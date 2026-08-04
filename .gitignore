@@ -216,3 +216,36 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project Snow local-only corpus and generated application state.
+# The source Wiki corpus can be large and may contain licensed material; it is
+# deliberately kept outside version control.  Rebuildable indexes, feedback,
+# benchmarks and local chat history all live below App/runtime.
+/Data/
+/App/runtime/
+
+# Wiki-derived avatar media is retained only for local, non-commercial testing.
+# The client has a text-avatar fallback, so do not redistribute these files in
+# the GPL source repository until their licence compatibility is confirmed.
+/App/frontend/assets/characters/*.png
+/App/frontend/assets/characters/avatars.json
+
+# Local model/API configuration.  Keep safe, documented templates tracked.
+.env.*
+!.env.example
+!.env.template
+
+# Electron development and packaging outputs.
+/App/client/node_modules/
+/App/client/dist/
+/App/client/.cache/
+/App/client/.electron/
+/App/client/release/
+
+# Local credentials and certificates.  Store only redacted/example files in Git.
+*.pem
+*.p12
+*.pfx
+*.keystore
+secrets/
+credentials/

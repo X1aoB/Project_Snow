@@ -1,0 +1,15 @@
+[project]
+name = "project-snow-app"
+version = "0.1.0"
+description = "Persona-first RAG and graph foundation for Project Snow"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

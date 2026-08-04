@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Project Snow · 证据工作台</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header id="overview">
+        <div>
+          <p class="eyebrow">PROJECT SNOW · INTERNAL VALIDATION</p>
+          <h1>角色证据工作台</h1>
+          <p class="muted">检索、审核、反馈与对话调试的内部管理界面。</p>
+        </div>
+        <div class="header-actions">
+          <a class="workspace-home" href="/">返回聊天客户端</a>
+          <div id="health" class="status">正在检查服务…</div>
+        </div>
+      </header>
+
+      <nav class="workspace-nav" aria-label="后台工作台导航">
+        <a href="#overview">服务概览</a>
+        <a href="#evidence">证据检索</a>
+        <a href="#relations">关系审核</a>
+        <a href="#entities">实体审核</a>
+        <a href="#feedback-inbox">用户反馈</a>
+        <a href="#dialogue-debug">对话调试</a>
+      </nav>
+
+      <section class="stage-lock">
+        <strong>会话身份固定：当前使用者即分析员。</strong>
+        旧版通用 <code>/api/v1/chat</code> 仍保持阶段锁定；当前本地测试产品使用受控的 <code>/api/v1/mvp/chat</code>。未审核的 AI 候选不会进入正式图谱。
+      </section>
+
+      <section id="dialogue-debug" class="panel mvp-chat">
+        <div class="panel-title">
+          <div>
+            <h2>22 角色本地对话测试（MVP）</h2>
+            <p id="mvp-status" class="muted">正在读取 MVP 工件…</p>
+          </div>
+          <span class="chip">仅内部测试</span>
+        </div>
+        <p class="muted">
+          22 个可对话角色共享主线世界观背景。默认是沉浸式陪伴；装甲与时装是角色的上下文层，会从消息自动识别，不会作为独立角色或随机混入。资料覆盖有限的角色会明确标记，不会用其他角色设定补齐。
+        </p>
+        <div class="mvp-controls">
+          <label>
+            测试角色
+            <select id="mvp-character"><option value="">正在读取…</option></select>
+          </label>
+          <label>
+            对话类型
+            <select id="mvp-mode">
+              <option value="immersive">沉浸式陪伴</option>
+              <option value="assistant">角色助手</option>
+            </select>
+          </label>
+          <fieldset class="channel-picker">
+            <legend>交流媒介</legend>
+            <div id="mvp-channel" class="segmented" role="group" aria-label="交流媒介">
+              <button type="button" data-channel="in_person" aria-pressed="true">面对面</button>
+              <button type="button" data-channel="text" aria-pressed="false">文字通讯</button>
+            </div>
+          </fieldset>
+          <label>
+            手动指定装甲/时装（可选）
+            <input id="mvp-costume" placeholder="留空：从消息自动识别并在会话中保持" maxlength="240" />
+          </label>
+        </div>
+        <div id="mvp-style-context" class="muted">当前未激活装甲或时装语境。</div>
+        <div id="mvp-coverage" class="coverage-card muted">正在读取角色资料覆盖度。</div>
+        <div id="mvp-scene-state" class="scene-state muted">当前媒介：面对面 · 场景位置将在首次发送时确定。</div>
+        <div id="mvp-questions" class="mvp-questions empty">选择角色后显示预设问题。</div>
+        <form id="mvp-chat-form" class="mvp-form">
+          <label class="mvp-message">
+            自由提问
+            <textarea id="mvp-message" rows="3" maxlength="4000" placeholder="也可以输入自己的问题…"></textarea>
+          </label>
+          <button id="mvp-send" type="submit">发送测试问题</button>
+        </form>
+        <article id="mvp-answer" class="mvp-answer empty">模型回答、引用和临时关系证据会显示在这里。</article>
+        <div id="mvp-feedback" class="mvp-feedback" hidden>
+          <strong>反馈</strong>
+          <div id="mvp-feedback-options" class="feedback-options"></div>
+          <textarea id="mvp-feedback-text" rows="2" maxlength="4000" placeholder="补充说明（可选）"></textarea>
+          <button id="mvp-submit-feedback" type="button" class="secondary">提交反馈</button>
+        </div>
+      </section>
+
+      <section id="evidence" class="panel controls">
+        <label>
+          工作模式
+          <select id="mode">
+            <option value="immersive">沉浸式证据预览</option>
+            <option value="assistant">助手证据模式</option>
+          </select>
+        </label>
+        <label>
+          对话角色
+          <select id="character"><option value="">不限定角色</option></select>
+        </label>
+        <label class="query">
+          检索问题
+          <input id="query" placeholder="例如：她平时会怎样称呼分析员？" />
+        </label>
+        <button id="search">检索证据</button>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-title"><h2>人格证据档案</h2><button id="load-persona" class="secondary">查看</button></div>
+          <div id="persona" class="empty">选择角色后可查看其来源证据分布。人格特质仍须人工审核后才能启用。</div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><h2>已验证关系图谱</h2><button id="load-graph" class="secondary">查看</button></div>
+          <div id="graph" class="empty">选择角色后可查看已验证关系及其证据页。</div>
+        </article>
+      </section>
+
+      <section class="panel results">
+        <div class="panel-title"><h2>混合检索证据</h2><span id="retrieval-meta" class="muted"></span></div>
+        <div id="results" class="empty">输入问题后，系统将显示角色、装甲、时装和世界观中的可追溯来源片段。</div>
+      </section>
+
+      <section id="relations" class="panel review">
+        <div class="panel-title review-title">
+          <div>
+            <h2>叙事关系人工审核</h2>
+            <p id="review-summary" class="muted">正在读取审核队列…</p>
+          </div>
+          <button id="refresh-review" class="secondary">刷新队列</button>
+        </div>
+        <p class="muted">
+          候选先按“规范化的字面主体—关系—客体”合并同类证据；不会自动合并别名、自动映射节点或批量批准。批准时仍需逐条核对引文并明确选择图谱节点。
+        </p>
+
+        <div class="review-filters" aria-label="审核筛选">
+          <label>
+            审核层级
+            <select id="review-tier">
+              <option value="">全部层级</option>
+              <option value="high">高价值叙事关系</option>
+              <option value="normal">常规叙事事实</option>
+              <option value="low">低价值提及</option>
+            </select>
+          </label>
+          <label>
+            关系类型
+            <select id="review-relation-type"><option value="">全部关系类型</option></select>
+          </label>
+          <label>
+            来源类型
+            <select id="review-source-type"><option value="">全部来源类型</option></select>
+          </label>
+          <label>
+            风险标记
+            <select id="review-risk-level">
+              <option value="">全部风险等级</option>
+              <option value="high">高：证据缺失</option>
+              <option value="medium">中：情境或时间线需复核</option>
+              <option value="low">低：证据可用</option>
+            </select>
+          </label>
+          <label>
+            独立二审建议
+            <select id="review-machine-verdict">
+              <option value="">全部二审状态</option>
+              <option value="recommend_approve">模型建议批准</option>
+              <option value="recommend_reject">模型建议驳回</option>
+              <option value="abstain_or_incomplete">模型保留/未完成</option>
+              <option value="mixed">同组结论不一致</option>
+              <option value="unreviewed">尚未二审</option>
+            </select>
+          </label>
+          <div class="filter-actions">
+            <button id="reset-review-filters" class="secondary">重置筛选</button>
+          </div>
+        </div>
+
+        <div class="audit-controls">
+          <label>
+            抽样种子
+            <input id="review-sample-seed" value="project-snow-audit-v1" maxlength="160" />
+          </label>
+          <label>
+            抽样组数
+            <input id="review-sample-size" type="number" min="1" max="50" value="12" />
+          </label>
+          <button id="load-audit-sample" class="secondary">抽取可复现的分层样本</button>
+          <span id="review-filter-meta" class="muted"></span>
+        </div>
+
+        <div class="reviewer-row">
+          <label class="reviewer">
+            审核人标识
+            <input id="reviewer" value="local-reviewer" maxlength="120" />
+          </label>
+          <label class="reviewer reviewer-note">
+            审核备注
+            <input id="review-note" placeholder="例如：原文直接陈述，身份映射已核对" maxlength="2000" />
+          </label>
+        </div>
+        <div id="review-groups" class="empty">正在构建审核分组…</div>
+        <div class="review-pagination"><button id="load-more-review" class="secondary">加载更多审核组</button><span id="review-pagination-meta" class="muted"></span></div>
+      </section>
+
+      <section id="entities" class="panel entity-review">
+        <div class="panel-title review-title">
+          <div>
+            <h2>缺失实体节点审批</h2>
+            <p id="entity-review-summary" class="muted">正在读取待补充的地点与事件节点…</p>
+          </div>
+          <button id="refresh-entity-review" class="secondary">刷新节点队列</button>
+        </div>
+        <p class="muted">
+          此处只处理关系端点缺失、且可由关系类型唯一确定为“地点”或“事件”的实体。批准节点不会批准任何关系；节点创建后，请回到上方关系审核，为具体关系填写该节点 ID。
+        </p>
+        <div id="entity-review-candidates" class="empty">正在构建缺失实体候选…</div>
+        <div class="review-pagination"><button id="load-more-entity-review" class="secondary">加载更多实体候选</button><span id="entity-review-pagination-meta" class="muted"></span></div>
+      </section>
+
+      <section id="feedback-inbox" class="panel feedback-inbox">
+        <div class="panel-title review-title">
+          <div>
+            <h2>用户反馈收件箱</h2>
+            <p id="feedback-inbox-summary" class="muted">正在读取反馈…</p>
+          </div>
+          <button id="refresh-feedback-inbox" class="secondary">刷新反馈</button>
+        </div>
+        <div class="feedback-inbox-filters">
+          <label>
+            大类
+            <select id="feedback-category-filter"><option value="">全部类别</option></select>
+          </label>
+          <label>
+            状态
+            <select id="feedback-status-filter">
+              <option value="">全部状态</option>
+              <option value="pending_triage">待处理</option>
+              <option value="planned">计划修复</option>
+              <option value="resolved">已解决</option>
+              <option value="ignored">忽略</option>
+            </select>
+          </label>
+          <label>
+            角色
+           <select id="feedback-character-filter"><option value="">全部角色</option></select>
+         </label>
+          <label>
+            问题状态
+            <select id="feedback-resolution-filter">
+              <option value="">全部问题状态</option>
+              <option value="fixed_verified">已验证修复</option>
+              <option value="needs_verification">待验证</option>
+              <option value="regression_candidate">修复后再现</option>
+              <option value="not_reproduced">未能复现</option>
+              <option value="duplicate">重复反馈</option>
+            </select>
+          </label>
+        </div>
+        <div id="feedback-inbox-list" class="empty">暂无反馈。</div>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

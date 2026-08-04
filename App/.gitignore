@@ -1,0 +1,25 @@
+# Local configuration.  Commit only intentionally redacted templates.
+.env
+.env.local
+.env.*
+!.env.example
+!.env.template
+
+# Python environments, caches and test output.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# All generated indexes, relation-review data, feedback, benchmarks, logs and
+# the local SQLite conversation store are reproducible/private runtime state.
+runtime/
+
+# Electron dependencies, caches and Windows packaging output.
+client/node_modules/
+client/dist/
+client/.cache/
+client/.electron/
+client/release/

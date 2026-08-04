@@ -1,0 +1,18 @@
+# Do not send local credentials, corpus files, derived state or desktop build
+# dependencies to Docker during an App-only build.
+.env
+.env.*
+runtime/
+client/
+tests/
+docs/
+# Wiki-derived local media stays out of container build contexts as well.
+frontend/assets/characters/*.png
+frontend/assets/characters/avatars.json
+.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]

@@ -1,0 +1,54 @@
+# Project Snow Desktop Preview Client
+
+This is a thin Electron wrapper around the existing local web application. It
+does not contain `Data/`, model credentials, or a second dialogue implementation.
+
+## Prerequisites
+
+Start the API and web server from two PowerShell windows:
+
+```powershell
+cd C:\Users\25685\Desktop\Myprojects\Project_Snow\App
+python -m backend.snow_app.main
+```
+
+```powershell
+cd C:\Users\25685\Desktop\Myprojects\Project_Snow\App
+python scripts/dev_server.py
+```
+
+## Development client
+
+```powershell
+cd C:\Users\25685\Desktop\Myprojects\Project_Snow\App\client
+npm install
+npm start
+```
+
+The client opens the chat product at `http://127.0.0.1:8080/`. The evidence,
+review and feedback workspace remains available from the client at
+`http://127.0.0.1:8080/workspace/`. If either local service is unavailable, the
+client shows the startup commands and a retry button.
+
+## Windows portable build
+
+Run the desktop and narrow-window smoke test while both local services are up:
+
+```powershell
+cd C:\Users\25685\Desktop\Myprojects\Project_Snow\App\client
+npm run smoke
+```
+
+The test checks the 390-pixel responsive layout, composer hit target, local
+avatars and `/workspace/`, then writes its screenshot to
+`App/runtime/screenshots/electron-mobile.png`.
+
+Build the portable executable:
+
+```powershell
+cd C:\Users\25685\Desktop\Myprojects\Project_Snow\App\client
+npm run package:win
+```
+
+The portable executable is written below `App/client/dist/`. It still expects
+the API and web service to be running on the same machine.

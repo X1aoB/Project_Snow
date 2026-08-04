@@ -1,0 +1,28 @@
+{
+  "version": "mvp-22.0",
+  "coverage_policy": "runtime/mvp/character_views.jsonl",
+  "characters": [
+    {"character_id": "78aa7ab99154", "display_name": "伊切尔", "source_name": "伊切尔", "aliases": ["伊切尔"], "selector_enabled": true},
+    {"character_id": "d5ecfceba959", "display_name": "克罗瑞娜", "source_name": "克罗瑞娜", "aliases": ["克罗瑞娜"], "selector_enabled": true},
+    {"character_id": "25b23cb64398", "display_name": "凯西娅", "source_name": "凯茜娅", "aliases": ["凯西娅", "凯茜娅"], "selector_enabled": true},
+    {"character_id": "6455a5dcff6a", "display_name": "卜卜", "source_name": "卜卜", "aliases": ["卜卜"], "selector_enabled": true},
+    {"character_id": "41b7444e39cc", "display_name": "奈莉德", "source_name": "奈莉德", "aliases": ["奈莉德"], "selector_enabled": true},
+    {"character_id": "4370a74d6fda", "display_name": "妮塔", "source_name": "妮塔", "aliases": ["妮塔"], "selector_enabled": true},
+    {"character_id": "9f5804761c56", "display_name": "安卡希雅", "source_name": "安卡希雅", "aliases": ["安卡希雅"], "selector_enabled": true},
+    {"character_id": "43f05917bfa1", "display_name": "恩雅", "source_name": "恩雅", "aliases": ["恩雅"], "selector_enabled": true},
+    {"character_id": "921f9ef0cc4e", "display_name": "晴", "source_name": "晴", "aliases": ["晴", "鸣濑晴"], "selector_enabled": true},
+    {"character_id": "6862c43d2ac9", "display_name": "猫汐尔", "source_name": "猫汐尔", "aliases": ["猫汐尔"], "selector_enabled": true},
+    {"character_id": "8d5b5c3912bb", "display_name": "琴诺", "source_name": "琴诺", "aliases": ["琴诺"], "selector_enabled": true},
+    {"character_id": "85b205f6f623", "display_name": "瑟瑞斯", "source_name": "瑟瑞斯", "aliases": ["瑟瑞斯"], "selector_enabled": true},
+    {"character_id": "702f4375675b", "display_name": "米娅", "source_name": "米娅", "aliases": ["米娅"], "selector_enabled": true},
+    {"character_id": "cf0569ac6de9", "display_name": "肴", "source_name": "肴", "aliases": ["肴"], "selector_enabled": true},
+    {"character_id": "447ed3c401c9", "display_name": "胧嫣", "source_name": "胧嫣", "aliases": ["胧嫣"], "selector_enabled": true},
+    {"character_id": "a2ffc5b44d7f", "display_name": "芙提雅", "source_name": "芙提雅", "aliases": ["芙提雅"], "selector_enabled": true},
+    {"character_id": "1b0a6b35719a", "display_name": "芬妮", "source_name": "芬妮", "aliases": ["芬妮", "芬妮·戈尔登", "芬妮戈尔登"], "selector_enabled": true},
+    {"character_id": "673ba6851b05", "display_name": "苔丝", "source_name": "苔丝", "aliases": ["苔丝", "苔丝·科特金"], "selector_enabled": true},
+    {"character_id": "daab0f4cceb4", "display_name": "茉莉安", "source_name": "茉莉安", "aliases": ["茉莉安", "茉莉安·安德烈奥蒂"], "selector_enabled": true},
+    {"character_id": "5157b8972632", "display_name": "薇蒂雅", "source_name": "薇蒂雅", "aliases": ["薇蒂雅"], "selector_enabled": true},
+    {"character_id": "98322bd505f4", "display_name": "辰星", "source_name": "辰星", "aliases": ["辰星", "姬辰星"], "selector_enabled": true},
+    {"character_id": "ca0144ccd81b", "display_name": "里芙", "source_name": "里芙", "aliases": ["里芙"], "selector_enabled": true}
+  ]
+}

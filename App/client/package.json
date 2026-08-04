@@ -1,0 +1,40 @@
+{
+  "name": "project-snow-desktop",
+  "version": "0.2.2",
+  "private": true,
+  "author": "Project Snow",
+  "description": "Local Windows preview client for Project Snow chat",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron smoke.js",
+    "package:win": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^36.3.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.projectsnow.mvp",
+    "productName": "Project Snow Preview",
+    "asar": true,
+    "files": [
+      "main.js",
+      "preload.js"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Project-Snow-Preview-${version}.exe"
+    }
+  }
+}
