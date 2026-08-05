@@ -309,6 +309,200 @@ class FeedbackRegressionTests(unittest.TestCase):
         self.assertIn("凯西娅", second_action)
         self.assertNotEqual(first_action, second_action)
 
+    def test_shared_meal_keeps_food_supplied_in_the_current_turn(self) -> None:
+        service = self._service()
+        message = "我拿了些西餐过来，今天先吃点工作餐，下次再带你出去吃好吗？"
+        self.assertEqual(service._question_focus(message), "shared_meal")
+        bad = "我还没决定吃什么。你有想吃的，就告诉我吧。"
+        payload = self._model_payload(bad, [{"type": "speech", "text": bad}])
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", side_effect=[(payload, {}), (payload, {})]
+        ):
+            result = service.chat(
+                "673ba6851b05",
+                message,
+                session_id="feedback-regression-shared-meal",
+                mode="immersive",
+                communication_channel="in_person",
+            )
+
+        self.assertIn("工作餐", result["answer"])
+        self.assertNotIn("还没决定吃什么", result["answer"])
+        self.assertIn("shared_meal_guard", result["response_adjustments"])
+
+    def test_routine_choice_rejects_rest_training_contradiction(self) -> None:
+        service = self._service()
+        message = "早上在干什么呢，训练还是休息？"
+        bad = "早上我更想赖床，不过既然你问了，那大概是在训练场活动筋骨吧。"
+        payload = self._model_payload(bad, [{"type": "speech", "text": bad}])
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", side_effect=[(payload, {}), (payload, {})]
+        ):
+            result = service.chat(
+                "25b23cb64398",
+                message,
+                session_id="feedback-regression-routine-logic",
+                mode="immersive",
+                communication_channel="in_person",
+            )
+
+        self.assertIn("没有任务", result["answer"])
+        self.assertIn("训练安排", result["answer"])
+        self.assertNotIn("大概是在训练场", result["answer"])
+        self.assertIn("routine_activity_guard", result["response_adjustments"])
+
+    def test_bubu_signature_trait_is_rate_limited_but_explicit_request_is_allowed(self) -> None:
+        service = self._service()
+        service._remember_session(
+            "feedback-regression-bubu-frequency",
+            "6455a5dcff6a",
+            "下午好",
+            "下午好呀，要不要卜卜给你算一卦，看看今天的运势？",
+            mode="immersive",
+            communication_channel="text",
+        )
+        repeated = "火锅好呀！本天师再给你算一卦，看看哪种锅底运势最旺。"
+        payload = self._model_payload(repeated, [{"type": "message", "text": repeated}])
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", side_effect=[(payload, {}), (payload, {})]
+        ):
+            result = service.chat(
+                "6455a5dcff6a",
+                "吃火锅怎么样？",
+                session_id="feedback-regression-bubu-frequency",
+                mode="immersive",
+                communication_channel="text",
+            )
+
+        self.assertNotIn("算卦", result["answer"])
+        self.assertNotIn("运势", result["answer"])
+        self.assertIn("signature_frequency_guard", result["response_adjustments"])
+        self.assertEqual(
+            service._signature_overuse_violations(
+                "那就算一卦",
+                repeated,
+                {
+                    "character": service.character("6455a5dcff6a"),
+                    "session_context": {"turns": [{"assistant": "刚才算过一卦。"}]},
+                },
+            ),
+            [],
+        )
+
+    def test_recently_disclosed_location_is_not_repeated_on_visit_followup(self) -> None:
+        service = self._service()
+        session_id = "feedback-regression-visit-followup"
+        service._remember_session(
+            session_id,
+            "6455a5dcff6a",
+            "你现在在哪呢？",
+            "我在资料室呢，正翻着手边的资料。",
+            mode="immersive",
+            communication_channel="text",
+        )
+        repeated = "我在资料室呢，你要过来的话，卜卜就在这里等你。"
+        payload = self._model_payload(repeated, [{"type": "message", "text": repeated}])
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", side_effect=[(payload, {}), (payload, {})]
+        ):
+            result = service.chat(
+                "6455a5dcff6a",
+                "那我去找你？",
+                session_id=session_id,
+                mode="immersive",
+                communication_channel="text",
+            )
+
+        self.assertNotIn("资料室", result["answer"])
+        self.assertIn("我等你", result["answer"])
+        self.assertIn("visit_location_guard", result["response_adjustments"])
+
+    def test_jointly_confirmed_room_overrides_neutral_training_scene(self) -> None:
+        service = self._service()
+        session_id = "feedback-regression-confirmed-room"
+        service._remember_session(
+            session_id,
+            "daab0f4cceb4",
+            "你在房间吗，我想你了",
+            "我在呢，亲爱的。我也想你。",
+            mode="immersive",
+            communication_channel="text",
+        )
+        anchor = service._recent_confirmed_location(
+            service._session_snapshot(session_id, "daab0f4cceb4", "immersive"),
+            "daab0f4cceb4",
+        )
+        self.assertIsNotNone(anchor)
+        self.assertEqual(anchor["location"], "个人房间")
+
+    def test_open_invitation_continues_intimacy_without_activity_reset(self) -> None:
+        service = self._service()
+        message = "不如，你亲口告诉我，你想让我做什么呢"
+        self.assertEqual(service._question_focus(message), "open_invitation")
+        bad = "我刚结束一轮基础训练。现在可以陪你聊会儿。"
+        payload = self._model_payload(bad, [{"type": "speech", "text": bad}])
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", side_effect=[(payload, {}), (payload, {})]
+        ):
+            result = service.chat(
+                "daab0f4cceb4",
+                message,
+                session_id="feedback-regression-open-invitation",
+                mode="immersive",
+                communication_channel="in_person",
+            )
+
+        self.assertNotIn("训练", result["answer"])
+        self.assertIn("心意", result["answer"])
+        self.assertIn("open_invitation_guard", result["response_adjustments"])
+
+    def test_in_person_accepts_action_and_speech_in_the_same_turn(self) -> None:
+        blocks = MVPService._normalize_analyst_content_blocks(
+            "抬手理好她的发梢\n今天辛苦了。",
+            [
+                {"type": "action", "text": "抬手理好她的发梢"},
+                {"type": "speech", "text": "今天辛苦了。"},
+            ],
+            "in_person",
+        )
+        self.assertEqual(
+            blocks,
+            [
+                {"type": "action", "text": "抬手理好她的发梢"},
+                {"type": "speech", "text": "今天辛苦了。"},
+            ],
+        )
+
+    def test_feedback_families_distinguish_fixed_regressions(self) -> None:
+        service = self._service()
+        cases = {
+            "character_signature_frequency": {
+                "category": "conversation_experience",
+                "free_text": "一直在提算卦，角色特点不至于反复提及，请减少频次",
+                "message_excerpt": "吃火锅怎么样",
+            },
+            "location_continuity": {
+                "category": "conversation_experience",
+                "free_text": "刚才已经提到了地点，不需要再次揭露",
+                "message_excerpt": "那我去找你？",
+            },
+            "routine_activity_logic": {
+                "category": "conversation_experience",
+                "free_text": "这句话回答逻辑有问题",
+                "message_excerpt": "早上训练还是休息？",
+            },
+            "client_dual_input": {
+                "category": "client_function",
+                "free_text": "动作和对白应该支持同时输入，文字通讯时隐藏动作按钮",
+            },
+            "intimacy_continuity": {
+                "category": "knowledge_memory",
+                "free_text": "暧昧亲密剧情碰到审核后强行重置和中断，希望保持隐晦连续",
+            },
+        }
+        for expected, row in cases.items():
+            self.assertEqual(service._feedback_issue_key(row), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

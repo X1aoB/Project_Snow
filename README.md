@@ -1,47 +1,373 @@
 # Project Snow
 
-基于 RAG 架构的《尘白禁区》世界观智能对话系统。项目以可追溯的 Wiki
-资料、角色证据视图和受控检索为基础，提供 22 名角色的本地测试聊天产品。
+Project Snow 是一个以《尘白禁区》公开 Wiki 资料为知识基础、面向本地单用户测试的角色对话系统。
+项目并不是简单地把资料全文塞进提示词，而是把“资料采集、身份归一、可追溯检索、人格约束、
+场景连续性、关系审核、聊天产品和用户反馈”拆成相互独立的层，使角色回答既能保留游戏世界中的
+身份和说话方式，又能追溯到明确的资料来源。
 
-## 仓库边界
+当前测试版本提供 22 名可对话角色、沉浸式陪伴与角色助手两种模式、面对面与文字通讯两种交流媒介，
+并带有浏览器客户端、内部证据工作台和 Windows Electron 测试壳。
 
-- `App/`：可提交的应用代码、前端、桌面壳、管线与测试。
-- `Data/`：本机只读的 Wiki 原始资料与采集输出。它可能包含大量或受许可
-  限制的内容，因此默认不纳入 Git。
-- `App/runtime/`：本机生成的索引、审核队列、反馈、日志和聊天 SQLite 数据库；
-  默认不纳入 Git。
+> 当前定位：本地、单用户、持续反馈的测试产品。项目不提供公网账号系统，不会把本机聊天记录或
+> API Key 上传到外部服务，也不会将 `Data/` 中的 Wiki 语料随源代码提交。
 
-应用从 `Data/` 读取资料，但不会修改它。需要在新机器上重建资料时，请使用本地
-`Data/Scraper/` 的采集说明；资料本身不会随应用代码推送。
+## 设计目标
 
-## 本地启动
+- **人物可复原**：优先使用角色在主线、个人故事、好感故事、语音、邮件、时装和日常资料中的真实表现。
+- **证据可追溯**：人格、关系和回答引用尽量保留到文档、页面与章节，不让模型总结成为新的“事实源”。
+- **世界观一致**：分析员始终是当前用户；装甲和时装是角色的情境，不是可替换的独立人格。
+- **对话有连续性**：当前地点、媒介、关系前提、时装语境和有限历史在会话中延续，但不会污染原始资料。
+- **边界可控**：未审核关系、旧剧情场景和低权重物品描述不能擅自覆盖角色核心设定。
+- **本地优先**：语料、索引、反馈和聊天历史留在本机；模型供应商可通过 OpenAI-compatible API 替换。
 
-需要 Python 3.11+；桌面客户端另需 Node.js 20+。在 PowerShell 中：
+## 当前能力
+
+### 角色与人格
+
+- 统一注册 22 名可对话角色：里芙、芬妮、凯西娅、猫汐尔、芙提雅、伊切尔、克罗瑞娜、卜卜、
+  奈莉德、妮塔、安卡希雅、恩雅、晴、琴诺、瑟瑞斯、米娅、肴、胧嫣、苔丝、茉莉安、薇蒂雅、辰星。
+- 合并名字与全名别名，例如“芬妮 / 芬妮·戈尔登”“晴 / 鸣濑晴”，避免生成重复人格。
+- NPC 和世界观实体保留在语料及图谱中，但不会自动出现在角色选择器。
+- 每个角色视图记录直接资料、关联资料、称呼证据、语气证据和资料覆盖等级。
+- 资料较少时采用保守、自然的表达，不把其他角色的偏好、口癖和私人关系复制过来。
+
+### 对话模式与交流媒介
+
+人格模式和交流媒介是两条正交维度：
+
+| 维度 | 选项 | 行为 |
+|---|---|---|
+| 人格模式 | `immersive` 沉浸式 | 角色生活在游戏世界中，不暴露模型、检索、提示词或工具概念 |
+| 人格模式 | `assistant` 助手 | 保持角色人格，同时允许说明证据和使用后端批准的只读工具 |
+| 交流媒介 | `in_person` 面对面 | 支持独立动作/神态与对白内容块，受当前地点约束 |
+| 交流媒介 | `text` 文字通讯 | 只允许消息块，不声称看见用户表情、衣着或已完成物理接触 |
+
+面对面输入区允许“仅动作”“仅对白”或“动作 + 对白”同轮发送。文字通讯会完全隐藏动作输入区。
+角色和分析员不在同一地点时，API 返回结构化冲突，让客户端选择“去找她”或“改用文字通讯”。
+
+### 检索、关系与反馈
+
+- SQLite FTS5 负责精确名称、装甲、时装和章节标题的词法召回。
+- Sentence Transformers 提供本地中文语义向量；Qdrant 可作为可选向量服务副本。
+- Reciprocal Rank Fusion（RRF）融合词法与语义结果，并按当前角色及资料层级约束证据。
+- JSONL 图谱是可移植的事实来源；Neo4j 仅是可选的服务投影。
+- 叙事关系候选保留原文证据并进入审核层，未经批准不会成为正式图谱边。
+- 用户反馈采用追加式记录，按问题族区分首次、重复、待验证、已验证修复和回归候选。
+
+## 总体架构
+
+```mermaid
+flowchart LR
+    Wiki["Wiki 页面与页面索引"] --> Data["Data/Source 与 Manifest\n只读语料"]
+    Data --> Lake["湖仓文档与分块"]
+    Lake --> Lexical["SQLite FTS5\n词法索引"]
+    Lake --> Vector["Sentence Transformers\n向量索引"]
+    Lake --> Persona["角色证据视图\n22 人注册表"]
+    Lake --> Graph["JSONL 图谱与关系审核"]
+    Lexical --> Retrieval["混合检索与证据排序"]
+    Vector --> Retrieval
+    Persona --> Retrieval
+    Graph --> Retrieval
+    Retrieval --> API["FastAPI\n对话、媒介、场景与校验"]
+    API --> Web["浏览器聊天客户端"]
+    API --> Workspace["证据/审核/反馈工作台"]
+    Web --> Electron["Electron Windows 薄壳"]
+    API <--> Runtime["App/runtime/\nSQLite、索引、日志与反馈"]
+```
+
+生成链路会先识别角色、问题焦点、模式、媒介、场景和时装语境，再执行受角色约束的混合检索。
+模型返回结构化内容块后，服务端还会检查媒介违规、实现细节泄漏、错误关系称呼、场景跳变、当前事实
+伪造和典型连续性问题；必要时进行一次受控重写，仍失败则使用与当前角色和语境相符的确定性兜底。
+
+## 仓库构成
+
+```text
+Project_Snow/
+├── App/                         可提交的应用层
+│   ├── backend/snow_app/        FastAPI、检索、对话、会话与规则
+│   ├── frontend/                正式聊天客户端和 /workspace/ 工作台
+│   ├── pipelines/               湖仓、索引、人格、图谱及模型审核管线
+│   ├── client/                  Electron Windows 安全薄壳
+│   ├── docs/                    架构、数据契约和人工审核指南
+│   ├── infra/                   Docker、Nginx 与数据库初始化配置
+│   ├── scripts/                 开发服务器、架构校验和辅助脚本
+│   ├── tests/                   unittest 应用与回归测试
+│   ├── runtime/                 本地派生产物和私密状态（Git 忽略）
+│   ├── requirements.txt         完整 Python 本地运行依赖
+│   └── .env.example             不含密钥的配置模板
+├── Data/                        本机 Wiki 原始资料与采集结果（Git 忽略）
+├── README.md                    项目总览
+├── LICENSE                      GPL-3.0
+└── .gitignore                   语料、凭据、运行时和构建产物边界
+```
+
+### 关键边界
+
+- `Data/` 是采集层拥有的只读输入契约；应用代码读取它，但不改写它。
+- `App/runtime/` 保存可重建或私密的内容，包括索引、审核队列、模型基准、日志、反馈和
+  `chat/conversations.sqlite3`。
+- `.env`、API Key、Cookie、SQLite、用户反馈、测试截图、`node_modules/` 和 Electron 构建产物都不提交。
+- Wiki 图片和音频只在采集阶段保存 URL 或本地测试引用；角色头像缺失时客户端使用文字头像。
+
+## 技术栈
+
+| 层级 | 技术 | 用途 |
+|---|---|---|
+| 语言与运行时 | Python 3.11+、JavaScript、Node.js 20+ | 后端、管线、Web 与桌面测试壳 |
+| API | FastAPI、Pydantic、Uvicorn、HTTPX | 请求契约、异步兼容调用、服务与模型网关 |
+| 本地状态 | SQLite、JSONL、DuckDB | 会话、词法检索、湖仓派生表和可移植产物 |
+| 语义检索 | Sentence Transformers、Qdrant | 中文向量编码与可选向量服务 |
+| 图谱 | JSONL、Neo4j | 经审核关系的源文件与可选查询投影 |
+| 文本/媒体处理 | Beautiful Soup、Pillow | Wiki HTML 解析和本地头像准备 |
+| Web 客户端 | 原生 HTML、CSS、JavaScript、Lucide 图标 | 无前端框架依赖的聊天和工作台界面 |
+| 桌面客户端 | Electron、electron-builder | Windows 测试壳与 portable 构建 |
+| 测试 | Python `unittest`、Electron smoke、架构校验脚本 | API、对话规则、持久化、响应式界面和产物一致性 |
+| 可选服务 | Docker Compose、PostgreSQL、Qdrant、Neo4j、Nginx | 本地服务化和图谱/向量投影 |
+
+## 数据与检索层级
+
+采集资料按主线、个人故事、好感故事、随机事件、角色资料、语音、时装、邮件、家具、武器、道具、
+后勤、探索、活动和世界观等类别保存。应用层不会仅凭文件名决定人格事实，而是结合 Manifest、页面关系、
+角色/装甲/时装 ID 和章节提示建立资料层级。
+
+默认检索优先级：
+
+1. 当前角色直接关联的角色资料、个人故事、好感故事、主线表现和语音；
+2. 当前角色装甲明确关联的后勤、武器、邮件、家具和时装资料；
+3. 明确提及当前角色的主线、活动、随机事件及共享经历；
+4. 全局世界观背景；
+5. 没有直接证据时使用中性表达，不补写未经支持的个人事实。
+
+时装是“情境化人格补充”。用户没有明确激活某套时装时，以角色本体和最新剧情状态为准；明确提及时，
+只在对应语境中使用该时装的语气和描述，不让特殊台词永久污染角色本体。
+
+## 本地安装
+
+### 前置条件
+
+- Windows 10/11 或其他可运行 Python 的系统；当前桌面壳主要在 Windows 验证。
+- Python 3.11 或更高版本。
+- Node.js 20 或更高版本（仅运行或打包 Electron 客户端时需要）。
+- 已准备的本地 `Data/` 语料；源代码仓库本身不包含 Wiki 数据。
+- 可选的 OpenAI-compatible 模型 API；没有密钥时可浏览工作台，但不能生成在线模型回复。
+
+### 安装 Python 依赖
 
 ```powershell
-cd App
+cd Project_Snow\App
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 Copy-Item .env.example .env
+```
+
+`requirements.txt` 是“完整本地应用”依赖集，包含 API、资料处理、混合检索和可选图谱客户端。
+测试使用 Python 标准库 `unittest`，不要求额外安装 pytest。
+
+### 模型配置
+
+只在本机 `App/.env` 中填写配置。最小聊天配置如下：
+
+```dotenv
+MVP_CHAT_ENABLED=true
+MVP_CHAT_PROVIDER=openai-compatible
+MVP_CHAT_BASE_URL=https://your-provider.example/v1
+MVP_CHAT_API_KEY=replace-with-your-local-key
+MVP_CHAT_MODEL=your-model-name
+MVP_CHAT_TIMEOUT_SECONDS=120
+MVP_CHAT_IMMERSIVE_TEMPERATURE=0.45
+MVP_CHAT_ASSISTANT_TEMPERATURE=0.20
+```
+
+关系候选抽取与独立复核分别使用 `RELATION_CANDIDATE_*` 和 `RELATION_REVIEW_*`，它们不会自动复用
+聊天密钥。进程环境变量优先于 `.env`；不要把真实密钥粘贴到 README、issue、截图或提交记录中。
+
+## 构建运行时资料
+
+首次运行或 `Data/` 更新后，在 `App/` 下执行：
+
+```powershell
+python -m pipelines.run_stage --stage b --skip-vector
+python -m pipelines.run_stage --stage c
+python -m pipelines.build_dialogue_profiles
+python -m pipelines.build_mvp_views
+```
+
+如需本地语义向量索引：
+
+```powershell
+python -m pipelines.build_vector_index
+```
+
+这些命令只写入 `App/runtime/`。它们不会修改 `Data/`、原始页面、人工审核决定或正式图谱边。
+
+## 启动服务
+
+在第一个 PowerShell 窗口启动 API：
+
+```powershell
+cd Project_Snow\App
+.\.venv\Scripts\Activate.ps1
 python -m backend.snow_app.main
 ```
 
-在第二个 PowerShell 窗口启动 Web 客户端：
+在第二个 PowerShell 窗口启动 Web 服务与 API 代理：
 
 ```powershell
-cd App
+cd Project_Snow\App
 .\.venv\Scripts\Activate.ps1
 python scripts/dev_server.py
 ```
 
-浏览器访问 `http://127.0.0.1:8080/`；内部证据与审核工作台位于
-`http://127.0.0.1:8080/workspace/`。模型、桌面客户端、测试与运行时数据的完整说明见
-[App/README.md](App/README.md)。
+- 聊天客户端：<http://127.0.0.1:8080/>
+- 证据、关系、实体、反馈与调试工作台：<http://127.0.0.1:8080/workspace/>
+- Web 健康检查：<http://127.0.0.1:8080/health>
+- FastAPI：<http://127.0.0.1:8000/>
 
-`.env` 只保存在本机，绝不要提交 API Key、令牌、数据库或会话记录。可提交的
-`.env.example` 仅用于说明所需变量。
+### Electron Windows 测试客户端
 
-从 Wiki 下载的角色头像也仅保留在本机测试目录，默认不会推送；缺少图片时客户端会使用
-角色文字头像，避免将未经确认可再分发的媒体带入源代码仓库。
+Web 和 API 服务启动后：
+
+```powershell
+cd Project_Snow\App\client
+npm ci
+npm start
+```
+
+冒烟测试和 portable 构建：
+
+```powershell
+npm run smoke
+npm run package:win
+```
+
+Electron 只是沙箱化的浏览器薄壳，不包含 Python、`Data/`、API Key 或另一套聊天实现。
+生成物位于 `App/client/dist/`，且仍要求本机 API 与 Web 服务处于运行状态。
+
+## API 与本地持久化
+
+主要接口：
+
+- `GET /api/v1/mvp/status`：模型与 MVP 状态。
+- `GET /api/v1/mvp/bootstrap`：22 角色、覆盖统计、会话摘要和反馈类别。
+- `POST /api/v1/mvp/chat`：兼容旧客户端的聊天入口，支持模式、媒介、动作/对白块和幂等消息 ID。
+- `GET /api/v1/mvp/conversations/{character_id}`：分页读取某角色本地历史。
+- `DELETE /api/v1/mvp/conversations/{character_id}`：清理所选本地聊天历史。
+- `POST /api/v1/mvp/feedback`：提交带角色、模式、媒介、版本和消息上下文的反馈。
+- `/api/v1/review/*`：内部关系和实体审核接口。
+
+聊天显示历史保存在 `App/runtime/chat/conversations.sqlite3`。模型不会读取全部历史，而只读取当前模式下
+有限的最近轮次，以及明确共享的关系、时装和世界状态。`client_message_id` 用于防止超时重试产生重复消息。
+
+## 验证
+
+```powershell
+cd Project_Snow\App
+python -m unittest discover -s tests -p "test_*.py"
+python scripts/validate_architecture.py
+node --check frontend/app.js
+```
+
+桌面端还可在 API 与 Web 运行时执行：
+
+```powershell
+cd client
+npm run smoke
+```
+
+架构校验会确认文档、节点、关系、人格视图和审核产物之间的引用一致性。反馈回归测试覆盖角色称呼、
+主线最新状态、时装语境、媒介边界、场景位置、当前活动、共享用餐、重复口癖和双输入客户端等问题。
+
+## 开发经历
+
+Project Snow 的实现经历了以下阶段。这里记录的不只是功能列表，也说明当前架构为何采用这些边界。
+
+### 1. 从页面采集转向“具体内容 + 稳定命名”
+
+早期采集能找到故事入口，但好感故事、主线、随机事件和邮件等页面存在多层索引：栏目下面还有篇目、
+章节和小章节。只保存入口页会得到大量没有正文的文件。采集策略因此改为沿页面关系递归发现具体内容，
+以 canonical URL、修订信息、HTTP 缓存头和规范化正文哈希支持增量更新，并为主线、角色、装甲、武器、
+时装、家具、邮件和探索资料建立适合人工浏览的稳定命名。
+
+这一阶段还确立了两个原则：媒体第一阶段只保存 URL/HTML 引用；价格、版本、奖券和获取方式保留为
+机制元数据，但不默认当作人格背景。
+
+### 2. 建立角色资料层级和只读数据边界
+
+角色页面被确认不仅是索引，还聚合了性格、背景、装甲、故事、心意、生日、语音、邮件和物品关系。
+项目把 `Data/` 固定为只读语料，把所有分块、索引和审核结果移入 `App/runtime/`。角色名、全名、装甲名、
+NPC 与导航页被拆开处理，避免把“推荐说明”“类型”“未关联角色”等导航字段误建成人格。
+
+### 3. 先完成 B：人格优先的混合检索
+
+应用先构建湖仓文档、FTS5 词法索引、可选语义向量、角色证据库存和 22 人统一注册表。检索使用 RRF
+融合，但先受角色和资料层级约束。这样即使向量结果相似，也不会轻易把另一名角色的口癖或关系借给
+当前角色；时装文本也不会压过主线与角色本体。
+
+### 4. 再完成 C：关系候选、模型比较与审核分层
+
+叙事关系抽取曾使用 Qwen 与 DeepSeek 在相同样本上比较成功率、速度、token、候选数量和三元组重合度。
+实践表明“候选更多”不等于“关系更准确”，而数千条逐项人工审核也不现实。因此关系层采用：确定性证据
+校验、第一模型抽取、独立第二模型保守复核、风险分层和人工抽查。模型报告始终是建议，不会直接写入
+正式图谱。
+
+### 5. 从 5 角色 MVP 扩展到 22 角色
+
+首批角色用于验证资料检索、称呼、关系和说话方式；随后移除五人硬编码，统一由注册表驱动选择器、问题库、
+场景状态和对话服务。所有角色默认处于资料中的最新剧情状态，不再维护多个可切换的历史剧情阶段。
+
+### 6. 将“人格模式”和“交流媒介”拆开
+
+沉浸式/助手解决的是角色是否知道系统和工具；面对面/文字通讯解决的是角色能感知和执行什么。两者混在
+一起会出现文字通讯中触碰用户、面对面却像发消息等违和行为，因此后端增加结构化内容块、轻量世界位置、
+异地冲突和媒介切换规则，前端按每条消息实际媒介渲染。
+
+### 7. 从证据工作台重构为聊天产品
+
+原先的单页工作台适合调试，却不适合长期使用。项目新增聊天软件式三栏界面、角色列表、固定输入区、
+模式/媒介开关、信息抽屉、SQLite 历史、幂等重试和 Electron 薄壳；旧检索和审核能力保留在
+`/workspace/`。反馈类别被压缩为角色表现、知识记忆、对话体验、客户端功能和其他五类，让用户可以先
+选择大类，再自由描述问题。
+
+### 8. 用真实反馈修正连续性，而不是无限堆提示词
+
+持续使用暴露了机械拒答、关系背景缺失、主线最新状态不明确、输出结构泄漏、角色口癖重复、地点跳变、
+当前活动矛盾、已带来食物却重新询问、亲密语境突然重置以及输入框交互等问题。修复方式逐步从通用
+“更像角色”提示改为可测试的问题焦点、上下文卡片、局部校验器和有限兜底，并给反馈建立稳定问题标识，
+区分已修复与真实回归，避免反复修改同一问题。
+
+## 当前限制与后续方向
+
+- 当前是本地测试产品，不包含公网认证、多用户隔离、跨设备同步或生产级密钥托管。
+- 助手工具目前只开放受后端控制的只读能力；新增文件、网络或系统工具前需要单独权限模型和审计。
+- 低资料覆盖角色的自然度仍依赖后续资料补充和真实使用反馈。
+- 未审核关系不会自动成为人格事实；高风险或多义关系仍需要人工确认。
+- Electron portable 目前不打包 Python、语料和模型环境，使用前需先启动本地服务。
+- Wiki 资料和媒体可能有独立许可要求；仓库的 GPL-3.0 只覆盖本仓库提交的源代码与文档。
+
+## 隐私与提交检查
+
+提交前至少执行：
+
+```powershell
+git status --short
+git diff --check
+```
+
+允许提交源码、测试、文档、无密钥模板和依赖锁文件；不要提交：
+
+- `Data/` 原始 Wiki 语料；
+- `App/runtime/`、SQLite、反馈、日志、模型基准和截图；
+- `.env`、API Key、Cookie、证书和其他凭据；
+- `node_modules/`、Electron `dist/` 和缓存；
+- 未确认可再分发的 Wiki 图片、音频和视频。
+
+详细应用命令见 [App/README.md](App/README.md)，架构与数据约束见
+[App/docs/architecture.md](App/docs/architecture.md) 和
+[App/docs/data_contract.md](App/docs/data_contract.md)。
+
+## 许可证
+
+本仓库提交的源代码与文档采用 [GNU General Public License v3.0](LICENSE)。`Data/` 中的第三方 Wiki
+内容、游戏文本和媒体不随仓库分发，并继续受其原始来源和页面许可证约束。

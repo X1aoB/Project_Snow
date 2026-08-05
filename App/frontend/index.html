@@ -76,13 +76,12 @@
 
         <form id="composer" class="composer" autocomplete="off">
           <div id="request-status" class="request-status" aria-live="polite"></div>
-          <div id="analyst-input-kind" class="input-kind-control" role="group" aria-label="分析员输入类型" hidden>
-            <span>输入</span>
-            <button type="button" data-input-kind="speech" aria-pressed="true"><i data-lucide="message-circle"></i>对白</button>
-            <button type="button" data-input-kind="action" aria-pressed="false"><i data-lucide="hand"></i>动作</button>
+          <div id="analyst-action-field" class="action-composer" hidden>
+            <label for="action-input"><i data-lucide="hand"></i>动作或神态 <span>可选，可与对白同时发送</span></label>
+            <textarea id="action-input" rows="1" maxlength="1200" aria-label="输入面对面动作或神态" placeholder="描述你的动作或神态（可选）…"></textarea>
           </div>
           <div class="composer-row">
-            <textarea id="message-input" rows="1" maxlength="4000" aria-label="输入消息" placeholder="输入消息…"></textarea>
+            <textarea id="message-input" rows="1" maxlength="4000" aria-label="输入对白或消息" placeholder="输入消息…"></textarea>
             <button id="send-message" class="send-button" type="submit" aria-label="发送消息" title="发送">
               <i data-lucide="send"></i>
             </button>

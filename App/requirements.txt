@@ -1,16 +1,20 @@
-# HTTP API, settings and OpenAI-compatible model calls.
+# Project Snow complete local Python dependency set.
+# Requires Python >= 3.11. Tests use the standard-library unittest package.
+
+# HTTP API, typed settings and OpenAI-compatible model calls.
 fastapi>=0.115,<1
 httpx>=0.27,<1
 pydantic>=2.9,<3
 python-dotenv>=1.0,<2
 uvicorn[standard]>=0.32,<1
 
-# Local source processing and avatar generation.
+# Wiki/source processing and local avatar preparation.
 beautifulsoup4>=4.12,<5
 pillow>=10,<13
 
-# Retrieval and optional graph serving.  These are installed together so the
-# documented local pipeline commands work without a second requirements file.
+# Lakehouse, hybrid retrieval and optional graph/vector serving. These are
+# intentionally installed together so every command documented in README.md
+# works from a single reproducible environment.
 duckdb>=1.1,<2
 neo4j>=5.24,<6
 qdrant-client>=1.12,<2

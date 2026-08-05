@@ -267,11 +267,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 }
 .request-status { min-height: 18px; color: var(--muted); font-size: .73rem; }
 .request-status.error { color: #f2a097; }
-.input-kind-control { display: flex; align-items: center; gap: 5px; min-height: 26px; margin: 0 0 7px; color: var(--subtle); font-size: .69rem; }
-.input-kind-control > span { margin-right: 2px; }
-.input-kind-control button { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
-.input-kind-control button[aria-pressed="true"] { border-color: #4e9388; color: #eafff8; background: #234c46; }
-.input-kind-control svg { width: 13px; height: 13px; }
+.action-composer { display: grid; gap: 5px; margin: 0 0 7px; }
+.action-composer[hidden] { display: none; }
+.action-composer label { display: flex; align-items: center; gap: 5px; color: #d7c4a0; font-size: .69rem; }
+.action-composer label span { color: var(--subtle); }
+.action-composer label svg { width: 13px; height: 13px; }
+.action-composer textarea { min-height: 38px; max-height: 104px; padding: 8px 11px; border-color: #756348; color: #fff4dd; background: #1d1b17; }
 .composer-row { display: grid; grid-template-columns: minmax(0, 1fr) 42px; gap: 9px; align-items: end; }
 .composer textarea {
   position: relative;
@@ -290,7 +291,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   line-height: 1.5;
   pointer-events: auto;
 }
-.composer textarea.action-input { border-color: #8e7650; color: #fff4dd; background: #1d1b17; }
+.composer .action-composer textarea { min-height: 38px; max-height: 104px; padding: 8px 11px; border-color: #756348; color: #fff4dd; background: #1d1b17; }
 .send-button {
   display: grid;
   place-items: center;

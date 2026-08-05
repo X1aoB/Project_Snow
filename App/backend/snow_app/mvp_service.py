@@ -62,6 +62,12 @@ _FEEDBACK_DEFAULT_RESOLUTION: dict[str, str] = {
     "communication_state": "fixed_verified",
     "mode_continuity": "fixed_verified",
     "client_input_state": "needs_verification",
+    "client_dual_input": "fixed_verified",
+    "character_signature_frequency": "fixed_verified",
+    "shared_meal_continuity": "fixed_verified",
+    "routine_activity_logic": "fixed_verified",
+    "location_continuity": "fixed_verified",
+    "intimacy_continuity": "fixed_verified",
     "narrative_continuity": "needs_verification",
     "costume_context": "needs_verification",
     "nickname_mapping": "needs_verification",
@@ -2162,7 +2168,7 @@ class MVPService:
                 }
             )
         return {
-            "client_version": "preview-0.2.2",
+            "client_version": "preview-0.2.3",
             "registry_version": status["registry_version"],
             "enabled": status["enabled"],
             "provider_configured": status["provider_configured"],
@@ -2583,6 +2589,104 @@ class MVPService:
         return MVPService._world_snapshot(world_session_id)
 
     @staticmethod
+    def _set_character_location(
+        world_session_id: str,
+        character_id: str,
+        location: str,
+    ) -> dict[str, Any]:
+        """Persist a location explicitly confirmed by the conversation.
+
+        The scene simulator supplies a neutral starting point, but a later
+        user/character exchange such as "你在房间吗" / "我在呢" is more
+        specific for this local session.  Promoting only these recently and
+        jointly confirmed anchors prevents the simulator from snapping a
+        character back to its original training area on the next turn.
+        """
+
+        with _WORLD_STATE_LOCK:
+            cached = _WORLD_STATES.get(world_session_id)
+            if cached is None:
+                raise KeyError(world_session_id)
+            scene = (cached.get("presence") or {}).get(character_id)
+            if scene is None:
+                raise KeyError(character_id)
+            scene["location"] = location
+            scene["activity"] = "在这里等分析员"
+            scene["state_scope"] = "conversation_confirmed"
+        return MVPService._world_snapshot(world_session_id)
+
+    @staticmethod
+    def _recent_confirmed_location(
+        session_context: dict[str, Any] | None,
+        character_id: str,
+    ) -> dict[str, str] | None:
+        """Recover a compact current-location anchor from recent dialogue."""
+
+        aliases: dict[str, str] = {
+            "你的房间": "个人房间",
+            "你房间": "个人房间",
+            "自己房间": "个人房间",
+            "个人房间": "个人房间",
+            "房间": "个人房间",
+            "宿舍": "个人房间",
+        }
+        for character in MVP_CHARACTERS:
+            for location, _ in scene_templates_for(character.character_id):
+                aliases.setdefault(location, location)
+        aliases.update(
+            {
+                "餐厅": "餐厅",
+                "食堂": "食堂",
+                "资料室": "资料室",
+                "训练区": "训练区",
+                "观景区": "观景区",
+                "医务室": "医务室附近",
+                "休息区": "基地休息区",
+                "公共区": "基地公共区",
+            }
+        )
+
+        def mentioned_location(text: str) -> tuple[str, str] | None:
+            normalized = _compact(text)
+            for alias in sorted(aliases, key=len, reverse=True):
+                if _compact(alias) in normalized:
+                    return alias, aliases[alias]
+            return None
+
+        turns = list((session_context or {}).get("turns") or [])
+        for turn in reversed(turns[-4:]):
+            user = str(turn.get("user") or "")
+            assistant = str(turn.get("assistant") or "")
+            assistant_location = mentioned_location(assistant)
+            if assistant_location and any(
+                term in _compact(assistant)
+                for term in ("我在", "在这里", "在这", "等你", "回房间")
+            ):
+                return {
+                    "location": assistant_location[1],
+                    "surface": assistant_location[0],
+                    "source": "character_disclosure",
+                }
+            user_location = mentioned_location(user)
+            if not user_location:
+                continue
+            user_establishes = any(
+                term in _compact(user)
+                for term in ("在房间吗", "在哪里见", "在哪见", "见好吗", "见好么", "见好不好", "去", "来")
+            ) or bool(re.search(r"在.{0,10}(?:吗|么|呢|吧|见)", user))
+            assistant_affirms = any(
+                term in _compact(assistant)
+                for term in ("我在", "在呢", "好呀", "好啊", "好的", "等你", "回房间")
+            ) and not any(term in _compact(assistant) for term in ("不在", "别来", "不要来"))
+            if user_establishes and assistant_affirms:
+                return {
+                    "location": user_location[1],
+                    "surface": user_location[0],
+                    "source": "joint_confirmation",
+                }
+        return None
+
+    @staticmethod
     def _scene_state(world_state: dict[str, Any], character: Any) -> dict[str, Any]:
         character_scene = (world_state.get("presence") or {}).get(character.character_id) or {}
         analyst_location = str(world_state.get("analyst_location") or "").strip() or None
@@ -2596,7 +2700,7 @@ class MVPService:
                 and character_location
                 and analyst_location == character_location
             ),
-            "state_scope": "session_simulation",
+            "state_scope": str(character_scene.get("state_scope") or "session_simulation"),
         }
 
     @staticmethod
@@ -2626,7 +2730,10 @@ class MVPService:
         location_requested = (
             question_focus == "location"
             or bool(named_locations)
-            or MVPService._is_visit_request(message)
+            or (
+                question_focus != "visit_followup"
+                and MVPService._is_visit_request(message)
+            )
         )
         activity_requested = question_focus == "current_activity"
         prompt_state: dict[str, Any] = {
@@ -3211,10 +3318,63 @@ class MVPService:
             return "costume_detail"
         if intents and "logistics" in intents:
             return "logistics_detail"
+        # A meal that the analyst has already brought or proposed is a shared
+        # scene premise, not a request for the character's current diet.  The
+        # old broad ``吃饭`` matcher routed these turns to the conservative
+        # "I have not decided" fallback and erased the food visible in the
+        # conversation itself.
+        meal_terms = (
+            "西餐",
+            "工作餐",
+            "餐品",
+            "饭菜",
+            "晚餐",
+            "午餐",
+            "早餐",
+            "火锅",
+            "吃饭",
+            "吃点",
+        )
+        meal_offer_terms = (
+            "拿了",
+            "带了",
+            "准备了",
+            "做好了",
+            "给你",
+            "跟我来",
+            "一起吃",
+            "共进",
+            "今天先来",
+            "尝尝",
+            "合不合",
+            "和不和",
+            "胃口",
+            "出去吃",
+        )
+        if any(term in normalized for term in meal_terms) and any(
+            term in normalized for term in meal_offer_terms
+        ):
+            return "shared_meal"
         if any(term in normalized for term in ("吃了什么", "吃什么", "吃饭了吗", "吃饭", "喝了什么", "喝什么")):
             return "food_or_drink"
         if MVPService._is_visit_request(message):
             return "location"
+        # "你想让我做什么" asks for the character's wish in the current
+        # interaction.  It must be classified before the generic ``做什么``
+        # activity matcher; otherwise an intimate or playful exchange is
+        # replaced by an unrelated report about training or work.
+        if any(
+            term in normalized
+            for term in (
+                "你想让我做什么",
+                "你想要我做什么",
+                "你希望我做什么",
+                "你要我做什么",
+                "想让我怎么做",
+                "想要我怎样",
+            )
+        ):
+            return "open_invitation"
         # A reference to an earlier or habitual time window must not be
         # answered from the live “right now” scene.  This branch comes before
         # the broad “在做什么/干什么” matcher below, which otherwise treated
@@ -3319,6 +3479,9 @@ class MVPService:
         focus = cls._question_focus(message, intents)
         contracts = {
             "food_or_drink": "用户问的是吃了/喝了什么。第一句必须直接回答食物或饮品；不能回答地点、谁陪着、在哪里或相关剧情。没有当前事实时，用明确的假设/倾向表达，不要声称某个旧场景刚刚发生。",
+            "shared_meal": "分析员已经带来、准备或明确提出了本轮要吃的食物。直接回应这份邀请和已经说出的餐点，可以评价是否合胃口、接受一起用餐或承接下次外出的约定；不得回答‘还没决定吃什么’，也不要反问分析员想吃什么。",
+            "open_invitation": "分析员是在邀请你说出当下希望他怎么做。承接最近几轮的情绪、动作和亲密程度，给出自然、具体但非露骨的回应；不要突然汇报训练、工作或地点，也不要用实现层或安全说明打断。若话题可能继续升温，可以用含蓄表达、确认彼此意愿或自然淡出场景，但不得擅自把露骨行为写成已经发生。",
+            "visit_followup": "角色的当前位置最近已经明确说过，分析员是在确认要过来。自然接受、等待或提醒路上小心即可；不要机械重复地点，也不要改称自己在另一个地点或突然补写刚结束的活动。",
             "current_activity": "用户问的是正在做什么或是否有空。第一句必须直接回答活动/状态；不要用地点或一段故事替代活动答案。",
             "routine_activity": "用户问的是早些时候或通常会做什么。先直接回应训练、休息或当时安排这一选择；不得把当前会话的‘刚才/现在’活动冒充为早上的事实。没有可核实的具体安排时，用自然的条件或习惯表达承接，不要编造日程。",
             "location": "用户问的是地点。第一句必须直接回答地点；若没有当前地点事实，简短说明不确定或用假设表达，不要转答吃饭、任务或旧剧情。",
@@ -3771,8 +3934,10 @@ class MVPService:
         if focus in {
             "casual_check_in",
             "food_or_drink",
+            "shared_meal",
             "current_activity",
             "location",
+            "visit_followup",
             "current_condition",
         }:
             return {}
@@ -4251,9 +4416,12 @@ class MVPService:
         question_focus = self._question_focus(message, intents)
         natural_focus = question_focus in {
             "food_or_drink",
+            "shared_meal",
             "current_activity",
             "routine_activity",
             "location",
+            "visit_followup",
+            "open_invitation",
         }
         latest_requested = (
             question_focus == "current_condition"
@@ -4735,11 +4903,14 @@ class MVPService:
         }
         if question_focus in {
             "food_or_drink",
+            "shared_meal",
             "current_activity",
             "routine_activity",
             "location",
+            "visit_followup",
             "casual_check_in",
             "general",
+            "open_invitation",
         }:
             # Keep situational story/mail records out of the default casual
             # prompt.  They remain searchable when the user explicitly asks
@@ -4832,11 +5003,14 @@ class MVPService:
             if question_focus
             in {
                 "food_or_drink",
+                "shared_meal",
                 "current_activity",
                 "routine_activity",
                 "location",
+                "visit_followup",
                 "casual_check_in",
                 "general",
+                "open_invitation",
             }
             else "current_fact"
             if "current_state" in query_intents
@@ -5160,6 +5334,11 @@ class MVPService:
             if str(getattr(character, "character_id", "")) == "1b0a6b35719a"
             else ""
         )
+        if str(getattr(character, "character_id", "")) == "6455a5dcff6a":
+            character_voice_rule += """
+【卜卜的标志性表达频率】
+算卦、卦象、运势和“本天师”是可用的角色特点，不是每轮必加的口癖。只有分析员主动问占卜，或最近三轮尚未使用且它确实能推进当前话题时才提一次；普通问候、连续点餐和闲聊优先表现她的活泼、好奇与亲近，不要反复用算卦作为句尾。
+"""
         dual_persona_rule = (
             f"\n【琴诺／莫尔索语境】\n{dual_persona_context.get('guidance') or _MORSO_GUIDANCE}\n"
             if dual_persona_context.get("active")
@@ -5207,6 +5386,7 @@ class MVPService:
 16. mentioned_characters 中的 matched_alias 只用于理解分析员所指的人；surface_policy 为 canonical_response 时，回答必须使用 canonical_name，不得因为分析员用了昵称就自动照抄该昵称。
 17. live_scene 是当前会话临时建立的世界内现状，仅用于回答此刻的位置和活动。它不是历史剧情或永久人格，但在同一个 world_session 中必须保持一致，并且优先于检索到的旧场景。
 18. companion_social_context.active 为 true 时，相关少女是友好同伴；允许拌嘴、开玩笑和争取分析员关注，但不得写成敌意、仇恨、伤害意图或真正的敌人。
+19. 当分析员在已经建立的亲密语境中询问“你想让我做什么”，应承接最近动作与情绪，用自然、含蓄、尊重彼此意愿的方式继续；不要突然重置为训练、工作或寒暄。可以停在靠近、拥抱、目光、心意确认或自然淡出，不把露骨行为擅自写成已经发生，也不输出实现层说明。
 
 {_LATEST_NARRATIVE_STATE_GUIDANCE}
 
@@ -5237,9 +5417,12 @@ class MVPService:
         if focus in {
             "casual_check_in",
             "food_or_drink",
+            "shared_meal",
             "current_activity",
             "routine_activity",
             "location",
+            "visit_followup",
+            "open_invitation",
         }:
             per_document_limit, evidence_budget = 1200, 5200
         elif focus in {"preference_or_value", "costume_detail", "logistics_detail", "general"}:
@@ -5735,6 +5918,12 @@ class MVPService:
                 return MVPService._live_scene_fallback(context)
         if focus == "costume_detail":
             return "你问的是这套装扮本身吧？我先说我能确定的细节，别让无关的事情把话题带偏。"
+        if focus == "shared_meal":
+            return MVPService._shared_meal_fallback(context)
+        if focus == "open_invitation":
+            return MVPService._open_invitation_fallback(context)
+        if focus == "visit_followup":
+            return MVPService._visit_followup_fallback(context)
         if focus == "preference_or_value":
             return "这个问题我愿意认真想想。能明确说的，我会直接告诉你，不拿别的故事来敷衍。"
         if focus == "casual_check_in":
@@ -5945,6 +6134,32 @@ class MVPService:
             return ["unsupported_current_food_fact"]
         return []
 
+    @classmethod
+    def _shared_meal_continuity_violations(
+        cls,
+        answer: str,
+        context: dict[str, Any],
+        content_blocks: Any = None,
+    ) -> list[str]:
+        """Keep food explicitly supplied by the analyst in the active scene."""
+
+        if str(context.get("question_focus") or "") != "shared_meal":
+            return []
+        opening = _compact(cls._first_verbal_response(answer, content_blocks))
+        if any(
+            term in opening
+            for term in (
+                "还没决定吃什么",
+                "不知道吃什么",
+                "你想吃什么",
+                "有想吃的",
+                "告诉我想吃",
+                "替我挑",
+            )
+        ):
+            return ["shared_meal_context_lost"]
+        return []
+
     @staticmethod
     def _routine_activity_time_scope_violations(
         answer: str,
@@ -5996,17 +6211,124 @@ class MVPService:
             return []
         return ["routine_activity_direct_answer"]
 
+    @classmethod
+    def _routine_activity_contradiction_violations(
+        cls,
+        answer: str,
+        context: dict[str, Any],
+        content_blocks: Any = None,
+    ) -> list[str]:
+        """Reject mutually inconsistent answers to a training/rest choice."""
+
+        if str(context.get("question_focus") or "") != "routine_activity":
+            return []
+        message = _compact(str(context.get("user_message") or ""))
+        if not ("训练" in message and "休息" in message):
+            return []
+        opening = _compact(cls._first_verbal_response(answer, content_blocks))
+        rest_markers = ("赖床", "想睡", "多睡", "更想休息", "想休息")
+        training_markers = ("训练场", "去训练", "在训练", "活动筋骨")
+        condition_markers = ("如果", "要是", "有任务", "有安排", "训练安排", "任务安排", "再去")
+        if (
+            any(term in opening for term in rest_markers)
+            and any(term in opening for term in training_markers)
+            and not any(term in opening for term in condition_markers)
+        ):
+            return ["routine_activity_contradiction"]
+        return []
+
     @staticmethod
     def _routine_activity_fallback(context: dict[str, Any]) -> str:
         """A direct but non-fabricated fallback for routine-time questions."""
 
         message = _compact(str(context.get("user_message") or ""))
         if "训练" in message and "休息" in message:
-            return (
-                "早上的安排要看当天有没有任务。没有紧急的事时，我多半会先把该准备的事理一理，"
-                "再决定是训练一会儿，还是给自己留一点休息的时间。"
-            )
+            character_id = str(getattr(context.get("character"), "character_id", ""))
+            if character_id == "25b23cb64398":
+                return "没有任务催着的话，我会先休息够；真有训练安排，再去活动身体。早上总该给自己留一点缓冲，不是吗？"
+            return "要是当天有任务或训练安排，我会先把它完成；没有紧急的事，就给自己留一点休息时间。"
         return "那段时间的安排得看当天的任务。要是没有紧急事务，我会按自己的节奏把该做的事安排好。"
+
+    @staticmethod
+    def _shared_meal_fallback(context: dict[str, Any]) -> str:
+        message = _compact(str(context.get("user_message") or ""))
+        address = str(
+            (context.get("relationship_address_memory") or {}).get("preferred_address") or ""
+        ).strip()
+        prefix = f"{address}，" if address else ""
+        if "工作餐" in message:
+            return f"{prefix}好啊，今天就一起吃你带来的工作餐。至于下次出去吃，我可把这句邀请记下了。"
+        if "西餐" in message:
+            return f"{prefix}好啊，我跟你来。你特意带来的西餐，我当然愿意先尝尝；合不合胃口，坐下来就知道了。"
+        if "火锅" in message:
+            return f"{prefix}好啊，那就一起吃火锅。锅底和想加的菜，我们边走边商量。"
+        return f"{prefix}好啊，就吃你已经准备好的这些。能和你坐下来一起吃，比临时再挑什么更重要。"
+
+    @staticmethod
+    def _open_invitation_fallback(context: dict[str, Any]) -> str:
+        """Continue closeness without explicit sexual detail or a topic reset."""
+
+        address = str(
+            (context.get("relationship_address_memory") or {}).get("preferred_address") or ""
+        ).strip()
+        prefix = f"{address}……" if address else ""
+        channel = str((context.get("communication_context") or {}).get("channel") or "in_person")
+        if channel == "text":
+            return f"{prefix}先别急着追问。把你现在真正想说的话告诉我，我会认真听，也会告诉你我的心意。"
+        return f"{prefix}先别移开目光，就这样再靠近我一点。接下来不必急着说破，我们慢慢确认彼此的心意就好。"
+
+    @staticmethod
+    def _open_invitation_continuity_violations(
+        answer: str,
+        context: dict[str, Any],
+    ) -> list[str]:
+        if str(context.get("question_focus") or "") != "open_invitation":
+            return []
+        normalized = _compact(answer)
+        reset_markers = (
+            "刚结束一轮基础训练",
+            "刚结束训练",
+            "刚完成训练",
+            "现在可以陪你聊会儿",
+            "正在处理日常事务",
+            "刚完成任务",
+        )
+        if any(term in normalized for term in reset_markers):
+            return ["open_invitation_topic_reset"]
+        return []
+
+    @staticmethod
+    def _signature_overuse_violations(
+        message: str,
+        answer: str,
+        context: dict[str, Any],
+    ) -> list[str]:
+        """Use a signature trait as flavour, not as a compulsory suffix."""
+
+        character_id = str(getattr(context.get("character"), "character_id", ""))
+        if character_id != "6455a5dcff6a":
+            return []
+        signature_terms = ("算卦", "卦象", "运势", "本天师")
+        if any(_contains_term(message, term) for term in signature_terms):
+            return []
+        if not any(_contains_term(answer, term) for term in signature_terms):
+            return []
+        recent = list((context.get("session_context") or {}).get("turns") or [])[-3:]
+        if any(
+            any(_contains_term(str(turn.get("assistant") or ""), term) for term in signature_terms)
+            for turn in recent
+        ):
+            return ["character_signature_overuse"]
+        return []
+
+    @staticmethod
+    def _signature_overuse_fallback(context: dict[str, Any]) -> str:
+        message = _compact(str(context.get("user_message") or ""))
+        if "火锅" in message:
+            return "火锅好呀，热腾腾的，正适合一起吃。你想选麻辣锅底，还是清淡一点的？"
+        if any(term in message for term in ("吃饭", "晚饭", "一起吃", "出去吃")):
+            return "好呀好呀，正好我也饿了。和你一起出去吃，光是想想就让人期待。"
+        return "好呀，那就这么定了。你接着说，卜卜这次好好听你的。"
 
     @staticmethod
     def _first_verbal_response(answer: str, content_blocks: Any = None) -> str:
@@ -6084,7 +6406,7 @@ class MVPService:
         if not scene_state:
             return []
         focus = str(context.get("question_focus") or "general")
-        if focus == "location":
+        if focus in {"location", "visit_followup"}:
             return []
         violations: list[str] = []
         for field in ("character_location", "analyst_location"):
@@ -6122,9 +6444,32 @@ class MVPService:
 
         if not MVPService._is_visit_request(message):
             return False
+        if str(context.get("question_focus") or "") == "visit_followup":
+            return False
         scene_state = context.get("raw_scene_state") or {}
         location = str(scene_state.get("character_location") or "").strip()
         return bool(location and not _contains_term(answer, location))
+
+    @staticmethod
+    def _visit_location_repeated(
+        message: str,
+        answer: str,
+        context: dict[str, Any],
+    ) -> bool:
+        """Do not recite a location again on the immediate visit follow-up."""
+
+        if (
+            str(context.get("question_focus") or "") != "visit_followup"
+            or not MVPService._is_visit_request(message)
+        ):
+            return False
+        confirmed = context.get("confirmed_location") or {}
+        locations = {
+            str(confirmed.get("location") or "").strip(),
+            str(confirmed.get("surface") or "").strip(),
+            str((context.get("raw_scene_state") or {}).get("character_location") or "").strip(),
+        }
+        return any(location and _contains_term(answer, location) for location in locations)
 
     @staticmethod
     def _visit_location_fallback(context: dict[str, Any]) -> str:
@@ -6137,9 +6482,19 @@ class MVPService:
         return "你若要来找我，先告诉我你现在在哪里，我好把地方说清楚。"
 
     @staticmethod
+    def _visit_followup_fallback(context: dict[str, Any]) -> str:
+        address = str(
+            (context.get("relationship_address_memory") or {}).get("preferred_address") or ""
+        ).strip()
+        prefix = f"{address}，" if address else ""
+        return f"{prefix}好啊，我等你。路上慢一点，到了就告诉我。"
+
+    @staticmethod
     def _unprompted_logistics_plan(message: str, answer: str) -> bool:
         """Whether a reply added a meeting/plan nobody asked for."""
 
+        if MVPService._is_visit_request(message):
+            return False
         if any(_contains_term(message, term) for term in _LOGISTICS_REQUEST_TERMS):
             return False
         return bool(
@@ -6674,8 +7029,11 @@ class MVPService:
             "general",
             "casual_check_in",
             "food_or_drink",
+            "shared_meal",
             "current_activity",
             "location",
+            "visit_followup",
+            "open_invitation",
             "preference_or_value",
             "costume_detail",
             "logistics_detail",
@@ -6770,11 +7128,19 @@ class MVPService:
             cls._unsupported_current_food_claims(answer, context, content_blocks)
         )
         violations.extend(
+            cls._shared_meal_continuity_violations(answer, context, content_blocks)
+        )
+        violations.extend(
             cls._routine_activity_time_scope_violations(answer, context, content_blocks)
         )
         violations.extend(
             cls._routine_activity_direct_answer_violations(answer, context, content_blocks)
         )
+        violations.extend(
+            cls._routine_activity_contradiction_violations(answer, context, content_blocks)
+        )
+        violations.extend(cls._open_invitation_continuity_violations(answer, context))
+        violations.extend(cls._signature_overuse_violations(message, answer, context))
         # Preserve the supplied blocks for the first-block check without
         # mutating the request context that is reused by the controlled retry.
         context_for_style = {**context, "content_blocks": content_blocks}
@@ -6790,6 +7156,8 @@ class MVPService:
         )
         if cls._visit_location_missing(message, answer, context):
             violations.append("visit_location_missing")
+        if cls._visit_location_repeated(message, answer, context):
+            violations.append("visit_location_repeated")
         if cls._unprompted_logistics_plan(message, answer):
             violations.append("unprompted_logistics_plan")
         if cls._unprompted_plot_recap(message, answer, context):
@@ -6872,10 +7240,18 @@ class MVPService:
                     "不得只回答餐厅、地点、同伴、任务或旧剧情。"
                     "若包含 unsupported_current_food_fact，不得把旧剧情、语音或偏好写成‘刚刚/今天/现在已经吃了什么’；"
                     "改为自然地说还没决定、还没吃，或用‘如果现在要选’表达带条件的偏好。"
+                    "若包含 shared_meal_context_lost，分析员已经把本轮餐点带来或说清楚；直接接受、评价或承接一起用餐，"
+                    "不得再说没决定吃什么、让分析员重新挑选，或反问想吃什么。"
                      "若包含 routine_activity_time_scope，用户问的是早些时候或通常的安排；不得把 live_scene 的刚才/现在活动当作答案。"
                      "优先回答训练、休息或任务安排这一选择；没有明确事实时用自然的条件或习惯表达，不要编造日程。"
                      "若包含 routine_activity_direct_answer，必须直接回应训练、休息或决定二者的任务安排；"
                      "不得用赖床、嗜睡、恒约后的变化或其他无依据的日常状态绕开这个选择。"
+                     "若包含 routine_activity_contradiction，选择一个有条件的明确答案：没有任务时休息，有任务或训练安排时训练；"
+                     "不得先说更想赖床又无理由地声称自己大概在训练场。"
+                    "若包含 open_invitation_topic_reset，承接 continuity_card 中最近的亲密或玩笑语境，用非露骨、尊重意愿的表达继续；"
+                    "不要跳到训练、工作、位置报告，也不要输出安全声明。可以含蓄确认、停在拥抱/靠近/目光等程度，或自然淡出。"
+                    "若包含 character_signature_overuse，本轮不要再提算卦、卦象、运势或‘本天师’；"
+                    "保留卜卜活泼亲近的节奏，直接回应当前食物、邀约或玩笑。"
                     "若包含 mechanical_dialogue，删除‘根据资料/无法确定/请提供更多背景’等报告式开头，"
                     "先用角色口吻直接接住分析员的问题；证据不足时只用一句自然、轻量的保留，不要把资料边界当成回答。"
                     "若包含 unprompted_scene_disclosure，不得主动说出当前精确地点、刚结束的活动或分析员位置；"
@@ -6885,6 +7261,8 @@ class MVPService:
                     "先自然回应邀约或关心，再用一句温暖的追问延续话题，不要为了显得了解角色而强行带剧情。"
                      "若包含 repeated_recent_event_after_channel_switch，承接上一轮已经发生的事实，不得把训练结束、刚回来、刚到达或刚完成任务重新写成此刻的新事件。"
                      "若包含 repeated_response，不能复制上一轮固定句式；从本轮问题的另一个具体角度回答，必要时只保留一句新的简短回应。"
+                    "若包含 visit_location_repeated，位置已经在最近对话中说过；只自然确认分析员可以过来并表示等待，"
+                    "不要再次报地点、改换地点或补写刚结束的活动。"
                     "若包含 interaction_opening_required:干什么！，首个 speech/message 必须以‘干什么！’自然承接，再回答分析员当下的玩笑；"
                     "不要把它写成固定口癖或无关场景的模板。"
                       "若包含 communication_block_type、text_channel_physical_action、text_channel_unseen_visual 或 text_channel_unseen_audio，"
@@ -7303,6 +7681,22 @@ class MVPService:
             active_channel,
         )
 
+        confirmed_location = self._recent_confirmed_location(
+            session_context,
+            character.character_id,
+        )
+        if confirmed_location:
+            current_location = str(
+                ((world_state.get("presence") or {}).get(character.character_id) or {}).get("location")
+                or ""
+            ).strip()
+            if current_location != confirmed_location["location"]:
+                world_state = self._set_character_location(
+                    resolved_world_session,
+                    character.character_id,
+                    confirmed_location["location"],
+                )
+
         scene_state = self._scene_state(world_state, character)
         presence_transition: dict[str, Any] | None = None
         if presence_action and presence_action != "join_character":
@@ -7373,6 +7767,15 @@ class MVPService:
             mode=mode,
             world_state=world_state,
         )
+        if self._is_visit_request(message.strip()) and confirmed_location:
+            context["question_focus"] = "visit_followup"
+            context["conversation_mode"] = "natural_chat"
+            context["response_contract"] = (
+                "角色的当前位置最近已经明确说过。自然接受分析员过来、表示等待或提醒路上小心；"
+                "不要重复地点，不要改口为另一个地点，也不要突然补写训练或工作。"
+            )
+            context["live_scene"] = None
+            context["confirmed_location"] = confirmed_location
         prompt_scene_state = self._scene_state_for_prompt(
             scene_state,
             message.strip(),
@@ -7478,7 +7881,10 @@ class MVPService:
         session_premise_guard = False
         casual_state_guard = False
         current_food_guard = False
+        shared_meal_guard = False
         routine_activity_guard = False
+        open_invitation_guard = False
+        signature_frequency_guard = False
         cross_character_guard = False
         dual_persona_guard = False
         direct_answer_guard = False
@@ -7612,8 +8018,31 @@ class MVPService:
                     "citation_notes": ["日常饮食问题混入了未被建立的当前事实，已改为自然的非断言回应。"],
                 }
                 current_food_guard = True
+            elif "shared_meal_context_lost" in retry_violations:
+                answer_text = self._shared_meal_fallback(context)
+                generated = {
+                    "answer": answer_text,
+                    "content_blocks": [
+                        {
+                            "type": "message" if active_channel == "text" else "speech",
+                            "text": answer_text,
+                        }
+                    ],
+                    "confidence": "medium",
+                    "narrative_scope": "unknown",
+                    "used_document_ids": [],
+                    "used_relation_candidate_ids": [],
+                    "uncertainties": [],
+                    "citation_notes": ["已承接分析员在当前会话中明确带来的餐点。"],
+                }
+                shared_meal_guard = True
             elif any(
-                item in {"routine_activity_time_scope", "routine_activity_direct_answer"}
+                item
+                in {
+                    "routine_activity_time_scope",
+                    "routine_activity_direct_answer",
+                    "routine_activity_contradiction",
+                }
                 for item in retry_violations
             ):
                 answer_text = self._routine_activity_fallback(context)
@@ -7633,6 +8062,42 @@ class MVPService:
                     "citation_notes": ["早些时候的安排不能由当前场景替代，已改为不虚构日程的直接回应。"],
                 }
                 routine_activity_guard = True
+            elif "open_invitation_topic_reset" in retry_violations:
+                answer_text = self._open_invitation_fallback(context)
+                generated = {
+                    "answer": answer_text,
+                    "content_blocks": [
+                        {
+                            "type": "message" if active_channel == "text" else "speech",
+                            "text": answer_text,
+                        }
+                    ],
+                    "confidence": "medium",
+                    "narrative_scope": "unknown",
+                    "used_document_ids": [],
+                    "used_relation_candidate_ids": [],
+                    "uncertainties": [],
+                    "citation_notes": ["已在非露骨边界内承接当前亲密语境，未跳转到无关活动。"],
+                }
+                open_invitation_guard = True
+            elif "character_signature_overuse" in retry_violations:
+                answer_text = self._signature_overuse_fallback(context)
+                generated = {
+                    "answer": answer_text,
+                    "content_blocks": [
+                        {
+                            "type": "message" if active_channel == "text" else "speech",
+                            "text": answer_text,
+                        }
+                    ],
+                    "confidence": "medium",
+                    "narrative_scope": "unknown",
+                    "used_document_ids": [],
+                    "used_relation_candidate_ids": [],
+                    "uncertainties": [],
+                    "citation_notes": ["已降低角色标志性表达在连续闲聊中的重复频率。"],
+                }
+                signature_frequency_guard = True
             elif "cross_character_fact_mismatch" in retry_violations:
                 answer_text = self._cross_character_fact_fallback(context)
                 generated = {
@@ -7814,8 +8279,15 @@ class MVPService:
                     "citation_notes": ["交流媒介边界校验未通过，已使用对应媒介的安全回应。"],
                 }
                 communication_guard = True
-            elif "visit_location_missing" in retry_violations:
-                answer_text = self._visit_location_fallback(context)
+            elif any(
+                item in {"visit_location_missing", "visit_location_repeated"}
+                for item in retry_violations
+            ):
+                answer_text = (
+                    self._visit_followup_fallback(context)
+                    if "visit_location_repeated" in retry_violations
+                    else self._visit_location_fallback(context)
+                )
                 generated = {
                     "answer": answer_text,
                     "content_blocks": [
@@ -7829,7 +8301,9 @@ class MVPService:
                     "used_document_ids": [],
                     "used_relation_candidate_ids": [],
                     "uncertainties": [],
-                    "citation_notes": ["明确的到访请求没有给出当前位置，已补充会话场景位置。"],
+                    "citation_notes": [
+                        "到访请求已按最近会话中的位置披露状态处理，避免遗漏或机械复述。"
+                    ],
                 }
                 visit_location_guard = True
             elif any(item.startswith("live_scene_mismatch:") for item in retry_violations):
@@ -7958,7 +8432,10 @@ class MVPService:
             or analyst_premise_guard
             or casual_state_guard
             or current_food_guard
+            or shared_meal_guard
             or routine_activity_guard
+            or open_invitation_guard
+            or signature_frequency_guard
             or cross_character_guard
             or dual_persona_guard
             or direct_answer_guard
@@ -8175,7 +8652,10 @@ class MVPService:
                     ("session_premise_guard", session_premise_guard),
                     ("casual_state_guard", casual_state_guard),
                     ("current_food_guard", current_food_guard),
+                    ("shared_meal_guard", shared_meal_guard),
                     ("routine_activity_guard", routine_activity_guard),
+                    ("open_invitation_guard", open_invitation_guard),
+                    ("signature_frequency_guard", signature_frequency_guard),
                     ("cross_character_guard", cross_character_guard),
                     ("dual_persona_guard", dual_persona_guard),
                     ("direct_answer_guard", direct_answer_guard),
@@ -8267,12 +8747,32 @@ class MVPService:
         ) and has("亲爱的", "郎君", "达令", "老婆", "妻子")
         if relationship_address_signal or address_error_signal:
             return "formal_relationship_address"
+        if has("西餐", "工作餐", "餐品", "已经拿", "带了") and has(
+            "重复", "前文", "没决定", "重新", "没有被纳入", "询问吃什么"
+        ):
+            return "shared_meal_continuity"
         if has("刚吃", "刚喝", "吃了什么", "吃什么", "喝了什么", "饮食", "食物"):
             return "food_current_fact"
         if has("后勤", "小队", "成员", "队员", "推荐角色", "装备时"):
             return "logistics_linkage"
         if has("猫猫", "小老师", "昵称", "外号"):
             return "nickname_mapping"
+        if has("算卦", "卦象", "运势", "本天师") and has(
+            "一直", "反复", "重复", "频次", "频率", "减少"
+        ):
+            return "character_signature_frequency"
+        if has("地点", "位置") and has(
+            "重复", "再次", "揭露", "前后", "矛盾", "不一致"
+        ):
+            return "location_continuity"
+        if has("训练", "休息") and has("逻辑", "矛盾", "答非所问"):
+            return "routine_activity_logic"
+        if has("动作") and has("同时输入", "语言", "对白", "隐藏", "文字"):
+            return "client_dual_input"
+        if has("色情", "暧昧", "亲密", "隐晦") and has(
+            "中断", "重置", "跳", "连续", "审核"
+        ):
+            return "intimacy_continuity"
         if has("json", "api", "模型", "系统", "检索", "资料库", "正在读取"):
             return "json_or_implementation_leak"
         if has("文字通讯", "面对面", "媒介", "输入中", "发送中", "通信", "通讯"):
@@ -8318,7 +8818,25 @@ class MVPService:
     ) -> list[dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            key = str(row.get("issue_key") or self._feedback_issue_key(row))
+            stored_key = str(row.get("issue_key") or "").strip()
+            derived_key = self._feedback_issue_key(row)
+            # Early previews grouped nearly every dialogue report into one of
+            # two coarse buckets.  Re-evaluate only those legacy buckets so a
+            # fixed location regression no longer makes an unrelated story
+            # problem look like the same duplicate.  Already-specific and
+            # hashed keys remain immutable.
+            key = (
+                derived_key
+                if stored_key
+                in {
+                    "narrative_continuity",
+                    "client_input_state",
+                    "json_or_implementation_leak",
+                    "food_current_fact",
+                }
+                and derived_key != stored_key
+                else stored_key or derived_key
+            )
             row["issue_key"] = key
             grouped.setdefault(key, []).append(row)
         for key, group in grouped.items():

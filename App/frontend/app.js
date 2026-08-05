@@ -47,7 +47,7 @@ async function api(path, options = {}, timeoutMs = 15000) {
 }
 
 const state = {
-  clientVersion: "preview-0.2.2",
+  clientVersion: "preview-0.2.3",
   registryVersion: "",
   enabled: false,
   characters: [],
@@ -90,14 +90,8 @@ function channelPreference(characterId) {
   return value === "text" ? "text" : "in_person";
 }
 
-function inputKindPreference(characterId) {
-  return storageGet(`project_snow:input-kind:${characterId}`, "speech") === "action"
-    ? "action"
-    : "speech";
-}
-
-function draftKey(characterId, mode, channel, inputKind) {
-  return `project_snow:draft:${characterId}:${mode}:${channel}:${inputKind}`;
+function draftKey(characterId, mode, channel, inputType) {
+  return `project_snow:draft:${characterId}:${mode}:${channel}:${inputType}`;
 }
 
 function getThread(characterId) {
@@ -110,7 +104,6 @@ function getThread(characterId) {
       sessionId: summary.session_id || "",
       worldSessionId: summary.world_session_id || "",
       channel: summary.communication_channel || channelPreference(characterId),
-      inputKind: inputKindPreference(characterId),
       messages: [],
       questions: [],
       loaded: false,
@@ -135,25 +128,14 @@ function currentThread() {
   return state.selectedCharacterId ? getThread(state.selectedCharacterId) : null;
 }
 
-function currentInputKind() {
+function updateComposerFields() {
   const thread = currentThread();
-  if (!thread || thread.channel === "text") return "message";
-  return thread.inputKind === "action" ? "action" : "speech";
-}
-
-function updateInputKindControl() {
-  const thread = currentThread();
-  const control = byId("analyst-input-kind");
-  const input = byId("message-input");
+  const actionField = byId("analyst-action-field");
+  const speechInput = byId("message-input");
   const inPerson = Boolean(thread && thread.channel === "in_person");
-  control.hidden = !inPerson;
-  const kind = currentInputKind();
-  control.querySelectorAll("[data-input-kind]").forEach((button) => {
-    button.setAttribute("aria-pressed", button.dataset.inputKind === kind ? "true" : "false");
-  });
-  input.classList.toggle("action-input", kind === "action");
-  input.placeholder = kind === "action" ? "描述你的动作或神态…" : "输入消息…";
-  input.setAttribute("aria-label", kind === "action" ? "输入面对面动作或神态" : "输入消息");
+  actionField.hidden = !inPerson;
+  speechInput.placeholder = inPerson ? "输入对白（可选）…" : "输入消息…";
+  speechInput.setAttribute("aria-label", inPerson ? "输入面对面对白" : "输入文字消息");
 }
 
 function avatarMarkup(character, size = "") {
@@ -230,7 +212,7 @@ function updateControls() {
   document.querySelectorAll("#channel-control [data-channel]").forEach((button) => {
     button.setAttribute("aria-pressed", button.dataset.channel === channel ? "true" : "false");
   });
-  updateInputKindControl();
+  updateComposerFields();
 }
 
 function renderHeader() {
@@ -408,13 +390,16 @@ function renderTimeline(scrollToBottom = false) {
 }
 
 function restoreDraft() {
-  const input = byId("message-input");
+  const speechInput = byId("message-input");
+  const actionInput = byId("action-input");
   const thread = currentThread();
-  const kind = currentInputKind();
-  input.value = state.selectedCharacterId && thread
-    ? storageGet(draftKey(state.selectedCharacterId, state.mode, thread.channel, kind), "")
+  speechInput.value = state.selectedCharacterId && thread
+    ? storageGet(draftKey(state.selectedCharacterId, state.mode, thread.channel, "speech"), "")
     : "";
-  updateInputKindControl();
+  actionInput.value = state.selectedCharacterId && thread && thread.channel === "in_person"
+    ? storageGet(draftKey(state.selectedCharacterId, state.mode, thread.channel, "action"), "")
+    : "";
+  updateComposerFields();
   resizeComposer();
 }
 
@@ -422,18 +407,26 @@ function saveDraft() {
   const thread = currentThread();
   if (!state.selectedCharacterId || !thread) return;
   storageSet(
-    draftKey(state.selectedCharacterId, state.mode, thread.channel, currentInputKind()),
+    draftKey(state.selectedCharacterId, state.mode, thread.channel, "speech"),
     byId("message-input").value,
   );
+  if (thread.channel === "in_person") {
+    storageSet(
+      draftKey(state.selectedCharacterId, state.mode, thread.channel, "action"),
+      byId("action-input").value,
+    );
+  }
 }
 
 function resizeComposer() {
-  const input = byId("message-input");
-  input.rows = 1;
-  const computed = window.getComputedStyle(input);
-  const lineHeight = Number.parseFloat(computed.lineHeight) || 24;
-  const verticalPadding = Number.parseFloat(computed.paddingTop) + Number.parseFloat(computed.paddingBottom);
-  input.rows = Math.min(5, Math.max(1, Math.ceil((input.scrollHeight - verticalPadding) / lineHeight)));
+  [byId("message-input"), byId("action-input")].forEach((input) => {
+    if (!input) return;
+    input.rows = 1;
+    const computed = window.getComputedStyle(input);
+    const lineHeight = Number.parseFloat(computed.lineHeight) || 24;
+    const verticalPadding = Number.parseFloat(computed.paddingTop) + Number.parseFloat(computed.paddingBottom);
+    input.rows = Math.min(5, Math.max(1, Math.ceil((input.scrollHeight - verticalPadding) / lineHeight)));
+  });
 }
 
 function updateRequestStatus() {
@@ -501,17 +494,6 @@ function setChannel(channel) {
   byId("message-input").focus();
 }
 
-function setInputKind(kind) {
-  const thread = currentThread();
-  if (!thread || thread.channel !== "in_person" || !["speech", "action"].includes(kind)) return;
-  if (thread.inputKind === kind) return;
-  saveDraft();
-  thread.inputKind = kind;
-  storageSet(`project_snow:input-kind:${thread.characterId}`, kind);
-  restoreDraft();
-  byId("message-input").focus();
-}
-
 function optimisticUserMessage(pending) {
   return {
     id: pending.userMessageId,
@@ -530,16 +512,30 @@ function optimisticUserMessage(pending) {
 async function queueMessage() {
   const character = currentCharacter();
   const thread = currentThread();
-  const input = byId("message-input");
-  const message = input.value.trim();
-  if (!character || !thread || !message || thread.pending) return;
+  const speechInput = byId("message-input");
+  const actionInput = byId("action-input");
+  const speech = speechInput.value.trim();
+  const action = thread?.channel === "in_person" ? actionInput.value.trim() : "";
+  if (!character || !thread || (!speech && !action) || thread.pending) return;
+  const blocks = thread.channel === "text"
+    ? [{ type: "message", text: speech }]
+    : [
+        ...(action ? [{ type: "action", text: action }] : []),
+        ...(speech ? [{ type: "speech", text: speech }] : []),
+      ];
+  const message = blocks.map((block) => block.text).join("\n");
+  if (message.length > 4000) {
+    thread.error = "本轮动作与对白合计不能超过 4000 个字符。";
+    updateRequestStatus();
+    return;
+  }
   const pending = {
     message,
     clientMessageId: newClientMessageId(),
     userMessageId: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
     mode: state.mode,
     channel: thread.channel,
-    blocks: [{ type: currentInputKind(), text: message }],
+    blocks,
     sending: false,
   };
   thread.pending = pending;
@@ -547,10 +543,11 @@ async function queueMessage() {
   thread.conflict = null;
   thread.error = "";
   thread.messages.push(optimisticUserMessage(pending));
-  input.value = "";
+  speechInput.value = "";
+  actionInput.value = "";
   saveDraft();
   resizeComposer();
-  input.focus();
+  speechInput.focus();
   await dispatchPending();
 }
 
@@ -855,20 +852,19 @@ byId("channel-control").addEventListener("click", (event) => {
   const button = event.target.closest("[data-channel]");
   if (button) setChannel(button.dataset.channel);
 });
-byId("analyst-input-kind").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-input-kind]");
-  if (button) setInputKind(button.dataset.inputKind);
-});
 byId("composer").addEventListener("submit", (event) => {
   event.preventDefault();
   queueMessage();
 });
 byId("message-input").addEventListener("input", () => { saveDraft(); resizeComposer(); });
-byId("message-input").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-    event.preventDefault();
-    queueMessage();
-  }
+byId("action-input").addEventListener("input", () => { saveDraft(); resizeComposer(); });
+[byId("message-input"), byId("action-input")].forEach((input) => {
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      queueMessage();
+    }
+  });
 });
 byId("timeline").addEventListener("click", (event) => {
   const feedback = event.target.closest("[data-message-feedback]");
