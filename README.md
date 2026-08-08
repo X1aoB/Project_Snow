@@ -217,6 +217,10 @@ MVP_CHAT_MODEL=your-model-name
 MVP_CHAT_TIMEOUT_SECONDS=120
 MVP_CHAT_IMMERSIVE_TEMPERATURE=0.45
 MVP_CHAT_ASSISTANT_TEMPERATURE=0.20
+# 助手模式允许更详细的回答；以下是可见执行摘要和只读联网工具的上限
+MVP_CHAT_ASSISTANT_MAX_TOKENS=8192
+MVP_CHAT_WEB_TIMEOUT_SECONDS=15
+MVP_CHAT_WEB_MAX_RESULTS=5
 ```
 
 关系候选抽取与独立复核分别使用 `RELATION_CANDIDATE_*` 和 `RELATION_REVIEW_*`，它们不会自动复用
@@ -294,10 +298,17 @@ Electron 只是沙箱化的浏览器薄壳，不包含 Python、`Data/`、API Ke
 - `GET /api/v1/mvp/conversations/{character_id}`：分页读取某角色本地历史。
 - `DELETE /api/v1/mvp/conversations/{character_id}`：清理所选本地聊天历史。
 - `POST /api/v1/mvp/feedback`：提交带角色、模式、媒介、版本和消息上下文的反馈。
+- `GET /api/v1/mvp/tools`：读取助手模式的只读工具能力契约与安全边界。
 - `/api/v1/review/*`：内部关系和实体审核接口。
 
 聊天显示历史保存在 `App/runtime/chat/conversations.sqlite3`。模型不会读取全部历史，而只读取当前模式下
 有限的最近轮次，以及明确共享的关系、时装和世界状态。`client_message_id` 用于防止超时重试产生重复消息。
+
+助手模式的只读工具包括 `get_current_time`、`calculator`、`web_search`、
+`research_current_info`、`fetch_web_page` 和 `get_market_history`。普通搜索与网页读取仍由明确意图触发；
+天气、突发事件、运营状态和精确日线行情会根据用户问题自动调用对应只读数据源。网页内容会标记为外部临时资料，
+不会自动写入 `Data/`、人格档案或图谱。助手回复可带角色化的“工作摘要/步骤”，这是可见的执行说明，
+不是模型隐藏思维链；系统不会把 `reasoning_content` 原样显示给用户。沉浸式模式不会调用这些工具。
 
 ## 验证
 
@@ -379,7 +390,7 @@ NPC 与导航页被拆开处理，避免把“推荐说明”“类型”“未�
 ## 当前限制与后续方向
 
 - 当前是本地测试产品，不包含公网认证、多用户隔离、跨设备同步或生产级密钥托管。
-- 助手工具目前只开放受后端控制的只读能力；新增文件、网络或系统工具前需要单独权限模型和审计。
+- 助手工具目前开放受后端控制的只读能力（时间、计算、公开网页搜索/读取、多来源实时资料研究、公开市场日线）；shell、文件写入、账号操作、消息发送等高风险能力仍关闭，新增工具前需要单独权限模型和审计。
 - 低资料覆盖角色的自然度仍依赖后续资料补充和真实使用反馈。
 - 未审核关系不会自动成为人格事实；高风险或多义关系仍需要人工确认。
 - Electron portable 目前不打包 Python、语料和模型环境，使用前需先启动本地服务。

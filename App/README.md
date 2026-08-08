@@ -53,6 +53,10 @@ MVP_CHAT_MODEL=your-model-name
 MVP_CHAT_TIMEOUT_SECONDS=120
 MVP_CHAT_IMMERSIVE_TEMPERATURE=0.45
 MVP_CHAT_ASSISTANT_TEMPERATURE=0.20
+# 助手模式可按请求展开更详细的回答；这是可见执行摘要，不是隐藏思维链
+MVP_CHAT_ASSISTANT_MAX_TOKENS=8192
+MVP_CHAT_WEB_TIMEOUT_SECONDS=15
+MVP_CHAT_WEB_MAX_RESULTS=5
 ```
 
 进程环境变量会覆盖 `.env` 中的同名变量。关系抽取/复核配置与聊天模型配置彼此独立；
@@ -107,8 +111,16 @@ python scripts/dev_server.py
 
 聊天客户端提供沉浸式陪伴/角色助手、面对面/文字通讯的正交切换。完整显示历史、
 当前场景和共享关系前提仅保存在本机 `runtime/chat/conversations.sqlite3`；生成时仅使用
-受限的当前模式历史和明确共享上下文。助手模式当前仅开放只读的 `get_current_time`
-工具，沉浸式模式不暴露工具或内部系统概念。
+受限的当前模式历史和明确共享上下文。助手模式开放受后端白名单控制的只读工具：
+`get_current_time`、`calculator`、`web_search`、`research_current_info`、`fetch_web_page` 和
+`get_market_history`。天气、突发事件、运营状态和精确日线行情可以自动触发对应的只读查询；
+联网结果只作为临时外部资料，
+不会写入 `Data/`、人格档案或图谱。助手回复可以显示角色化的“工作摘要/步骤”，这是已经执行的
+工具、证据范围和结论依据，不是模型隐藏思维链；沉浸式模式不暴露工具或内部系统概念。
+
+助手在评价现实事务时会分开标注已核实事实、用户给定前提和条件判断，并在证据允许的范围内
+给出明确的角色化观点，不再用“是否需要我继续搜索”替代已经要求的分析。公开行情数据可能延迟，
+交易决策仍应复核交易所或券商数据。
 
 面对面会话的输入区同时提供动作/神态和对白两个输入框：可仅发送其中一种，也可在同一轮
 组合发送，并会作为分离的内容块写入本地会话历史；文字通讯会完全隐藏动作输入框，只发送

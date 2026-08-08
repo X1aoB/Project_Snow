@@ -115,6 +115,23 @@ def mvp_bootstrap() -> dict:
     return mvp_service.bootstrap()
 
 
+@app.get("/api/v1/mvp/tools")
+def mvp_tools() -> dict:
+    """Expose the assistant's read-only capability contract to clients."""
+
+    return {
+        "mode": "assistant",
+        "tools": mvp_service._assistant_tool_definitions(),
+        "policy": {
+            "read_only": True,
+            "intent_gated": True,
+            "automatic_time_sensitive_lookup": True,
+            "public_web_only": True,
+            "hidden_reasoning": "never_returned",
+        },
+    }
+
+
 @app.get("/api/v1/mvp/questions")
 def mvp_questions(character_id: str) -> dict:
     try:

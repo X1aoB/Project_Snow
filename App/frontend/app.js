@@ -47,7 +47,7 @@ async function api(path, options = {}, timeoutMs = 15000) {
 }
 
 const state = {
-  clientVersion: "preview-0.2.3",
+  clientVersion: "preview-0.2.5",
   registryVersion: "",
   enabled: false,
   characters: [],
@@ -68,6 +68,14 @@ const state = {
 
 const MODE_LABELS = { immersive: "沉浸式", assistant: "助手" };
 const CHANNEL_LABELS = { in_person: "面对面", text: "文字通讯" };
+const TOOL_LABELS = {
+  get_current_time: "当前时间",
+  web_search: "网页搜索",
+  research_current_info: "实时资料研究",
+  fetch_web_page: "网页读取",
+  get_market_history: "历史行情",
+  calculator: "计算器",
+};
 
 function storageGet(key, fallback = "") {
   try { return localStorage.getItem(key) ?? fallback; } catch (_) { return fallback; }
@@ -342,7 +350,14 @@ function messageHtml(message, character) {
       ? `<div class="message-action${revealClass}"${revealStyle}>${escapeHtml(text)}</div>`
       : `<div class="message-bubble${revealClass}"${revealStyle}>${escapeHtml(text)}</div>`;
   }).join("");
-  return `<article class="message assistant ${escapeHtml(message.channel)}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta"><span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span></div>${blocks}<div class="message-actions"><button type="button" data-message-info="${escapeHtml(message.id)}">查看依据</button><button type="button" data-message-feedback="${escapeHtml(message.id)}">反馈</button></div></article>`;
+  const result = message.result || {};
+  const traceSummary = message.mode === "assistant" ? String(result.work_summary || "").trim() : "";
+  const traceSteps = message.mode === "assistant" && Array.isArray(result.work_steps) ? result.work_steps.filter(Boolean).slice(0, 5) : [];
+  const toolCalls = message.mode === "assistant" && Array.isArray(result.tool_calls) ? result.tool_calls : [];
+  const trace = traceSummary || traceSteps.length || toolCalls.length
+    ? `<details class="work-trace" open><summary><i data-lucide="sparkles"></i> ${toolCalls.length ? "角色化处理摘要 · 已使用只读工具" : "角色化处理摘要"}</summary>${traceSummary ? `<p>${escapeHtml(traceSummary)}</p>` : ""}${traceSteps.length ? `<ol>${traceSteps.map((step) => `<li>${escapeHtml(String(step))}</li>`).join("")}</ol>` : ""}${toolCalls.length ? `<div class="tool-trace">${toolCalls.map((call) => `<span class="tool-chip ${call.status === "failed" ? "failed" : ""}">${escapeHtml(TOOL_LABELS[call.name] || call.name || "只读工具")} · ${call.status === "completed" ? "完成" : "未完成"}</span>`).join("")}</div>` : ""}</details>`
+    : "";
+  return `<article class="message assistant ${escapeHtml(message.channel)}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta"><span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span></div>${blocks}${trace}<div class="message-actions"><button type="button" data-message-info="${escapeHtml(message.id)}">查看依据</button><button type="button" data-message-feedback="${escapeHtml(message.id)}">反馈</button></div></article>`;
 }
 
 function renderTimeline(scrollToBottom = false) {
@@ -685,6 +700,8 @@ function renderInfo() {
   const scene = result.scene_state || {};
   const style = result.style_context || {};
   const citations = result.citations || [];
+  const webSources = Array.isArray(result.web_sources) ? result.web_sources : [];
+  const toolCalls = Array.isArray(result.tool_calls) ? result.tool_calls : [];
   const sceneText = scene.location_visibility === "visible_for_current_turn"
     ? (scene.co_located ? `双方同处：${scene.character_location || "未定位"}` : `分析员：${scene.analyst_location || "未定位"}；角色：${scene.character_location || "未定位"}`)
     : "当前位置未在本轮对话中公开";
@@ -695,7 +712,7 @@ function renderInfo() {
     <section class="info-section"><h3>资料覆盖</h3><p>${escapeHtml(coverage.label || "资料覆盖状态未知")}</p><div class="info-metrics"><div class="info-metric"><strong>${Number(coverage.direct_document_count || 0)}</strong><span>直接资料</span></div><div class="info-metric"><strong>${Number(coverage.linked_document_count || 0)}</strong><span>关联资料</span></div><div class="info-metric"><strong>${Number(coverage.address_term_count || 0)}</strong><span>称呼证据</span></div><div class="info-metric"><strong>${Number(coverage.voice_evidence_count || 0)}</strong><span>语气证据</span></div></div></section>
     <section class="info-section"><h3>当前场景</h3><p>${escapeHtml(CHANNEL_LABELS[thread.channel])}</p><p>${escapeHtml(sceneText)}</p></section>
     <section class="info-section"><h3>装甲 / 时装语境</h3><p>${escapeHtml(styleText)}</p></section>
-    <section class="info-section"><h3>本条回答依据</h3>${citations.length ? citations.map((item) => `<article class="citation"><strong>${escapeHtml(item.source_type || "资料")} · ${escapeHtml(item.title || "未命名来源")}</strong><blockquote>${escapeHtml(item.excerpt || "")}</blockquote></article>`).join("") : "<p>当前未选择带引用的回答。</p>"}</section>`;
+    <section class="info-section"><h3>本条回答依据</h3>${citations.length ? citations.map((item) => `<article class="citation"><strong>${escapeHtml(item.source_type || "资料")} · ${escapeHtml(item.title || "未命名来源")}</strong><blockquote>${escapeHtml(item.excerpt || "")}</blockquote></article>`).join("") : "<p>当前未选择带引用的回答。</p>"}${webSources.length ? `<h4 class="info-subheading">联网参考</h4>${webSources.map((item) => `<article class="citation"><strong>${escapeHtml(item.title || "网页")}</strong><a class="source-link" href="${escapeHtml(item.url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(item.url || "")}</a><blockquote>${escapeHtml(item.snippet || "")}</blockquote></article>`).join("")}` : ""}${toolCalls.length ? `<p class="tool-note">本轮只读工具：${toolCalls.map((item) => `${escapeHtml(item.name || "工具")}（${item.status === "completed" ? "完成" : "未完成"}）`).join("、")}</p>` : ""}</section>`;
 }
 
 function openInfo(result = null) {

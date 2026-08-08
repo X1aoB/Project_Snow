@@ -238,6 +238,27 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .message.user .message-action { color: #d9f7f0; text-align: right; }
 .message.user.analyst-action-message { width: min(76%, 680px); }
 .message-action.analyst-action { padding-right: 2px; }
+.work-trace {
+  width: 100%;
+  max-width: 100%;
+  margin-top: 3px;
+  border: 1px solid #3b4b48;
+  border-left: 3px solid var(--teal);
+  border-radius: var(--radius);
+  color: var(--muted);
+  background: #18211f;
+  font-size: .74rem;
+  line-height: 1.55;
+}
+.work-trace summary { display: flex; align-items: center; gap: 6px; padding: 7px 9px; color: #b9e7de; cursor: pointer; list-style: none; }
+.work-trace summary::-webkit-details-marker { display: none; }
+.work-trace summary svg { width: 14px; height: 14px; }
+.work-trace p { margin: 0; padding: 0 10px 6px; white-space: pre-wrap; }
+.work-trace ol { margin: 0; padding: 0 22px 8px 30px; }
+.work-trace li { padding: 2px 0; }
+.tool-trace { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 10px 9px; }
+.tool-chip { padding: 3px 6px; border: 1px solid #396d63; border-radius: 999px; color: #aee3d8; background: #1d3833; font-size: .66rem; }
+.tool-chip.failed { border-color: #75433e; color: #f0b2aa; background: #382422; }
 .message-actions { display: flex; gap: 4px; opacity: .25; transition: opacity .15s ease; }
 .message:hover .message-actions, .message-actions:focus-within { opacity: 1; }
 .message-actions button { min-height: 30px; padding: 5px 8px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; }
@@ -338,6 +359,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .citation:first-child { border-top: 0; }
 .citation strong { font-size: .76rem; }
 .citation blockquote { margin: 7px 0 0; color: var(--muted); font-size: .74rem; line-height: 1.55; }
+.info-subheading { margin: 16px 0 7px; color: var(--teal); font-size: .72rem; font-weight: 600; }
+.source-link { display: block; margin-top: 4px; overflow-wrap: anywhere; color: #91cfc5; font-size: .68rem; }
+.tool-note { color: #9dcfc6 !important; }
 .drawer-scrim { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, .5); }
 
 .modal {
