@@ -2,23 +2,46 @@
 
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+import base64
+from contextlib import asynccontextmanager
+import json
+from pathlib import Path
+import time
+
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
+import httpx
 
 from .config import Settings
 from .contracts import (
     ConversationIdentity,
+    ConnectorConfigRequest,
+    ConnectorOAuthCallbackRequest,
+    ConnectorOAuthStartRequest,
+    AttachmentTranscriptionRequest,
+    AgentApprovalRequest,
+    AgentRunRequest,
     EntityNodeReviewDecision,
     GraphNeighborhood,
     MVPChatRequest,
     MVPFeedbackRequest,
     MVPFeedbackIssueStatusRequest,
     MVPFeedbackTriageRequest,
+    ModelDefaultsRequest,
+    ProviderConfigRequest,
+    ProviderProbeRequest,
+    VoicePreviewRequest,
     RelationReviewDecision,
     RetrievalRequest,
     RetrievalResponse,
     StageLockResponse,
 )
+from .agent_runtime import AgentRuntime
+from .agent_store import AgentStore
+from .attachment_manager import AttachmentError, AttachmentManager
+from .connectors import ConnectorError, ConnectorManager
+from .provider_registry import ProviderRegistry
 from .repository import MACHINE_REVIEW_FILTERS, REVIEW_RISK_LEVELS, REVIEW_TIERS, RuntimeRepository
 from .mvp_service import (
     MVPChatDisabled,
@@ -32,17 +55,158 @@ from .mvp_service import (
 settings = Settings.from_environment()
 repository = RuntimeRepository(settings)
 mvp_service = MVPService(settings, repository)
-app = FastAPI(title="Project Snow Application API", version="0.1.0")
+agent_store = AgentStore(settings.runtime_root / "chat" / "agent.sqlite3")
+provider_registry = ProviderRegistry(agent_store)
+attachment_manager = AttachmentManager(settings.runtime_root, agent_store)
+connector_manager = ConnectorManager(agent_store, provider_registry.vault)
+agent_runtime = AgentRuntime(
+    agent_store,
+    provider_registry,
+    settings.runtime_root.parent.parent,
+    research_service=mvp_service,
+    connector_manager=connector_manager,
+    persona_context_provider=lambda character_id: MVPService._dialogue_profile_prompt_context(
+        mvp_service._dialogue_profiles().get(character_id)
+    ) or {},
+)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    attachment_manager.cleanup_expired()
+    agent_runtime.recover()
+    try:
+        yield
+    finally:
+        agent_runtime.shutdown()
+
+
+app = FastAPI(title="Project Snow Application API", version="0.3.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-Filename"],
 )
 
 
 def get_repository() -> RuntimeRepository:
     return repository
+
+
+def _transcribe_attachment(record: dict, model_override: dict | None = None) -> tuple[str, dict]:
+    existing = str(record.get("extracted_text") or "").strip()
+    if existing and str(record.get("parse_status") or "") == "transcribed":
+        return existing, dict((record.get("metadata") or {}).get("transcription_model") or {})
+    selection = provider_registry.route(
+        {"speech_to_text"}, model_override, {"audio"}
+    )
+    credential = provider_registry.credential_for_selection(selection)
+    if not credential:
+        raise ValueError("STT 模型凭据不可用。")
+    path = Path(str(record.get("storage_path") or ""))
+    with path.open("rb") as handle:
+        response = httpx.post(
+            selection.base_url.rstrip("/") + "/audio/transcriptions",
+            headers={"Authorization": f"Bearer {credential}"},
+            data={"model": selection.model_name, "response_format": "json"},
+            files={"file": (str(record.get("original_name") or path.name), handle, str(record.get("mime_type") or "application/octet-stream"))},
+            timeout=180,
+        )
+    response.raise_for_status()
+    payload = response.json()
+    transcript = str(payload.get("text") or "").strip()
+    if not transcript:
+        raise ValueError("STT Provider 未返回可用转写文本。")
+    metadata = dict(record.get("metadata") or {})
+    metadata.update({"transcription_status": "completed", "transcription_model": selection.public()})
+    agent_store.update_attachment_parse(str(record["attachment_id"]), "transcribed", transcript, metadata)
+    return transcript, selection.public()
+
+
+def _synthesize_voice(character_id: str, text_value: str) -> dict:
+    selection = provider_registry.route({"text_to_speech"}, required_data_types={"text"})
+    credential = provider_registry.credential_for_selection(selection)
+    if not credential:
+        raise ValueError("TTS 模型凭据不可用。")
+    provider = next((item for item in agent_store.list_providers() if item["provider_id"] == selection.provider_id), {})
+    config = dict(provider.get("config") or {})
+    voices = dict(config.get("voice_by_character") or {})
+    voice = str(voices.get(character_id) or config.get("tts_voice") or "alloy")
+    response = httpx.post(
+        selection.base_url.rstrip("/") + "/audio/speech",
+        headers={"Authorization": f"Bearer {credential}", "Content-Type": "application/json"},
+        json={"model": selection.model_name, "input": text_value[:8000], "voice": voice, "response_format": "mp3"},
+        timeout=180,
+    )
+    response.raise_for_status()
+    if not response.content:
+        raise ValueError("TTS Provider 未返回音频。")
+    attachment = attachment_manager.save_bytes(f"{character_id}-reply.mp3", response.content, response.headers.get("content-type", "audio/mpeg"))
+    return {"status": "completed", "attachment_id": attachment["attachment_id"], "content_url": f"/api/v1/attachments/{attachment['attachment_id']}/content", "voice": voice, "model": selection.public()}
+
+
+def _synthesize_agent_voice(character_id: str, text_value: str) -> dict:
+    spoken = text_value.strip()
+    summary_only = len(spoken) > 1200
+    if summary_only:
+        first_paragraph = next((item.strip() for item in spoken.split("\n\n") if item.strip()), spoken)
+        spoken = first_paragraph[:1000]
+    result = _synthesize_voice(character_id, spoken)
+    return {**result, "spoken_text": "summary" if summary_only else "full", "spoken_characters": len(spoken)}
+
+
+agent_runtime.voice_synthesizer = _synthesize_agent_voice
+
+
+@app.post("/api/v1/voices/preview")
+def voice_preview(request: VoicePreviewRequest) -> dict:
+    try:
+        return _synthesize_voice(request.character_id, request.text)
+    except (ValueError, httpx.HTTPError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)[:500]) from exc
+
+
+def _pdf_vision_inputs(record: dict, limit: int = 4) -> list[dict]:
+    """Render textless PDF pages for a vision-capable model.
+
+    Text PDFs stay local and use pypdf extraction.  A scanned PDF is marked by
+    AttachmentManager and only a small, downscaled page sample is sent; the
+    original file never leaves the runtime attachment directory.
+    """
+    try:
+        import fitz  # PyMuPDF, optional but included in the supported install
+    except ImportError as exc:
+        raise ValueError("扫描 PDF 需要安装 PyMuPDF 才能进行视觉解析。") from exc
+    path = Path(str(record.get("storage_path") or "")).resolve()
+    document = fitz.open(str(path))
+    result: list[dict] = []
+    try:
+        for page in list(document)[:limit]:
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(1.15, 1.15), alpha=False)
+            data = pixmap.tobytes("png")
+            if len(data) > 8 * 1024 * 1024:
+                continue
+            result.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64.b64encode(data).decode('ascii')}"}})
+    finally:
+        document.close()
+    return result
+
+
+def _attachment_excerpt(text_value: str, query: str, limit: int = 20_000) -> str:
+    """Return a bounded lexical window for the conversation attachment index."""
+    text_value = str(text_value or "")
+    if len(text_value) <= limit:
+        return text_value
+    terms = [term.casefold() for term in query.replace("\n", " ").split() if len(term) >= 2][:12]
+    chunks = [text_value[index:index + 4000] for index in range(0, len(text_value), 4000)]
+    scored = []
+    for index, chunk in enumerate(chunks):
+        folded = chunk.casefold()
+        score = sum(folded.count(term) for term in terms)
+        scored.append((score, -index, chunk))
+    selected = [item[2] for item in sorted(scored, reverse=True)[: max(1, limit // 4000)]]
+    return "\n\n".join(selected)[:limit]
 
 
 def _validate_review_filters(
@@ -71,7 +235,332 @@ def _validate_entity_review_status(review_status: str) -> None:
 
 @app.get("/health")
 def health(repo: RuntimeRepository = Depends(get_repository)) -> dict:
-    return {"service": "project-snow-api", "chat_enabled": settings.chat_enabled, "artifacts": repo.status()}
+    return {"service": "project-snow-api", "version": "preview-0.3.0", "chat_enabled": settings.chat_enabled, "artifacts": repo.status()}
+
+
+@app.get("/api/v1/providers")
+def providers() -> dict:
+    return {"providers": provider_registry.providers(), "credential_storage": "windows_credential_manager"}
+
+
+@app.post("/api/v1/providers")
+def save_provider(request: ProviderConfigRequest) -> dict:
+    try:
+        payload = request.model_dump(exclude={"api_key"})
+        return provider_registry.save_provider(payload, request.api_key)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/models")
+def models() -> dict:
+    return {
+        "models": provider_registry.models(),
+        "defaults": agent_store.get_meta("model_defaults", {}),
+        "policy": "Only verified or explicitly user-declared capabilities are routable.",
+    }
+
+
+@app.post("/api/v1/models/defaults")
+def save_model_defaults(request: ModelDefaultsRequest) -> dict:
+    defaults = {key: value for key, value in request.model_dump().items() if value is not None}
+    # Validate that every selected model already exists. Capability-specific
+    # validation remains part of routing so a text default cannot receive an image.
+    known = {(item["provider_id"], item["model_name"]): item for item in agent_store.list_models()}
+    required = {"text": "text", "vision": "vision", "speech_to_text": "speech_to_text", "text_to_speech": "text_to_speech"}
+    for kind, item in defaults.items():
+        model = known.get((item["provider_id"], item["model_name"]))
+        if not model:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="默认模型必须先完成 Provider 探测。")
+        if not (model.get("capabilities") or {}).get(required[kind]):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=f"所选模型不具备 {required[kind]} 能力。")
+    agent_store.set_meta("model_defaults", defaults)
+    return {"defaults": defaults}
+
+
+@app.post("/api/v1/providers/{provider_id}/probe")
+def probe_provider(provider_id: str, request: ProviderProbeRequest) -> dict:
+    try:
+        capabilities = dict(request.capabilities)
+        capabilities["quality_score"] = request.quality_score
+        for key in ("context_window", "max_output_tokens", "input_price_per_million", "output_price_per_million"):
+            value = getattr(request, key)
+            if value is not None:
+                capabilities[key] = value
+        return provider_registry.probe(provider_id, request.model_name, capabilities)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider 不存在。") from None
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"能力探测失败：{str(exc)[:500]}") from exc
+
+
+@app.post("/api/v1/attachments")
+async def upload_attachment(request: Request) -> dict:
+    """Accept multipart, JSON base64, or raw binary without logging content."""
+
+    try:
+        content_type = request.headers.get("content-type", "")
+        try:
+            announced_size = int(request.headers.get("content-length", "0") or 0)
+        except ValueError:
+            announced_size = 0
+        if announced_size > 100 * 1024 * 1024:
+            raise AttachmentError("单个上传请求不能超过 100 MB。")
+        if content_type.startswith("multipart/form-data"):
+            try:
+                form = await request.form()
+            except Exception as exc:
+                raise AttachmentError("multipart 上传需要安装 python-multipart。") from exc
+            upload = form.get("file")
+            if upload is None or not hasattr(upload, "read"):
+                raise AttachmentError("multipart 请求必须包含 file 字段。")
+            data = await upload.read()
+            filename = str(getattr(upload, "filename", "") or "attachment")
+            mime = str(getattr(upload, "content_type", "") or "application/octet-stream")
+        elif content_type.startswith("application/json"):
+            payload = await request.json()
+            filename = str(payload.get("filename") or "attachment")
+            mime = str(payload.get("mime_type") or "application/octet-stream")
+            try:
+                data = base64.b64decode(str(payload.get("data_base64") or ""), validate=True)
+            except Exception as exc:
+                raise AttachmentError("data_base64 不是有效的 Base64。") from exc
+        else:
+            filename = request.headers.get("x-filename", "attachment")
+            mime = content_type or "application/octet-stream"
+            data = await request.body()
+        return attachment_manager.save_bytes(filename, data, mime)
+    except AttachmentError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/attachments")
+def attachments(limit: int = 100, offset: int = 0) -> dict:
+    return {
+        "attachments": [attachment_manager.public(item) for item in agent_store.list_attachments(limit=limit, offset=offset)],
+        "storage": "local_runtime_only",
+    }
+
+
+@app.get("/api/v1/attachments/{attachment_id}")
+def attachment(attachment_id: str, include_text: bool = False) -> dict:
+    record = attachment_manager.get(attachment_id, include_text=include_text)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在。")
+    return record
+
+
+@app.post("/api/v1/attachments/{attachment_id}/transcription")
+def transcribe_attachment(attachment_id: str, request: AttachmentTranscriptionRequest) -> dict:
+    record = agent_store.get_attachment(attachment_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在。")
+    if not str(record.get("mime_type") or "").startswith("audio/"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="只有音频附件可以转写。")
+    try:
+        if request.transcript is not None:
+            transcript = request.transcript.strip()
+            if not transcript:
+                raise ValueError("转写内容不能为空。")
+            metadata = dict(record.get("metadata") or {})
+            metadata.update({"transcription_status": "edited", "transcription_model": {}})
+            agent_store.update_attachment_parse(attachment_id, "transcribed", transcript, metadata)
+            return attachment_manager.get(attachment_id, include_text=True) or {}
+        transcript, model = _transcribe_attachment(
+            record,
+            request.model_override.model_dump() if request.model_override else None,
+        )
+        updated = agent_store.get_attachment(attachment_id) or record
+        return {**(attachment_manager.public(updated, include_text=True)), "transcription": {"actual_model": model}}
+    except (ValueError, OSError, httpx.HTTPError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)[:500]) from exc
+
+
+@app.get("/api/v1/attachments/{attachment_id}/content")
+def attachment_content(attachment_id: str) -> FileResponse:
+    record = agent_store.get_attachment(attachment_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在。")
+    path = Path(str(record.get("storage_path") or "")).resolve()
+    root = attachment_manager.root
+    if not path.is_file() or not (path == root or root in path.parents):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件文件不可用。")
+    return FileResponse(path, media_type=str(record.get("mime_type") or "application/octet-stream"), filename=str(record.get("original_name") or path.name))
+
+
+@app.delete("/api/v1/attachments/{attachment_id}")
+def delete_attachment(attachment_id: str) -> dict:
+    record = attachment_manager.delete(attachment_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在。")
+    return {"deleted": True, "attachment": record}
+
+
+@app.post("/api/v1/attachments/{attachment_id}/retention")
+def set_attachment_retention(attachment_id: str, days: int | None = None) -> dict:
+    try:
+        record = attachment_manager.set_retention(attachment_id, days)
+    except AttachmentError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在。")
+    return record
+
+
+@app.post("/api/v1/agent/runs")
+def create_agent_run(request: AgentRunRequest) -> dict:
+    total_bytes = 0
+    for attachment_id in request.attachment_ids:
+        record = agent_store.get_attachment(attachment_id)
+        if not record:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"附件不存在：{attachment_id}")
+        total_bytes += int(record.get("size_bytes") or 0)
+    if total_bytes > 100 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="单任务附件总大小不能超过 100 MB。")
+    return agent_runtime.create({**request.model_dump(), "mode": "assistant"})
+
+
+@app.get("/api/v1/agent/runs")
+def list_agent_runs(limit: int = 50, run_status: str | None = None) -> dict:
+    return {"runs": agent_store.list_runs(limit=limit, status=run_status)}
+
+
+@app.get("/api/v1/agent/tools")
+def agent_tools() -> dict:
+    return {
+        "tools": agent_runtime.tool_manifest(),
+        "policy": {
+            "authorized_roots": "project_and_user_granted",
+            "external_write": "approval_required",
+            "destructive": "double_approval_required",
+            "hidden_reasoning": "never_returned",
+        },
+    }
+
+
+@app.get("/api/v1/agent/runs/{run_id}")
+def get_agent_run(run_id: str) -> dict:
+    try:
+        return agent_runtime.snapshot(run_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent 任务不存在。") from None
+
+
+@app.get("/api/v1/agent/runs/{run_id}/events")
+def agent_run_events(run_id: str) -> StreamingResponse:
+    if not agent_store.get_run(run_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent 任务不存在。")
+
+    def stream():
+        delivered = 0
+        for _ in range(1800):
+            snapshot = agent_runtime.snapshot(run_id)
+            events = list((snapshot.get("state") or {}).get("events") or [])
+            for event in events[delivered:]:
+                yield f"event: {event.get('kind', 'update')}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            delivered = len(events)
+            if snapshot.get("status") in {"succeeded", "failed", "cancelled"}:
+                yield f"event: done\ndata: {json.dumps({'status': snapshot.get('status')})}\n\n"
+                return
+            time.sleep(0.5)
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/v1/agent/runs/{run_id}/cancel")
+def cancel_agent_run(run_id: str) -> dict:
+    try:
+        return agent_runtime.cancel(run_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent 任务不存在。") from None
+
+
+@app.post("/api/v1/agent/runs/{run_id}/retry")
+def retry_agent_run(run_id: str) -> dict:
+    try:
+        return agent_runtime.retry(run_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent 任务不存在。") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/agent/runs/{run_id}/approvals/{approval_id}")
+def decide_agent_approval(run_id: str, approval_id: str, request: AgentApprovalRequest) -> dict:
+    try:
+        return agent_runtime.approve(run_id, approval_id, request.decision, request.note)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="审批记录不存在。") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/artifacts/{artifact_id}")
+def artifact(artifact_id: str) -> FileResponse:
+    record = agent_store.get_artifact(artifact_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact 不存在。")
+    path = Path(str(record.get("storage_path") or "")).resolve()
+    artifact_root = (settings.runtime_root / "chat" / "artifacts").resolve()
+    if not path.is_file() or not (path == artifact_root or artifact_root in path.parents):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact 文件不可用。")
+    return FileResponse(path, media_type=str(record.get("mime_type") or "application/octet-stream"), filename=str(record.get("file_name") or path.name))
+
+
+@app.get("/api/v1/connectors")
+def connectors() -> dict:
+    # Credential references are masked; connector secrets never enter SQLite.
+    rows = [connector_manager.public(item) for item in agent_store.list_connectors()]
+    return {"connectors": rows, "status": "configured_connectors", "external_writes_require_approval": True}
+
+
+@app.post("/api/v1/connectors")
+def save_connector(request: ConnectorConfigRequest) -> dict:
+    forbidden = {"password", "token", "api_key", "secret", "client_secret"}
+    if forbidden.intersection({str(key).casefold() for key in request.config}):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="秘密字段必须通过 secret 输入并保存到系统凭据库。")
+    connector_id = request.connector_id or agent_store.new_id("connector")
+    reference = f"connector:{connector_id}"
+    try:
+        if request.secret:
+            provider_registry.vault.put(reference, request.secret)
+        record = agent_store.upsert_connector({
+            "connector_id": connector_id, "connector_type": request.connector_type,
+            "account_label": request.account_label, "credential_ref": reference if request.secret else "",
+            "status": "configured", "config": request.config,
+        })
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    return connector_manager.public(record)
+
+
+@app.post("/api/v1/connectors/oauth/start")
+def start_connector_oauth(request: ConnectorOAuthStartRequest) -> dict:
+    try:
+        return connector_manager.oauth_start(request.connector_id, request.redirect_uri)
+    except ConnectorError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/connectors/oauth/callback")
+def finish_connector_oauth(request: ConnectorOAuthCallbackRequest) -> dict:
+    try:
+        return connector_manager.oauth_callback(request.connector_id, request.code, request.state)
+    except ConnectorError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"OAuth token 交换失败：{str(exc)[:500]}") from exc
+
+
+@app.get("/api/v1/connectors/oauth/callback")
+def finish_connector_oauth_redirect(connector_id: str, code: str, state: str) -> dict:
+    try:
+        return connector_manager.oauth_callback(connector_id, code, state)
+    except ConnectorError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"OAuth token 交换失败：{str(exc)[:500]}") from exc
 
 
 @app.get("/api/v1/characters")
@@ -117,13 +606,17 @@ def mvp_bootstrap() -> dict:
 
 @app.get("/api/v1/mvp/tools")
 def mvp_tools() -> dict:
-    """Expose the assistant's read-only capability contract to clients."""
+    """Expose legacy chat tools and the separately gated Agent contract."""
 
     return {
         "mode": "assistant",
         "tools": mvp_service._assistant_tool_definitions(),
+        "agent_tools": agent_runtime.tool_manifest(),
         "policy": {
-            "read_only": True,
+            "legacy_chat_tools_read_only": True,
+            "agent_scoped_writes": True,
+            "external_write_requires_approval": True,
+            "destructive_requires_double_approval": True,
             "intent_gated": True,
             "automatic_time_sensitive_lookup": True,
             "public_web_only": True,
@@ -143,7 +636,142 @@ def mvp_questions(character_id: str) -> dict:
 @app.post("/api/v1/mvp/chat")
 def mvp_chat(request: MVPChatRequest) -> dict:
     try:
-        return mvp_service.chat(
+        if request.agent_mode:
+            agent_attachment_bytes = 0
+            for attachment_id in request.attachment_ids:
+                agent_attachment = agent_store.get_attachment(attachment_id)
+                if not agent_attachment:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"附件不存在：{attachment_id}")
+                agent_attachment_bytes += int(agent_attachment.get("size_bytes") or 0)
+            if agent_attachment_bytes > 100 * 1024 * 1024:
+                raise ValueError("单轮附件总大小不能超过 100 MB。")
+            run = agent_runtime.create({
+                "character_id": request.character_id,
+                "session_id": request.session_id,
+                "mode": "assistant",
+                "task": request.message or "处理本轮附件",
+                "attachment_ids": request.attachment_ids,
+                "model_override": request.model_override.model_dump() if request.model_override else {},
+                "voice_reply": request.voice_reply,
+                "client_run_id": request.client_message_id,
+            })
+            resolved_session = request.session_id or f"agent_session_{run['run_id']}"
+            resolved_world = request.world_session_id or f"agent_world_{resolved_session}"
+            agent_result = {
+                "message_id": f"agent_message_{run['run_id']}",
+                "session_id": resolved_session,
+                "world_session_id": resolved_world,
+                "character_id": request.character_id,
+                "mode": "assistant",
+                "communication_channel": request.communication_channel or "text",
+                "answer": "任务已进入可审计的 Agent 执行队列。",
+                "content_blocks": [{"type": "message", "text": "任务已进入可审计的 Agent 执行队列。"}],
+                "agent_run_id": run["run_id"],
+                "agent_status": run["status"],
+                "actual_model": {}, "artifacts": [], "attachment_results": [],
+                "audio": None, "usage": {}, "routing_decision": {},
+                "persisted": True,
+            }
+            conversation_id = mvp_service.conversation_store.save_exchange(
+                character_id=request.character_id,
+                session_id=resolved_session,
+                world_session_id=resolved_world,
+                client_message_id=request.client_message_id,
+                user_text=request.message or "处理本轮附件",
+                user_content_blocks=[item.model_dump() for item in request.analyst_content_blocks],
+                response=agent_result,
+                session_state={"communication_channel": request.communication_channel or "text", "agent_mode": True},
+                world_state=mvp_service.conversation_store.world_state(resolved_world) or {"world_session_id": resolved_world, "presence": {}},
+            )
+            for attachment_id in request.attachment_ids:
+                agent_store.link_attachment(agent_result["message_id"], attachment_id)
+                agent_store.link_attachment(f"session:{resolved_session}", attachment_id)
+            return {**agent_result, "conversation_id": conversation_id}
+        # An attachment is a session-scoped temporary index entry, not a
+        # character memory.  Current-turn files may include images/audio;
+        # older textual entries are reused only as bounded lexical context.
+        current_attachment_ids = list(dict.fromkeys(request.attachment_ids))
+        session_attachment_records = (
+            agent_store.attachments_for_message(f"session:{request.session_id}")
+            if request.session_id else []
+        )
+        session_attachment_ids = [str(item.get("attachment_id")) for item in session_attachment_records]
+        all_attachment_ids = list(dict.fromkeys(current_attachment_ids + session_attachment_ids))
+        for attachment_id, transcript in request.attachment_transcripts.items():
+            if attachment_id not in current_attachment_ids:
+                continue
+            record = agent_store.get_attachment(attachment_id)
+            if record and str(record.get("mime_type") or "").startswith("audio/") and transcript.strip():
+                metadata = dict(record.get("metadata") or {})
+                metadata.update({"transcription_status": "edited", "transcription_model": {}})
+                agent_store.update_attachment_parse(attachment_id, "transcribed", transcript.strip(), metadata)
+        attachment_context: list[dict] = []
+        image_inputs: list[dict] = []
+        required_capabilities = {"text"}
+        required_data_types = {"text"}
+        total_text = 0
+        total_attachment_bytes = 0
+        for attachment_id in all_attachment_ids:
+            record = agent_store.get_attachment(attachment_id)
+            if not record:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"附件不存在：{attachment_id}")
+            total_attachment_bytes += int(record.get("size_bytes") or 0)
+            if total_attachment_bytes > 100 * 1024 * 1024:
+                raise ValueError("单轮附件总大小不能超过 100 MB。")
+            public = attachment_manager.public(record)
+            extracted = str(record.get("extracted_text") or "")
+            if extracted:
+                remaining = max(0, 60_000 - total_text)
+                public["extracted_text"] = _attachment_excerpt(extracted, request.message, min(remaining, 20_000))
+                total_text += len(public["extracted_text"])
+            mime = str(record.get("mime_type") or "")
+            if mime.startswith("image/"):
+                required_data_types.add("image")
+                if attachment_id in current_attachment_ids:
+                    required_capabilities.add("vision")
+                if mime == "image/gif" and attachment_id in current_attachment_ids:
+                    from io import BytesIO
+                    from PIL import Image
+                    buffer = BytesIO()
+                    with Image.open(Path(str(record["storage_path"]))) as image:
+                        image.seek(0)
+                        image.convert("RGBA").save(buffer, format="PNG")
+                    data = buffer.getvalue()
+                    mime = "image/png"
+                    public["metadata"] = {**dict(public.get("metadata") or {}), "vision_input": "gif_first_frame"}
+                else:
+                    data = Path(str(record["storage_path"])).read_bytes()
+                if attachment_id in current_attachment_ids:
+                    image_inputs.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"}})
+            elif mime == "application/pdf" and bool((record.get("metadata") or {}).get("vision_required")):
+                required_data_types.add("document")
+                if attachment_id in current_attachment_ids:
+                    required_capabilities.add("vision")
+                    image_inputs.extend(_pdf_vision_inputs(record))
+            elif mime.startswith("audio/"):
+                required_data_types.add("audio")
+                if attachment_id in current_attachment_ids:
+                    transcript, stt_model = _transcribe_attachment(record, request.model_override.model_dump() if request.model_override else None)
+                    public["extracted_text"] = transcript[:20_000]
+                    public["transcription"] = {"status": "completed", "actual_model": stt_model}
+                record = agent_store.get_attachment(attachment_id) or record
+            elif mime.startswith("text/") or (record.get("metadata") or {}).get("kind") in {"document", "spreadsheet", "presentation"}:
+                required_data_types.add("document")
+            attachment_context.append(public)
+
+        data_types = required_data_types
+        selection = provider_registry.route(
+            required_capabilities,
+            request.model_override.model_dump() if request.model_override else None,
+            data_types,
+        )
+        credential = provider_registry.credential_for_selection(selection)
+        if not credential:
+            raise ValueError("所选模型的凭据不可用。")
+        model_settings = (selection.base_url, credential, selection.model_name)
+        model_info = selection.public()
+
+        chat_arguments = (
             request.character_id,
             request.message,
             request.session_id,
@@ -155,7 +783,40 @@ def mvp_chat(request: MVPChatRequest) -> dict:
             request.presence_action,
             request.client_message_id,
             [item.model_dump() for item in request.analyst_content_blocks],
+            attachment_context,
+            image_inputs,
+            model_settings,
+            model_info,
+            request.voice_reply,
         )
+        try:
+            result = mvp_service.chat(*chat_arguments)
+        except MVPProviderError:
+            if request.model_override or selection.provider_id == "env-default":
+                raise
+            fallback = provider_registry.route(
+                required_capabilities, None, data_types,
+                {(selection.provider_id, selection.model_name)},
+            )
+            fallback_key = provider_registry.credential_for_selection(fallback)
+            if not fallback_key:
+                raise
+            fallback_info = {**fallback.public(), "fallback": True, "reason": "primary_provider_failed"}
+            retry_arguments = list(chat_arguments)
+            retry_arguments[-3] = (fallback.base_url, fallback_key, fallback.model_name)
+            retry_arguments[-2] = fallback_info
+            result = mvp_service.chat(*retry_arguments)
+        if request.voice_reply:
+            try:
+                result["audio"] = _synthesize_voice(request.character_id, str(result.get("answer") or ""))
+            except Exception as exc:
+                result["audio"] = {"status": "failed", "error": str(exc)[:500]}
+        for attachment_id in current_attachment_ids:
+            agent_store.link_attachment(str(result.get("message_id") or ""), attachment_id)
+            resolved_attachment_session = str(result.get("session_id") or request.session_id or "")
+            if resolved_attachment_session:
+                agent_store.link_attachment(f"session:{resolved_attachment_session}", attachment_id)
+        return result
     except MVPCommunicationConflict as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.detail) from exc
     except MVPRequestInProgress as exc:
@@ -189,6 +850,10 @@ def mvp_feedback(request: MVPFeedbackRequest) -> dict:
             client_version=request.client_version,
             message_excerpt=request.message_excerpt,
             answer_excerpt=request.answer_excerpt,
+            agent_run_id=request.agent_run_id,
+            actual_model=request.actual_model,
+            attachment_ids=request.attachment_ids,
+            failed_stage=request.failed_stage,
         )
     except (KeyError, FileNotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MVP 角色视图不存在。") from None

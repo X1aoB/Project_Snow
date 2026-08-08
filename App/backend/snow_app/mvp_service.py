@@ -2220,7 +2220,7 @@ class MVPService:
                 }
             )
         return {
-            "client_version": "preview-0.2.5",
+            "client_version": "preview-0.3.0",
             "registry_version": status["registry_version"],
             "enabled": status["enabled"],
             "provider_configured": status["provider_configured"],
@@ -6014,6 +6014,7 @@ class MVPService:
                 "dialogue_boundary": context.get("dialogue_boundary") or {},
                 "communication_context": context.get("communication_context") or {},
                 "tool_context": context.get("tool_context") or {},
+                "attachment_context": context.get("attachment_context") or [],
                 "scene_state": context.get("scene_state") or {},
                 "continuity_card": context.get("continuity_card") or {},
                 "relationship_address_memory": context.get("relationship_address_memory") or {},
@@ -6065,8 +6066,10 @@ class MVPService:
         user_prompt: str,
         *,
         mode: str = "immersive",
+        model_settings: tuple[str, str, str] | None = None,
+        user_content: list[dict[str, Any]] | None = None,
     ) -> tuple[str, dict[str, Any]]:
-        base_url, api_key, model = self.provider_settings()
+        base_url, api_key, model = model_settings or self.provider_settings()
         if not base_url or not api_key or not model:
             raise MVPProviderError("MVP 对话模型未配置 base URL、API key 或 model。")
         endpoint = base_url.rstrip("/") + "/chat/completions"
@@ -6083,7 +6086,7 @@ class MVPService:
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": user_content or user_prompt},
             ],
             "temperature": self._chat_temperature(mode),
             "max_tokens": max_tokens,
@@ -8179,11 +8182,17 @@ class MVPService:
         presence_action: str | None = None,
         client_message_id: str | None = None,
         analyst_content_blocks: list[dict[str, Any]] | None = None,
+        attachment_context: list[dict[str, Any]] | None = None,
+        image_inputs: list[dict[str, Any]] | None = None,
+        model_settings: tuple[str, str, str] | None = None,
+        model_info: dict[str, Any] | None = None,
+        voice_reply: bool = False,
     ) -> dict[str, Any]:
         if not self.chat_enabled():
             raise MVPChatDisabled("MVP 对话接口未开启。请设置 MVP_CHAT_ENABLED=true 后重启 API。")
-        if not message.strip():
+        if not message.strip() and not attachment_context:
             raise ValueError("消息不能为空。")
+        message = message.strip() or "请查看并说明附件内容。"
         mode = self._normalize_mode(mode)
         character = self.character(character_value)
         request_key = str(client_message_id or "").strip() or None
@@ -8351,6 +8360,7 @@ class MVPService:
         )
         context["user_message"] = message.strip()
         context["analyst_content_blocks"] = normalized_analyst_blocks
+        context["attachment_context"] = list(attachment_context or [])
         # Keep only the compact, evidence-backed direct-address memory in all
         # prompts.  The detailed relationship card remains intent-gated below
         # so ordinary greetings do not turn into relationship exposition.
@@ -8404,7 +8414,15 @@ class MVPService:
                 return {**duplicate, "idempotent_replay": True}
             raise MVPRequestInProgress("相同消息仍在处理中，请稍后使用原消息重试。")
         try:
-            raw_content, usage = self._call_model(system_prompt, user_prompt, mode=mode)
+            initial_kwargs: dict[str, Any] = {"mode": mode}
+            if model_settings is not None:
+                initial_kwargs["model_settings"] = model_settings
+            if image_inputs:
+                initial_kwargs["user_content"] = [
+                    {"type": "text", "text": user_prompt},
+                    *image_inputs,
+                ]
+            raw_content, usage = self._call_model(system_prompt, user_prompt, **initial_kwargs)
         except Exception:
             self.conversation_store.release_request(request_key)
             raise
@@ -8470,6 +8488,9 @@ class MVPService:
             fallback_answer = answer_text
             fallback_generated = generated
             try:
+                retry_kwargs: dict[str, Any] = {"mode": mode}
+                if model_settings is not None:
+                    retry_kwargs["model_settings"] = model_settings
                 retry_content, retry_usage = self._call_model(
                     system_prompt,
                     self._guarded_rewrite_prompt(
@@ -8477,7 +8498,7 @@ class MVPService:
                         answer_text,
                         guardrail_violations,
                     ),
-                    mode=mode,
+                    **retry_kwargs,
                 )
                 usage = self._merge_usage(usage, retry_usage)
                 candidate = _parse_model_json(retry_content)
@@ -9234,6 +9255,21 @@ class MVPService:
             "tool_calls": list((context.get("tool_context") or {}).get("tool_calls") or []),
             "tool_results": list((context.get("tool_context") or {}).get("tool_results") or []),
             "usage": usage,
+            "actual_model": dict(model_info or {}),
+            "routing_decision": {
+                "reason": (model_info or {}).get("reason", "environment_default"),
+                "fallback": bool((model_info or {}).get("fallback", False)),
+            },
+            "attachment_results": [
+                {
+                    key: item.get(key)
+                    for key in ("attachment_id", "original_name", "mime_type", "size_bytes", "parse_status", "metadata")
+                }
+                for item in (attachment_context or [])
+            ],
+            "artifacts": [],
+            "audio": {"status": "not_configured"} if voice_reply else None,
+            "agent_run_id": None,
             "response_adjustments": [
                 adjustment
                 for adjustment, active in (
@@ -9547,6 +9583,10 @@ class MVPService:
         client_version: str | None = None,
         message_excerpt: str = "",
         answer_excerpt: str = "",
+        agent_run_id: str | None = None,
+        actual_model: dict[str, Any] | None = None,
+        attachment_ids: list[str] | None = None,
+        failed_stage: str | None = None,
     ) -> dict[str, Any]:
         character = self.character(character_value)
         invalid = sorted(set(selected_options) - feedback_option_ids())
@@ -9589,6 +9629,10 @@ class MVPService:
             "client_version": str(client_version or "").strip() or None,
             "message_excerpt": str(message_excerpt or "").strip()[:1200],
             "answer_excerpt": str(answer_excerpt or "").strip()[:1800],
+            "agent_run_id": str(agent_run_id or "").strip() or None,
+            "actual_model": dict(actual_model or {}),
+            "attachment_ids": list(attachment_ids or [])[:10],
+            "failed_stage": str(failed_stage or "").strip()[:120] or None,
             "issue_key": issue_key,
             "status": "pending_triage",
             "policy": "反馈只形成待处理问题，不自动改写资料、人格或图谱。",

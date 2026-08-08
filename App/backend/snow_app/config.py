@@ -40,8 +40,8 @@ class Settings:
         # not override values that are already present.
         if load_dotenv is not None:
             load_dotenv(PACKAGE_ROOT / ".env", override=False)
-        data_root = Path(os.getenv("DATA_ROOT", PROJECT_ROOT / "Data")).resolve()
-        runtime_root = Path(os.getenv("APP_RUNTIME", PACKAGE_ROOT / "runtime")).resolve()
+        data_root = Path(os.getenv("DATA_ROOT") or (PROJECT_ROOT / "Data")).resolve()
+        runtime_root = Path(os.getenv("APP_RUNTIME") or (PACKAGE_ROOT / "runtime")).resolve()
         origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:8080").split(",") if origin.strip()]
         return cls(
             data_root=data_root,

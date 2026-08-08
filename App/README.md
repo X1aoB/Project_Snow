@@ -4,6 +4,10 @@
 运行时检索索引，并提供 22 名角色的聊天测试客户端、证据工作台和安全的 Electron
 桌面壳。`Data/` 保持只读；所有可再生成或私密的产物均写入 `App/runtime/`。
 
+当前应用版本为 `preview-0.3.0`。角色助手已加入 Provider Registry、多模态附件、STT/TTS
+适配、质量优先路由、持久化 Agent 状态机、授权目录工具、风险审批和可下载 Artifact；沉浸式模式
+仍只获得多模态理解，不开放系统工具。
+
 ## 目录
 
 ```text
@@ -32,12 +36,15 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m playwright install chromium
 Copy-Item .env.example .env
 ```
 
 `requirements.txt` 是本地运行的完整 Python 依赖清单：FastAPI/HTTP 客户端、
 dotenv 配置加载、资料/头像处理，以及检索与可选图谱组件。测试使用 Python 标准库
-`unittest`，无需单独安装 pytest。
+`unittest`，无需单独安装 pytest。文档/媒体依赖同时包括 PyPDF、PyMuPDF、python-docx、openpyxl、
+python-pptx、Pillow、Mutagen 和 ReportLab；浏览器任务使用 Playwright Chromium，凭据通过 keyring
+写入 Windows Credential Manager。
 
 ## 模型配置（不要提交密钥）
 
@@ -111,12 +118,20 @@ python scripts/dev_server.py
 
 聊天客户端提供沉浸式陪伴/角色助手、面对面/文字通讯的正交切换。完整显示历史、
 当前场景和共享关系前提仅保存在本机 `runtime/chat/conversations.sqlite3`；生成时仅使用
-受限的当前模式历史和明确共享上下文。助手模式开放受后端白名单控制的只读工具：
+受限的当前模式历史和明确共享上下文。普通助手对话开放受后端白名单控制的只读工具：
 `get_current_time`、`calculator`、`web_search`、`research_current_info`、`fetch_web_page` 和
 `get_market_history`。天气、突发事件、运营状态和精确日线行情可以自动触发对应的只读查询；
 联网结果只作为临时外部资料，
 不会写入 `Data/`、人格档案或图谱。助手回复可以显示角色化的“工作摘要/步骤”，这是已经执行的
 工具、证据范围和结论依据，不是模型隐藏思维链；沉浸式模式不暴露工具或内部系统概念。
+
+在设置中新增 Provider 后，可以为会话选择已探测模型，也可勾选“仅本轮”。图片、文档和录音从
+输入区上传到 `runtime/chat/attachments/` 并按 SHA-256 去重；视觉或语音附件只有在 Provider
+能力与数据授权都满足时才会离开本机。勾选“作为 Agent 执行”后，客户端显示真实步骤、审批、
+停止/重试按钮、实际模型、用量和 Artifact 下载。Agent 默认限制为 20 步、15 分钟和 2 个并发任务。
+扫描 PDF 会在本地渲染有限页供视觉模型读取；录音会先生成可编辑转写。Agent 还可以使用授权目录
+文件、PowerShell、Git、Playwright 和已配置账号连接器，但最终网页提交、邮件发送、日程/云端修改、
+Git push 及删除均需审批，删除要求二次确认。
 
 助手在评价现实事务时会分开标注已核实事实、用户给定前提和条件判断，并在证据允许的范围内
 给出明确的角色化观点，不再用“是否需要我继续搜索”替代已经要求的分析。公开行情数据可能延迟，

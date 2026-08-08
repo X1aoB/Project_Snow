@@ -2,6 +2,10 @@
 
 This is a thin Electron wrapper around the existing local web application. It
 does not contain `Data/`, model credentials, or a second dialogue implementation.
+The BrowserWindow keeps Node integration disabled, context isolation and the
+sandbox enabled. Only microphone access requested by the exact local client
+origin is permitted; filesystem, geolocation, notifications and other browser
+permissions remain denied.
 
 ## Prerequisites
 

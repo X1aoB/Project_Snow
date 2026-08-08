@@ -10,8 +10,8 @@ Project Snow 是一个以《尘白禁区》公开 Wiki 资料为知识基础的�
 场景连续性、聊天产品和用户反馈拆成独立层。这样既能让角色保留游戏世界中的说话方式和情感关系，也能
 追踪回答用了什么资料，并在反馈出现时定位到检索、关系、提示词、媒介还是客户端层。
 
-当前版本已经形成可长期试用的本地测试产品：22 名角色、两种人格模式、两种交流媒介、持久化聊天历史、
-证据工作台、反馈闭环，以及 Windows Electron 客户端薄壳。
+当前 `preview-0.3.0` 在上述角色产品上加入了多模型、多模态和持久化 Agent 执行层：图片、文档、
+语音转写、可选 TTS、质量优先路由、授权目录工具、审批卡片、Artifact 和任务恢复均由本地后端统一控制。
 
 **导航：**
 [项目一览](#项目一览) ·
@@ -34,8 +34,8 @@ Project Snow 是一个以《尘白禁区》公开 Wiki 资料为知识基础的�
 | 对话形态 | 沉浸式陪伴 / 角色助手 × 面对面 / 文字通讯 |
 | 知识系统 | FTS5 词法检索 + 本地中文向量 + RRF 融合 + 经审核图谱 |
 | 本地产品 | 浏览器聊天客户端、证据工作台、Electron Windows 测试壳 |
-| 质量保障 | 151 项自动化测试、架构一致性检查、追加式用户反馈与回归标识 |
-| 当前版本 | `preview-0.2.3`，本地单用户测试阶段 |
+| 质量保障 | 171 项自动化测试、架构一致性检查、追加式用户反馈与回归标识 |
+| 当前版本 | `preview-0.3.0`，本地单用户多模态 Agent 预览版 |
 
 ### 它与普通角色 Prompt 有什么不同
 
@@ -48,7 +48,28 @@ Project Snow 是一个以《尘白禁区》公开 Wiki 资料为知识基础的�
 - **聊天客户端 `/`**：类似即时通讯软件的角色列表与会话时间线，可切换模式和媒介，并查看当前场景与引用。
 - **内部工作台 `/workspace/`**：用于证据检索、人格档案、关系/实体审核、反馈收件箱和对话调试。
 - **Electron 客户端**：安全加载本地 Web 产品，不复制语料、不保存模型密钥，也不向页面开放 Node 文件系统。
-- **后端 API**：负责角色注册、检索、会话、结构化内容块、媒介校验、场景冲突、幂等和本地持久化。
+- **后端 API**：负责角色注册、检索、会话、多模态附件、模型路由、Agent 状态机、审批、Artifact 和本地持久化。
+
+### preview-0.3.0 多模态角色 Agent
+
+- Provider Registry 同时适配 OpenAI、Qwen、GLM、DeepSeek、Kimi 与自定义 OpenAI-compatible 接口；
+  能力来自真实文本/结构化/工具探测或用户明确声明，不按模型名猜测。
+- API Key 与连接器秘密进入 Windows Credential Manager；SQLite 和 API 响应只保存或返回掩码引用。
+- 图片、PDF、文本、DOCX、XLSX、PPTX、代码和音频附件写入 `App/runtime/chat/attachments/`，
+  以 SHA-256 去重，不进入 `Data/`、人格档案或正式图谱。
+- 视觉请求只路由给已验证/声明视觉能力且获准接收图片的 Provider；音频先经已配置 STT 转写，
+  TTS 失败不会影响文字回复。
+- Agent 任务持久化为 `queued → planning → running → awaiting_approval → succeeded/failed/cancelled`，
+  默认最多 20 步、15 分钟、2 个并发任务，可停止、恢复和查看 SSE 事件。
+- 授权目录内读取和小范围写入可以自动执行；Git push、外部发送、安装、系统变更和删除进入审批，
+  删除需要二次确认。网页与附件内容始终作为不可信数据，不能扩大权限。
+- 可生成 TXT、Markdown、CSV、JSON、PDF、Word、Excel 和 PowerPoint Artifact，并从客户端直接下载。
+- 客户端支持拖放/粘贴图片、附件队列、浏览器录音、会话/单次模型覆盖、Agent 执行卡片、审批和停止。
+- 扫描 PDF 会在本地渲染有限页后交给获准的视觉模型；录音先生成可编辑转写。附件可设置保留期限，
+  同一会话中的文档只作为临时索引复用，不会进入长期人格记忆。
+- Agent 可使用公开网页研究、Playwright 页面提取/填写/下载、授权目录文件与 PowerShell、Git、
+  文档 Artifact，以及 IMAP/SMTP、CalDAV/WebDAV、Microsoft Graph/Google OAuth 连接器。最终提交、
+  外部发送、云端修改、Git push 与删除仍由后端审批，不由页面或模型自行放权。
 
 ## 设计目标
 
@@ -77,7 +98,7 @@ Project Snow 是一个以《尘白禁区》公开 Wiki 资料为知识基础的�
 | 维度 | 选项 | 行为 |
 |---|---|---|
 | 人格模式 | `immersive` 沉浸式 | 角色生活在游戏世界中，不暴露模型、检索、提示词或工具概念 |
-| 人格模式 | `assistant` 助手 | 保持角色人格，同时允许说明证据和使用后端批准的只读工具 |
+| 人格模式 | `assistant` 助手 | 保持角色人格；普通聊天使用只读工具，显式 Agent 任务可在风险审批下执行本机与连接器工具 |
 | 交流媒介 | `in_person` 面对面 | 支持独立动作/神态与对白内容块，受当前地点约束 |
 | 交流媒介 | `text` 文字通讯 | 只允许消息块，不声称看见用户表情、衣着或已完成物理接触 |
 
@@ -111,7 +132,10 @@ flowchart LR
     API --> Web["浏览器聊天客户端"]
     API --> Workspace["证据/审核/反馈工作台"]
     Web --> Electron["Electron Windows 薄壳"]
-    API <--> Runtime["App/runtime/\nSQLite、索引、日志与反馈"]
+    API <--> Runtime["App/runtime/\nSQLite、附件、Agent、索引与反馈"]
+    API --> Router["Provider Registry\n能力探测与质量路由"]
+    API --> Agent["Agent Runtime\n工具、审批与 Artifact"]
+    Agent --> Runtime
 ```
 
 生成链路会先识别角色、问题焦点、模式、媒介、场景和时装语境，再执行受角色约束的混合检索。
@@ -157,7 +181,9 @@ Project_Snow/
 | 本地状态 | SQLite、JSONL、DuckDB | 会话、词法检索、湖仓派生表和可移植产物 |
 | 语义检索 | Sentence Transformers、Qdrant | 中文向量编码与可选向量服务 |
 | 图谱 | JSONL、Neo4j | 经审核关系的源文件与可选查询投影 |
-| 文本/媒体处理 | Beautiful Soup、Pillow | Wiki HTML 解析和本地头像准备 |
+| 文本/媒体处理 | Beautiful Soup、Pillow、PyPDF、PyMuPDF、python-docx、openpyxl、python-pptx、Mutagen | Wiki、图片、扫描 PDF、文档和音频元数据 |
+| Agent 与凭据 | SQLite 状态机、Windows Credential Manager / keyring | 任务恢复、审批、模型与连接器秘密引用 |
+| 浏览器自动化 | Playwright / Chromium | 公开网页提取、表单填写与受控下载；最终提交始终审批 |
 | Web 客户端 | 原生 HTML、CSS、JavaScript、Lucide 图标 | 无前端框架依赖的聊天和工作台界面 |
 | 桌面客户端 | Electron、electron-builder | Windows 测试壳与 portable 构建 |
 | 测试 | Python `unittest`、Electron smoke、架构校验脚本 | API、对话规则、持久化、响应式界面和产物一致性 |
@@ -198,6 +224,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m playwright install chromium
 Copy-Item .env.example .env
 ```
 
@@ -225,6 +252,32 @@ MVP_CHAT_WEB_MAX_RESULTS=5
 
 关系候选抽取与独立复核分别使用 `RELATION_CANDIDATE_*` 和 `RELATION_REVIEW_*`，它们不会自动复用
 聊天密钥。进程环境变量优先于 `.env`；不要把真实密钥粘贴到 README、issue、截图或提交记录中。
+
+`preview-0.3.0` 也可以在客户端“设置 → 模型与 Provider”中添加模型。后端先把 Key 写入 Windows
+凭据库，再执行真实文本探测；视觉、STT、TTS 等无法在无样例条件下探测的能力必须由用户明确勾选。
+Provider 还需要被明确授权接收图片、文档或音频，路由器才会把对应附件发给它。环境变量模型继续作为
+兼容回退，但不会被静默用于私人附件。
+
+常用新增接口：
+
+```text
+POST   /api/v1/attachments
+POST   /api/v1/attachments/{id}/transcription
+GET    /api/v1/models
+GET/POST /api/v1/providers
+POST   /api/v1/providers/{id}/probe
+POST   /api/v1/agent/runs
+GET    /api/v1/agent/runs/{id}
+GET    /api/v1/agent/runs/{id}/events
+POST   /api/v1/agent/runs/{id}/approvals/{approval_id}
+POST   /api/v1/agent/runs/{id}/retry
+GET    /api/v1/artifacts/{id}
+GET/POST /api/v1/connectors
+POST   /api/v1/connectors/oauth/start
+```
+
+附件、Agent 状态、审批和 Artifact 保存在 `App/runtime/chat/agent.sqlite3` 及相邻运行时目录中；
+删除源附件会同步移除其本地派生状态。Agent 的技术任务记录不会自动进入沉浸式人格记忆。
 
 ## 构建运行时资料
 
@@ -298,7 +351,8 @@ Electron 只是沙箱化的浏览器薄壳，不包含 Python、`Data/`、API Ke
 - `GET /api/v1/mvp/conversations/{character_id}`：分页读取某角色本地历史。
 - `DELETE /api/v1/mvp/conversations/{character_id}`：清理所选本地聊天历史。
 - `POST /api/v1/mvp/feedback`：提交带角色、模式、媒介、版本和消息上下文的反馈。
-- `GET /api/v1/mvp/tools`：读取助手模式的只读工具能力契约与安全边界。
+- `GET /api/v1/mvp/tools`：读取普通助手只读工具和显式 Agent 工具的分层能力契约。
+- `GET /api/v1/agent/tools`：读取 Agent 工具风险等级、审批与授权目录策略。
 - `/api/v1/review/*`：内部关系和实体审核接口。
 
 聊天显示历史保存在 `App/runtime/chat/conversations.sqlite3`。模型不会读取全部历史，而只读取当前模式下

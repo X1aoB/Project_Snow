@@ -8,6 +8,10 @@ const REQUEST_TIMEOUT_MS = 4000;
 
 let mainWindow;
 
+function isLocalApplicationUrl(value) {
+  try { return new URL(value).origin === new URL(WEB_URL).origin; } catch (_) { return false; }
+}
+
 async function endpointAvailable(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -64,7 +68,7 @@ function createWindow() {
 
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith(WEB_URL)) event.preventDefault();
+    if (!isLocalApplicationUrl(url)) event.preventDefault();
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("did-fail-load", () => {
@@ -76,7 +80,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
+    return permission === "media"
+      && isLocalApplicationUrl(requestingOrigin)
+      && isLocalApplicationUrl(webContents?.getURL());
+  });
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(permission === "media" && isLocalApplicationUrl(webContents?.getURL()));
+  });
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -1,6 +1,6 @@
 {
   "name": "project-snow-desktop",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "private": true,
   "author": "Project Snow",
   "description": "Local Windows preview client for Project Snow chat",

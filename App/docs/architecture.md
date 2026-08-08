@@ -71,6 +71,61 @@ after that reply, while an explicit current-state declaration such as “我现�
 - The Electron application is a sandboxed web shell with no Node or filesystem
   API exposed to page content.
 
+## preview-0.3.0 multimodal Agent boundary
+
+Provider and model configuration lives in `runtime/chat/agent.sqlite3`; secrets
+do not. The database stores an opaque credential reference while keyring uses
+Windows Credential Manager/DPAPI for the actual key. A model capability is
+routable only after an adapter declaration plus active probe or explicit user
+override. Routing first matches capabilities and the Provider's approved data
+types, then uses quality score and health; private attachments never fall back
+to an untrusted Provider.
+
+Attachments are content-addressed below `runtime/chat/attachments/`. Local
+parsers extract bounded text from PDF, DOCX, XLSX, PPTX and text/code formats;
+images are verified locally and GIF contributes only its first frame to a
+vision request. Audio is duration-checked where metadata permits and requires a
+configured STT model before entering a conversation. None of these inputs can
+be promoted to `Data/`, persona evidence or graph facts without a separate,
+explicit memory workflow.
+
+Agent runs use a second durable state machine and never write technical task
+history into immersive chat context:
+
+```text
+queued -> planning -> running -> awaiting_approval
+       -> running -> succeeded | failed | cancelled
+```
+
+The executor accepts only registered JSON-schema-shaped calls. Real paths are
+resolved before execution and must remain inside Project Snow or an explicitly
+authorized root. Read and scoped writes can run automatically; external writes,
+system changes and destructive operations require approval, with destructive
+operations requiring a second confirmation. Every step stores only bounded
+input/output summaries. User-visible execution summaries are not hidden
+reasoning, and the character-rendering layer may not alter tool facts, numbers
+or paths. Web and attachment content is always untrusted data.
+
+The connector boundary exposes IMAP search, SMTP drafts/sending, calendar
+read/write, and WebDAV/Graph/Google-style cloud file operations through an
+explicit connector id. OAuth-capable connectors use a local PKCE callback;
+access/refresh tokens remain in the OS credential vault. SQLite keeps only
+connector type, account label, non-secret endpoint metadata and an opaque
+credential reference. Connector writes are `external_write` (or
+`destructive` for cloud deletion), so a model cannot silently send, publish,
+upload, modify a calendar or delete remote data.
+
+Browser automation is a single bounded Playwright action rather than an
+unrestricted browser handle. Public navigation, extraction, filling and
+download are schema-checked; login, upload, final submit, purchase, publish,
+share and delete actions are risk-gated. Page content is untrusted and the URL
+passes the same public-host/SSRF guard as web research.
+
+PDFs with no extractable text are flagged `vision_required` and only a small
+downscaled page sample is rendered locally for a Provider explicitly trusted
+for both documents and images. Audio transcriptions can be edited before the
+turn is sent; document excerpts are indexed for the current session only.
+
 ## C: two-layer knowledge graph
 
 - Deterministic edges are built only from explicit manifest fields and enter the graph as `review_status=verified`.

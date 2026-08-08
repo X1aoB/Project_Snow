@@ -47,7 +47,7 @@ async function api(path, options = {}, timeoutMs = 15000) {
 }
 
 const state = {
-  clientVersion: "preview-0.2.5",
+  clientVersion: "preview-0.3.0",
   registryVersion: "",
   enabled: false,
   characters: [],
@@ -64,6 +64,9 @@ const state = {
   infoResult: null,
   search: "",
   revealTimers: new Map(),
+  models: [],
+  modelDefaults: {},
+  recording: null,
 };
 
 const MODE_LABELS = { immersive: "沉浸式", assistant: "助手" };
@@ -123,6 +126,10 @@ function getThread(characterId) {
       conflict: null,
       error: "",
       latestResult: null,
+      attachments: [],
+      uploadingAttachments: 0,
+      modelOverride: storageGet(`project_snow:model:${characterId}`, ""),
+      voiceReply: storageGet(`project_snow:voice:${characterId}`, "false") === "true",
     });
   }
   return state.threads.get(characterId);
@@ -289,6 +296,7 @@ async function loadConversation(characterId, { older = false } = {}) {
       const latestAssistant = [...thread.messages].reverse().find((item) => item.role === "assistant");
       thread.latestResult = latestAssistant?.result || null;
       state.infoResult = thread.latestResult;
+      thread.messages.filter((item) => item.role === "assistant" && item.result?.agent_run_id && !["succeeded", "failed", "cancelled"].includes(item.result?.agent_status)).forEach((item) => monitorAgentRun(item, thread));
       await loadQuestions(thread);
     }
     thread.nextBefore = result.next_before;
@@ -308,6 +316,7 @@ async function loadConversation(characterId, { older = false } = {}) {
 
 function messageBlocks(message) {
   if (Array.isArray(message.blocks) && message.blocks.length) return message.blocks;
+  if (Array.isArray(message.attachments) && message.attachments.length && !message.text) return [];
   return [{ type: message.channel === "text" ? "message" : "speech", text: message.text || "" }];
 }
 
@@ -334,7 +343,9 @@ function messageHtml(message, character) {
       ? `<div class="message-action analyst-action">${escapeHtml(block.text || "")}</div>`
       : `<div class="message-bubble">${escapeHtml(block.text || "")}</div>`
     ).join("");
-    return `<article class="message user ${escapeHtml(message.channel)}${isActionOnly ? " analyst-action-message" : ""}${statusClass}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta"><span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span>${kindLabel}${status}</div>${renderedBlocks}${retry}</article>`;
+    const attachments = Array.isArray(message.attachments) && message.attachments.length
+      ? `<div class="message-attachments">${message.attachments.map((item) => `<span><i data-lucide="paperclip"></i>${escapeHtml(item.original_name || "附件")}</span>`).join("")}</div>` : "";
+    return `<article class="message user ${escapeHtml(message.channel)}${isActionOnly ? " analyst-action-message" : ""}${statusClass}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta"><span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span>${kindLabel}${status}</div>${renderedBlocks}${attachments}${retry}</article>`;
   }
   let revealOffset = 0;
   const freshText = Boolean(message.fresh && message.channel === "text");
@@ -357,7 +368,16 @@ function messageHtml(message, character) {
   const trace = traceSummary || traceSteps.length || toolCalls.length
     ? `<details class="work-trace" open><summary><i data-lucide="sparkles"></i> ${toolCalls.length ? "角色化处理摘要 · 已使用只读工具" : "角色化处理摘要"}</summary>${traceSummary ? `<p>${escapeHtml(traceSummary)}</p>` : ""}${traceSteps.length ? `<ol>${traceSteps.map((step) => `<li>${escapeHtml(String(step))}</li>`).join("")}</ol>` : ""}${toolCalls.length ? `<div class="tool-trace">${toolCalls.map((call) => `<span class="tool-chip ${call.status === "failed" ? "failed" : ""}">${escapeHtml(TOOL_LABELS[call.name] || call.name || "只读工具")} · ${call.status === "completed" ? "完成" : "未完成"}</span>`).join("")}</div>` : ""}</details>`
     : "";
-  return `<article class="message assistant ${escapeHtml(message.channel)}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta"><span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span></div>${blocks}${trace}<div class="message-actions"><button type="button" data-message-info="${escapeHtml(message.id)}">查看依据</button><button type="button" data-message-feedback="${escapeHtml(message.id)}">反馈</button></div></article>`;
+  const run = result.agent || null;
+  const runSteps = run?.state?.steps || [];
+  const approvals = (run?.state?.approvals || []).filter((item) => item.status === "pending");
+  const artifacts = run?.state?.artifacts || [];
+  const agentStatus = run?.status || result.agent_status || "queued";
+  const agentCard = result.agent_run_id
+    ? `<section class="agent-run"><header><strong>Agent 任务</strong><span>${escapeHtml(agentStatus)}</span></header>${runSteps.length ? `<ol>${runSteps.map((step) => `<li><span>${escapeHtml(step.tool_name || step.kind || "步骤")}</span><small>${escapeHtml(step.status || "pending")}</small></li>`).join("")}</ol>` : '<p>正在准备可审计的执行步骤…</p>'}${artifacts.length ? `<div class="artifact-list">${artifacts.map((item) => `<a href="/api/v1/artifacts/${escapeHtml(item.artifact_id)}" download>${escapeHtml(item.file_name)} · ${escapeHtml(formatBytes(item.size_bytes))}</a>`).join("")}</div>` : ""}${approvals.filter((approval) => approval.status === "pending").map((approval) => `<div class="approval-card"><p>${escapeHtml(approval.summary)}</p><button type="button" data-agent-approval="${escapeHtml(approval.approval_id)}" data-run-id="${escapeHtml(result.agent_run_id)}" data-decision="approved">允许</button><button type="button" data-agent-approval="${escapeHtml(approval.approval_id)}" data-run-id="${escapeHtml(result.agent_run_id)}" data-decision="rejected">拒绝</button></div>`).join("")}${!["succeeded", "failed", "cancelled"].includes(agentStatus) ? `<button type="button" class="secondary-button" data-cancel-run="${escapeHtml(result.agent_run_id)}">停止任务</button>` : ["failed", "cancelled"].includes(agentStatus) ? `<button type="button" class="secondary-button" data-retry-agent="${escapeHtml(result.agent_run_id)}">重试任务</button>` : ""}</section>` : "";
+  const modelMeta = result.actual_model?.model_name ? `<div class="model-meta">${escapeHtml(result.actual_model.provider_name || result.actual_model.provider_id || "模型")} · ${escapeHtml(result.actual_model.model_name)}${result.routing_decision?.fallback ? " · 已回退" : ""}</div>` : "";
+  const audio = result.audio?.status === "completed" ? `<audio class="voice-reply" controls preload="metadata" src="${escapeHtml(result.audio.content_url)}"></audio>` : "";
+  return `<article class="message assistant ${escapeHtml(message.channel)}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta"><span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span></div>${blocks}${trace}${agentCard}${audio}${modelMeta}<div class="message-actions"><button type="button" data-message-info="${escapeHtml(message.id)}">查看依据</button><button type="button" data-message-feedback="${escapeHtml(message.id)}">反馈</button></div></article>`;
 }
 
 function renderTimeline(scrollToBottom = false) {
@@ -404,6 +424,127 @@ function renderTimeline(scrollToBottom = false) {
   if (scrollToBottom) requestAnimationFrame(() => { target.scrollTop = target.scrollHeight; });
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderAttachments() {
+  const thread = currentThread();
+  const target = byId("attachment-preview");
+  if (!thread) { target.innerHTML = ""; return; }
+  const attachments = thread.attachments || [];
+  target.innerHTML = [
+    ...attachments.map((item) => `<div class="attachment-chip ${String(item.mime_type || "").startsWith("audio/") ? "audio-attachment" : ""}"><i data-lucide="${String(item.mime_type || "").startsWith("image/") ? "image" : String(item.mime_type || "").startsWith("audio/") ? "audio-lines" : "file-text"}"></i><span><strong>${escapeHtml(item.original_name)}</strong><small>${escapeHtml(formatBytes(item.size_bytes))} · ${escapeHtml(item.transcribing ? "正在转写" : item.transcript_error ? "转写待处理" : item.parse_status || "已保存")}</small></span><button type="button" data-remove-attachment="${escapeHtml(item.attachment_id)}" aria-label="移除附件"><i data-lucide="x"></i></button>${String(item.mime_type || "").startsWith("audio/") ? `<label class="transcript-editor"><span>发送前可编辑转写</span><textarea data-attachment-transcript="${escapeHtml(item.attachment_id)}" rows="2" placeholder="语音转写将在这里显示；也可手动输入">${escapeHtml(item.edited_transcript ?? item.extracted_text ?? "")}</textarea>${item.transcript_error ? `<button type="button" data-retry-transcription="${escapeHtml(item.attachment_id)}">重新转写</button>` : ""}</label>` : ""}</div>`),
+    ...(thread.uploadingAttachments ? [`<span class="attachment-chip uploading"><i data-lucide="loader-circle"></i><span><strong>正在处理附件</strong><small>${thread.uploadingAttachments} 个文件</small></span></span>`] : []),
+  ].join("");
+  renderIcons();
+}
+
+async function uploadFiles(fileList) {
+  const thread = currentThread();
+  if (!thread) return;
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  if ((thread.attachments?.length || 0) + files.length > 10) {
+    showToast("每轮最多添加 10 个附件。");
+    return;
+  }
+  const total = files.reduce((sum, file) => sum + file.size, 0) + (thread.attachments || []).reduce((sum, item) => sum + Number(item.size_bytes || 0), 0);
+  if (total > 100 * 1024 * 1024) {
+    showToast("本轮附件总大小不能超过 100 MB。");
+    return;
+  }
+  thread.uploadingAttachments += files.length;
+  renderAttachments();
+  for (const file of files) {
+    try {
+      const result = await api("/api/v1/attachments", {
+        method: "POST",
+        headers: { "Content-Type": file.type || "application/octet-stream", "X-Filename": file.name },
+        body: file,
+      }, 120000);
+      if (!thread.attachments.some((item) => item.attachment_id === result.attachment_id)) thread.attachments.push(result);
+      const stored = thread.attachments.find((item) => item.attachment_id === result.attachment_id);
+      if (stored && String(stored.mime_type || "").startsWith("audio/")) transcribeAudioAttachment(thread, stored);
+    } catch (error) {
+      showToast(`${file.name} 上传失败：${error.message}`);
+    } finally {
+      thread.uploadingAttachments -= 1;
+      renderAttachments();
+      updateRequestStatus();
+    }
+  }
+}
+
+async function transcribeAudioAttachment(thread, attachment) {
+  if (!thread || !attachment || attachment.transcribing) return;
+  attachment.transcribing = true;
+  attachment.transcript_error = "";
+  renderAttachments();
+  try {
+    const modelOverride = thread.modelOverride ? (() => { const [provider_id, model_name] = thread.modelOverride.split("::"); return { provider_id, model_name }; })() : null;
+    const result = await api(`/api/v1/attachments/${encodeURIComponent(attachment.attachment_id)}/transcription`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript: null, model_override: modelOverride }),
+    }, 180000);
+    Object.assign(attachment, result, { edited_transcript: result.extracted_text || "" });
+  } catch (error) {
+    attachment.transcript_error = error.message;
+    showToast(`语音转写失败：${error.message}`);
+  } finally {
+    attachment.transcribing = false;
+    if (state.selectedCharacterId === thread.characterId) {
+      renderAttachments();
+      updateRequestStatus();
+    }
+  }
+}
+
+async function removeAttachment(attachmentId) {
+  const thread = currentThread();
+  if (!thread) return;
+  thread.attachments = thread.attachments.filter((item) => item.attachment_id !== attachmentId);
+  renderAttachments();
+  try { await api(`/api/v1/attachments/${encodeURIComponent(attachmentId)}`, { method: "DELETE" }); } catch (_) { /* it may be shared by a deduplicated upload */ }
+}
+
+async function toggleRecording() {
+  const button = byId("record-audio");
+  if (state.recording) {
+    state.recording.recorder.stop();
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    showToast("当前浏览器不支持录音。");
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks = [];
+    const recorder = new MediaRecorder(stream);
+    recorder.addEventListener("dataavailable", (event) => { if (event.data.size) chunks.push(event.data); });
+    recorder.addEventListener("stop", async () => {
+      stream.getTracks().forEach((track) => track.stop());
+      state.recording = null;
+      button.classList.remove("recording");
+      button.innerHTML = '<i data-lucide="mic"></i>';
+      renderIcons();
+      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      const file = new File([blob], `recording-${Date.now()}.webm`, { type: blob.type });
+      await uploadFiles([file]);
+    });
+    recorder.start();
+    state.recording = { recorder, stream };
+    button.classList.add("recording");
+    button.innerHTML = '<i data-lucide="square"></i>';
+    renderIcons();
+  } catch (error) {
+    showToast(`无法开始录音：${error.message}`);
+  }
+}
+
 function restoreDraft() {
   const speechInput = byId("message-input");
   const actionInput = byId("action-input");
@@ -442,6 +583,8 @@ function resizeComposer() {
     const verticalPadding = Number.parseFloat(computed.paddingTop) + Number.parseFloat(computed.paddingBottom);
     input.rows = Math.min(5, Math.max(1, Math.ceil((input.scrollHeight - verticalPadding) / lineHeight)));
   });
+  byId("agent-mode-option").hidden = state.mode !== "assistant";
+  if (state.mode !== "assistant") byId("agent-mode").checked = false;
 }
 
 function updateRequestStatus() {
@@ -463,7 +606,8 @@ function updateRequestStatus() {
   } else {
     target.textContent = "";
   }
-  byId("send-message").disabled = !state.selectedCharacterId || Boolean(thread?.pending);
+  const attachmentBusy = Boolean(thread?.attachments?.some((item) => item.transcribing));
+  byId("send-message").disabled = !state.selectedCharacterId || Boolean(thread?.pending) || Boolean(thread?.uploadingAttachments) || attachmentBusy;
 }
 
 async function selectCharacter(characterId) {
@@ -472,6 +616,8 @@ async function selectCharacter(characterId) {
   state.selectedCharacterId = characterId;
   storageSet("project_snow:selected_character", characterId);
   const thread = getThread(characterId);
+  byId("model-override").value = thread.modelOverride || "";
+  byId("voice-reply").checked = Boolean(thread.voiceReply);
   if (!state.worldSessionId && thread.worldSessionId) state.worldSessionId = thread.worldSessionId;
   renderCharacterList();
   renderHeader();
@@ -479,6 +625,7 @@ async function selectCharacter(characterId) {
   renderTimeline(false);
   renderInfo();
   updateRequestStatus();
+  renderAttachments();
   closeDrawers();
   byId("message-input").focus();
   await loadConversation(characterId);
@@ -521,7 +668,81 @@ function optimisticUserMessage(pending) {
     clientMessageId: pending.clientMessageId,
     created_at: new Date().toISOString(),
     status: pending.sending ? "sending" : "sent",
+    attachments: pending.attachments || [],
   };
+}
+
+async function monitorAgentRun(message, thread) {
+  const runId = message?.result?.agent_run_id;
+  if (!runId) return;
+  for (let attempt = 0; attempt < 900; attempt += 1) {
+    try {
+      const snapshot = await api(`/api/v1/agent/runs/${encodeURIComponent(runId)}`, {}, 15000);
+      message.result.agent = snapshot;
+      message.result.agent_status = snapshot.status;
+      message.result.artifacts = snapshot.state?.artifacts || [];
+      message.result.actual_model = snapshot.state?.actual_model || message.result.actual_model || {};
+      message.result.usage = snapshot.state?.usage || message.result.usage || {};
+      message.result.audio = snapshot.state?.audio || message.result.audio || null;
+      if (snapshot.status === "succeeded") {
+        message.text = snapshot.state?.final_answer || "任务已经完成，执行步骤和结果都记录在下方。";
+        message.blocks = [{ type: "message", text: message.text }];
+      } else if (snapshot.status === "failed") {
+        message.text = `任务未能完成：${snapshot.state?.error || "请查看执行步骤。"}`;
+        message.blocks = [{ type: "message", text: message.text }];
+      } else if (snapshot.status === "cancelled") {
+        message.text = "任务已停止。";
+        message.blocks = [{ type: "message", text: message.text }];
+      }
+      if (state.selectedCharacterId === thread.characterId) {
+        renderTimeline(false);
+        if (snapshot.status === "succeeded" && thread.voiceReply && message.result.audio?.status === "completed") {
+          requestAnimationFrame(() => {
+            const audio = document.querySelector(`[data-message-id="${CSS.escape(message.id)}"] audio.voice-reply`);
+            audio?.play().catch(() => {});
+          });
+        }
+      }
+      if (["succeeded", "failed", "cancelled"].includes(snapshot.status)) return;
+    } catch (error) {
+      message.result.agent_error = error.message;
+      if (state.selectedCharacterId === thread.characterId) renderTimeline(false);
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 900));
+  }
+}
+
+async function decideAgentApproval(runId, approvalId, decision) {
+  try {
+    await api(`/api/v1/agent/runs/${encodeURIComponent(runId)}/approvals/${encodeURIComponent(approvalId)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision, note: "客户端审批" }),
+    });
+    showToast(decision === "approved" ? "已允许该步骤。" : "已拒绝并停止任务。");
+  } catch (error) { showToast(`审批失败：${error.message}`); }
+}
+
+async function cancelAgentRun(runId) {
+  try {
+    await api(`/api/v1/agent/runs/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
+    showToast("已请求停止任务。");
+  } catch (error) { showToast(`停止失败：${error.message}`); }
+}
+
+async function retryAgentRun(runId) {
+  try {
+    const snapshot = await api(`/api/v1/agent/runs/${encodeURIComponent(runId)}/retry`, { method: "POST" });
+    const thread = currentThread();
+    const message = thread?.messages.find((item) => item.result?.agent_run_id === runId);
+    if (message) {
+      message.result.agent_run_id = snapshot.run_id;
+      message.result.agent_status = snapshot.status;
+      message.result.agent = snapshot;
+      message.text = "任务已重新进入执行队列。";
+      message.blocks = [{ type: "message", text: message.text }];
+      renderTimeline(false);
+      monitorAgentRun(message, thread);
+    }
+  } catch (error) { showToast(`重试失败：${error.message}`); }
 }
 
 async function queueMessage() {
@@ -531,7 +752,8 @@ async function queueMessage() {
   const actionInput = byId("action-input");
   const speech = speechInput.value.trim();
   const action = thread?.channel === "in_person" ? actionInput.value.trim() : "";
-  if (!character || !thread || (!speech && !action) || thread.pending) return;
+  const attachments = [...(thread?.attachments || [])];
+  if (!character || !thread || (!speech && !action && !attachments.length) || thread.pending || thread.uploadingAttachments || attachments.some((item) => item.transcribing)) return;
   const blocks = thread.channel === "text"
     ? [{ type: "message", text: speech }]
     : [
@@ -539,8 +761,9 @@ async function queueMessage() {
         ...(speech ? [{ type: "speech", text: speech }] : []),
       ];
   const message = blocks.map((block) => block.text).join("\n");
-  if (message.length > 4000) {
-    thread.error = "本轮动作与对白合计不能超过 4000 个字符。";
+  const messageLimit = state.mode === "assistant" ? 12000 : 4000;
+  if (message.length > messageLimit) {
+    thread.error = `本轮动作与对白合计不能超过 ${messageLimit} 个字符。`;
     updateRequestStatus();
     return;
   }
@@ -551,6 +774,13 @@ async function queueMessage() {
     mode: state.mode,
     channel: thread.channel,
     blocks,
+    attachments,
+    attachmentIds: attachments.map((item) => item.attachment_id),
+    attachmentTranscripts: Object.fromEntries(attachments.filter((item) => String(item.mime_type || "").startsWith("audio/") && String(item.edited_transcript || item.extracted_text || "").trim()).map((item) => [item.attachment_id, String(item.edited_transcript || item.extracted_text).trim()])),
+    agentMode: state.mode === "assistant" && byId("agent-mode").checked,
+    voiceReply: byId("voice-reply").checked,
+    modelOverride: byId("model-override").value,
+    modelOnce: byId("model-once").checked,
     sending: false,
   };
   thread.pending = pending;
@@ -595,6 +825,11 @@ async function dispatchPending({ channel = null, presenceAction = null } = {}) {
         presence_action: presenceAction,
         client_message_id: pending.clientMessageId,
         analyst_content_blocks: pending.blocks,
+        attachment_ids: pending.attachmentIds || [],
+        attachment_transcripts: pending.attachmentTranscripts || {},
+        voice_reply: Boolean(pending.voiceReply),
+        agent_mode: Boolean(pending.agentMode),
+        model_override: pending.modelOverride ? (() => { const [provider_id, model_name] = pending.modelOverride.split("::"); return { provider_id, model_name }; })() : null,
       }),
     }, 135000);
     if (userMessage) userMessage.status = "sent";
@@ -622,6 +857,7 @@ async function dispatchPending({ channel = null, presenceAction = null } = {}) {
       fresh: pending.channel === "text" && (result.content_blocks || []).length > 1,
     };
     if (!thread.messages.some((item) => item.id === assistantMessage.id)) thread.messages.push(assistantMessage);
+    if (result.agent_run_id) monitorAgentRun(assistantMessage, thread);
     if (assistantMessage.fresh) {
       const totalDelay = messageBlocks(assistantMessage).reduce(
         (sum, block) => sum + Math.min(900, Math.max(140, String(block.text || "").length * 16)),
@@ -636,6 +872,14 @@ async function dispatchPending({ channel = null, presenceAction = null } = {}) {
       }, totalDelay + 220));
     }
     thread.latestResult = result;
+    if (pending.attachmentIds?.length) thread.attachments = [];
+    if (pending.modelOnce) {
+      thread.modelOverride = "";
+      storageSet(`project_snow:model:${thread.characterId}`, "");
+      byId("model-override").value = "";
+      byId("model-once").checked = false;
+    }
+    renderAttachments();
     state.infoResult = result;
     const character = state.characterMap.get(thread.characterId);
     character.conversation = {
@@ -664,6 +908,13 @@ async function dispatchPending({ channel = null, presenceAction = null } = {}) {
   renderTimeline(true);
   renderInfo();
   updateRequestStatus();
+  const latest = thread?.messages?.slice(-1)[0];
+  if (latest?.role === "assistant" && !latest.result?.agent_run_id && latest.result?.audio?.status === "completed" && thread.voiceReply) {
+    requestAnimationFrame(() => {
+      const audio = document.querySelector(`[data-message-id="${CSS.escape(latest.id)}"] audio.voice-reply`);
+      audio?.play().catch(() => {});
+    });
+  }
   byId("message-input").focus();
 }
 
@@ -784,6 +1035,10 @@ async function submitFeedback(event) {
         client_version: state.clientVersion,
         message_excerpt: message ? (thread.messages.slice(0, thread.messages.indexOf(message)).reverse().find((item) => item.role === "user")?.text || "") : "",
         answer_excerpt: result?.answer || message?.text || "",
+        agent_run_id: result?.agent_run_id || null,
+        actual_model: result?.actual_model || {},
+        attachment_ids: (result?.attachment_results || []).map((item) => item.attachment_id).filter(Boolean),
+        failed_stage: result?.agent?.status === "failed" ? (result?.agent?.state?.events || []).slice(-1)[0]?.kind || "agent" : null,
       }),
     });
     byId("feedback-dialog").close();
@@ -828,6 +1083,138 @@ async function clearConversation(mode = null) {
   }
 }
 
+function providerPayload() {
+  const kind = byId("provider-kind").value;
+  const builtinUrls = {
+    openai: "https://api.openai.com/v1",
+    dashscope: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    zhipu: "https://open.bigmodel.cn/api/paas/v4",
+    deepseek: "https://api.deepseek.com/v1",
+    moonshot: "https://api.moonshot.cn/v1",
+  };
+  return {
+    provider_id: kind === "openai-compatible" ? "custom-ui" : kind,
+    display_name: byId("provider-name").value.trim() || kind,
+    kind,
+    base_url: byId("provider-url").value.trim() || builtinUrls[kind] || "",
+    api_key: byId("provider-key").value.trim(),
+    enabled: true,
+    trusted_data_types: byId("trust-images").checked ? ["text", "image", "document", "audio"] : ["text"],
+    config: {
+      tts_voice: byId("tts-voice").value.trim() || undefined,
+      voice_by_character: state.selectedCharacterId && byId("character-voice").value.trim()
+        ? { [state.selectedCharacterId]: byId("character-voice").value.trim() }
+        : {},
+    },
+  };
+}
+
+async function configureProvider(andProbe = false) {
+  const status = byId("provider-status");
+  try {
+    const payload = providerPayload();
+    if (!payload.base_url) throw new Error("请填写 Provider Base URL。");
+    status.textContent = "正在保存本地 Provider 配置…";
+    const saved = await api("/api/v1/providers", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }, 30000);
+    byId("provider-key").value = "";
+    if (andProbe) {
+      const model = byId("provider-model").value.trim();
+      if (!model) throw new Error("探测前请填写模型名称。");
+      status.textContent = "正在执行真实文本能力探测…";
+      await api(`/api/v1/providers/${encodeURIComponent(saved.provider_id)}/probe`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model_name: model,
+          quality_score: Number(byId("provider-quality").value || 50),
+          context_window: Number(byId("provider-context").value || 0) || null,
+          max_output_tokens: Number(byId("provider-max-output").value || 0) || null,
+          capabilities: {
+          structured_output: true,
+          native_tool_calling: byId("cap-tools").checked,
+          streaming: byId("cap-streaming").checked,
+          vision: byId("cap-vision").checked,
+          speech_to_text: byId("cap-stt").checked,
+          text_to_speech: byId("cap-tts").checked,
+        } }),
+      }, 120000);
+      status.textContent = "探测成功；已记录真实文本探测和用户声明能力。";
+      await loadModels();
+    } else {
+      status.textContent = "Provider 已保存；API Key 不会在页面回显。";
+    }
+  } catch (error) {
+    status.textContent = `配置失败：${error.message}`;
+  }
+}
+
+async function loadModels() {
+  try {
+    const result = await api("/api/v1/models", {}, 30000);
+    state.models = result.models || [];
+    state.modelDefaults = result.defaults || {};
+    const verified = state.models.filter((item) => item.probe_status === "verified");
+    const picker = byId("model-override");
+    const selected = currentThread()?.modelOverride || picker.value;
+    picker.innerHTML = '<option value="">质量优先自动路由</option>' + verified.map((item) => `<option value="${escapeHtml(`${item.provider_id}::${item.model_name}`)}">${escapeHtml(item.provider_name || item.provider_id)} · ${escapeHtml(item.model_name)}</option>`).join("");
+    picker.value = [...picker.options].some((option) => option.value === selected) ? selected : "";
+    byId("active-model").textContent = verified.length ? `自动路由 · ${verified.length} 个已验证模型` : "自动路由 · 当前环境模型";
+    const capabilityLabels = { text: "文本", structured_output: "结构化", native_tool_calling: "工具", vision: "视觉", speech_to_text: "STT", text_to_speech: "TTS", streaming: "流式" };
+    byId("model-capability-list").innerHTML = verified.map((item) => {
+      const enabled = Object.entries(item.capabilities || {}).filter(([, value]) => value === true).map(([key]) => capabilityLabels[key] || key).join(" · ");
+      const latency = item.probe?.latency_ms ? `${Math.round(item.probe.latency_ms)} ms` : "延迟未知";
+      return `<div><strong>${escapeHtml(item.provider_name || item.provider_id)} · ${escapeHtml(item.model_name)}</strong><small>${escapeHtml(enabled || "仅文本待验证")} · 质量 ${Number(item.quality_score || 0)} · ${escapeHtml(latency)}</small></div>`;
+    }).join("") || "<p>尚无已验证模型。</p>";
+    const defaultBindings = [
+      ["default-text-model", "text", "text"],
+      ["default-vision-model", "vision", "vision"],
+      ["default-stt-model", "speech_to_text", "speech_to_text"],
+      ["default-tts-model", "text_to_speech", "text_to_speech"],
+    ];
+    defaultBindings.forEach(([id, key, capability]) => {
+      const target = byId(id);
+      const eligible = verified.filter((item) => item.capabilities?.[capability]);
+      target.innerHTML = `<option value="">${key === "text" ? "自动选择文本模型" : `不指定 ${capability}`}</option>` + eligible.map((item) => `<option value="${escapeHtml(`${item.provider_id}::${item.model_name}`)}">${escapeHtml(item.provider_name || item.provider_id)} · ${escapeHtml(item.model_name)}</option>`).join("");
+      const current = state.modelDefaults[key];
+      target.value = current ? `${current.provider_id}::${current.model_name}` : "";
+    });
+  } catch (_) {
+    byId("active-model").textContent = "自动路由";
+  }
+}
+
+async function saveModelDefaults() {
+  const bindings = { text: "default-text-model", vision: "default-vision-model", speech_to_text: "default-stt-model", text_to_speech: "default-tts-model" };
+  const payload = {};
+  Object.entries(bindings).forEach(([key, id]) => {
+    const value = byId(id).value;
+    if (!value) return;
+    const [provider_id, model_name] = value.split("::");
+    payload[key] = { provider_id, model_name };
+  });
+  try {
+    await api("/api/v1/models/defaults", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }, 30000);
+    showToast("默认模型已保存。后续自动路由仍会检查模态与 Provider 授权。");
+    await loadModels();
+  } catch (error) { showToast(`默认模型保存失败：${error.message}`); }
+}
+
+async function previewVoice() {
+  const character = currentCharacter();
+  if (!character) return showToast("请先选择角色。");
+  try {
+    const result = await api("/api/v1/voices/preview", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ character_id: character.character_id, text: `你好，分析员。我是${character.character_name}。` }),
+    }, 180000);
+    if (result.content_url) {
+      const audio = new Audio(result.content_url);
+      await audio.play();
+    }
+  } catch (error) { showToast(`试听失败：${error.message}`); }
+}
+
 async function bootstrap() {
   try {
     const result = await api("/api/v1/mvp/bootstrap", {}, 30000);
@@ -838,6 +1225,7 @@ async function bootstrap() {
     state.characterMap = new Map(state.characters.map((item) => [item.character_id, item]));
     state.feedbackCategories = result.feedback_categories || [];
     state.worldSessionId = result.active_world_session_id || "";
+    await loadModels();
     setConnection(true, state.enabled ? `已连接 · ${result.model || "模型已配置"}` : "已连接 · 模型未开启");
     const savedCharacter = storageGet("project_snow:selected_character", "");
     const selected = state.characterMap.has(savedCharacter) ? savedCharacter : state.characters[0]?.character_id;
@@ -890,7 +1278,13 @@ byId("timeline").addEventListener("click", (event) => {
   const presence = event.target.closest("[data-presence]");
   const suggestion = event.target.closest("[data-suggestion]");
   const older = event.target.closest("[data-load-older]");
-  if (feedback) openFeedback(findAssistantMessage(feedback.dataset.messageFeedback));
+  const approval = event.target.closest("[data-agent-approval]");
+  const cancelRun = event.target.closest("[data-cancel-run]");
+  const retryRun = event.target.closest("[data-retry-agent]");
+  if (approval) decideAgentApproval(approval.dataset.runId, approval.dataset.agentApproval, approval.dataset.decision);
+  else if (cancelRun) cancelAgentRun(cancelRun.dataset.cancelRun);
+  else if (retryRun) retryAgentRun(retryRun.dataset.retryAgent);
+  else if (feedback) openFeedback(findAssistantMessage(feedback.dataset.messageFeedback));
   else if (info) {
     const message = findAssistantMessage(info.dataset.messageInfo);
     openInfo(message?.result || null);
@@ -913,6 +1307,56 @@ byId("close-contacts").addEventListener("click", closeDrawers);
 byId("drawer-scrim").addEventListener("click", closeDrawers);
 byId("open-global-feedback").addEventListener("click", () => openFeedback(null));
 byId("open-settings").addEventListener("click", () => byId("settings-dialog").showModal());
+byId("add-attachment").addEventListener("click", () => byId("attachment-input").click());
+byId("attachment-input").addEventListener("change", async (event) => {
+  await uploadFiles(event.target.files);
+  event.target.value = "";
+});
+byId("record-audio").addEventListener("click", toggleRecording);
+byId("voice-reply").addEventListener("change", (event) => {
+  const thread = currentThread();
+  if (!thread) return;
+  thread.voiceReply = Boolean(event.target.checked);
+  storageSet(`project_snow:voice:${thread.characterId}`, String(thread.voiceReply));
+});
+byId("model-override").addEventListener("change", (event) => {
+  const thread = currentThread();
+  if (!thread) return;
+  thread.modelOverride = event.target.value;
+  if (!byId("model-once").checked) storageSet(`project_snow:model:${thread.characterId}`, thread.modelOverride);
+});
+byId("attachment-preview").addEventListener("click", (event) => {
+  const remove = event.target.closest("[data-remove-attachment]");
+  const retry = event.target.closest("[data-retry-transcription]");
+  if (remove) removeAttachment(remove.dataset.removeAttachment);
+  else if (retry) {
+    const thread = currentThread();
+    const attachment = thread?.attachments.find((item) => item.attachment_id === retry.dataset.retryTranscription);
+    if (attachment) transcribeAudioAttachment(thread, attachment);
+  }
+});
+byId("attachment-preview").addEventListener("input", (event) => {
+  const editor = event.target.closest("[data-attachment-transcript]");
+  const thread = currentThread();
+  if (!editor || !thread) return;
+  const attachment = thread.attachments.find((item) => item.attachment_id === editor.dataset.attachmentTranscript);
+  if (attachment) attachment.edited_transcript = editor.value;
+});
+byId("composer").addEventListener("dragover", (event) => { event.preventDefault(); byId("composer").classList.add("dragging"); });
+byId("composer").addEventListener("dragleave", () => byId("composer").classList.remove("dragging"));
+byId("composer").addEventListener("drop", (event) => {
+  event.preventDefault();
+  byId("composer").classList.remove("dragging");
+  uploadFiles(event.dataTransfer?.files);
+});
+byId("message-input").addEventListener("paste", (event) => {
+  const files = Array.from(event.clipboardData?.items || []).filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter(Boolean);
+  if (files.length) uploadFiles(files);
+});
+byId("save-provider").addEventListener("click", () => configureProvider(false));
+byId("probe-provider").addEventListener("click", () => configureProvider(true));
+byId("save-model-defaults").addEventListener("click", saveModelDefaults);
+byId("preview-voice").addEventListener("click", previewVoice);
 byId("feedback-form").addEventListener("submit", submitFeedback);
 byId("clear-current-mode").addEventListener("click", () => clearConversation(state.mode));
 byId("clear-character").addEventListener("click", () => clearConversation(null));
