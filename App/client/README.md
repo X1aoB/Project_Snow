@@ -1,4 +1,4 @@
-# Project Snow Desktop Preview Client
+# Project Snow v0.5.0 Desktop Preview Client
 
 This is a thin Electron wrapper around the existing local web application. It
 does not contain `Data/`, model credentials, or a second dialogue implementation.
@@ -29,8 +29,9 @@ npm install
 npm start
 ```
 
-The client opens the chat product at `http://127.0.0.1:8080/`. The evidence,
-review and feedback workspace remains available from the client at
+The client always opens the experience selector at `http://127.0.0.1:8080/`.
+The two chat surfaces are available at `/immersive/` and `/assistant/`; the evidence,
+review and feedback workspace remains available at
 `http://127.0.0.1:8080/workspace/`. If either local service is unavailable, the
 client shows the startup commands and a retry button.
 
@@ -43,8 +44,8 @@ cd C:\Users\25685\Desktop\Myprojects\Project_Snow\App\client
 npm run smoke
 ```
 
-The test checks the 390-pixel responsive layout, composer hit target, local
-avatars and `/workspace/`, then writes its screenshot to
+The test checks the selector, both chat routes, the 390-pixel composer hit target,
+text portraits and `/workspace/`, then writes its screenshot to
 `App/runtime/screenshots/electron-mobile.png`.
 
 Build the portable executable:

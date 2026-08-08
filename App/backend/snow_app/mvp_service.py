@@ -2202,6 +2202,13 @@ class MVPService:
             item["character_id"]: item
             for item in self.conversation_store.latest_conversations()
         }
+        mode_summaries = {
+            mode: {
+                item["character_id"]: item
+                for item in self.conversation_store.latest_conversations(mode)
+            }
+            for mode in _CONVERSATION_MODES
+        }
         avatars = self._avatar_manifest()
         characters = []
         for item in status["selected_characters"]:
@@ -2217,10 +2224,15 @@ class MVPService:
                         "source_url": avatar.get("source_url"),
                     },
                     "conversation": summaries.get(character_id),
+                    "conversations": {
+                        mode: mode_summaries[mode].get(character_id)
+                        for mode in _CONVERSATION_MODES
+                    },
+                    "generated_portrait": None,
                 }
             )
         return {
-            "client_version": "preview-0.3.0",
+            "client_version": "v0.5.0",
             "registry_version": status["registry_version"],
             "enabled": status["enabled"],
             "provider_configured": status["provider_configured"],
@@ -2239,13 +2251,16 @@ class MVPService:
         session_id: str | None = None,
         before: int | None = None,
         limit: int = 50,
+        mode: str | None = None,
     ) -> dict[str, Any]:
         character = self.character(character_value)
+        normalized_mode = self._normalize_mode(mode) if mode else None
         result = self.conversation_store.history(
             character.character_id,
             session_id=session_id,
             before=before,
             limit=limit,
+            mode=normalized_mode,
         )
         # Older sessions may contain a provider envelope saved before the
         # parser hardening shipped.  Sanitize on read as well as on write so a
@@ -4621,12 +4636,10 @@ class MVPService:
         """Give the model a compact, explicit cross-medium continuity anchor."""
 
         turns = list((session_context or {}).get("turns") or [])
-        cross_mode_turns = list((session_context or {}).get("cross_mode_turns") or [])
-        # Keep the technical mode histories isolated in the model prompt, but
-        # retain a compact continuity bridge when the user switches modes. A
-        # mode switch should change framing, not make the character forget the
-        # sentence immediately before it.
-        continuity_turns = cross_mode_turns or turns
+        # v0.5 exposes immersive companionship and assistant work as separate
+        # products. Only the active mode's turns may enter generation; stable
+        # relationship, style and world premises remain shared separately.
+        continuity_turns = turns
         recent_story_titles = list((session_context or {}).get("recent_story_titles") or [])
         shared_premises = list((session_context or {}).get("premises") or [])
         if not continuity_turns:
@@ -9570,8 +9583,8 @@ class MVPService:
 
     def append_feedback(
         self,
-        character_value: str,
-        session_id: str,
+        character_value: str | None,
+        session_id: str | None,
         message_id: str | None,
         selected_options: list[str],
         free_text: str,
@@ -9587,8 +9600,24 @@ class MVPService:
         actual_model: dict[str, Any] | None = None,
         attachment_ids: list[str] | None = None,
         failed_stage: str | None = None,
+        scope: str | None = None,
+        ui_surface: str | None = None,
     ) -> dict[str, Any]:
-        character = self.character(character_value)
+        normalized_scope = str(scope or ("message" if message_id else "conversation")).strip()
+        if normalized_scope not in {"product", "conversation", "message"}:
+            raise ValueError("不支持的反馈范围。")
+        normalized_surface = str(ui_surface or "").strip() or None
+        if normalized_surface and normalized_surface not in {
+            "landing", "immersive", "assistant", "workspace"
+        }:
+            raise ValueError("不支持的反馈界面来源。")
+        if normalized_scope in {"conversation", "message"} and (
+            not character_value or not session_id
+        ):
+            raise ValueError("会话或消息反馈必须包含角色和会话标识。")
+        if normalized_scope == "message" and not message_id:
+            raise ValueError("消息反馈必须包含消息标识。")
+        character = self.character(character_value) if character_value else None
         invalid = sorted(set(selected_options) - feedback_option_ids())
         if invalid:
             raise ValueError(f"不支持的反馈选项：{', '.join(invalid)}")
@@ -9600,7 +9629,9 @@ class MVPService:
         if not normalized_category and not selected_options and not free_text.strip():
             raise ValueError("至少选择一个反馈选项或填写自由文本。")
         created_at = _utc_now()
-        feedback_id = "mvp_feedback_" + sha256(f"{session_id}\x1f{message_id}\x1f{created_at}".encode()).hexdigest()[:16]
+        feedback_id = "mvp_feedback_" + sha256(
+            f"{session_id or 'product'}\x1f{message_id}\x1f{created_at}".encode()
+        ).hexdigest()[:16]
         issue_key = self._feedback_issue_key(
             {
                 "category": normalized_category,
@@ -9614,8 +9645,10 @@ class MVPService:
             "created_at": created_at,
             "session_id": session_id,
             "message_id": message_id,
-            "character_id": character.character_id,
-            "character_name": character.display_name,
+            "character_id": character.character_id if character else None,
+            "character_name": character.display_name if character else None,
+            "scope": normalized_scope,
+            "ui_surface": normalized_surface,
             "selected_options": selected_options,
             "category": normalized_category,
             "free_text": free_text.strip(),

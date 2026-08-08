@@ -27,9 +27,9 @@ async function endpointAvailable(url) {
 
 function offlinePage() {
   return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>Project Snow Preview</title>
-<style>body{font-family:"Microsoft YaHei",system-ui,sans-serif;background:#111313;color:#f2f3f1;padding:48px;line-height:1.7}main{max-width:720px;margin:auto;border:1px solid #474e49;border-radius:7px;padding:28px;background:#1e2120}h1{margin-top:0}code{color:#9ee0d5}button{border:1px solid #4e9388;border-radius:7px;background:#286f67;color:white;padding:10px 16px;font:inherit;cursor:pointer}</style>
-</head><body><main><h1>Project Snow Preview 尚未连接</h1>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Project Snow v0.5.0</title>
+<style>:root{color-scheme:light}*{box-sizing:border-box}body{display:grid;place-items:center;min-height:100vh;margin:0;padding:32px;font-family:"Microsoft YaHei",system-ui,sans-serif;background:#eaf4ff;color:#08234a;line-height:1.7}main{width:min(720px,100%);border:1px solid #9dbef1;border-radius:18px;padding:32px;background:#fff;box-shadow:0 18px 58px rgba(6,43,115,.14)}.mark{display:grid;place-items:center;width:48px;height:48px;border-radius:13px;background:#0a5cff;color:#fff;font-size:1.25rem;font-weight:800}h1{margin:18px 0 4px;color:#062b73}.version{color:#0a5cff;font-weight:700}code{color:#0759d2;background:#edf5ff;padding:2px 5px;border-radius:4px}button{border:1px solid #0a5cff;border-radius:9px;background:#0a5cff;color:white;padding:11px 18px;font:inherit;font-weight:700;cursor:pointer}button:focus-visible{outline:3px solid #24c7ff;outline-offset:3px}</style>
+</head><body><main><div class="mark">S</div><h1>Project Snow 尚未连接</h1><p class="version">v0.5.0 · 本地测试版</p>
 <p>桌面客户端连接的是现有本地服务。请在两个 PowerShell 窗口中启动：</p>
 <p><code>cd App</code><br><code>python -m backend.snow_app.main</code></p>
 <p><code>cd App</code><br><code>python scripts/dev_server.py</code></p>
@@ -57,7 +57,7 @@ function createWindow() {
     minWidth: 360,
     minHeight: 560,
     show: false,
-    backgroundColor: "#111313",
+    backgroundColor: "#eaf4ff",
     webPreferences: {
       preload: require("path").join(__dirname, "preload.js"),
       contextIsolation: true,

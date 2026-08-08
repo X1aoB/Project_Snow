@@ -3,38 +3,53 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Project Snow · 证据工作台</title>
+    <title>Project Snow v0.5.0 · 内部工作台</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="shell">
-      <header id="overview">
+      <aside class="workspace-sidebar">
+        <a class="workspace-brand" href="/"><span>S</span><strong>Project Snow</strong><small>v0.5.0 · INTERNAL</small></a>
+        <nav class="workspace-nav" aria-label="后台工作台导航">
+          <a href="#overview" data-workspace-target="overview">服务概览</a>
+          <a href="#evidence" data-workspace-target="evidence">证据检索</a>
+          <a href="#relations" data-workspace-target="relations">关系审核</a>
+          <a href="#entities" data-workspace-target="entities">实体审核</a>
+          <a href="#feedback" data-workspace-target="feedback">用户反馈</a>
+          <a href="#dialogue-debug" data-workspace-target="dialogue-debug">对话调试</a>
+        </nav>
+        <div class="workspace-sidebar-footer"><span id="health" class="status">正在检查服务…</span><a href="/">返回体验入口</a></div>
+      </aside>
+
+      <header class="workspace-header">
         <div>
           <p class="eyebrow">PROJECT SNOW · INTERNAL VALIDATION</p>
-          <h1>角色证据工作台</h1>
-          <p class="muted">检索、审核、反馈与对话调试的内部管理界面。</p>
+          <h1 id="workspace-view-title">服务概览</h1>
+          <p id="workspace-view-description" class="muted">资料、模型、审核和对话服务的运行状态。</p>
         </div>
         <div class="header-actions">
-          <a class="workspace-home" href="/">返回聊天客户端</a>
-          <div id="health" class="status">正在检查服务…</div>
+          <span class="workspace-version">v0.5.0 · 本地测试版</span>
         </div>
       </header>
 
-      <nav class="workspace-nav" aria-label="后台工作台导航">
-        <a href="#overview">服务概览</a>
-        <a href="#evidence">证据检索</a>
-        <a href="#relations">关系审核</a>
-        <a href="#entities">实体审核</a>
-        <a href="#feedback-inbox">用户反馈</a>
-        <a href="#dialogue-debug">对话调试</a>
-      </nav>
-
+      <div class="workspace-view" data-workspace-view="overview">
+      <section class="overview-grid">
+        <article class="overview-card"><span>产品版本</span><strong>v0.5.0</strong><small>双入口、多模态 Agent 测试版</small></article>
+        <article class="overview-card"><span>角色注册</span><strong>22</strong><small>统一注册表中的可对话角色</small></article>
+        <article class="overview-card"><span>会话模式</span><strong>2</strong><small>沉浸式与助手历史严格隔离</small></article>
+        <article class="overview-card"><span>安全边界</span><strong>本地</strong><small>Data 只读，外部写入需要确认</small></article>
+      </section>
       <section class="stage-lock">
         <strong>会话身份固定：当前使用者即分析员。</strong>
         旧版通用 <code>/api/v1/chat</code> 仍保持阶段锁定；当前本地测试产品使用受控的 <code>/api/v1/mvp/chat</code>。未审核的 AI 候选不会进入正式图谱。
       </section>
+      <section class="panel service-overview">
+        <div class="panel-title"><h2>服务与 Agent 状态</h2><button id="refresh-service-overview" class="secondary" type="button">刷新</button></div>
+        <div class="service-status-grid"><div><span>Provider / 模型</span><p id="overview-models" class="muted">正在读取…</p></div><div><span>最近 Agent 任务</span><p id="overview-agent-runs" class="muted">正在读取…</p></div></div>
+      </section>
+      </div>
 
-      <section id="dialogue-debug" class="panel mvp-chat">
+      <section id="dialogue-debug" class="panel mvp-chat workspace-view" data-workspace-view="dialogue-debug" hidden>
         <div class="panel-title">
           <div>
             <h2>22 角色本地对话测试（MVP）</h2>
@@ -89,6 +104,7 @@
         </div>
       </section>
 
+      <div class="workspace-view" data-workspace-view="evidence" hidden>
       <section id="evidence" class="panel controls">
         <label>
           工作模式
@@ -123,8 +139,9 @@
         <div class="panel-title"><h2>混合检索证据</h2><span id="retrieval-meta" class="muted"></span></div>
         <div id="results" class="empty">输入问题后，系统将显示角色、装甲、时装和世界观中的可追溯来源片段。</div>
       </section>
+      </div>
 
-      <section id="relations" class="panel review">
+      <section id="relations" class="panel review workspace-view" data-workspace-view="relations" hidden>
         <div class="panel-title review-title">
           <div>
             <h2>叙事关系人工审核</h2>
@@ -206,7 +223,7 @@
         <div class="review-pagination"><button id="load-more-review" class="secondary">加载更多审核组</button><span id="review-pagination-meta" class="muted"></span></div>
       </section>
 
-      <section id="entities" class="panel entity-review">
+      <section id="entities" class="panel entity-review workspace-view" data-workspace-view="entities" hidden>
         <div class="panel-title review-title">
           <div>
             <h2>缺失实体节点审批</h2>
@@ -221,7 +238,7 @@
         <div class="review-pagination"><button id="load-more-entity-review" class="secondary">加载更多实体候选</button><span id="entity-review-pagination-meta" class="muted"></span></div>
       </section>
 
-      <section id="feedback-inbox" class="panel feedback-inbox">
+      <section id="feedback-inbox" class="panel feedback-inbox workspace-view" data-workspace-view="feedback" hidden>
         <div class="panel-title review-title">
           <div>
             <h2>用户反馈收件箱</h2>
@@ -262,6 +279,8 @@
         </div>
         <div id="feedback-inbox-list" class="empty">暂无反馈。</div>
       </section>
+      <aside id="workspace-detail-drawer" class="workspace-detail-drawer" aria-hidden="true"><header><div><span class="eyebrow">DETAIL</span><h2 id="workspace-detail-title">详情</h2></div><button id="close-workspace-detail" type="button" class="secondary">关闭</button></header><div id="workspace-detail-content"></div></aside>
+      <div id="workspace-drawer-scrim" class="workspace-drawer-scrim" hidden></div>
     </main>
     <script src="app.js"></script>
   </body>

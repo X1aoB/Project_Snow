@@ -3,75 +3,102 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
-    <title>Project Snow</title>
-    <link rel="stylesheet" href="styles.css" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Project Snow v0.5.0</title>
+    <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
-    <div id="app" class="app-shell">
+  <body data-surface="landing">
+    <main id="landing-view" class="landing-view">
+      <header class="landing-header">
+        <a class="brand-lockup" href="/" aria-label="Project Snow 首页">
+          <span class="brand-mark" aria-hidden="true">S</span>
+          <span><strong>Project Snow</strong><small>v0.5.0 · 本地测试版</small></span>
+        </a>
+        <div class="landing-actions">
+          <span id="landing-status" class="connection-pill">正在连接本地服务</span>
+          <button id="landing-open-feedback" class="ghost-button" type="button"><i data-lucide="message-square-warning"></i>反馈</button>
+          <button id="landing-open-settings" class="icon-button" type="button" aria-label="设置" title="设置"><i data-lucide="settings"></i></button>
+        </div>
+      </header>
+
+      <section class="landing-hero" aria-labelledby="landing-title">
+        <p class="eyebrow">CHOOSE YOUR EXPERIENCE</p>
+        <h1 id="landing-title">今天，想怎样与她相处？</h1>
+        <p>同一位少女、同一段关系，两种彼此独立的相处方式。选择入口后，技术任务不会闯入沉浸对话。</p>
+      </section>
+
+      <section class="experience-grid" aria-label="选择体验入口">
+        <a class="experience-card immersive-entry" href="/immersive/">
+          <span class="experience-icon"><i data-lucide="snowflake"></i></span>
+          <span class="experience-number">01</span>
+          <span class="experience-copy">
+            <small>IMMERSIVE COMPANION</small>
+            <strong>沉浸式陪伴</strong>
+            <span>生活在游戏世界里。保留面对面、文字通讯、场景、动作与共同经历。</span>
+          </span>
+          <span class="experience-action">进入她的世界 <i data-lucide="arrow-right"></i></span>
+        </a>
+        <a class="experience-card assistant-entry" href="/assistant/">
+          <span class="experience-icon"><i data-lucide="sparkles"></i></span>
+          <span class="experience-number">02</span>
+          <span class="experience-copy">
+            <small>CHARACTER AGENT</small>
+            <strong>角色助手</strong>
+            <span>保持角色风格的多模态 Agent。处理图片、文档、研究、工具与真实任务。</span>
+          </span>
+          <span class="experience-action">开始协作 <i data-lucide="arrow-right"></i></span>
+        </a>
+      </section>
+
+      <section class="landing-roster" aria-labelledby="roster-title">
+        <div><p class="eyebrow">22 CHARACTERS</p><h2 id="roster-title">她们都在这里</h2></div>
+        <div id="landing-character-marks" class="landing-character-marks" aria-label="可用角色"></div>
+      </section>
+
+      <footer class="landing-footer">
+        <span>本地单用户测试产品 · 原始资料保持只读</span>
+        <a href="/workspace/">进入内部工作台 <i data-lucide="arrow-up-right"></i></a>
+      </footer>
+    </main>
+
+    <div id="chat-app" class="app-shell" hidden>
       <aside id="contact-panel" class="contact-panel" aria-label="角色会话">
         <header class="product-header">
-          <div class="product-mark" aria-hidden="true">S</div>
-          <div>
-            <strong>Project Snow</strong>
-            <span id="connection-status" class="connection-status">正在连接</span>
-          </div>
-          <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表" title="关闭角色列表">
-            <i data-lucide="x"></i>
-          </button>
-        </header>
-
-        <label class="contact-search">
-          <i data-lucide="search" aria-hidden="true"></i>
-          <input id="character-search" type="search" placeholder="搜索角色" autocomplete="off" />
-        </label>
-        <div id="character-list" class="character-list" role="listbox" aria-label="选择角色"></div>
-
-        <footer class="contact-footer">
-          <button id="open-global-feedback" class="footer-command" type="button">
-            <i data-lucide="message-square-warning"></i><span>问题反馈</span>
-          </button>
-          <a class="footer-command" href="/workspace/">
-            <i data-lucide="database"></i><span>后台工作台</span>
+          <a class="brand-lockup compact" href="/">
+            <span class="brand-mark" aria-hidden="true">S</span>
+            <span><strong>Project Snow</strong><small id="surface-label">沉浸式陪伴</small></span>
           </a>
-          <button id="open-settings" class="icon-button" type="button" aria-label="设置" title="设置">
-            <i data-lucide="settings"></i>
-          </button>
+          <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表"><i data-lucide="x"></i></button>
+        </header>
+        <div class="contact-service"><span id="connection-status" class="connection-status">正在连接</span><span>v0.5.0</span></div>
+        <label class="contact-search"><i data-lucide="search"></i><input id="character-search" type="search" placeholder="搜索角色" autocomplete="off" /></label>
+        <div id="character-list" class="character-list" role="listbox" aria-label="选择角色"></div>
+        <footer class="contact-footer">
+          <button id="open-global-feedback" class="footer-command" type="button"><i data-lucide="message-square-warning"></i><span>反馈</span></button>
+          <a class="footer-command" href="/workspace/"><i data-lucide="layout-dashboard"></i><span>工作台</span></a>
+          <button id="open-settings" class="icon-button" type="button" aria-label="设置"><i data-lucide="settings"></i></button>
         </footer>
       </aside>
 
       <main class="chat-panel">
         <header class="chat-header">
-          <button id="open-contacts" class="icon-button mobile-only" type="button" aria-label="打开角色列表" title="角色列表">
-            <i data-lucide="panel-left"></i>
-          </button>
+          <button id="open-contacts" class="icon-button mobile-only" type="button" aria-label="打开角色列表"><i data-lucide="panel-left"></i></button>
           <div id="active-character" class="active-character">
-            <div class="avatar avatar-fallback">?</div>
-            <div>
-              <h1>选择角色</h1>
-              <p>从左侧开始一段对话</p>
-            </div>
+            <span class="portrait portrait-text large">?</span><div><h1>选择角色</h1><p>从左侧开始一段对话</p></div>
           </div>
-          <div class="chat-controls" aria-label="对话控制">
-            <div id="mode-control" class="segmented-control" role="group" aria-label="对话模式">
-              <button type="button" data-mode="immersive" aria-pressed="true">沉浸式</button>
-              <button type="button" data-mode="assistant" aria-pressed="false">助手</button>
-            </div>
+          <div class="chat-controls" aria-label="会话控制">
+            <a class="surface-switch" href="/"><i data-lucide="shuffle"></i><span>切换体验</span></a>
             <div id="channel-control" class="segmented-control" role="group" aria-label="交流媒介">
-              <button type="button" data-channel="in_person" aria-pressed="true"><i data-lucide="users"></i><span>面对面</span></button>
-              <button type="button" data-channel="text" aria-pressed="false"><i data-lucide="message-circle"></i><span>文字</span></button>
+              <button type="button" data-channel="in_person" aria-pressed="false"><i data-lucide="users"></i><span>面对面</span></button>
+              <button type="button" data-channel="text" aria-pressed="true"><i data-lucide="message-circle"></i><span>文字</span></button>
             </div>
-            <button id="open-info" class="icon-button" type="button" aria-label="角色与场景信息" title="角色与场景信息">
-              <i data-lucide="info"></i>
-            </button>
+            <button id="open-info" class="icon-button" type="button" aria-label="角色、场景与依据"><i data-lucide="info"></i></button>
           </div>
         </header>
 
         <div id="system-banner" class="system-banner" hidden></div>
         <section id="timeline" class="timeline" aria-live="polite" aria-label="对话记录">
-          <div class="empty-conversation">
-            <p>选择一位角色开始聊天。</p>
-          </div>
+          <div class="empty-conversation"><p>选择一位角色开始聊天。</p></div>
         </section>
 
         <form id="composer" class="composer" autocomplete="off">
@@ -83,125 +110,79 @@
           </div>
           <div class="composer-row">
             <div class="composer-tools" aria-label="多模态输入">
-              <input id="attachment-input" type="file" multiple hidden accept="image/jpeg,image/png,image/webp,image/gif,.pdf,.txt,.md,.csv,.json,.docx,.xlsx,.pptx,.py,.js,.ts,.html,.css,audio/wav,audio/mpeg,audio/mp4,audio/webm,audio/ogg" />
-              <button id="add-attachment" class="icon-button" type="button" aria-label="添加附件" title="添加图片、文档或音频"><i data-lucide="paperclip"></i></button>
+              <input id="attachment-input" type="file" multiple hidden />
+              <button id="add-image" class="icon-button immersive-only" type="button" aria-label="添加图片" title="添加图片"><i data-lucide="image-plus"></i></button>
+              <button id="add-attachment" class="icon-button assistant-only" type="button" aria-label="添加附件" title="添加图片、文档或音频"><i data-lucide="paperclip"></i></button>
+              <details id="immersive-attachment-menu" class="attachment-more immersive-only">
+                <summary class="icon-button" aria-label="更多附件" title="更多附件"><i data-lucide="more-horizontal"></i></summary>
+                <div><button id="add-more-attachment" type="button"><i data-lucide="file-plus-2"></i><span><strong>更多附件</strong><small>PDF、Office、代码或音频</small></span></button></div>
+              </details>
               <button id="record-audio" class="icon-button" type="button" aria-label="录音" title="录制语音"><i data-lucide="mic"></i></button>
+              <button id="assistant-tool-toggle" class="icon-button assistant-only" type="button" aria-expanded="false" aria-controls="assistant-tool-panel" aria-label="展开助手工具"><i data-lucide="sliders-horizontal"></i></button>
             </div>
-            <textarea id="message-input" rows="1" maxlength="4000" aria-label="输入对白或消息" placeholder="输入消息…"></textarea>
-            <button id="send-message" class="send-button" type="submit" aria-label="发送消息" title="发送">
-              <i data-lucide="send"></i>
-            </button>
+            <textarea id="message-input" rows="1" maxlength="12000" aria-label="输入对白或消息" placeholder="输入消息…"></textarea>
+            <button id="send-message" class="send-button" type="submit" aria-label="发送消息"><i data-lucide="send"></i></button>
           </div>
-          <div class="composer-options">
-            <p class="composer-hint">Enter 发送 · Shift+Enter 换行 · 可拖放或粘贴图片</p>
-            <label id="agent-mode-option" class="agent-toggle" hidden><input id="agent-mode" type="checkbox" />作为 Agent 执行</label>
-            <label class="voice-toggle"><input id="voice-reply" type="checkbox" />语音回复</label>
-            <label class="model-picker"><span id="active-model" class="model-status">自动路由</span><select id="model-override" aria-label="模型覆盖"><option value="">质量优先自动路由</option></select></label>
-            <label class="voice-toggle"><input id="model-once" type="checkbox" />仅本轮</label>
+          <div class="composer-foot">
+            <p class="composer-hint">Enter 发送 · Shift+Enter 换行 · 支持拖放与粘贴图片</p>
+            <span id="active-model" class="model-status assistant-only">质量优先自动路由</span>
           </div>
+          <section id="assistant-tool-panel" class="assistant-tool-panel" hidden>
+            <header><div><strong>任务工具</strong><span>需要时再展开，所有高风险操作仍会请求确认。</span></div><i data-lucide="shield-check"></i></header>
+            <div class="tool-options">
+              <label id="agent-mode-option"><input id="agent-mode" type="checkbox" />作为 Agent 执行</label>
+              <label><input id="voice-reply" type="checkbox" />生成语音回复</label>
+              <label class="model-picker"><span>模型</span><select id="model-override" aria-label="模型覆盖"><option value="">质量优先自动路由</option></select></label>
+              <label><input id="model-once" type="checkbox" />仅本轮覆盖</label>
+            </div>
+          </section>
         </form>
       </main>
 
-      <aside id="info-panel" class="info-panel" aria-label="角色与场景信息" aria-hidden="true">
-        <header>
-          <div>
-            <span class="panel-kicker">当前会话</span>
-            <h2>角色与场景</h2>
-          </div>
-          <button id="close-info" class="icon-button" type="button" aria-label="关闭信息面板" title="关闭">
-            <i data-lucide="x"></i>
-          </button>
-        </header>
+      <aside id="info-panel" class="info-panel" aria-label="角色、场景与依据" aria-hidden="true">
+        <header><div><span class="panel-kicker">当前会话</span><h2>角色与场景</h2></div><button id="close-info" class="icon-button" type="button" aria-label="关闭信息面板"><i data-lucide="x"></i></button></header>
         <div id="info-content" class="info-content"></div>
       </aside>
       <div id="drawer-scrim" class="drawer-scrim" hidden></div>
     </div>
 
+    <button id="floating-feedback" class="floating-feedback" type="button"><i data-lucide="message-square-warning"></i><span>反馈</span></button>
+
     <dialog id="feedback-dialog" class="modal">
       <form id="feedback-form" method="dialog">
-        <header>
-          <div>
-            <span class="panel-kicker">问题反馈</span>
-            <h2>告诉我们哪里需要改进</h2>
-          </div>
-          <button class="icon-button" type="button" data-close-dialog="feedback-dialog" aria-label="关闭反馈" title="关闭"><i data-lucide="x"></i></button>
-        </header>
-        <fieldset id="feedback-categories" class="feedback-categories">
-          <legend>问题范围</legend>
-        </fieldset>
-        <label class="feedback-detail">
-          具体说明
-          <textarea id="feedback-text" rows="5" maxlength="4000" required placeholder="请描述你看到的问题、期望的表现，或复现步骤。"></textarea>
-        </label>
+        <header><div><span class="panel-kicker">v0.5.0 TEST FEEDBACK</span><h2>告诉我们哪里需要改进</h2></div><button class="icon-button" type="button" data-close-dialog="feedback-dialog" aria-label="关闭反馈"><i data-lucide="x"></i></button></header>
+        <fieldset id="feedback-categories" class="feedback-categories"><legend>问题范围</legend></fieldset>
+        <label class="feedback-detail">具体说明<textarea id="feedback-text" rows="5" maxlength="4000" required placeholder="请描述问题、期望表现，或复现步骤。"></textarea></label>
         <p id="feedback-context" class="modal-context"></p>
-        <div class="modal-actions">
-          <button type="button" class="secondary-button" data-close-dialog="feedback-dialog">取消</button>
-          <button id="submit-feedback" type="submit" class="primary-button">提交反馈</button>
-        </div>
+        <div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="feedback-dialog">取消</button><button id="submit-feedback" type="submit" class="primary-button">提交反馈</button></div>
       </form>
     </dialog>
 
-    <dialog id="settings-dialog" class="modal compact-modal">
+    <dialog id="settings-dialog" class="modal settings-modal">
       <form method="dialog">
-        <header>
-          <div>
-            <span class="panel-kicker">本地测试产品</span>
-            <h2>会话设置</h2>
-          </div>
-          <button class="icon-button" type="button" data-close-dialog="settings-dialog" aria-label="关闭设置" title="关闭"><i data-lucide="x"></i></button>
-        </header>
-        <div class="settings-section">
-          <strong>模型与 Provider</strong>
-          <p>API Key 只会提交给本地后端并保存到 Windows 凭据库；页面和数据库不保存明文。</p>
+        <header><div><span class="panel-kicker">PROJECT SNOW v0.5.0</span><h2>本地设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog" aria-label="关闭设置"><i data-lucide="x"></i></button></header>
+        <nav class="settings-tabs" aria-label="设置类别"><button type="button" class="active" data-settings-tab="models">模型与 Provider</button><button type="button" data-settings-tab="conversation">会话与存储</button><button type="button" data-settings-tab="about">关于</button></nav>
+        <section class="settings-section" data-settings-panel="models">
+          <strong>模型与 Provider</strong><p>API Key 只会提交给本地后端并保存到 Windows 凭据库。</p>
           <div class="provider-form">
-            <select id="provider-kind" aria-label="Provider 类型">
-              <option value="openai">OpenAI</option><option value="dashscope">阿里云百炼 Qwen</option>
-              <option value="zhipu">智谱 GLM</option><option value="deepseek">DeepSeek</option>
-              <option value="moonshot">Moonshot / Kimi</option><option value="openai-compatible">自定义兼容接口</option>
-            </select>
-            <input id="provider-name" placeholder="显示名称" value="本地模型配置" />
-            <input id="provider-url" type="url" placeholder="https://.../v1" />
-            <input id="provider-model" placeholder="模型名称" />
-            <input id="provider-key" type="password" autocomplete="new-password" placeholder="API Key（不会回显）" />
-            <div class="provider-metrics"><label>默认 TTS 音色 <input id="tts-voice" placeholder="例如 alloy" /></label><label>当前角色音色 <input id="character-voice" placeholder="可选覆盖" /></label></div>
-            <div class="provider-metrics">
-              <label>质量分 <input id="provider-quality" type="number" min="0" max="100" value="50" /></label>
-              <label>上下文 <input id="provider-context" type="number" min="1" placeholder="可选 token" /></label>
-              <label>最大输出 <input id="provider-max-output" type="number" min="1" placeholder="可选 token" /></label>
-            </div>
-            <label><input id="trust-images" type="checkbox" />允许该 Provider 接收私人图片/文档</label>
-            <div class="capability-checks"><span>明确声明或主动探测：</span><label><input id="cap-vision" type="checkbox" />视觉</label><label><input id="cap-tools" type="checkbox" />原生工具</label><label><input id="cap-streaming" type="checkbox" checked />流式</label><label><input id="cap-stt" type="checkbox" />语音转写</label><label><input id="cap-tts" type="checkbox" />语音合成</label></div>
-            <div class="settings-actions"><button id="save-provider" type="button" class="secondary-button">保存 Provider</button><button id="probe-provider" type="button" class="primary-button">保存并探测模型</button></div>
-            <div class="settings-actions"><button id="preview-voice" type="button" class="secondary-button">试听当前角色音色</button></div>
-            <p id="provider-status" class="modal-context"></p>
-            <div id="model-capability-list" class="model-capability-list"></div>
-            <div class="model-defaults">
-              <strong>默认路由模型</strong>
-              <select id="default-text-model" aria-label="默认文本模型"></select>
-              <select id="default-vision-model" aria-label="默认视觉模型"></select>
-              <select id="default-stt-model" aria-label="默认语音转写模型"></select>
-              <select id="default-tts-model" aria-label="默认语音合成模型"></select>
-              <button id="save-model-defaults" type="button" class="secondary-button">保存默认模型</button>
-            </div>
+            <select id="provider-kind" aria-label="Provider 类型"><option value="openai">OpenAI</option><option value="dashscope">阿里云百炼 Qwen</option><option value="zhipu">智谱 GLM</option><option value="deepseek">DeepSeek</option><option value="moonshot">Moonshot / Kimi</option><option value="openai-compatible">自定义兼容接口</option></select>
+            <input id="provider-name" placeholder="显示名称" value="本地模型配置" /><input id="provider-url" type="url" placeholder="https://.../v1" /><input id="provider-model" placeholder="模型名称" /><input id="provider-key" type="password" autocomplete="new-password" placeholder="API Key（不会回显）" />
+            <div class="provider-metrics"><label>默认 TTS 音色<input id="tts-voice" placeholder="例如 alloy" /></label><label>当前角色音色<input id="character-voice" placeholder="可选覆盖" /></label></div>
+            <div class="provider-metrics"><label>质量分<input id="provider-quality" type="number" min="0" max="100" value="50" /></label><label>上下文<input id="provider-context" type="number" min="1" placeholder="token" /></label><label>最大输出<input id="provider-max-output" type="number" min="1" placeholder="token" /></label></div>
+            <label><input id="trust-images" type="checkbox" />允许该 Provider 接收私人图片、文档和音频</label>
+            <div class="capability-checks"><span>能力声明与探测</span><label><input id="cap-vision" type="checkbox" />视觉</label><label><input id="cap-tools" type="checkbox" />原生工具</label><label><input id="cap-streaming" type="checkbox" checked />流式</label><label><input id="cap-stt" type="checkbox" />语音转写</label><label><input id="cap-tts" type="checkbox" />语音合成</label></div>
+            <div class="settings-actions"><button id="save-provider" type="button" class="secondary-button">保存 Provider</button><button id="probe-provider" type="button" class="primary-button">保存并探测</button><button id="preview-voice" type="button" class="secondary-button">试听角色音色</button></div>
+            <p id="provider-status" class="modal-context inline-context"></p><div id="model-capability-list" class="model-capability-list"></div>
+            <div class="model-defaults"><strong>默认路由模型</strong><select id="default-text-model" aria-label="默认文本模型"></select><select id="default-vision-model" aria-label="默认视觉模型"></select><select id="default-stt-model" aria-label="默认语音转写模型"></select><select id="default-tts-model" aria-label="默认语音合成模型"></select><button id="save-model-defaults" type="button" class="secondary-button">保存默认模型</button></div>
           </div>
-        </div>
-        <div class="settings-section">
-          <strong>清理当前角色记录</strong>
-          <p>只删除本机聊天历史，不会修改角色资料、反馈或知识图谱。</p>
-          <div class="settings-actions">
-            <button id="clear-current-mode" type="button" class="secondary-button">清空当前模式</button>
-            <button id="clear-character" type="button" class="danger-button">清空该角色全部对话</button>
-          </div>
-        </div>
-        <div class="settings-section attribution">
-          <strong>图片与资料</strong>
-          <p>角色头像来自尘白禁区 Wiki 的公开页面引用，仅用于本地非商业测试；详细来源记录在头像清单中。</p>
-        </div>
+        </section>
+        <section class="settings-section" data-settings-panel="conversation" hidden><strong>会话与存储</strong><p>只清理本机聊天，不会修改角色资料、反馈或知识图谱。</p><div class="settings-actions"><button id="clear-current-mode" type="button" class="secondary-button">清空当前入口记录</button><button id="clear-character" type="button" class="danger-button">清空该角色全部对话</button></div></section>
+        <section class="settings-section attribution" data-settings-panel="about" hidden><strong>关于本测试版</strong><p>角色暂时使用文字肖像。未来生成的角色图片将通过独立清单接入，不会写入 Data/。</p><p>Project Snow v0.5.0 · 本地 Windows 单用户测试产品。</p></section>
       </form>
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script src="vendor/lucide.min.js"></script>
-    <script src="app.js"></script>
+    <script src="/vendor/lucide.min.js"></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

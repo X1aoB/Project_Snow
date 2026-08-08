@@ -81,7 +81,7 @@ async def lifespan(_app: FastAPI):
         agent_runtime.shutdown()
 
 
-app = FastAPI(title="Project Snow Application API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Project Snow Application API", version="0.5.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
@@ -235,7 +235,7 @@ def _validate_entity_review_status(review_status: str) -> None:
 
 @app.get("/health")
 def health(repo: RuntimeRepository = Depends(get_repository)) -> dict:
-    return {"service": "project-snow-api", "version": "preview-0.3.0", "chat_enabled": settings.chat_enabled, "artifacts": repo.status()}
+    return {"service": "project-snow-api", "version": "v0.5.0", "chat_enabled": settings.chat_enabled, "artifacts": repo.status()}
 
 
 @app.get("/api/v1/providers")
@@ -854,6 +854,8 @@ def mvp_feedback(request: MVPFeedbackRequest) -> dict:
             actual_model=request.actual_model,
             attachment_ids=request.attachment_ids,
             failed_stage=request.failed_stage,
+            scope=request.scope,
+            ui_surface=request.ui_surface,
         )
     except (KeyError, FileNotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MVP 角色视图不存在。") from None
@@ -904,6 +906,7 @@ def mvp_conversation_history(
     session_id: str | None = None,
     before: int | None = None,
     limit: int = 50,
+    mode: str | None = None,
 ) -> dict:
     try:
         return mvp_service.conversation_history(
@@ -911,9 +914,12 @@ def mvp_conversation_history(
             session_id=session_id,
             before=before,
             limit=min(max(limit, 1), 100),
+            mode=mode,
         )
     except (KeyError, FileNotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MVP 角色视图不存在。") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
 
 @app.delete("/api/v1/mvp/conversations/{character_id}")

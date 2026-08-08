@@ -386,12 +386,12 @@ async function loadMoreRelationReview() {
 
 async function openReviewGroup(button) {
   const groupId = button.dataset.reviewOpen;
-  const container = button.closest("[data-review-group]");
-  if (!groupId || !container) return;
+  if (!groupId) return;
   button.disabled = true;
   try {
     const detail = await api(`/api/v1/review/relations/groups/${encodeURIComponent(groupId)}${queryString({ review_status: "pending_review", candidate_limit: 12, candidate_offset: 0 })}`);
-    container.innerHTML = reviewGroupDetail(detail);
+    openWorkspaceDetail("关系审核详情", `<article class="review-group" data-review-group="${escapeHtml(groupId)}">${reviewGroupDetail(detail)}</article>`);
+    button.disabled = false;
   } catch (error) {
     button.disabled = false;
     window.alert(`读取关系组详情失败：${error.message}`);
@@ -422,7 +422,7 @@ async function loadMoreGroupCandidates(button) {
 }
 
 async function collapseReviewGroup(button) {
-  await loadRelationReview();
+  closeWorkspaceDetail();
 }
 
 async function decideRelationCandidate(button) {
@@ -449,6 +449,7 @@ async function decideRelationCandidate(button) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    closeWorkspaceDetail();
     await loadRelationReview();
     if (currentCharacter()) await loadGraph();
   } catch (error) {
@@ -471,14 +472,17 @@ function entityReviewCandidate(candidate) {
     ? `<details><summary>查看来源证据片段</summary><ul class="review-evidence">${candidate.evidence.map((item) => reviewEvidence(item, "")).join("")}</ul></details>`
     : '<p class="muted">来源证据片段已不存在，不能批准。</p>';
   const relationCount = (candidate.relation_candidate_ids || []).length;
-  return `<article class="review-item entity-candidate" data-entity-candidate="${entityCandidateId}">
+  return `<article class="review-item entity-candidate entity-candidate-summary" data-entity-candidate="${entityCandidateId}">
     <div><span class="chip">${escapeHtml(candidate.proposed_node_type)}</span><span class="chip">关联关系 ${escapeHtml(relationCount)} 条</span></div>
     <h4>${escapeHtml(candidate.entity_name)} <span class="muted">→</span> <code>${escapeHtml(candidate.proposed_node_id)}</code></h4>
     <p class="muted">来源类型：${escapeHtml((candidate.source_types || []).join("、") || "未知")}；证据页：${escapeHtml((candidate.evidence_page_ids || []).join("、") || "无")}</p>
+    <button type="button" class="secondary" data-entity-review-open="${entityCandidateId}">查看证据并审核</button>
+    <div class="entity-candidate-detail" hidden>
     ${entityEvidenceExamples(candidate)}
     ${evidence}
     <p class="review-detail-policy">批准仅创建这个可追溯的 ${escapeHtml(candidate.proposed_node_type)} 节点；不会自动批准上方列出的任何关系。创建后请回到关系审核页面，重新核对具体关系。</p>
     <div class="review-actions"><button data-entity-review-decision="approved">批准并创建节点</button><button class="secondary" data-entity-review-decision="rejected">驳回节点候选</button></div>
+    </div>
   </article>`;
 }
 
@@ -546,6 +550,7 @@ async function decideEntityNodeCandidate(button) {
         note: byId("review-note").value.trim(),
       }),
     });
+    closeWorkspaceDetail();
     await Promise.all([loadEntityReview(), loadRelationReview()]);
     if (currentCharacter()) await loadGraph();
   } catch (error) {
@@ -1063,6 +1068,105 @@ const FEEDBACK_RESOLUTION_LABELS = {
   open: "开放问题",
 };
 
+const WORKSPACE_VIEWS = {
+  overview: ["服务概览", "资料、模型、审核和对话服务的运行状态。"],
+  evidence: ["证据检索", "检索角色证据、人格档案和已验证关系图谱。"],
+  relations: ["关系审核", "按证据组筛选候选，并在详情抽屉中逐条审核。"],
+  entities: ["实体审核", "创建或驳回缺失的地点与事件节点候选。"],
+  feedback: ["用户反馈", "按问题族、角色、模式、版本和处理状态跟进反馈。"],
+  "dialogue-debug": ["对话调试", "验证 22 个角色、媒介、时装语境和引用行为。"],
+};
+
+function currentWorkspaceView() {
+  const requested = window.location.hash.replace(/^#/, "");
+  return Object.prototype.hasOwnProperty.call(WORKSPACE_VIEWS, requested) ? requested : "overview";
+}
+
+function renderWorkspaceView() {
+  const view = currentWorkspaceView();
+  document.querySelectorAll("[data-workspace-view]").forEach((element) => {
+    element.hidden = element.dataset.workspaceView !== view;
+  });
+  document.querySelectorAll("[data-workspace-target]").forEach((link) => {
+    const active = link.dataset.workspaceTarget === view;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  const [title, description] = WORKSPACE_VIEWS[view];
+  byId("workspace-view-title").textContent = title;
+  byId("workspace-view-description").textContent = description;
+  closeWorkspaceDetail();
+  loadWorkspaceViewData(view);
+}
+
+const loadedWorkspaceViews = new Set();
+
+function loadWorkspaceViewData(view, force = false) {
+  if (!force && loadedWorkspaceViews.has(view)) return;
+  loadedWorkspaceViews.add(view);
+  if (view === "overview") loadServiceOverview();
+  else if (view === "relations") loadRelationReview();
+  else if (view === "entities") loadEntityReview();
+  else if (view === "feedback") loadFeedbackInbox();
+  else if (view === "dialogue-debug") loadMvpStatus();
+}
+
+function openWorkspaceDetail(title, content) {
+  const drawer = byId("workspace-detail-drawer");
+  const scrim = byId("workspace-drawer-scrim");
+  byId("workspace-detail-title").textContent = title;
+  byId("workspace-detail-content").innerHTML = content;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
+  scrim.hidden = false;
+  byId("close-workspace-detail").focus({ preventScroll: true });
+}
+
+function closeWorkspaceDetail() {
+  const drawer = byId("workspace-detail-drawer");
+  const scrim = byId("workspace-drawer-scrim");
+  if (!drawer || !scrim) return;
+  drawer.classList.remove("open");
+  drawer.setAttribute("aria-hidden", "true");
+  scrim.hidden = true;
+  byId("workspace-detail-content").replaceChildren();
+}
+
+function summarizeModels(providerResult, modelResult) {
+  const providers = providerResult?.providers || providerResult?.items || [];
+  const models = modelResult?.models || modelResult?.items || [];
+  const enabled = providers.filter((item) => item.enabled !== false).length;
+  const healthy = models.filter((item) => ["healthy", "available", "ok"].includes(String(item.health || item.status || "").toLowerCase())).length;
+  return `${enabled}/${providers.length} 个 Provider 已启用 · ${models.length} 个模型已登记${models.length ? ` · ${healthy} 个健康状态已确认` : ""}`;
+}
+
+async function loadServiceOverview() {
+  const modelTarget = byId("overview-models");
+  const runTarget = byId("overview-agent-runs");
+  if (!modelTarget || !runTarget) return;
+  modelTarget.textContent = "正在读取…";
+  runTarget.textContent = "正在读取…";
+  const [providersResult, modelsResult, runsResult] = await Promise.allSettled([
+    api("/api/v1/providers"),
+    api("/api/v1/models"),
+    api("/api/v1/agent/runs?limit=5"),
+  ]);
+  if (providersResult.status === "fulfilled" && modelsResult.status === "fulfilled") {
+    modelTarget.textContent = summarizeModels(providersResult.value, modelsResult.value);
+  } else {
+    modelTarget.textContent = "Provider 或模型状态暂不可用；聊天与审核服务仍可独立运行。";
+  }
+  if (runsResult.status === "fulfilled") {
+    const runs = runsResult.value?.runs || runsResult.value?.items || [];
+    runTarget.textContent = runs.length
+      ? runs.slice(0, 5).map((item) => `${item.character_name || item.character_id || "Agent"} · ${item.status || "unknown"}`).join("；")
+      : "暂无 Agent 任务。";
+  } else {
+    runTarget.textContent = "Agent 任务状态暂不可用。";
+  }
+}
+
 async function loadFeedbackInbox() {
   const category = byId("feedback-category-filter")?.value || "";
   const feedbackStatus = byId("feedback-status-filter")?.value || "";
@@ -1091,7 +1195,9 @@ async function loadFeedbackInbox() {
     const items = result.feedback || [];
     const characterFilter = byId("feedback-character-filter");
     if (characterFilter && characterFilter.options.length <= 1) {
-      const characters = [...new Map(items.map((item) => [item.character_id, item.character_name])).entries()];
+      const characters = [...new Map(items
+        .filter((item) => item.character_id)
+        .map((item) => [item.character_id, item.character_name || item.character_id])).entries()];
       characterFilter.innerHTML = '<option value="">全部角色</option>' + characters.map(([id, name]) => (
         `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`
       )).join("");
@@ -1105,17 +1211,19 @@ async function loadFeedbackInbox() {
         ? `重复反馈${item.duplicate_of ? " · 同问题族" : ""}`
         : "首次反馈";
       const issueKey = item.issue_key || "other";
-      return `<article class="feedback-inbox-item">
-        <header><strong>${escapeHtml(item.character_name || "未知角色")} · ${escapeHtml(categoryLabel)}</strong><span class="chip">${escapeHtml(occurrenceLabel)}</span><span class="chip">${escapeHtml(FEEDBACK_STATUS_LABELS[item.status] || item.status || "待处理")}</span><span class="chip">${escapeHtml(FEEDBACK_RESOLUTION_LABELS[item.resolution_status] || item.resolution_status || "待验证")}</span></header>
+      const subjectLabel = item.scope === "product" ? "产品级反馈" : (item.character_name || "未绑定角色");
+      return `<article class="feedback-inbox-item" data-feedback-row="${escapeHtml(item.feedback_id)}">
+        <header><strong>${escapeHtml(subjectLabel)} · ${escapeHtml(categoryLabel)}</strong><span class="chip">${escapeHtml(item.ui_surface || "legacy")}</span><span class="chip">${escapeHtml(occurrenceLabel)}</span><span class="chip">${escapeHtml(FEEDBACK_STATUS_LABELS[item.status] || item.status || "待处理")}</span><span class="chip">${escapeHtml(FEEDBACK_RESOLUTION_LABELS[item.resolution_status] || item.resolution_status || "待验证")}</span></header>
         <p class="muted feedback-issue-key">问题族：${escapeHtml(issueKey)}</p>
         <p>${escapeHtml(item.free_text || "（未填写说明）")}</p>
-        <details><summary>查看对话上下文</summary><p><strong>分析员：</strong>${escapeHtml(item.message_excerpt || "")}</p><p><strong>角色：</strong>${escapeHtml(item.answer_excerpt || "")}</p><p class="muted">${escapeHtml(item.mode || "")} · ${escapeHtml(item.communication_channel || "")} · ${escapeHtml(item.created_at || "")}</p></details>
+        <button type="button" class="secondary" data-feedback-open="${escapeHtml(item.feedback_id)}">查看上下文与处理</button>
+        <div class="feedback-row-detail" hidden><p><strong>分析员：</strong>${escapeHtml(item.message_excerpt || "（产品级反馈无对话消息）")}</p><p><strong>角色：</strong>${escapeHtml(item.answer_excerpt || "（无回答上下文）")}</p><p class="muted">${escapeHtml(item.mode || "未指定模式")} · ${escapeHtml(item.communication_channel || "未指定媒介")} · ${escapeHtml(item.client_version || "未知版本")} · ${escapeHtml(item.created_at || "")}</p>
         <div class="feedback-triage-actions">
           <button type="button" class="secondary" data-feedback-id="${escapeHtml(item.feedback_id)}" data-feedback-status="planned">计划修复</button>
           <button type="button" class="secondary" data-feedback-id="${escapeHtml(item.feedback_id)}" data-feedback-status="resolved">已解决</button>
           <button type="button" class="secondary" data-feedback-id="${escapeHtml(item.feedback_id)}" data-feedback-status="ignored">忽略</button>
           <button type="button" class="secondary" data-feedback-id="${escapeHtml(item.feedback_id)}" data-feedback-status="pending_triage">恢复待处理</button>
-        </div>
+        </div></div>
       </article>`;
     }).join("") || "当前筛选下没有反馈。";
   } catch (error) {
@@ -1135,11 +1243,44 @@ async function triageFeedback(button) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: feedbackStatus, note }),
     });
+    closeWorkspaceDetail();
     await loadFeedbackInbox();
   } catch (error) {
     window.alert(`反馈状态更新失败：${error.message}`);
     button.disabled = false;
   }
+}
+
+function openEntityReviewDetail(button) {
+  const item = button.closest("[data-entity-candidate]");
+  const detail = item?.querySelector(".entity-candidate-detail");
+  if (!item || !detail) return;
+  const title = item.querySelector("h4")?.textContent?.trim() || "实体审核详情";
+  openWorkspaceDetail(
+    title,
+    `<article class="review-item entity-candidate" data-entity-candidate="${escapeHtml(item.dataset.entityCandidate)}">${detail.innerHTML}</article>`,
+  );
+}
+
+function openFeedbackDetail(button) {
+  const item = button.closest("[data-feedback-row]");
+  const detail = item?.querySelector(".feedback-row-detail");
+  if (!item || !detail) return;
+  const title = item.querySelector("header strong")?.textContent?.trim() || "反馈详情";
+  openWorkspaceDetail(title, `<article class="feedback-inbox-item">${detail.innerHTML}</article>`);
+}
+
+function handleReviewDetailClick(event) {
+  const decisionButton = event.target.closest("button[data-review-decision]");
+  const collapseButton = event.target.closest("button[data-review-collapse]");
+  const moreCandidatesButton = event.target.closest("button[data-review-more-candidates]");
+  const entityDecisionButton = event.target.closest("button[data-entity-review-decision]");
+  const feedbackButton = event.target.closest("button[data-feedback-id]");
+  if (decisionButton) decideRelationCandidate(decisionButton);
+  else if (collapseButton) collapseReviewGroup(collapseButton);
+  else if (moreCandidatesButton) loadMoreGroupCandidates(moreCandidatesButton);
+  else if (entityDecisionButton) decideEntityNodeCandidate(entityDecisionButton);
+  else if (feedbackButton) triageFeedback(feedbackButton);
 }
 
 byId("mvp-channel")?.addEventListener("click", (event) => {
@@ -1187,7 +1328,9 @@ byId("review-groups").addEventListener("click", (event) => {
 });
 byId("entity-review-candidates").addEventListener("click", (event) => {
   const decisionButton = event.target.closest("button[data-entity-review-decision]");
+  const openButton = event.target.closest("button[data-entity-review-open]");
   if (decisionButton) decideEntityNodeCandidate(decisionButton);
+  else if (openButton) openEntityReviewDetail(openButton);
 });
 byId("character").addEventListener("change", () => { loadPersona(); loadGraph(); });
 byId("mvp-character").addEventListener("change", () => { resetMvpSession(); loadMvpQuestions(); });
@@ -1205,12 +1348,20 @@ byId("refresh-feedback-inbox")?.addEventListener("click", loadFeedbackInbox);
 });
 byId("feedback-inbox-list")?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-feedback-id]");
+  const openButton = event.target.closest("button[data-feedback-open]");
   if (button) triageFeedback(button);
+  else if (openButton) openFeedbackDetail(openButton);
+});
+
+byId("workspace-detail-content")?.addEventListener("click", handleReviewDetailClick);
+byId("close-workspace-detail")?.addEventListener("click", closeWorkspaceDetail);
+byId("workspace-drawer-scrim")?.addEventListener("click", closeWorkspaceDetail);
+byId("refresh-service-overview")?.addEventListener("click", () => loadWorkspaceViewData("overview", true));
+window.addEventListener("hashchange", renderWorkspaceView);
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeWorkspaceDetail();
 });
 
 loadHealth();
 loadCharacters();
-loadMvpStatus();
-loadRelationReview();
-loadEntityReview();
-loadFeedbackInbox();
+renderWorkspaceView();

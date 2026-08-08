@@ -1,62 +1,27 @@
-"use strict";
+import {
+  api,
+  byId,
+  escapeHtml,
+  formatBytes,
+  formatTime,
+  renderIcons,
+  storageGet,
+  storageSet,
+  textPortrait,
+} from "./ui-core.js";
+import { modeForSurface, surfaceFromPath } from "./ui-router.js";
 
-const byId = (id) => document.getElementById(id);
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function renderIcons() {
-  if (window.lucide?.createIcons) window.lucide.createIcons({ attrs: { "stroke-width": 1.8 } });
-}
-
-async function api(path, options = {}, timeoutMs = 15000) {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(path, { ...options, signal: controller.signal });
-    const raw = response.status === 204 ? "" : await response.text();
-    let payload = null;
-    try { payload = raw ? JSON.parse(raw) : null; } catch (_) { payload = raw; }
-    if (!response.ok) {
-      const error = new Error(
-        typeof payload?.detail === "string"
-          ? payload.detail
-          : payload?.detail?.message || payload?.message || raw || `HTTP ${response.status}`
-      );
-      error.status = response.status;
-      error.detail = payload?.detail || payload;
-      throw error;
-    }
-    return payload;
-  } catch (error) {
-    if (error.name === "AbortError") {
-      const timeoutError = new Error("等待回复超时，可以使用原消息重试。重试不会重复写入已完成的回答。");
-      timeoutError.code = "timeout";
-      throw timeoutError;
-    }
-    throw error;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
+const activeSurface = surfaceFromPath();
 
 const state = {
-  clientVersion: "preview-0.3.0",
+  clientVersion: "v0.5.0",
   registryVersion: "",
   enabled: false,
   characters: [],
   characterMap: new Map(),
   selectedCharacterId: "",
-  // v2 deliberately starts the redesigned client in immersive + text.  The
-  // old key was written by the evidence-workbench preview and could leave a
-  // fresh character chat in assistant mode after a client upgrade.
-  mode: localStorage.getItem("project_snow:mode:v2") || "immersive",
+  surface: activeSurface,
+  mode: modeForSurface(activeSurface),
   worldSessionId: "",
   threads: new Map(),
   feedbackCategories: [],
@@ -80,14 +45,6 @@ const TOOL_LABELS = {
   calculator: "计算器",
 };
 
-function storageGet(key, fallback = "") {
-  try { return localStorage.getItem(key) ?? fallback; } catch (_) { return fallback; }
-}
-
-function storageSet(key, value) {
-  try { localStorage.setItem(key, value); } catch (_) { /* local storage is optional */ }
-}
-
 function newClientMessageId() {
   if (window.crypto?.randomUUID) return `client_${window.crypto.randomUUID()}`;
   return `client_${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -108,7 +65,10 @@ function draftKey(characterId, mode, channel, inputType) {
 function getThread(characterId) {
   if (!state.threads.has(characterId)) {
     const character = state.characterMap.get(characterId);
-    const summary = character?.conversation || {};
+    // v0.5 surfaces must never fall back to the legacy mixed summary: doing
+    // so would show an assistant task as the first immersive preview (or the
+    // reverse) before the mode-specific history has loaded.
+    const summary = character?.conversations?.[state.mode] || {};
     state.threads.set(characterId, {
       characterId,
       conversationId: summary.conversation_id || "",
@@ -154,31 +114,7 @@ function updateComposerFields() {
 }
 
 function avatarMarkup(character, size = "") {
-  const source = character?.avatar?.src || "";
-  const fallback = character?.avatar?.fallback || character?.character_name?.slice(0, 1) || "?";
-  return `<div class="avatar ${size}">${source ? `<img src="${escapeHtml(source)}" alt="" /><span hidden>${escapeHtml(fallback)}</span>` : `<span>${escapeHtml(fallback)}</span>`}</div>`;
-}
-
-function bindAvatarFallbacks(container = document) {
-  container.querySelectorAll(".avatar img").forEach((image) => {
-    if (image.dataset.fallbackBound) return;
-    image.dataset.fallbackBound = "true";
-    image.addEventListener("error", () => {
-      image.hidden = true;
-      if (image.nextElementSibling) image.nextElementSibling.hidden = false;
-    });
-  });
-}
-
-function formatTime(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const now = new Date();
-  if (date.toDateString() === now.toDateString()) {
-    return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
-  }
-  return `${date.getMonth() + 1}/${date.getDate()}`;
+  return textPortrait(character, size);
 }
 
 function showToast(message) {
@@ -191,8 +127,24 @@ function showToast(message) {
 
 function setConnection(online, detail = "") {
   const target = byId("connection-status");
-  target.className = `connection-status ${online ? "online" : "offline"}`;
-  target.textContent = online ? (detail || "本地服务已连接") : (detail || "本地服务未连接");
+  const text = online ? (detail || "本地服务已连接") : (detail || "本地服务未连接");
+  if (target) {
+    target.className = `connection-status ${online ? "online" : "offline"}`;
+    target.textContent = text;
+  }
+  const landing = byId("landing-status");
+  if (landing) {
+    landing.className = `connection-pill ${online ? "online" : "offline"}`;
+    landing.textContent = text;
+  }
+}
+
+function renderLandingCharacters() {
+  const target = byId("landing-character-marks");
+  if (!target) return;
+  target.innerHTML = state.characters.map((character) => (
+    `<span class="landing-character-mark">${textPortrait(character)}<span>${escapeHtml(character.character_name)}</span></span>`
+  )).join("");
 }
 
 function renderCharacterList() {
@@ -205,7 +157,7 @@ function renderCharacterList() {
   });
   target.innerHTML = characters.map((character) => {
     const thread = state.threads.get(character.character_id);
-    const conversation = thread || character.conversation || {};
+    const conversation = thread || character.conversations?.[state.mode] || {};
     const latest = thread?.messages?.slice(-1)[0];
     const preview = latest?.text || conversation.last_message || "开始对话";
     const updated = latest?.created_at || conversation.updated_at;
@@ -216,13 +168,9 @@ function renderCharacterList() {
       <span class="coverage-dot ${level}" title="${escapeHtml(character.coverage?.label || "资料覆盖状态未知")}"></span>
     </button>`;
   }).join("") || '<div class="empty-conversation"><p>没有匹配的角色。</p></div>';
-  bindAvatarFallbacks(target);
 }
 
 function updateControls() {
-  document.querySelectorAll("#mode-control [data-mode]").forEach((button) => {
-    button.setAttribute("aria-pressed", button.dataset.mode === state.mode ? "true" : "false");
-  });
   const channel = currentThread()?.channel || "text";
   document.querySelectorAll("#channel-control [data-channel]").forEach((button) => {
     button.setAttribute("aria-pressed", button.dataset.channel === channel ? "true" : "false");
@@ -240,7 +188,6 @@ function renderHeader() {
     const coverage = character.coverage?.label || "资料覆盖状态未知";
     target.innerHTML = `${avatarMarkup(character, "large")}<div><h1>${escapeHtml(character.character_name)}</h1><p>${escapeHtml(coverage)} · ${escapeHtml(CHANNEL_LABELS[thread.channel])}</p></div>`;
   }
-  bindAvatarFallbacks(target);
   updateControls();
 }
 
@@ -276,7 +223,7 @@ async function loadConversation(characterId, { older = false } = {}) {
   else thread.loading = true;
   if (characterId === state.selectedCharacterId) renderTimeline(false);
   try {
-    const params = new URLSearchParams({ limit: "50" });
+    const params = new URLSearchParams({ limit: "50", mode: state.mode });
     if (thread.sessionId) params.set("session_id", thread.sessionId);
     if (older && thread.nextBefore) params.set("before", String(thread.nextBefore));
     const result = await api(`/api/v1/mvp/conversations/${encodeURIComponent(characterId)}?${params}`);
@@ -373,9 +320,17 @@ function messageHtml(message, character) {
   const approvals = (run?.state?.approvals || []).filter((item) => item.status === "pending");
   const artifacts = run?.state?.artifacts || [];
   const agentStatus = run?.status || result.agent_status || "queued";
-  const agentCard = result.agent_run_id
-    ? `<section class="agent-run"><header><strong>Agent 任务</strong><span>${escapeHtml(agentStatus)}</span></header>${runSteps.length ? `<ol>${runSteps.map((step) => `<li><span>${escapeHtml(step.tool_name || step.kind || "步骤")}</span><small>${escapeHtml(step.status || "pending")}</small></li>`).join("")}</ol>` : '<p>正在准备可审计的执行步骤…</p>'}${artifacts.length ? `<div class="artifact-list">${artifacts.map((item) => `<a href="/api/v1/artifacts/${escapeHtml(item.artifact_id)}" download>${escapeHtml(item.file_name)} · ${escapeHtml(formatBytes(item.size_bytes))}</a>`).join("")}</div>` : ""}${approvals.filter((approval) => approval.status === "pending").map((approval) => `<div class="approval-card"><p>${escapeHtml(approval.summary)}</p><button type="button" data-agent-approval="${escapeHtml(approval.approval_id)}" data-run-id="${escapeHtml(result.agent_run_id)}" data-decision="approved">允许</button><button type="button" data-agent-approval="${escapeHtml(approval.approval_id)}" data-run-id="${escapeHtml(result.agent_run_id)}" data-decision="rejected">拒绝</button></div>`).join("")}${!["succeeded", "failed", "cancelled"].includes(agentStatus) ? `<button type="button" class="secondary-button" data-cancel-run="${escapeHtml(result.agent_run_id)}">停止任务</button>` : ["failed", "cancelled"].includes(agentStatus) ? `<button type="button" class="secondary-button" data-retry-agent="${escapeHtml(result.agent_run_id)}">重试任务</button>` : ""}</section>` : "";
-  const modelMeta = result.actual_model?.model_name ? `<div class="model-meta">${escapeHtml(result.actual_model.provider_name || result.actual_model.provider_id || "模型")} · ${escapeHtml(result.actual_model.model_name)}${result.routing_decision?.fallback ? " · 已回退" : ""}</div>` : "";
+  const agentOpen = !["succeeded", "failed", "cancelled"].includes(agentStatus) || approvals.length;
+  const agentCard = message.mode === "assistant" && result.agent_run_id
+    ? `<details class="agent-run"${agentOpen ? " open" : ""}><summary><strong>Agent 任务</strong><span>${escapeHtml(agentStatus)}</span></summary><div class="agent-run-body">${runSteps.length ? `<ol>${runSteps.map((step) => `<li><span>${escapeHtml(step.tool_name || step.kind || "步骤")}</span><small>${escapeHtml(step.status || "pending")}</small></li>`).join("")}</ol>` : '<p>正在准备可审计的执行步骤…</p>'}${artifacts.length ? `<div class="artifact-list">${artifacts.map((item) => `<a href="/api/v1/artifacts/${escapeHtml(item.artifact_id)}" download>${escapeHtml(item.file_name)} · ${escapeHtml(formatBytes(item.size_bytes))}</a>`).join("")}</div>` : ""}${approvals.map((approval) => `<div class="approval-card"><p>${escapeHtml(approval.summary)}</p><button type="button" data-agent-approval="${escapeHtml(approval.approval_id)}" data-run-id="${escapeHtml(result.agent_run_id)}" data-decision="approved">允许</button><button type="button" data-agent-approval="${escapeHtml(approval.approval_id)}" data-run-id="${escapeHtml(result.agent_run_id)}" data-decision="rejected">拒绝</button></div>`).join("")}${!["succeeded", "failed", "cancelled"].includes(agentStatus) ? `<button type="button" class="secondary-button" data-cancel-run="${escapeHtml(result.agent_run_id)}">停止任务</button>` : ["failed", "cancelled"].includes(agentStatus) ? `<button type="button" class="secondary-button" data-retry-agent="${escapeHtml(result.agent_run_id)}">重试任务</button>` : ""}</div></details>` : "";
+  const usage = result.usage || {};
+  const usageText = usage.total_tokens || usage.prompt_tokens || usage.completion_tokens
+    ? `输入 ${usage.prompt_tokens ?? "-"} · 输出 ${usage.completion_tokens ?? "-"} · 合计 ${usage.total_tokens ?? "-"} tokens`
+    : "供应商未返回用量";
+  const routingReason = result.routing_decision?.fallback_reason || result.routing_decision?.reason || "质量优先能力路由";
+  const modelMeta = message.mode === "assistant" && result.actual_model?.model_name
+    ? `<details class="model-meta"><summary>模型、路由与用量${result.routing_decision?.fallback ? " · 已回退" : ""}</summary><p>${escapeHtml(result.actual_model.provider_name || result.actual_model.provider_id || "模型")} · ${escapeHtml(result.actual_model.model_name)}</p><p>${escapeHtml(routingReason)} · ${escapeHtml(usageText)}</p></details>`
+    : "";
   const audio = result.audio?.status === "completed" ? `<audio class="voice-reply" controls preload="metadata" src="${escapeHtml(result.audio.content_url)}"></audio>` : "";
   return `<article class="message assistant ${escapeHtml(message.channel)}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta"><span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span></div>${blocks}${trace}${agentCard}${audio}${modelMeta}<div class="message-actions"><button type="button" data-message-info="${escapeHtml(message.id)}">查看依据</button><button type="button" data-message-feedback="${escapeHtml(message.id)}">反馈</button></div></article>`;
 }
@@ -422,13 +377,6 @@ function renderTimeline(scrollToBottom = false) {
   target.innerHTML = html.join("");
   renderIcons();
   if (scrollToBottom) requestAnimationFrame(() => { target.scrollTop = target.scrollHeight; });
-}
-
-function formatBytes(bytes) {
-  const value = Number(bytes || 0);
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function renderAttachments() {
@@ -583,7 +531,6 @@ function resizeComposer() {
     const verticalPadding = Number.parseFloat(computed.paddingTop) + Number.parseFloat(computed.paddingBottom);
     input.rows = Math.min(5, Math.max(1, Math.ceil((input.scrollHeight - verticalPadding) / lineHeight)));
   });
-  byId("agent-mode-option").hidden = state.mode !== "assistant";
   if (state.mode !== "assistant") byId("agent-mode").checked = false;
 }
 
@@ -614,7 +561,7 @@ async function selectCharacter(characterId) {
   if (!state.characterMap.has(characterId)) return;
   saveDraft();
   state.selectedCharacterId = characterId;
-  storageSet("project_snow:selected_character", characterId);
+  storageSet(`project_snow:selected_character:${state.mode}`, characterId);
   const thread = getThread(characterId);
   byId("model-override").value = thread.modelOverride || "";
   byId("voice-reply").checked = Boolean(thread.voiceReply);
@@ -629,18 +576,6 @@ async function selectCharacter(characterId) {
   closeDrawers();
   byId("message-input").focus();
   await loadConversation(characterId);
-}
-
-function setMode(mode) {
-  if (!MODE_LABELS[mode] || mode === state.mode) return;
-  saveDraft();
-  state.mode = mode;
-  storageSet("project_snow:mode:v2", mode);
-  updateControls();
-  restoreDraft();
-  renderTimeline(false);
-  updateRequestStatus();
-  byId("message-input").focus();
 }
 
 function setChannel(channel) {
@@ -952,7 +887,7 @@ function renderInfo() {
   const style = result.style_context || {};
   const citations = result.citations || [];
   const webSources = Array.isArray(result.web_sources) ? result.web_sources : [];
-  const toolCalls = Array.isArray(result.tool_calls) ? result.tool_calls : [];
+  const toolCalls = state.mode === "assistant" && Array.isArray(result.tool_calls) ? result.tool_calls : [];
   const sceneText = scene.location_visibility === "visible_for_current_turn"
     ? (scene.co_located ? `双方同处：${scene.character_location || "未定位"}` : `分析员：${scene.analyst_location || "未定位"}；角色：${scene.character_location || "未定位"}`)
     : "当前位置未在本轮对话中公开";
@@ -989,18 +924,20 @@ function renderFeedbackCategories() {
   byId("feedback-categories").innerHTML = `<legend>问题范围</legend>${state.feedbackCategories.map((category) => `<label class="feedback-category"><input type="radio" name="feedback-category" value="${escapeHtml(category.id)}" required /><span><strong>${escapeHtml(category.label)}</strong><span>${escapeHtml(category.description || "")}</span></span></label>`).join("")}`;
 }
 
-function openFeedback(message = null) {
+function openFeedback(message = null, forceProduct = false) {
   const character = currentCharacter();
-  if (!character) {
-    showToast("请先选择角色。");
-    return;
-  }
-  state.feedbackTarget = message;
+  const productScope = forceProduct || state.surface === "landing" || !character;
+  state.feedbackTarget = productScope ? { scope: "product", message: null } : {
+    scope: message ? "message" : "conversation",
+    message,
+  };
   renderFeedbackCategories();
   byId("feedback-text").value = "";
-  byId("feedback-context").textContent = message
-    ? `将附带 ${character.character_name} 的当前问题、回答、模式和交流媒介。`
-    : `这是关于 ${character.character_name} 当前客户端会话的整体反馈。`;
+  byId("feedback-context").textContent = productScope
+    ? `这是关于 ${state.surface === "landing" ? "入口页" : "客户端"} 的产品反馈，将附带版本和界面来源。`
+    : message
+      ? `将附带 ${character.character_name} 的当前问题、回答、模式和交流媒介。`
+      : `这是关于 ${character.character_name} 当前会话的整体反馈。`;
   byId("feedback-dialog").showModal();
   setTimeout(() => byId("feedback-text").focus(), 0);
 }
@@ -1011,11 +948,16 @@ async function submitFeedback(event) {
   const thread = currentThread();
   const category = document.querySelector('input[name="feedback-category"]:checked')?.value;
   const freeText = byId("feedback-text").value.trim();
-  if (!character || !thread || !category || !freeText) {
+  if (!category || !freeText) {
     showToast("请选择问题范围并填写具体说明。");
     return;
   }
-  const message = state.feedbackTarget;
+  const scope = state.feedbackTarget?.scope || (character ? "conversation" : "product");
+  const message = state.feedbackTarget?.message || null;
+  if (scope !== "product" && (!character || !thread)) {
+    showToast("当前会话尚未准备好，请稍后再试。");
+    return;
+  }
   const result = message?.result || null;
   byId("submit-feedback").disabled = true;
   try {
@@ -1023,17 +965,19 @@ async function submitFeedback(event) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        character_id: character.character_id,
-        session_id: thread.sessionId || `client_ui_${character.character_id}`,
+        scope,
+        ui_surface: state.surface,
+        character_id: scope === "product" ? null : character.character_id,
+        session_id: scope === "product" ? null : (thread.sessionId || `client_ui_${character.character_id}`),
         message_id: message?.id || null,
         selected_options: [],
         category,
         free_text: freeText,
-        mode: message?.mode || state.mode,
-        communication_channel: message?.channel || thread.channel,
+        mode: scope === "product" ? null : (message?.mode || state.mode),
+        communication_channel: scope === "product" ? null : (message?.channel || thread.channel),
         registry_version: state.registryVersion,
         client_version: state.clientVersion,
-        message_excerpt: message ? (thread.messages.slice(0, thread.messages.indexOf(message)).reverse().find((item) => item.role === "user")?.text || "") : "",
+        message_excerpt: message && thread ? (thread.messages.slice(0, thread.messages.indexOf(message)).reverse().find((item) => item.role === "user")?.text || "") : "",
         answer_excerpt: result?.answer || message?.text || "",
         agent_run_id: result?.agent_run_id || null,
         actual_model: result?.actual_model || {},
@@ -1061,12 +1005,14 @@ async function clearConversation(mode = null) {
     await api(`/api/v1/mvp/conversations/${encodeURIComponent(character.character_id)}${query}`, { method: "DELETE" });
     if (mode) {
       thread.messages = thread.messages.filter((item) => item.mode !== mode);
+      if (character.conversations) character.conversations[mode] = null;
     } else {
       thread.messages = [];
       thread.sessionId = "";
       thread.conversationId = "";
       thread.latestResult = null;
       character.conversation = null;
+      character.conversations = { immersive: null, assistant: null };
     }
     thread.pending = null;
     thread.retry = null;
@@ -1216,6 +1162,10 @@ async function previewVoice() {
 }
 
 async function bootstrap() {
+  document.body.dataset.surface = state.surface;
+  byId("landing-view").hidden = state.surface !== "landing";
+  byId("chat-app").hidden = state.surface === "landing";
+  byId("surface-label").textContent = state.mode === "assistant" ? "角色助手" : "沉浸式陪伴";
   try {
     const result = await api("/api/v1/mvp/bootstrap", {}, 30000);
     state.clientVersion = result.client_version || state.clientVersion;
@@ -1227,10 +1177,12 @@ async function bootstrap() {
     state.worldSessionId = result.active_world_session_id || "";
     await loadModels();
     setConnection(true, state.enabled ? `已连接 · ${result.model || "模型已配置"}` : "已连接 · 模型未开启");
-    const savedCharacter = storageGet("project_snow:selected_character", "");
+    renderLandingCharacters();
+    renderFeedbackCategories();
+    if (state.surface === "landing") return;
+    const savedCharacter = storageGet(`project_snow:selected_character:${state.mode}`, "");
     const selected = state.characterMap.has(savedCharacter) ? savedCharacter : state.characters[0]?.character_id;
     renderCharacterList();
-    renderFeedbackCategories();
     if (selected) await selectCharacter(selected);
   } catch (error) {
     setConnection(false, "服务连接失败");
@@ -1248,10 +1200,6 @@ byId("character-list").addEventListener("click", (event) => {
 byId("character-search").addEventListener("input", (event) => {
   state.search = event.target.value;
   renderCharacterList();
-});
-byId("mode-control").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-mode]");
-  if (button) setMode(button.dataset.mode);
 });
 byId("channel-control").addEventListener("click", (event) => {
   const button = event.target.closest("[data-channel]");
@@ -1306,8 +1254,29 @@ byId("open-contacts").addEventListener("click", () => {
 byId("close-contacts").addEventListener("click", closeDrawers);
 byId("drawer-scrim").addEventListener("click", closeDrawers);
 byId("open-global-feedback").addEventListener("click", () => openFeedback(null));
-byId("open-settings").addEventListener("click", () => byId("settings-dialog").showModal());
-byId("add-attachment").addEventListener("click", () => byId("attachment-input").click());
+byId("floating-feedback").addEventListener("click", () => openFeedback(null, state.surface === "landing"));
+byId("landing-open-feedback").addEventListener("click", () => openFeedback(null, true));
+[byId("open-settings"), byId("landing-open-settings")].forEach((button) => button?.addEventListener("click", () => byId("settings-dialog").showModal()));
+const allAttachmentTypes = "image/jpeg,image/png,image/webp,image/gif,.pdf,.txt,.md,.csv,.json,.docx,.xlsx,.pptx,.py,.js,.ts,.html,.css,audio/wav,audio/mpeg,audio/mp4,audio/webm,audio/ogg";
+byId("add-image").addEventListener("click", () => {
+  byId("attachment-input").accept = "image/jpeg,image/png,image/webp,image/gif";
+  byId("attachment-input").click();
+});
+byId("add-attachment").addEventListener("click", () => {
+  byId("attachment-input").accept = allAttachmentTypes;
+  byId("attachment-input").click();
+});
+byId("add-more-attachment").addEventListener("click", () => {
+  byId("attachment-input").accept = allAttachmentTypes;
+  byId("attachment-input").click();
+  byId("immersive-attachment-menu").removeAttribute("open");
+});
+byId("assistant-tool-toggle").addEventListener("click", () => {
+  const panel = byId("assistant-tool-panel");
+  const expanded = panel.hidden;
+  panel.hidden = !expanded;
+  byId("assistant-tool-toggle").setAttribute("aria-expanded", String(expanded));
+});
 byId("attachment-input").addEventListener("change", async (event) => {
   await uploadFiles(event.target.files);
   event.target.value = "";
@@ -1360,6 +1329,14 @@ byId("preview-voice").addEventListener("click", previewVoice);
 byId("feedback-form").addEventListener("submit", submitFeedback);
 byId("clear-current-mode").addEventListener("click", () => clearConversation(state.mode));
 byId("clear-character").addEventListener("click", () => clearConversation(null));
+document.querySelectorAll("[data-settings-tab]").forEach((button) => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll("[data-settings-tab]").forEach((item) => item.classList.toggle("active", item === button));
+    document.querySelectorAll("[data-settings-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.settingsPanel !== button.dataset.settingsTab;
+    });
+  });
+});
 document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   button.addEventListener("click", () => byId(button.dataset.closeDialog)?.close());
 });

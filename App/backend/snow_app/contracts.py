@@ -179,9 +179,11 @@ class MVPChatRequest(BaseModel):
 
 
 class MVPFeedbackRequest(BaseModel):
-    character_id: str = Field(min_length=1, max_length=120)
-    session_id: str = Field(min_length=1, max_length=160)
+    character_id: str | None = Field(default=None, min_length=1, max_length=120)
+    session_id: str | None = Field(default=None, min_length=1, max_length=160)
     message_id: str | None = Field(default=None, max_length=160)
+    scope: Literal["product", "conversation", "message"] | None = None
+    ui_surface: Literal["landing", "immersive", "assistant", "workspace"] | None = None
     selected_options: list[str] = Field(default_factory=list, max_length=10)
     category: Literal[
         "character_portrayal",
@@ -201,6 +203,17 @@ class MVPFeedbackRequest(BaseModel):
     actual_model: dict[str, Any] = Field(default_factory=dict)
     attachment_ids: list[str] = Field(default_factory=list, max_length=10)
     failed_stage: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_feedback_scope(self) -> "MVPFeedbackRequest":
+        effective_scope = self.scope or ("message" if self.message_id else "conversation")
+        if effective_scope in {"conversation", "message"} and (
+            not self.character_id or not self.session_id
+        ):
+            raise ValueError("会话或消息反馈必须包含角色和会话标识。")
+        if effective_scope == "message" and not self.message_id:
+            raise ValueError("消息反馈必须包含消息标识。")
+        return self
 
 
 class MVPFeedbackTriageRequest(BaseModel):

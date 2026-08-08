@@ -335,43 +335,62 @@ class ConversationStore:
             connection.commit()
         return conversation_id
 
-    def latest_conversations(self) -> list[dict[str, Any]]:
+    def latest_conversations(self, mode: str | None = None) -> list[dict[str, Any]]:
         with _STORE_LOCK, self._connect() as connection:
-            rows = connection.execute(
-                """
+            mode_filter = str(mode or "").strip()
+            if mode_filter:
+                rows = connection.execute(
+                    """
+                    WITH ranked AS (
+                        SELECT c.*, m.text AS last_message, m.role AS last_role,
+                               m.communication_channel AS last_channel,
+                               m.created_at AS last_updated_at,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY c.character_id ORDER BY m.row_id DESC
+                               ) AS rank_number
+                        FROM conversations c
+                        JOIN messages m ON m.conversation_id = c.conversation_id
+                        WHERE m.mode = ?
+                    )
+                    SELECT * FROM ranked WHERE rank_number = 1
+                    ORDER BY last_updated_at DESC
+                    """,
+                    (mode_filter,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
                 WITH ranked AS (
-                    SELECT *, ROW_NUMBER() OVER (
-                        PARTITION BY character_id ORDER BY updated_at DESC
-                    ) AS rank_number
-                    FROM conversations
+                    SELECT c.*, m.text AS last_message, m.role AS last_role,
+                           m.communication_channel AS last_channel,
+                           m.created_at AS last_updated_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY c.character_id ORDER BY m.row_id DESC
+                           ) AS rank_number
+                    FROM conversations c
+                    JOIN messages m ON m.conversation_id = c.conversation_id
                 )
-                SELECT r.*,
-                    (SELECT text FROM messages m WHERE m.conversation_id = r.conversation_id
-                     ORDER BY m.row_id DESC LIMIT 1) AS last_message,
-                    (SELECT role FROM messages m WHERE m.conversation_id = r.conversation_id
-                     ORDER BY m.row_id DESC LIMIT 1) AS last_role
-                FROM ranked r
-                WHERE r.rank_number = 1
-                ORDER BY r.updated_at DESC
+                SELECT * FROM ranked WHERE rank_number = 1
+                ORDER BY last_updated_at DESC
                 """
-            ).fetchall()
+                ).fetchall()
         return [
             {
                 "conversation_id": row["conversation_id"],
                 "session_id": row["session_id"],
                 "character_id": row["character_id"],
                 "world_session_id": row["world_session_id"],
-                "communication_channel": row["communication_channel"],
+                "communication_channel": row["last_channel"] or row["communication_channel"],
                 "last_message": row["last_message"] or "",
                 "last_role": row["last_role"],
-                "updated_at": row["updated_at"],
+                "updated_at": row["last_updated_at"],
             }
             for row in rows
         ]
 
-    def latest_conversation(self, character_id: str) -> dict[str, Any] | None:
+    def latest_conversation(self, character_id: str, mode: str | None = None) -> dict[str, Any] | None:
         return next(
-            (item for item in self.latest_conversations() if item["character_id"] == character_id),
+            (item for item in self.latest_conversations(mode) if item["character_id"] == character_id),
             None,
         )
 
@@ -382,6 +401,7 @@ class ConversationStore:
         session_id: str | None = None,
         before: int | None = None,
         limit: int = 50,
+        mode: str | None = None,
     ) -> dict[str, Any]:
         with _STORE_LOCK, self._connect() as connection:
             if session_id:
@@ -391,6 +411,16 @@ class ConversationStore:
                     WHERE character_id = ? AND session_id = ?
                     """,
                     (character_id, session_id),
+                ).fetchone()
+            elif mode:
+                conversation = connection.execute(
+                    """
+                    SELECT c.* FROM conversations c
+                    JOIN messages m ON m.conversation_id = c.conversation_id
+                    WHERE c.character_id = ? AND m.mode = ?
+                    ORDER BY m.row_id DESC LIMIT 1
+                    """,
+                    (character_id, mode),
                 ).fetchone()
             else:
                 conversation = connection.execute(
@@ -404,6 +434,9 @@ class ConversationStore:
                 return {"conversation": None, "messages": [], "next_before": None}
             query = "SELECT * FROM messages WHERE conversation_id = ?"
             parameters: list[Any] = [conversation["conversation_id"]]
+            if mode:
+                query += " AND mode = ?"
+                parameters.append(mode)
             if before is not None:
                 query += " AND row_id < ?"
                 parameters.append(before)
@@ -433,12 +466,17 @@ class ConversationStore:
                 "session_id": conversation["session_id"],
                 "character_id": conversation["character_id"],
                 "world_session_id": conversation["world_session_id"],
-                "communication_channel": conversation["communication_channel"],
+                "communication_channel": (
+                    messages[-1]["communication_channel"]
+                    if messages
+                    else conversation["communication_channel"]
+                ),
                 "created_at": conversation["created_at"],
                 "updated_at": conversation["updated_at"],
             },
             "messages": messages,
             "next_before": rows[-1]["row_id"] if len(rows) == max(1, min(limit, 100)) else None,
+            "mode": mode,
         }
 
     def clear(self, character_id: str, mode: str | None = None) -> dict[str, Any]:

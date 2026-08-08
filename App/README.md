@@ -4,16 +4,17 @@
 运行时检索索引，并提供 22 名角色的聊天测试客户端、证据工作台和安全的 Electron
 桌面壳。`Data/` 保持只读；所有可再生成或私密的产物均写入 `App/runtime/`。
 
-当前应用版本为 `preview-0.3.0`。角色助手已加入 Provider Registry、多模态附件、STT/TTS
-适配、质量优先路由、持久化 Agent 状态机、授权目录工具、风险审批和可下载 Artifact；沉浸式模式
-仍只获得多模态理解，不开放系统工具。
+当前应用版本为 `v0.5.0`。`/` 是固定的体验选择页，`/immersive/` 与 `/assistant/` 分别保存
+角色选择、草稿和模式内历史；`/workspace/` 使用固定侧栏承载证据、审核、反馈与对话调试。角色助手
+保留 Provider Registry、多模态附件、STT/TTS、质量优先路由、持久化 Agent 状态机、授权目录工具、
+风险审批和可下载 Artifact；沉浸式模式只获得多模态理解，不开放系统工具或技术状态。
 
 ## 目录
 
 ```text
 App/
 ├── backend/       FastAPI API、检索、会话与媒介规则
-├── frontend/      浏览器聊天客户端（`/`）和工作台（`/workspace/`）
+├── frontend/      入口页、沉浸式/助手客户端和工作台
 ├── pipelines/     湖仓、检索、人格资料、图谱与审核管线
 ├── client/        不含凭据的 Electron Windows 桌面壳
 ├── docs/          数据契约、架构与审核说明

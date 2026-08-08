@@ -4,7 +4,9 @@ const { app, BrowserWindow, session } = require("electron");
 const fs = require("fs");
 const path = require("path");
 
-const CHAT_URL = "http://127.0.0.1:8080/";
+const LANDING_URL = "http://127.0.0.1:8080/";
+const IMMERSIVE_URL = "http://127.0.0.1:8080/immersive/";
+const ASSISTANT_URL = "http://127.0.0.1:8080/assistant/";
 const WORKSPACE_URL = "http://127.0.0.1:8080/workspace/";
 const SCREENSHOT_PATH = path.resolve(__dirname, "..", "runtime", "screenshots", "electron-mobile.png");
 
@@ -24,6 +26,30 @@ async function waitForCharacters(window) {
   throw new Error("Character bootstrap did not finish.");
 }
 
+async function waitForLanding(window) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const count = await window.webContents.executeJavaScript(
+      "document.querySelectorAll('.landing-character-mark').length",
+      true,
+    );
+    if (count === 22) return;
+    await delay(100);
+  }
+  throw new Error("Landing bootstrap did not finish.");
+}
+
+async function waitForChatReady(window) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const ready = await window.webContents.executeJavaScript(
+      "!document.getElementById('timeline').innerText.includes('正在读取本地会话')",
+      true,
+    );
+    if (ready) return;
+    await delay(100);
+  }
+  throw new Error("Conversation history did not finish loading.");
+}
+
 async function run() {
   const consoleErrors = [];
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -32,7 +58,7 @@ async function run() {
     height: 844,
     useContentSize: true,
     show: false,
-    backgroundColor: "#111313",
+    backgroundColor: "#eaf4ff",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -45,8 +71,18 @@ async function run() {
   });
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
-  await window.loadURL(CHAT_URL);
+  await window.loadURL(LANDING_URL);
+  await waitForLanding(window);
+  const landing = await window.webContents.executeJavaScript(`(() => ({
+    surface: document.body.dataset.surface,
+    entries: document.querySelectorAll('.experience-card').length,
+    versionVisible: document.body.innerText.includes('v0.5.0 · 本地测试版'),
+    characterMarks: document.querySelectorAll('.landing-character-mark').length
+  }))()`, true);
+
+  await window.loadURL(ASSISTANT_URL);
   await waitForCharacters(window);
+  await waitForChatReady(window);
   const metrics = await window.webContents.executeJavaScript(`(() => {
     const input = document.getElementById("message-input");
     const inputRect = input.getBoundingClientRect();
@@ -61,7 +97,9 @@ async function run() {
       inputPointTarget: document.elementFromPoint(
         inputRect.left + inputRect.width / 2,
         inputRect.top + inputRect.height / 2
-      )?.id || ""
+      )?.id || "",
+      surface: document.body.dataset.surface,
+      toolPanelHidden: document.getElementById('assistant-tool-panel').hidden
     };
   })()`, true);
   const inputX = Math.round((metrics.inputRect.left + metrics.inputRect.right) / 2);
@@ -71,14 +109,10 @@ async function run() {
   await delay(50);
   metrics.activeElement = await window.webContents.executeJavaScript("document.activeElement?.id || ''", true);
 
-  const openContactsRect = await window.webContents.executeJavaScript(`(() => {
-    const rect = document.getElementById("open-contacts").getBoundingClientRect();
-    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-  })()`, true);
-  const contactsX = Math.round((openContactsRect.left + openContactsRect.right) / 2);
-  const contactsY = Math.round((openContactsRect.top + openContactsRect.bottom) / 2);
-  window.webContents.sendInputEvent({ type: "mouseDown", x: contactsX, y: contactsY, button: "left", clickCount: 1 });
-  window.webContents.sendInputEvent({ type: "mouseUp", x: contactsX, y: contactsY, button: "left", clickCount: 1 });
+  await window.webContents.executeJavaScript(
+    "document.getElementById('open-contacts').click()",
+    true,
+  );
   await delay(250);
   metrics.contactDrawer = await window.webContents.executeJavaScript(`(() => ({
     open: document.getElementById("contact-panel").classList.contains("open"),
@@ -92,31 +126,46 @@ async function run() {
   fs.mkdirSync(path.dirname(SCREENSHOT_PATH), { recursive: true });
   fs.writeFileSync(SCREENSHOT_PATH, (await window.webContents.capturePage()).toPNG());
 
+  await window.loadURL(IMMERSIVE_URL);
+  await waitForCharacters(window);
+  const immersive = await window.webContents.executeJavaScript(`(() => ({
+    surface: document.body.dataset.surface,
+    agentControlsHidden: getComputedStyle(document.getElementById('assistant-tool-toggle')).display === 'none',
+    technicalModelHidden: getComputedStyle(document.getElementById('active-model')).display === 'none'
+  }))()`, true);
+
   await window.loadURL(WORKSPACE_URL);
   const workspaceReady = await window.webContents.executeJavaScript(
-    "Boolean(document.getElementById('feedback-inbox') && document.getElementById('mvp-message'))",
+    "Boolean(document.getElementById('feedback-inbox') && document.getElementById('mvp-message') && document.getElementById('workspace-detail-drawer'))",
     true,
   );
 
-  const result = { ...metrics, workspaceReady, consoleErrors, screenshot: SCREENSHOT_PATH };
-  const passed = metrics.mobileMedia
+  const result = { landing, assistant: metrics, immersive, workspaceReady, consoleErrors, screenshot: SCREENSHOT_PATH };
+  const passed = landing.surface === "landing"
+    && landing.entries === 2
+    && landing.versionVisible
+    && landing.characterMarks === 22
+    && metrics.mobileMedia
     && metrics.characterCount === 22
+    && metrics.surface === "assistant"
+    && metrics.toolPanelHidden
     && !metrics.horizontalOverflow
     && metrics.contactTransform !== "none"
     && metrics.contactDrawer.open
     && metrics.contactDrawer.scrimVisible
     && metrics.inputPointTarget === "message-input"
     && metrics.activeElement === "message-input"
+    && immersive.surface === "immersive"
+    && immersive.agentControlsHidden
+    && immersive.technicalModelHidden
     && workspaceReady
     && consoleErrors.length === 0;
   process.stdout.write(`${JSON.stringify({ ...result, passed }, null, 2)}\n`);
   window.destroy();
-  app.quit();
-  if (!passed) process.exitCode = 1;
+  app.exit(passed ? 0 : 1);
 }
 
 app.whenReady().then(run).catch((error) => {
   process.stderr.write(`${error.stack || error.message}\n`);
-  app.quit();
-  process.exitCode = 1;
+  app.exit(1);
 });
