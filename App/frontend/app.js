@@ -29,6 +29,7 @@ const state = {
   infoResult: null,
   search: "",
   revealTimers: new Map(),
+  providers: [],
   models: [],
   modelDefaults: {},
   recording: null,
@@ -43,6 +44,14 @@ const TOOL_LABELS = {
   fetch_web_page: "网页读取",
   get_market_history: "历史行情",
   calculator: "计算器",
+};
+const PROVIDER_PRESETS = {
+  openai: { name: "OpenAI", shortName: "ChatGPT", baseUrl: "https://api.openai.com/v1", modelHint: "填写 OpenAI 模型 ID" },
+  deepseek: { name: "DeepSeek", shortName: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", modelHint: "例如厂商控制台中可用的模型 ID" },
+  dashscope: { name: "阿里云百炼 Qwen", shortName: "Qwen", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", modelHint: "例如 qwen3.7-max" },
+  zhipu: { name: "智谱 GLM", shortName: "GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", modelHint: "填写智谱控制台中的模型 ID" },
+  moonshot: { name: "Moonshot / Kimi", shortName: "Kimi", baseUrl: "https://api.moonshot.cn/v1", modelHint: "填写 Moonshot 控制台中的模型 ID" },
+  "openai-compatible": { name: "自定义兼容接口", shortName: "其他厂商", baseUrl: "", modelHint: "填写兼容接口提供的模型 ID" },
 };
 
 function newClientMessageId() {
@@ -89,6 +98,7 @@ function getThread(characterId) {
       attachments: [],
       uploadingAttachments: 0,
       modelOverride: storageGet(`project_snow:model:${characterId}`, ""),
+      thinkingMode: storageGet(`project_snow:thinking:${characterId}`, "auto"),
       voiceReply: storageGet(`project_snow:voice:${characterId}`, "false") === "true",
     });
   }
@@ -137,14 +147,6 @@ function setConnection(online, detail = "") {
     landing.className = `connection-pill ${online ? "online" : "offline"}`;
     landing.textContent = text;
   }
-}
-
-function renderLandingCharacters() {
-  const target = byId("landing-character-marks");
-  if (!target) return;
-  target.innerHTML = state.characters.map((character) => (
-    `<span class="landing-character-mark">${textPortrait(character)}<span>${escapeHtml(character.character_name)}</span></span>`
-  )).join("");
 }
 
 function renderCharacterList() {
@@ -309,11 +311,20 @@ function messageHtml(message, character) {
       : `<div class="message-bubble${revealClass}"${revealStyle}>${escapeHtml(text)}</div>`;
   }).join("");
   const result = message.result || {};
+  const analysisProcess = message.mode === "assistant" && result.analysis_process && typeof result.analysis_process === "object"
+    ? result.analysis_process : null;
   const traceSummary = message.mode === "assistant" ? String(result.work_summary || "").trim() : "";
   const traceSteps = message.mode === "assistant" && Array.isArray(result.work_steps) ? result.work_steps.filter(Boolean).slice(0, 5) : [];
   const toolCalls = message.mode === "assistant" && Array.isArray(result.tool_calls) ? result.tool_calls : [];
-  const trace = traceSummary || traceSteps.length || toolCalls.length
-    ? `<details class="work-trace" open><summary><i data-lucide="sparkles"></i> ${toolCalls.length ? "角色化处理摘要 · 已使用只读工具" : "角色化处理摘要"}</summary>${traceSummary ? `<p>${escapeHtml(traceSummary)}</p>` : ""}${traceSteps.length ? `<ol>${traceSteps.map((step) => `<li>${escapeHtml(String(step))}</li>`).join("")}</ol>` : ""}${toolCalls.length ? `<div class="tool-trace">${toolCalls.map((call) => `<span class="tool-chip ${call.status === "failed" ? "failed" : ""}">${escapeHtml(TOOL_LABELS[call.name] || call.name || "只读工具")} · ${call.status === "completed" ? "完成" : "未完成"}</span>`).join("")}</div>` : ""}</details>`
+  const analysisSections = Array.isArray(analysisProcess?.sections)
+    ? analysisProcess.sections.filter((item) => item && item.title && item.content).slice(0, 7) : [];
+  const analysisOverview = String(analysisProcess?.overview || traceSummary || "").trim();
+  const legacySections = !analysisSections.length && traceSteps.length
+    ? traceSteps.map((step, index) => ({ title: `处理步骤 ${index + 1}`, content: String(step) })) : [];
+  const visibleSections = analysisSections.length ? analysisSections : legacySections;
+  const traceTitle = String(analysisProcess?.title || `${character.character_name}的分析过程`).trim();
+  const trace = analysisProcess || traceSummary || traceSteps.length || toolCalls.length
+    ? `<details class="work-trace analysis-trace"><summary><span><i data-lucide="sparkles"></i>${escapeHtml(traceTitle)}</span><small>${toolCalls.length ? `已使用 ${toolCalls.length} 项工具` : "展开查看"}</small></summary><div class="analysis-trace-body"><p class="analysis-disclosure">${escapeHtml(analysisProcess?.disclosure || "这是面向你的可核验分析说明，不包含系统提示或模型隐藏推理。")}</p>${analysisOverview ? `<p class="analysis-overview">${escapeHtml(analysisOverview)}</p>` : ""}${visibleSections.map((section) => `<section><h4>${escapeHtml(String(section.title))}</h4><p>${escapeHtml(String(section.content))}</p></section>`).join("")}${toolCalls.length ? `<div class="tool-trace">${toolCalls.map((call) => `<span class="tool-chip ${call.status === "failed" ? "failed" : ""}">${escapeHtml(TOOL_LABELS[call.name] || call.name || "只读工具")} · ${call.status === "completed" ? "完成" : "未完成"}</span>`).join("")}</div>` : ""}</div></details>`
     : "";
   const run = result.agent || null;
   const runSteps = run?.state?.steps || [];
@@ -328,8 +339,12 @@ function messageHtml(message, character) {
     ? `输入 ${usage.prompt_tokens ?? "-"} · 输出 ${usage.completion_tokens ?? "-"} · 合计 ${usage.total_tokens ?? "-"} tokens`
     : "供应商未返回用量";
   const routingReason = result.routing_decision?.fallback_reason || result.routing_decision?.reason || "质量优先能力路由";
+  const thinking = result.thinking_decision || result.routing_decision?.thinking_decision || {};
+  const thinkingText = thinking.effective
+    ? `Thinking ${thinking.effective === "on" ? "已启用" : thinking.effective === "off" ? "已关闭" : "等待路由"} · ${thinking.reason || "策略决定"}`
+    : "";
   const modelMeta = message.mode === "assistant" && result.actual_model?.model_name
-    ? `<details class="model-meta"><summary>模型、路由与用量${result.routing_decision?.fallback ? " · 已回退" : ""}</summary><p>${escapeHtml(result.actual_model.provider_name || result.actual_model.provider_id || "模型")} · ${escapeHtml(result.actual_model.model_name)}</p><p>${escapeHtml(routingReason)} · ${escapeHtml(usageText)}</p></details>`
+    ? `<details class="model-meta"><summary>模型、路由与用量${result.routing_decision?.fallback ? " · 已回退" : ""}</summary><p>${escapeHtml(result.actual_model.provider_name || result.actual_model.provider_id || "模型")} · ${escapeHtml(result.actual_model.model_name)}</p><p>${escapeHtml(routingReason)} · ${escapeHtml(usageText)}</p>${thinkingText ? `<p>${escapeHtml(thinkingText)}</p>` : ""}</details>`
     : "";
   const audio = result.audio?.status === "completed" ? `<audio class="voice-reply" controls preload="metadata" src="${escapeHtml(result.audio.content_url)}"></audio>` : "";
   return `<article class="message assistant ${escapeHtml(message.channel)}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta"><span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span></div>${blocks}${trace}${agentCard}${audio}${modelMeta}<div class="message-actions"><button type="button" data-message-info="${escapeHtml(message.id)}">查看依据</button><button type="button" data-message-feedback="${escapeHtml(message.id)}">反馈</button></div></article>`;
@@ -564,6 +579,7 @@ async function selectCharacter(characterId) {
   storageSet(`project_snow:selected_character:${state.mode}`, characterId);
   const thread = getThread(characterId);
   byId("model-override").value = thread.modelOverride || "";
+  byId("thinking-mode").value = thread.thinkingMode || "auto";
   byId("voice-reply").checked = Boolean(thread.voiceReply);
   if (!state.worldSessionId && thread.worldSessionId) state.worldSessionId = thread.worldSessionId;
   renderCharacterList();
@@ -618,6 +634,7 @@ async function monitorAgentRun(message, thread) {
       message.result.artifacts = snapshot.state?.artifacts || [];
       message.result.actual_model = snapshot.state?.actual_model || message.result.actual_model || {};
       message.result.usage = snapshot.state?.usage || message.result.usage || {};
+      message.result.thinking_decision = snapshot.state?.routing_decision?.thinking_decision || message.result.thinking_decision || {};
       message.result.audio = snapshot.state?.audio || message.result.audio || null;
       if (snapshot.status === "succeeded") {
         message.text = snapshot.state?.final_answer || "任务已经完成，执行步骤和结果都记录在下方。";
@@ -714,7 +731,8 @@ async function queueMessage() {
     attachmentTranscripts: Object.fromEntries(attachments.filter((item) => String(item.mime_type || "").startsWith("audio/") && String(item.edited_transcript || item.extracted_text || "").trim()).map((item) => [item.attachment_id, String(item.edited_transcript || item.extracted_text).trim()])),
     agentMode: state.mode === "assistant" && byId("agent-mode").checked,
     voiceReply: byId("voice-reply").checked,
-    modelOverride: byId("model-override").value,
+    modelOverride: state.mode === "assistant" ? byId("model-override").value : "",
+    thinkingMode: byId("thinking-mode").value,
     modelOnce: byId("model-once").checked,
     sending: false,
   };
@@ -764,6 +782,7 @@ async function dispatchPending({ channel = null, presenceAction = null } = {}) {
         attachment_transcripts: pending.attachmentTranscripts || {},
         voice_reply: Boolean(pending.voiceReply),
         agent_mode: Boolean(pending.agentMode),
+        thinking_mode: pending.thinkingMode || "auto",
         model_override: pending.modelOverride ? (() => { const [provider_id, model_name] = pending.modelOverride.split("::"); return { provider_id, model_name }; })() : null,
       }),
     }, 135000);
@@ -1029,6 +1048,120 @@ async function clearConversation(mode = null) {
   }
 }
 
+function updateWindowsEnvGuide() {
+  const target = byId("windows-env-code");
+  if (!target) return;
+  const preset = PROVIDER_PRESETS[byId("provider-kind").value] || PROVIDER_PRESETS["openai-compatible"];
+  const baseUrl = byId("provider-url").value.trim() || preset.baseUrl || "<兼容接口 Base URL>";
+  const modelName = byId("provider-model-select").value
+    || byId("provider-model").value.trim()
+    || "<从厂商列表选择的模型 ID>";
+  const quote = (value) => String(value).replaceAll('"', '`"');
+  target.textContent = [
+    "# 仅在当前 PowerShell 窗口生效（建议先这样测试）",
+    '$env:MVP_CHAT_ENABLED = "true"',
+    '$env:MVP_CHAT_PROVIDER = "openai-compatible"',
+    `$env:MVP_CHAT_BASE_URL = "${quote(baseUrl)}"`,
+    '$env:MVP_CHAT_API_KEY = "<粘贴你的 API Key>"',
+    `$env:MVP_CHAT_MODEL = "${quote(modelName)}"`,
+    "",
+    "# 然后在同一个 PowerShell 窗口中重启 API",
+    "python -m uvicorn backend.snow_app.main:app --host 127.0.0.1 --port 8000",
+    "",
+    "# 如需长期写入当前 Windows 用户环境（执行后新开 PowerShell）",
+    `[Environment]::SetEnvironmentVariable("MVP_CHAT_BASE_URL", "${quote(baseUrl)}", "User")`,
+    '[Environment]::SetEnvironmentVariable("MVP_CHAT_API_KEY", "<粘贴你的 API Key>", "User")',
+    `[Environment]::SetEnvironmentVariable("MVP_CHAT_MODEL", "${quote(modelName)}", "User")`,
+    '[Environment]::SetEnvironmentVariable("MVP_CHAT_ENABLED", "true", "User")',
+  ].join("\n");
+}
+
+function selectProvider(kind, resetModel = true) {
+  const preset = PROVIDER_PRESETS[kind] || PROVIDER_PRESETS["openai-compatible"];
+  const custom = kind === "openai-compatible";
+  byId("provider-kind").value = kind;
+  byId("provider-name").value = preset.name;
+  byId("provider-url").value = preset.baseUrl;
+  byId("provider-model").placeholder = preset.modelHint;
+  if (resetModel) byId("provider-model").value = "";
+  byId("provider-key").value = "";
+  byId("provider-url-field").hidden = !custom;
+  byId("provider-model-field").hidden = !custom;
+  document.querySelectorAll("[data-provider-choice]").forEach((button) => {
+    const active = button.dataset.providerChoice === kind;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  const providerId = custom ? "custom-ui" : kind;
+  const configured = state.providers.find((item) => item.provider_id === providerId)?.configured;
+  byId("provider-key").placeholder = configured
+    ? "已配置；留空可沿用 Windows 凭据库中的 Key"
+    : "仅发送到本地服务，不会回显";
+  byId("provider-status").textContent = configured
+    ? `${preset.shortName} 已配置；可重新读取模型或更新 API Key。`
+    : `${preset.shortName} 已选中；填写 API Key 后读取模型。`;
+  renderProviderModelPicker();
+  updateWindowsEnvGuide();
+}
+
+function activeProviderId() {
+  const kind = byId("provider-kind").value;
+  return kind === "openai-compatible" ? "custom-ui" : kind;
+}
+
+function modelValue(item) {
+  return `${item.provider_id}::${item.model_name}`;
+}
+
+function modelStateLabel(item) {
+  if (item.text_status === "ready") return "文本可用";
+  if (item.text_status === "failed") return "文本验证失败";
+  return "已发现 · 待验证";
+}
+
+function renderProviderModelPicker() {
+  const picker = byId("provider-model-select");
+  if (!picker) return;
+  const current = picker.value;
+  const models = state.models.filter((item) => item.provider_id === activeProviderId() && item.selectable !== false);
+  const categoryLabels = { recommended: "推荐", other_text: "其他文本模型", unknown_purpose: "用途待确认" };
+  const groups = new Map();
+  models.forEach((item) => {
+    const category = item.probe?.category || "other_text";
+    if (!groups.has(category)) groups.set(category, []);
+    groups.get(category).push(item);
+  });
+  const options = [];
+  ["recommended", "other_text", "unknown_purpose"].forEach((category) => {
+    const items = groups.get(category) || [];
+    if (!items.length) return;
+    options.push(`<optgroup label="${categoryLabels[category]}">${items.map((item) => `<option value="${escapeHtml(item.model_name)}">${escapeHtml(item.model_name)} · ${escapeHtml(modelStateLabel(item))}</option>`).join("")}</optgroup>`);
+  });
+  picker.innerHTML = options.join("") || '<option value="">保存 API Key 后读取模型</option>';
+  if ([...picker.options].some((option) => option.value === current)) picker.value = current;
+  updateWindowsEnvGuide();
+}
+
+function renderProviderChoices() {
+  const configured = new Set(state.providers.filter((item) => item.configured).map((item) => item.provider_id));
+  document.querySelectorAll("[data-provider-choice]").forEach((button) => {
+    const providerId = button.dataset.providerChoice === "openai-compatible" ? "custom-ui" : button.dataset.providerChoice;
+    button.classList.toggle("configured", configured.has(providerId));
+    button.title = configured.has(providerId) ? "已保存到 Windows 凭据库" : "尚未保存";
+  });
+}
+
+async function loadProviders() {
+  try {
+    const result = await api("/api/v1/providers", {}, 30000);
+    state.providers = result.providers || [];
+    renderProviderChoices();
+    selectProvider(byId("provider-kind").value, false);
+  } catch (_) {
+    state.providers = [];
+  }
+}
+
 function providerPayload() {
   const kind = byId("provider-kind").value;
   const builtinUrls = {
@@ -1046,52 +1179,87 @@ function providerPayload() {
     api_key: byId("provider-key").value.trim(),
     enabled: true,
     trusted_data_types: byId("trust-images").checked ? ["text", "image", "document", "audio"] : ["text"],
-    config: {
-      tts_voice: byId("tts-voice").value.trim() || undefined,
-      voice_by_character: state.selectedCharacterId && byId("character-voice").value.trim()
-        ? { [state.selectedCharacterId]: byId("character-voice").value.trim() }
-        : {},
-    },
+    config: {},
   };
 }
 
-async function configureProvider(andProbe = false) {
+async function configureProvider() {
   const status = byId("provider-status");
   try {
     const payload = providerPayload();
     if (!payload.base_url) throw new Error("请填写 Provider Base URL。");
+    const existing = state.providers.find((item) => item.provider_id === payload.provider_id);
+    if (!payload.api_key && !existing?.configured) throw new Error("请填写该厂商的 API Key。");
     status.textContent = "正在保存本地 Provider 配置…";
     const saved = await api("/api/v1/providers", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     }, 30000);
     byId("provider-key").value = "";
-    if (andProbe) {
-      const model = byId("provider-model").value.trim();
-      if (!model) throw new Error("探测前请填写模型名称。");
-      status.textContent = "正在执行真实文本能力探测…";
-      await api(`/api/v1/providers/${encodeURIComponent(saved.provider_id)}/probe`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model_name: model,
-          quality_score: Number(byId("provider-quality").value || 50),
-          context_window: Number(byId("provider-context").value || 0) || null,
-          max_output_tokens: Number(byId("provider-max-output").value || 0) || null,
-          capabilities: {
-          structured_output: true,
-          native_tool_calling: byId("cap-tools").checked,
-          streaming: byId("cap-streaming").checked,
-          vision: byId("cap-vision").checked,
-          speech_to_text: byId("cap-stt").checked,
-          text_to_speech: byId("cap-tts").checked,
-        } }),
-      }, 120000);
-      status.textContent = "探测成功；已记录真实文本探测和用户声明能力。";
-      await loadModels();
-    } else {
-      status.textContent = "Provider 已保存；API Key 不会在页面回显。";
+    status.textContent = "正在从厂商读取当前账户可用模型…";
+    const discovery = await api(`/api/v1/providers/${encodeURIComponent(saved.provider_id)}/discover-models`, {
+      method: "POST",
+    }, 60000);
+    await Promise.all([loadModels(), loadProviders()]);
+    renderProviderModelPicker();
+    if (discovery.status === "failed") {
+      status.textContent = `${discovery.error}${discovery.stale ? " 已保留缓存模型。" : ""}`;
+      const manual = byId("provider-model").value.trim();
+      if (payload.kind === "openai-compatible" && manual) {
+        byId("provider-model-select").innerHTML = `<option value="${escapeHtml(manual)}">${escapeHtml(manual)} · 手动模型</option>`;
+      }
+      return;
+    }
+    const selectedModel = byId("provider-model-select").value;
+    status.textContent = `已读取 ${discovery.models?.length || 0} 个模型；模型现在即可选择，附加能力验证不会阻止文本使用。`;
+    if (selectedModel) {
+      await ensureInitialModelDefaults(saved.provider_id, selectedModel);
+      verifySelectedProviderModel({ background: true });
     }
   } catch (error) {
     status.textContent = `配置失败：${error.message}`;
+  }
+}
+
+async function verifySelectedProviderModel({ background = false } = {}) {
+  const status = byId("provider-status");
+  const providerId = activeProviderId();
+  const model = byId("provider-model-select").value || byId("provider-model").value.trim();
+  if (!model) {
+    if (!background) status.textContent = "请先从厂商列表选择模型。";
+    return;
+  }
+  if (!background) status.textContent = "正在验证文本、结构化输出和流式能力…";
+  try {
+    const result = await api(`/api/v1/providers/${encodeURIComponent(providerId)}/probe`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model_name: model,
+        quality_score: 50,
+        capabilities: { structured_output: true, native_tool_calling: false, streaming: true },
+      }),
+    }, 120000);
+    await loadModels();
+    status.textContent = result.capabilities?.structured_output
+      ? "文本连接成功；结构化输出可用，其他能力按各自验证结果启用。"
+      : "文本连接成功；结构化输出未通过，但该模型仍可用于普通文本。";
+  } catch (error) {
+    await loadModels();
+    status.textContent = `文本验证失败：${error.message}。模型选择会保留，修正 Key、权限或余额后可重试。`;
+  }
+}
+
+async function ensureInitialModelDefaults(providerId, modelName) {
+  if (Object.keys(state.modelDefaults || {}).length) return;
+  const value = { provider_id: providerId, model_name: modelName };
+  try {
+    const result = await api("/api/v1/models/defaults", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ immersive_text: value, assistant_text: value, assistant_agent: value }),
+    });
+    state.modelDefaults = result.defaults || {};
+    renderModelDefaults();
+  } catch (_) {
+    // Discovery remains useful even when a vendor model is not Agent-ready.
   }
 }
 
@@ -1100,65 +1268,75 @@ async function loadModels() {
     const result = await api("/api/v1/models", {}, 30000);
     state.models = result.models || [];
     state.modelDefaults = result.defaults || {};
-    const verified = state.models.filter((item) => item.probe_status === "verified");
+    const selectable = state.models.filter((item) => item.selectable !== false && item.capabilities?.text === true);
     const picker = byId("model-override");
     const selected = currentThread()?.modelOverride || picker.value;
-    picker.innerHTML = '<option value="">质量优先自动路由</option>' + verified.map((item) => `<option value="${escapeHtml(`${item.provider_id}::${item.model_name}`)}">${escapeHtml(item.provider_name || item.provider_id)} · ${escapeHtml(item.model_name)}</option>`).join("");
+    picker.innerHTML = '<option value="">使用助手默认模型</option>' + selectable.map((item) => `<option value="${escapeHtml(modelValue(item))}">${escapeHtml(item.provider_name || item.provider_id)} · ${escapeHtml(item.model_name)} · ${escapeHtml(modelStateLabel(item))}</option>`).join("");
     picker.value = [...picker.options].some((option) => option.value === selected) ? selected : "";
-    byId("active-model").textContent = verified.length ? `自动路由 · ${verified.length} 个已验证模型` : "自动路由 · 当前环境模型";
+    const readyCount = selectable.filter((item) => item.text_status === "ready").length;
+    byId("active-model").textContent = selectable.length
+      ? `${selectable.length} 个可选模型 · ${readyCount} 个文本已验证`
+      : "尚未发现模型 · 可沿用环境配置";
     const capabilityLabels = { text: "文本", structured_output: "结构化", native_tool_calling: "工具", vision: "视觉", speech_to_text: "STT", text_to_speech: "TTS", streaming: "流式" };
-    byId("model-capability-list").innerHTML = verified.map((item) => {
+    const providerModels = selectable.filter((item) => item.provider_id === activeProviderId());
+    byId("model-capability-list").innerHTML = providerModels.map((item) => {
       const enabled = Object.entries(item.capabilities || {}).filter(([, value]) => value === true).map(([key]) => capabilityLabels[key] || key).join(" · ");
       const latency = item.probe?.latency_ms ? `${Math.round(item.probe.latency_ms)} ms` : "延迟未知";
-      return `<div><strong>${escapeHtml(item.provider_name || item.provider_id)} · ${escapeHtml(item.model_name)}</strong><small>${escapeHtml(enabled || "仅文本待验证")} · 质量 ${Number(item.quality_score || 0)} · ${escapeHtml(latency)}</small></div>`;
-    }).join("") || "<p>尚无已验证模型。</p>";
-    const defaultBindings = [
-      ["default-text-model", "text", "text"],
-      ["default-vision-model", "vision", "vision"],
-      ["default-stt-model", "speech_to_text", "speech_to_text"],
-      ["default-tts-model", "text_to_speech", "text_to_speech"],
-    ];
-    defaultBindings.forEach(([id, key, capability]) => {
-      const target = byId(id);
-      const eligible = verified.filter((item) => item.capabilities?.[capability]);
-      target.innerHTML = `<option value="">${key === "text" ? "自动选择文本模型" : `不指定 ${capability}`}</option>` + eligible.map((item) => `<option value="${escapeHtml(`${item.provider_id}::${item.model_name}`)}">${escapeHtml(item.provider_name || item.provider_id)} · ${escapeHtml(item.model_name)}</option>`).join("");
-      const current = state.modelDefaults[key];
-      target.value = current ? `${current.provider_id}::${current.model_name}` : "";
-    });
+      const stateClass = item.text_status === "ready" ? "ready" : (item.text_status === "failed" ? "failed" : "");
+      return `<div><strong>${escapeHtml(item.provider_name || item.provider_id)} · ${escapeHtml(item.model_name)}</strong><small>${escapeHtml(enabled || "文本用途待验证")} · ${escapeHtml(latency)}</small><span class="model-state ${stateClass}">${escapeHtml(modelStateLabel(item))}</span></div>`;
+    }).join("") || "<p>该厂商尚未读取到模型。</p>";
+    renderProviderModelPicker();
+    renderModelDefaults();
   } catch (_) {
     byId("active-model").textContent = "自动路由";
   }
 }
 
-async function saveModelDefaults() {
-  const bindings = { text: "default-text-model", vision: "default-vision-model", speech_to_text: "default-stt-model", text_to_speech: "default-tts-model" };
-  const payload = {};
-  Object.entries(bindings).forEach(([key, id]) => {
-    const value = byId(id).value;
-    if (!value) return;
-    const [provider_id, model_name] = value.split("::");
-    payload[key] = { provider_id, model_name };
+function renderModelDefaults() {
+  const selectable = state.models.filter((item) => item.selectable !== false && item.capabilities?.text === true);
+  const options = '<option value="">沿用兼容默认</option>' + selectable.map((item) => `<option value="${escapeHtml(modelValue(item))}">${escapeHtml(item.provider_name || item.provider_id)} · ${escapeHtml(item.model_name)} · ${escapeHtml(modelStateLabel(item))}</option>`).join("");
+  const bindings = [
+    ["default-immersive-model", "immersive_text"],
+    ["default-assistant-model", "assistant_text"],
+    ["default-agent-model", "assistant_agent"],
+  ];
+  bindings.forEach(([id, key]) => {
+    const select = byId(id);
+    if (!select) return;
+    select.innerHTML = options;
+    const value = state.modelDefaults?.[key];
+    const serialized = value?.provider_id && value?.model_name ? `${value.provider_id}::${value.model_name}` : "";
+    select.value = [...select.options].some((option) => option.value === serialized) ? serialized : "";
   });
-  try {
-    await api("/api/v1/models/defaults", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }, 30000);
-    showToast("默认模型已保存。后续自动路由仍会检查模态与 Provider 授权。");
-    await loadModels();
-  } catch (error) { showToast(`默认模型保存失败：${error.message}`); }
 }
 
-async function previewVoice() {
-  const character = currentCharacter();
-  if (!character) return showToast("请先选择角色。");
+function parseModelSelection(value) {
+  if (!value) return null;
+  const separator = value.indexOf("::");
+  if (separator < 1) return null;
+  return { provider_id: value.slice(0, separator), model_name: value.slice(separator + 2) };
+}
+
+async function saveModelDefaults() {
+  const status = byId("provider-status");
+  const immersive = parseModelSelection(byId("default-immersive-model").value);
+  const assistant = parseModelSelection(byId("default-assistant-model").value);
+  const agent = parseModelSelection(byId("default-agent-model").value) || assistant;
+  if (!immersive || !assistant) {
+    status.textContent = "请分别选择沉浸式和助手默认模型。";
+    return;
+  }
   try {
-    const result = await api("/api/v1/voices/preview", {
+    const result = await api("/api/v1/models/defaults", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ character_id: character.character_id, text: `你好，分析员。我是${character.character_name}。` }),
-    }, 180000);
-    if (result.content_url) {
-      const audio = new Audio(result.content_url);
-      await audio.play();
-    }
-  } catch (error) { showToast(`试听失败：${error.message}`); }
+      body: JSON.stringify({ immersive_text: immersive, assistant_text: assistant, assistant_agent: agent }),
+    });
+    state.modelDefaults = result.defaults || {};
+    renderModelDefaults();
+    status.textContent = "默认模型已保存；切换模型不会改变角色记忆、关系或场景。";
+  } catch (error) {
+    status.textContent = `默认模型保存失败：${error.message}`;
+  }
 }
 
 async function bootstrap() {
@@ -1175,9 +1353,8 @@ async function bootstrap() {
     state.characterMap = new Map(state.characters.map((item) => [item.character_id, item]));
     state.feedbackCategories = result.feedback_categories || [];
     state.worldSessionId = result.active_world_session_id || "";
-    await loadModels();
+    await Promise.all([loadModels(), loadProviders()]);
     setConnection(true, state.enabled ? `已连接 · ${result.model || "模型已配置"}` : "已连接 · 模型未开启");
-    renderLandingCharacters();
     renderFeedbackCategories();
     if (state.surface === "landing") return;
     const savedCharacter = storageGet(`project_snow:selected_character:${state.mode}`, "");
@@ -1294,6 +1471,12 @@ byId("model-override").addEventListener("change", (event) => {
   thread.modelOverride = event.target.value;
   if (!byId("model-once").checked) storageSet(`project_snow:model:${thread.characterId}`, thread.modelOverride);
 });
+byId("thinking-mode").addEventListener("change", (event) => {
+  const thread = currentThread();
+  if (!thread) return;
+  thread.thinkingMode = event.target.value;
+  storageSet(`project_snow:thinking:${thread.characterId}`, thread.thinkingMode);
+});
 byId("attachment-preview").addEventListener("click", (event) => {
   const remove = event.target.closest("[data-remove-attachment]");
   const retry = event.target.closest("[data-retry-transcription]");
@@ -1322,10 +1505,23 @@ byId("message-input").addEventListener("paste", (event) => {
   const files = Array.from(event.clipboardData?.items || []).filter((item) => item.kind === "file").map((item) => item.getAsFile()).filter(Boolean);
   if (files.length) uploadFiles(files);
 });
-byId("save-provider").addEventListener("click", () => configureProvider(false));
-byId("probe-provider").addEventListener("click", () => configureProvider(true));
+document.querySelectorAll("[data-provider-choice]").forEach((button) => {
+  button.addEventListener("click", () => selectProvider(button.dataset.providerChoice));
+});
+byId("provider-model").addEventListener("input", updateWindowsEnvGuide);
+byId("provider-model-select").addEventListener("change", updateWindowsEnvGuide);
+byId("provider-url").addEventListener("input", updateWindowsEnvGuide);
+byId("probe-provider").addEventListener("click", configureProvider);
+byId("verify-provider-model").addEventListener("click", () => verifySelectedProviderModel());
 byId("save-model-defaults").addEventListener("click", saveModelDefaults);
-byId("preview-voice").addEventListener("click", previewVoice);
+byId("copy-windows-env").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(byId("windows-env-code").textContent);
+    showToast("PowerShell 命令已复制；请先替换 API Key 占位符。");
+  } catch (_) {
+    showToast("浏览器未允许复制，请手动选择命令文本。");
+  }
+});
 byId("feedback-form").addEventListener("submit", submitFeedback);
 byId("clear-current-mode").addEventListener("click", () => clearConversation(state.mode));
 byId("clear-character").addEventListener("click", () => clearConversation(null));
@@ -1344,5 +1540,6 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
 window.addEventListener("online", () => setConnection(true));
 window.addEventListener("offline", () => setConnection(false, "网络不可用"));
 
+selectProvider(byId("provider-kind").value, false);
 renderIcons();
 bootstrap();

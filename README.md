@@ -247,7 +247,7 @@ MVP_CHAT_MODEL=your-model-name
 MVP_CHAT_TIMEOUT_SECONDS=120
 MVP_CHAT_IMMERSIVE_TEMPERATURE=0.45
 MVP_CHAT_ASSISTANT_TEMPERATURE=0.20
-# 助手模式允许更详细的回答；以下是可见执行摘要和只读联网工具的上限
+# 助手模式允许更详细的回答；以下是可见分析过程和只读联网工具的上限
 MVP_CHAT_ASSISTANT_MAX_TOKENS=8192
 MVP_CHAT_WEB_TIMEOUT_SECONDS=15
 MVP_CHAT_WEB_MAX_RESULTS=5
@@ -256,10 +256,32 @@ MVP_CHAT_WEB_MAX_RESULTS=5
 关系候选抽取与独立复核分别使用 `RELATION_CANDIDATE_*` 和 `RELATION_REVIEW_*`，它们不会自动复用
 聊天密钥。进程环境变量优先于 `.env`；不要把真实密钥粘贴到 README、issue、截图或提交记录中。
 
-`v0.5.0` 也可以在客户端“设置 → 模型与 Provider”中添加模型。后端先把 Key 写入 Windows
-凭据库，再执行真实文本探测；视觉、STT、TTS 等无法在无样例条件下探测的能力必须由用户明确勾选。
-Provider 还需要被明确授权接收图片、文档或音频，路由器才会把对应附件发给它。环境变量模型继续作为
-兼容回退，但不会被静默用于私人附件。
+`v0.5.0` 也可以在客户端“设置 → 模型厂商”中选择 ChatGPT/OpenAI、DeepSeek、Qwen、GLM、
+Kimi 或自定义兼容接口。五个内置厂商只需填写 API Key：后端先把 Key 写入 Windows 凭据库，
+再从厂商 `/models` 接口读取当前账户可用模型。自定义兼容接口才需要填写 API 地址，并可在模型
+发现不可用时手动填写模型 ID。Provider 还需要被明确授权接收图片、文档或音频，路由器才会把
+对应附件发给它；尚未验证的视觉、STT 和 TTS 能力不会根据模型名称自动开启。
+
+模型“可选择”与“已验证”是两个状态：厂商发现的文本模型可以立即手动选择；只有通过基础文本
+连接测试的模型才会进入质量优先自动路由。结构化输出、流式、视觉或工具调用探测失败，只会关闭
+相应能力，不会再把普通文本模型整体判为不可用。沉浸式、助手问答和 Agent 分别保存默认模型。
+沉浸式强制关闭 thinking；助手普通问答默认关闭，复杂分析和 Agent 按任务启用。厂商隐藏推理
+不会显示在客户端，可收起的角色化分析过程是单独生成并校验的用户可见摘要。
+
+如需直接在 Windows PowerShell 中切换一个默认厂商，可在 `App` 目录执行以下命令。把地址、Key
+和模型 ID 换成厂商控制台提供的实际值，并在同一个 PowerShell 窗口重启 API：
+
+```powershell
+$env:MVP_CHAT_ENABLED = "true"
+$env:MVP_CHAT_PROVIDER = "openai-compatible"
+$env:MVP_CHAT_BASE_URL = "https://your-provider.example/v1"
+$env:MVP_CHAT_API_KEY = "<你的 API Key>"
+$env:MVP_CHAT_MODEL = "<厂商提供的模型 ID>"
+python -m uvicorn backend.snow_app.main:app --host 127.0.0.1 --port 8000
+```
+
+客户端会根据所选厂商自动生成可复制的当前会话和 Windows 用户级环境变量命令。环境变量模型继续
+作为兼容回退，但不会被静默用于私人附件；ChatGPT 订阅本身也不等同于 OpenAI API Key。
 
 常用新增接口：
 
@@ -269,6 +291,8 @@ POST   /api/v1/attachments/{id}/transcription
 GET    /api/v1/models
 GET/POST /api/v1/providers
 POST   /api/v1/providers/{id}/probe
+POST   /api/v1/providers/{id}/discover-models
+POST   /api/v1/models/defaults
 POST   /api/v1/agent/runs
 GET    /api/v1/agent/runs/{id}
 GET    /api/v1/agent/runs/{id}/events

@@ -70,7 +70,7 @@ export function formatBytes(bytes) {
 
 export function textPortrait(character, size = "") {
   const name = String(character?.character_name || "?").trim();
-  const monogram = name.length <= 2 ? name : name.slice(-2);
+  const monogram = name.slice(0, 1) || "?";
   const generated = String(character?.generated_portrait || "").trim();
   if (generated) {
     return `<span class="portrait ${size}"><img src="${escapeHtml(generated)}" alt="${escapeHtml(name)}" /></span>`;

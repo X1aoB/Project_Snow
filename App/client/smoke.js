@@ -28,11 +28,11 @@ async function waitForCharacters(window) {
 
 async function waitForLanding(window) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    const count = await window.webContents.executeJavaScript(
-      "document.querySelectorAll('.landing-character-mark').length",
+    const ready = await window.webContents.executeJavaScript(
+      "document.querySelectorAll('.experience-card').length === 2 && document.body.innerText.includes('v0.5.0')",
       true,
     );
-    if (count === 22) return;
+    if (ready) return;
     await delay(100);
   }
   throw new Error("Landing bootstrap did not finish.");
@@ -77,7 +77,7 @@ async function run() {
     surface: document.body.dataset.surface,
     entries: document.querySelectorAll('.experience-card').length,
     versionVisible: document.body.innerText.includes('v0.5.0 · 本地测试版'),
-    characterMarks: document.querySelectorAll('.landing-character-mark').length
+    rosterRemoved: !document.body.innerText.includes('她们都在这里')
   }))()`, true);
 
   await window.loadURL(ASSISTANT_URL);
@@ -108,6 +108,25 @@ async function run() {
   window.webContents.sendInputEvent({ type: "mouseUp", x: inputX, y: inputY, button: "left", clickCount: 1 });
   await delay(50);
   metrics.activeElement = await window.webContents.executeJavaScript("document.activeElement?.id || ''", true);
+
+  metrics.providerSettings = await window.webContents.executeJavaScript(`(() => {
+    document.getElementById("open-settings").click();
+    document.querySelector('[data-provider-choice="deepseek"]').click();
+    const model = document.getElementById("provider-model");
+    model.value = "deepseek-v4-flash";
+    model.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector(".windows-env-guide").open = true;
+    const guide = document.getElementById("windows-env-code").textContent;
+    const result = {
+      vendorButtons: document.querySelectorAll("[data-provider-choice]").length,
+      selectedVendor: document.getElementById("provider-kind").value,
+      guideHasEndpoint: guide.includes("https://api.deepseek.com/v1"),
+      guideHasModel: guide.includes("deepseek-v4-flash"),
+      guideHasSecretPlaceholder: guide.includes("<粘贴你的 API Key>"),
+    };
+    document.getElementById("settings-dialog").close();
+    return result;
+  })()`, true);
 
   await window.webContents.executeJavaScript(
     "document.getElementById('open-contacts').click()",
@@ -144,7 +163,7 @@ async function run() {
   const passed = landing.surface === "landing"
     && landing.entries === 2
     && landing.versionVisible
-    && landing.characterMarks === 22
+    && landing.rosterRemoved
     && metrics.mobileMedia
     && metrics.characterCount === 22
     && metrics.surface === "assistant"
@@ -155,6 +174,11 @@ async function run() {
     && metrics.contactDrawer.scrimVisible
     && metrics.inputPointTarget === "message-input"
     && metrics.activeElement === "message-input"
+    && metrics.providerSettings.vendorButtons === 6
+    && metrics.providerSettings.selectedVendor === "deepseek"
+    && metrics.providerSettings.guideHasEndpoint
+    && metrics.providerSettings.guideHasModel
+    && metrics.providerSettings.guideHasSecretPlaceholder
     && immersive.surface === "immersive"
     && immersive.agentControlsHidden
     && immersive.technicalModelHidden

@@ -6,11 +6,12 @@ import tempfile
 from threading import Event
 import time
 import unittest
+from unittest.mock import Mock, patch
 
 from backend.snow_app.agent_runtime import AgentRuntime, AgentSecurityError
 from backend.snow_app.agent_store import AgentStore
 from backend.snow_app.attachment_manager import AttachmentError, AttachmentManager
-from backend.snow_app.provider_registry import ProviderRegistry
+from backend.snow_app.provider_registry import ModelSelection, ProviderRegistry
 
 
 class _Vault:
@@ -27,7 +28,7 @@ class _NoProvider:
 
 
 class _ApprovalRuntime(AgentRuntime):
-    def _plan(self, task, override):
+    def _plan(self, task, override, thinking_mode="auto"):
         return ([{"tool": "powershell", "arguments": {"command": "Remove-Item important.txt"}}], {"reason": "test"})
 
 
@@ -69,6 +70,100 @@ class MultimodalAgentTests(unittest.TestCase):
             selected = registry.route({"text", "vision"}, required_data_types={"text", "image"})
             self.assertEqual(selected.provider_id, "high")
             self.assertEqual(selected.quality_score, 90)
+
+    def test_discovered_model_is_selectable_before_probe_but_not_auto_routed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = AgentStore(Path(temp) / "agent.sqlite3")
+            registry = ProviderRegistry(store)
+            registry.vault = _Vault()
+            store.upsert_provider({
+                "provider_id": "deepseek", "display_name": "DeepSeek", "kind": "deepseek",
+                "base_url": "https://api.deepseek.com/v1", "credential_ref": "deepseek",
+                "enabled": True, "trusted_data_types": ["text"],
+            })
+            response = Mock()
+            response.raise_for_status.return_value = None
+            response.json.return_value = {"data": [{"id": "deepseek-v4-flash"}, {"id": "deepseek-v4-pro"}]}
+            with patch("backend.snow_app.provider_registry.httpx.get", return_value=response):
+                discovered = registry.discover_models("deepseek")
+            self.assertEqual(discovered["status"], "succeeded")
+            flash = next(item for item in discovered["models"] if item["model_name"] == "deepseek-v4-flash")
+            self.assertTrue(flash["selectable"])
+            self.assertEqual(flash["text_status"], "unverified")
+            selected = registry.route(
+                {"text"}, {"provider_id": "deepseek", "model_name": "deepseek-v4-flash"}
+            )
+            self.assertEqual(selected.model_name, "deepseek-v4-flash")
+            with self.assertRaises(ValueError):
+                registry.route({"text"})
+
+    def test_deepseek_probe_disables_thinking_and_keeps_text_when_json_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = AgentStore(Path(temp) / "agent.sqlite3")
+            registry = ProviderRegistry(store)
+            registry.vault = _Vault()
+            store.upsert_provider({
+                "provider_id": "deepseek", "display_name": "DeepSeek", "kind": "deepseek",
+                "base_url": "https://api.deepseek.com/v1", "credential_ref": "deepseek",
+                "enabled": True, "trusted_data_types": ["text"],
+            })
+            basic = Mock(status_code=200)
+            basic.raise_for_status.return_value = None
+            basic.json.return_value = {"choices": [{"message": {"content": "OK"}}]}
+            structured = Mock(status_code=200)
+            structured.raise_for_status.return_value = None
+            structured.json.return_value = {"choices": [{"message": {"content": "not json"}}]}
+            with patch("backend.snow_app.provider_registry.httpx.post", side_effect=[basic, structured]) as request:
+                result = registry.probe("deepseek", "deepseek-v4-flash", {"structured_output": True})
+            self.assertEqual(request.call_args_list[0].kwargs["json"]["thinking"], {"type": "disabled"})
+            self.assertEqual(request.call_args_list[1].kwargs["json"]["max_tokens"], 256)
+            self.assertEqual(result["text_status"], "ready")
+            self.assertFalse(result["capabilities"]["structured_output"])
+            self.assertEqual(result["capability_status"]["structured_output"], "failed")
+            self.assertEqual(registry.route({"text"}).model_name, "deepseek-v4-flash")
+
+    def test_changing_provider_base_url_invalidates_old_probe(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = AgentStore(Path(temp) / "agent.sqlite3")
+            registry = ProviderRegistry(store)
+            registry.vault = _Vault()
+            store.upsert_provider({
+                "provider_id": "openai", "display_name": "OpenAI", "kind": "openai",
+                "base_url": "https://relay.example/v1", "credential_ref": "openai",
+                "enabled": True, "trusted_data_types": ["text"],
+            })
+            store.upsert_model({
+                "provider_id": "openai", "model_name": "relay-model", "probe_status": "verified",
+                "capabilities": {"text": True}, "probe": {"text": "passed"},
+            })
+            registry.save_provider({
+                "provider_id": "openai", "display_name": "OpenAI", "kind": "openai",
+                "base_url": "https://api.openai.com/v1", "enabled": True,
+                "trusted_data_types": ["text"], "config": {},
+            })
+            model = registry.models()[0]
+            self.assertEqual(model["text_status"], "unverified")
+            self.assertFalse(model["automatic_routing_eligible"])
+            self.assertEqual(model["probe"]["stale_reason"], "provider_base_url_changed")
+
+    def test_thinking_policy_forces_immersive_off_and_enables_complex_assistant(self):
+        selection = ModelSelection(
+            "deepseek", "DeepSeek", "deepseek-v4-flash", "https://api.deepseek.com/v1",
+            "deepseek", {"text": True}, "test", provider_kind="deepseek",
+        )
+        immersive = ProviderRegistry.resolve_thinking(selection, "immersive", "on", complex_task=True)
+        assistant = ProviderRegistry.resolve_thinking(selection, "assistant", "auto", complex_task=True)
+        self.assertEqual(immersive["effective"], "off")
+        self.assertEqual(immersive["request_fields"]["thinking"], {"type": "disabled"})
+        self.assertEqual(assistant["effective"], "on")
+        self.assertEqual(assistant["request_fields"]["thinking"], {"type": "enabled"})
+        openai = ModelSelection(
+            "openai", "OpenAI", "text-model", "https://api.openai.com/v1",
+            "openai", {"text": True}, "test", provider_kind="openai",
+        )
+        unverified = ProviderRegistry.resolve_thinking(openai, "assistant", "on", complex_task=True)
+        self.assertEqual(unverified["effective"], "off")
+        self.assertEqual(unverified["reason"], "provider_thinking_unverified")
 
     def test_agent_read_task_finishes_and_is_persisted(self):
         with tempfile.TemporaryDirectory() as temp:

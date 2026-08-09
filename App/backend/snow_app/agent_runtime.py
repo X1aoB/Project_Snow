@@ -95,6 +95,7 @@ class AgentRuntime:
                 "authorized_roots": self._roots(payload.get("authorized_roots") or []),
                 "attachment_ids": list(payload.get("attachment_ids") or []),
                 "voice_reply": bool(payload.get("voice_reply")),
+                "thinking_mode": str(payload.get("thinking_mode") or "auto"),
                 "events": [],
             },
         })
@@ -120,6 +121,7 @@ class AgentRuntime:
             "authorized_roots": state.get("authorized_roots") or [],
             "attachment_ids": state.get("attachment_ids") or [],
             "voice_reply": state.get("voice_reply", False),
+            "thinking_mode": state.get("thinking_mode", "auto"),
         })
 
     @staticmethod
@@ -290,7 +292,11 @@ class AgentRuntime:
             else:
                 attachment_ids = list((run.get("state") or {}).get("attachment_ids") or [])
                 planning_task = run["task"] + (f"\nAvailable attachment IDs: {', '.join(attachment_ids)}" if attachment_ids else "")
-                plan, routing = self._plan(planning_task, run.get("model_override") or {})
+                plan, routing = self._plan(
+                    planning_task,
+                    run.get("model_override") or {},
+                    str((run.get("state") or {}).get("thinking_mode") or "auto"),
+                )
             self._event(run_id, "plan_ready", {"step_count": len(plan), "summary": "已生成可执行计划。"})
             if len(plan) > MAX_STEPS:
                 raise ValueError(f"任务步骤超过上限 {MAX_STEPS}。")
@@ -407,7 +413,12 @@ class AgentRuntime:
     def _allowed_tools(cls) -> set[str]:
         return {str(item["function"]["name"]) for item in cls._tool_schemas()}
 
-    def _plan(self, task: str, override: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def _plan(
+        self,
+        task: str,
+        override: dict[str, Any],
+        thinking_mode: str = "auto",
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         # A configured structured model supplies the plan.  Every call is
         # subsequently schema-checked and risk-classified by this process.
         try:
@@ -415,9 +426,15 @@ class AgentRuntime:
                 {"text"},
                 override or None,
                 any_of={"structured_output", "native_tool_calling"},
+                profile="assistant_agent",
             )
             credential = self.registry.credential_for_selection(selection)
             if credential:
+                thinking_supported = selection.provider_kind in {"deepseek", "dashscope"} or (
+                    selection.provider_kind == "openai"
+                    and selection.capabilities.get("reasoning") is True
+                )
+                thinking_effective = thinking_mode != "off" and thinking_supported
                 system = (
                     "You are a neutral task planner. Return JSON only; never include hidden reasoning. "
                     "Output {\"steps\":[{\"tool\":string,\"arguments\":object}]}. "
@@ -430,7 +447,11 @@ class AgentRuntime:
                     "model": selection.model_name,
                     "messages": [{"role": "system", "content": system}, {"role": "user", "content": task}],
                     "temperature": 0,
-                    "max_tokens": 1600,
+                    "max_tokens": 1600 if thinking_mode == "off" else 4096,
+                    **self.registry.thinking_request_fields(
+                        selection.provider_kind,
+                        "on" if thinking_effective else "off",
+                    ),
                 }
                 if selection.capabilities.get("native_tool_calling"):
                     request_body.update({"tools": self._tool_schemas(), "tool_choice": "required"})
@@ -470,6 +491,15 @@ class AgentRuntime:
                         **selection.public(),
                         "planning_protocol": "native_tool_calling" if tool_calls else "structured_json",
                         "usage": dict(payload.get("usage") or {}),
+                        "thinking_decision": {
+                            "requested": thinking_mode,
+                            "effective": "on" if thinking_effective else "off",
+                            "reason": (
+                                "user_disabled" if thinking_mode == "off"
+                                else "agent_task" if thinking_effective
+                                else "provider_thinking_unverified"
+                            ),
+                        },
                     }
         except Exception:
             # The deterministic fallback is intentionally narrow and read-only.
@@ -844,7 +874,7 @@ class AgentRuntime:
         if extracted:
             return {"attachment_id": attachment_id, "kind": "document", "text": extracted[:MAX_OUTPUT_CHARS]}
         if mime.startswith("audio/"):
-            selection = self.registry.route({"speech_to_text"}, required_data_types={"audio"})
+            selection = self.registry.route({"speech_to_text"}, required_data_types={"audio"}, profile="speech_to_text")
             credential = self.registry.credential_for_selection(selection)
             path = Path(str(record["storage_path"]))
             with path.open("rb") as handle:
@@ -868,6 +898,7 @@ class AgentRuntime:
             selection = self.registry.route(
                 {"text", "vision"},
                 required_data_types={"text", "document", "image"} if mime == "application/pdf" else {"text", "image"},
+                profile="vision",
             )
             credential = self.registry.credential_for_selection(selection)
             path = Path(str(record["storage_path"]))
@@ -927,7 +958,9 @@ class AgentRuntime:
             except Exception:
                 persona_context = {}
         try:
-            selection = self.registry.route({"text"}, run.get("model_override") or None, {"text"})
+            selection = self.registry.route(
+                {"text"}, run.get("model_override") or None, {"text"}, profile="assistant_agent"
+            )
             credential = self.registry.credential_for_selection(selection)
             response = httpx.post(
                 selection.base_url.rstrip("/") + "/chat/completions",
@@ -945,6 +978,10 @@ class AgentRuntime:
                         {"role": "user", "content": json.dumps({"character_id": run.get("character_id"), "persona_context": persona_context, "task": run.get("task"), "facts": facts}, ensure_ascii=False)[:30000]},
                     ],
                     "temperature": 0.1, "max_tokens": 1800,
+                    # Persona rendering is a grounded rewrite, not a planning
+                    # task.  Keep reasoning off so it cannot consume the
+                    # answer budget or alter tool facts.
+                    **self.registry.thinking_request_fields(selection.provider_kind, "off"),
                 }, timeout=90,
             )
             response.raise_for_status()

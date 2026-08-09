@@ -20,8 +20,35 @@ class V050SurfaceTests(unittest.TestCase):
         self.assertIn('rel="stylesheet" href="/styles.css"', html)
         self.assertIn('path === "/immersive"', router)
         self.assertIn('path === "/assistant"', router)
+        self.assertNotIn("她们都在这里", html)
+        self.assertNotIn("landing-character-marks", html)
         self.assertNotIn("character?.conversation ||", application)
         self.assertNotIn("character.conversation ||", application)
+
+    def test_assistant_analysis_and_provider_picker_are_progressive(self) -> None:
+        html = (APP_ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+        application = (APP_ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
+        for provider in ("openai", "deepseek", "dashscope", "zhipu", "moonshot", "openai-compatible"):
+            self.assertIn(f'data-provider-choice="{provider}"', html)
+        self.assertIn('id="windows-env-code"', html)
+        self.assertIn('id="copy-windows-env"', html)
+        self.assertIn('id="provider-model-select"', html)
+        self.assertIn('id="default-immersive-model"', html)
+        self.assertIn('id="default-assistant-model"', html)
+        self.assertIn('id="thinking-mode"', html)
+        self.assertNotIn('id="provider-quality"', html)
+        self.assertNotIn('id="cap-vision"', html)
+        self.assertIn("analysis_process", application)
+        self.assertIn('class="work-trace analysis-trace"', application)
+        self.assertNotIn("角色化处理摘要", application)
+        self.assertIn('$env:MVP_CHAT_BASE_URL', application)
+        self.assertIn('discover-models', application)
+        self.assertNotIn('filter((item) => item.probe_status === "verified")', application)
+
+    def test_text_portraits_use_only_the_first_character(self) -> None:
+        ui_core = (APP_ROOT / "frontend" / "ui-core.js").read_text(encoding="utf-8")
+        self.assertIn('name.slice(0, 1) || "?"', ui_core)
+        self.assertNotIn("name.slice(-2)", ui_core)
 
     def test_workspace_has_all_six_hash_views_and_detail_drawer(self) -> None:
         html = (APP_ROOT / "frontend" / "workspace" / "index.html").read_text(

@@ -50,11 +50,6 @@
         </a>
       </section>
 
-      <section class="landing-roster" aria-labelledby="roster-title">
-        <div><p class="eyebrow">22 CHARACTERS</p><h2 id="roster-title">她们都在这里</h2></div>
-        <div id="landing-character-marks" class="landing-character-marks" aria-label="可用角色"></div>
-      </section>
-
       <footer class="landing-footer">
         <span>本地单用户测试产品 · 原始资料保持只读</span>
         <a href="/workspace/">进入内部工作台 <i data-lucide="arrow-up-right"></i></a>
@@ -133,6 +128,7 @@
               <label id="agent-mode-option"><input id="agent-mode" type="checkbox" />作为 Agent 执行</label>
               <label><input id="voice-reply" type="checkbox" />生成语音回复</label>
               <label class="model-picker"><span>模型</span><select id="model-override" aria-label="模型覆盖"><option value="">质量优先自动路由</option></select></label>
+              <label class="model-picker"><span>Thinking</span><select id="thinking-mode" aria-label="Thinking 模式"><option value="auto">按任务自动</option><option value="off">关闭</option><option value="on">开启</option></select></label>
               <label><input id="model-once" type="checkbox" />仅本轮覆盖</label>
             </div>
           </section>
@@ -161,19 +157,34 @@
     <dialog id="settings-dialog" class="modal settings-modal">
       <form method="dialog">
         <header><div><span class="panel-kicker">PROJECT SNOW v0.5.0</span><h2>本地设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog" aria-label="关闭设置"><i data-lucide="x"></i></button></header>
-        <nav class="settings-tabs" aria-label="设置类别"><button type="button" class="active" data-settings-tab="models">模型与 Provider</button><button type="button" data-settings-tab="conversation">会话与存储</button><button type="button" data-settings-tab="about">关于</button></nav>
+        <nav class="settings-tabs" aria-label="设置类别"><button type="button" class="active" data-settings-tab="models">模型厂商</button><button type="button" data-settings-tab="conversation">会话与存储</button><button type="button" data-settings-tab="about">关于</button></nav>
         <section class="settings-section" data-settings-panel="models">
-          <strong>模型与 Provider</strong><p>API Key 只会提交给本地后端并保存到 Windows 凭据库。</p>
+          <strong>选择模型厂商</strong><p>内置厂商只需填写 API Key，客户端会从官方接口读取当前账户可用的模型。Key 只会提交给本地后端并写入 Windows 凭据库，不会保存在聊天数据库中。</p>
           <div class="provider-form">
-            <select id="provider-kind" aria-label="Provider 类型"><option value="openai">OpenAI</option><option value="dashscope">阿里云百炼 Qwen</option><option value="zhipu">智谱 GLM</option><option value="deepseek">DeepSeek</option><option value="moonshot">Moonshot / Kimi</option><option value="openai-compatible">自定义兼容接口</option></select>
-            <input id="provider-name" placeholder="显示名称" value="本地模型配置" /><input id="provider-url" type="url" placeholder="https://.../v1" /><input id="provider-model" placeholder="模型名称" /><input id="provider-key" type="password" autocomplete="new-password" placeholder="API Key（不会回显）" />
-            <div class="provider-metrics"><label>默认 TTS 音色<input id="tts-voice" placeholder="例如 alloy" /></label><label>当前角色音色<input id="character-voice" placeholder="可选覆盖" /></label></div>
-            <div class="provider-metrics"><label>质量分<input id="provider-quality" type="number" min="0" max="100" value="50" /></label><label>上下文<input id="provider-context" type="number" min="1" placeholder="token" /></label><label>最大输出<input id="provider-max-output" type="number" min="1" placeholder="token" /></label></div>
-            <label><input id="trust-images" type="checkbox" />允许该 Provider 接收私人图片、文档和音频</label>
-            <div class="capability-checks"><span>能力声明与探测</span><label><input id="cap-vision" type="checkbox" />视觉</label><label><input id="cap-tools" type="checkbox" />原生工具</label><label><input id="cap-streaming" type="checkbox" checked />流式</label><label><input id="cap-stt" type="checkbox" />语音转写</label><label><input id="cap-tts" type="checkbox" />语音合成</label></div>
-            <div class="settings-actions"><button id="save-provider" type="button" class="secondary-button">保存 Provider</button><button id="probe-provider" type="button" class="primary-button">保存并探测</button><button id="preview-voice" type="button" class="secondary-button">试听角色音色</button></div>
-            <p id="provider-status" class="modal-context inline-context"></p><div id="model-capability-list" class="model-capability-list"></div>
-            <div class="model-defaults"><strong>默认路由模型</strong><select id="default-text-model" aria-label="默认文本模型"></select><select id="default-vision-model" aria-label="默认视觉模型"></select><select id="default-stt-model" aria-label="默认语音转写模型"></select><select id="default-tts-model" aria-label="默认语音合成模型"></select><button id="save-model-defaults" type="button" class="secondary-button">保存默认模型</button></div>
+            <div id="provider-choices" class="provider-choices" role="group" aria-label="选择模型厂商">
+              <button type="button" class="active" data-provider-choice="openai" aria-pressed="true"><strong>ChatGPT</strong><span>OpenAI API</span></button>
+              <button type="button" data-provider-choice="deepseek" aria-pressed="false"><strong>DeepSeek</strong><span>官方 API</span></button>
+              <button type="button" data-provider-choice="dashscope" aria-pressed="false"><strong>Qwen</strong><span>阿里云百炼</span></button>
+              <button type="button" data-provider-choice="zhipu" aria-pressed="false"><strong>GLM</strong><span>智谱开放平台</span></button>
+              <button type="button" data-provider-choice="moonshot" aria-pressed="false"><strong>Kimi</strong><span>Moonshot API</span></button>
+              <button type="button" data-provider-choice="openai-compatible" aria-pressed="false"><strong>其他</strong><span>兼容接口</span></button>
+            </div>
+            <input id="provider-kind" type="hidden" value="openai" /><input id="provider-name" type="hidden" value="OpenAI" />
+            <label class="provider-field">API Key<input id="provider-key" type="password" autocomplete="new-password" placeholder="仅发送到本地服务，不会回显" /></label>
+            <label id="provider-url-field" class="provider-field" hidden>API 地址<input id="provider-url" type="url" value="https://api.openai.com/v1" placeholder="https://.../v1" /></label>
+            <label class="provider-field">该厂商模型<select id="provider-model-select"><option value="">保存 API Key 后读取模型</option></select></label>
+            <label id="provider-model-field" class="provider-field" hidden>手动模型 ID<input id="provider-model" placeholder="兼容接口提供的模型 ID" /></label>
+            <label class="provider-trust"><input id="trust-images" type="checkbox" />允许该厂商接收私人图片、文档和音频；未勾选时只发送文字</label>
+            <div class="settings-actions"><button id="probe-provider" type="button" class="primary-button">保存 API Key 并读取模型</button><button id="verify-provider-model" type="button" class="secondary-button">验证所选模型</button></div>
+            <p id="provider-status" class="modal-context inline-context">尚未读取当前厂商的模型。</p><div id="model-capability-list" class="model-capability-list"></div>
+            <div class="model-defaults">
+              <strong>默认模型</strong><p>沉浸式不在聊天页展示模型信息；助手可在单次任务中覆盖。</p>
+              <label class="provider-field">沉浸式对话<select id="default-immersive-model"><option value="">沿用兼容默认</option></select></label>
+              <label class="provider-field">助手问答<select id="default-assistant-model"><option value="">沿用兼容默认</option></select></label>
+              <label class="provider-field">助手 Agent<select id="default-agent-model"><option value="">沿用助手问答</option></select></label>
+              <button id="save-model-defaults" type="button" class="secondary-button">保存默认模型</button>
+            </div>
+            <details class="windows-env-guide"><summary>改用 Windows PowerShell 环境变量配置</summary><p>环境变量适合指定一个默认聊天厂商；需要同时保存多个厂商时，请使用上面的厂商按钮和 Windows 凭据库。</p><pre><code id="windows-env-code"></code></pre><div class="settings-actions"><button id="copy-windows-env" type="button" class="secondary-button">复制 PowerShell 命令</button></div><p>在当前 PowerShell 会话设置后，必须在同一个窗口重启 API。长期写入用户环境变量后，需要新开 PowerShell，再重启 API。</p></details>
           </div>
         </section>
         <section class="settings-section" data-settings-panel="conversation" hidden><strong>会话与存储</strong><p>只清理本机聊天，不会修改角色资料、反馈或知识图谱。</p><div class="settings-actions"><button id="clear-current-mode" type="button" class="secondary-button">清空当前入口记录</button><button id="clear-character" type="button" class="danger-button">清空该角色全部对话</button></div></section>

@@ -1137,8 +1137,9 @@ function summarizeModels(providerResult, modelResult) {
   const providers = providerResult?.providers || providerResult?.items || [];
   const models = modelResult?.models || modelResult?.items || [];
   const enabled = providers.filter((item) => item.enabled !== false).length;
-  const healthy = models.filter((item) => ["healthy", "available", "ok"].includes(String(item.health || item.status || "").toLowerCase())).length;
-  return `${enabled}/${providers.length} 个 Provider 已启用 · ${models.length} 个模型已登记${models.length ? ` · ${healthy} 个健康状态已确认` : ""}`;
+  const selectable = models.filter((item) => item.selectable !== false).length;
+  const ready = models.filter((item) => item.text_status === "ready").length;
+  return `${enabled}/${providers.length} 个 Provider 已启用 · ${selectable}/${models.length} 个模型可选${models.length ? ` · ${ready} 个文本连接已验证` : ""}`;
 }
 
 async function loadServiceOverview() {

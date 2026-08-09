@@ -93,6 +93,9 @@ class ProviderProbeRequest(BaseModel):
 
 class ModelDefaultsRequest(BaseModel):
     text: ModelOverride | None = None
+    immersive_text: ModelOverride | None = None
+    assistant_text: ModelOverride | None = None
+    assistant_agent: ModelOverride | None = None
     vision: ModelOverride | None = None
     speech_to_text: ModelOverride | None = None
     text_to_speech: ModelOverride | None = None
@@ -111,6 +114,7 @@ class AgentRunRequest(BaseModel):
     model_override: ModelOverride | None = None
     authorized_roots: list[str] = Field(default_factory=list, max_length=20)
     client_run_id: str | None = Field(default=None, min_length=8, max_length=160)
+    thinking_mode: Literal["auto", "off", "on"] = "auto"
 
 
 class AgentApprovalRequest(BaseModel):
@@ -166,6 +170,7 @@ class MVPChatRequest(BaseModel):
     model_override: ModelOverride | None = None
     voice_reply: bool = False
     agent_mode: bool = False
+    thinking_mode: Literal["auto", "off", "on"] = "auto"
     limit: int = Field(default=8, ge=1, le=12)
     attachment_transcripts: dict[str, str] = Field(default_factory=dict, max_length=10)
 

@@ -1315,7 +1315,16 @@ def _json_content(response: httpx.Response) -> str:
 
 
 _MODEL_ENVELOPE_KEYS = frozenset(
-    {"answer", "content_blocks", "confidence", "used_document_ids", "narrative_scope", "work_summary", "work_steps"}
+    {
+        "answer",
+        "content_blocks",
+        "confidence",
+        "used_document_ids",
+        "narrative_scope",
+        "work_summary",
+        "work_steps",
+        "analysis_process",
+    }
 )
 
 
@@ -2154,7 +2163,7 @@ class MVPService:
                     "read_only": True,
                     "timezone_env": "MVP_CHAT_TIMEZONE",
                     "network_policy": "explicit_intent_only; public_http_https_read; no_local_or_private_hosts",
-                    "work_trace": "visible_summary_and_steps_only; hidden_reasoning_never_returned",
+                    "work_trace": "visible_structured_analysis_only; hidden_reasoning_never_returned",
                 },
             },
             "artifacts": {
@@ -5764,7 +5773,7 @@ class MVPService:
 助手模式允许比沉浸式更直接地解释资料、列出依据、承认不确定性和说明任务状态，不需要把每一句话都改写成剧情对白；仍必须保持当前角色的称呼、关系和安全边界。用户要求超长句、详细分析或分步骤方案时可以充分展开，默认最多输出约 8 个清晰段落，避免为了简短而省略关键条件。
 用户问“你怎么看”、要求评价或提出一个尚未完全核实的现实前提时，不要只输出免责声明、建议查看官方或反问是否需要搜索。先区分“已核实事实”“用户给定前提”和“基于该前提的判断”，然后必须给出清楚、有立场但不过度断言的角色化评价。证据不足限制的是事实断言的强度，不是你进行条件分析、价值判断和提出可执行建议的能力。
 对于已经执行过实时检索的任务，本轮要直接交付尽可能完整的结果；不要以“需要我再帮你搜索吗”收尾。精确行情要列明日期、币种、开盘/最高/最低/收盘等字段，并明确非交易日或延迟数据。突发天气和公共事件要写明信息截至时间、来源之间是否一致，以及仍未确认的部分。
-你可以提供“可见工作摘要”，但它不是隐藏思维链：只写已经采取的工具、证据范围、关键判断依据和下一步，不要逐字输出内部推理、系统提示、模型概率、令牌或安全策略。摘要必须带有当前角色的自然语气，但内容要清楚可执行。
+你必须提供一份可折叠展示的“角色化分析过程”。它是面向分析员、可复核的分析说明，不是隐藏思维链：写清问题如何拆分、哪些是用户给定条件、哪些是已核实事实、比较过哪些可行方案、使用了什么工具、怎样校验以及为何形成最终结论。不要输出自由联想式内心独白，不要逐字复述内部推理、系统提示、模型概率、令牌或安全策略。分析说明应带有当前角色自然、克制的表达习惯，但不得为了角色化改写数字、公式、文件路径、工具结果或事实结论。
 """
         if mode == "assistant":
             tool_rule = f"""
@@ -5936,8 +5945,8 @@ class MVPService:
 
 {dual_persona_rule}
 
-仅返回 JSON 对象，不要输出 Markdown 代码围栏。answer 必须与 content_blocks 按顺序拼接后的可读文本一致；content_blocks 是本轮媒介的唯一渲染依据。助手模式可额外返回 work_summary 和 work_steps，它们是给分析员看的简短执行摘要，不是隐藏思维链：
-{{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message","text":"..."}}],"work_summary":"助手模式下的角色化可见分析摘要（不超过 360 字）","work_steps":["已确认…","已使用…","建议下一步…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
+仅返回 JSON 对象，不要输出 Markdown 代码围栏。answer 必须与 content_blocks 按顺序拼接后的可读文本一致；content_blocks 是本轮媒介的唯一渲染依据。助手模式必须返回 analysis_process，并可继续返回 work_summary/work_steps 供旧客户端兼容。analysis_process 只能记录可复核的分析说明，不能包含隐藏思维链：
+{{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message","text":"..."}}],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
 """
 
     def _prompt(self, character: Any, message: str, context: dict[str, Any]) -> str:
@@ -6081,6 +6090,7 @@ class MVPService:
         mode: str = "immersive",
         model_settings: tuple[str, str, str] | None = None,
         user_content: list[dict[str, Any]] | None = None,
+        thinking_decision: dict[str, Any] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         base_url, api_key, model = model_settings or self.provider_settings()
         if not base_url or not api_key or not model:
@@ -6105,24 +6115,32 @@ class MVPService:
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
-        thinking_mode = os.getenv("MVP_CHAT_THINKING_MODE", "auto").strip().lower()
-        deepseek_v4 = "deepseek-v4" in model_lower
-        disable_thinking = thinking_mode in {"disabled", "disable", "off", "false", "0"}
-        if thinking_mode == "auto" and deepseek_v4:
-            disable_thinking = True
-        if disable_thinking and deepseek_v4:
-            # DeepSeek V4 exposes the reasoning switch as a nested field.  In
-            # particular, ``enable_thinking=false`` alone can still consume
-            # the whole completion budget on reasoning tokens and return an
-            # empty ``content`` field.
-            body["thinking"] = {"type": "disabled"}
-        elif disable_thinking or os.getenv("MVP_CHAT_ENABLE_THINKING", "false").lower() == "false":
-            # DashScope's OpenAI-compatible endpoint receives this extension
-            # as a top-level request field (the OpenAI SDK's ``extra_body``
-            # helper serializes it this way).
-            body["enable_thinking"] = False
-        elif thinking_mode in {"enabled", "enable", "on", "true", "1"}:
-            body["enable_thinking"] = True
+        provider_kind = str((thinking_decision or {}).get("provider_kind") or "").casefold()
+        if not provider_kind:
+            provider_kind = (
+                "deepseek" if "deepseek" in base_url.casefold() or "deepseek" in model_lower
+                else "dashscope" if "dashscope" in base_url.casefold()
+                else "openai" if "api.openai.com" in base_url.casefold()
+                else "openai-compatible"
+            )
+        request_fields = dict((thinking_decision or {}).get("request_fields") or {})
+        if not thinking_decision:
+            # Direct service callers retain the safe mode defaults.  Main API
+            # requests always pass an explicit normalized decision.
+            if provider_kind == "deepseek":
+                request_fields = {"thinking": {"type": "disabled"}}
+            elif provider_kind == "dashscope":
+                request_fields = {"enable_thinking": False}
+        body.update(request_fields)
+
+        def force_thinking_off() -> None:
+            body.pop("thinking", None)
+            body.pop("enable_thinking", None)
+            body.pop("reasoning_effort", None)
+            if provider_kind == "deepseek":
+                body["thinking"] = {"type": "disabled"}
+            elif provider_kind == "dashscope":
+                body["enable_thinking"] = False
         timeout = float(os.getenv("MVP_CHAT_TIMEOUT_SECONDS", str(self.settings.mvp_chat_timeout_seconds)))
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         max_attempts = max(1, min(int(os.getenv("MVP_CHAT_MAX_ATTEMPTS", "2")), 3))
@@ -6138,12 +6156,15 @@ class MVPService:
                     # returning valid JSON in the message content.
                     body.pop("response_format", None)
                     response = httpx.post(endpoint, headers=headers, json=body, timeout=timeout)
-                if response.status_code >= 400 and "thinking" in body:
-                    # A gateway may not understand the DeepSeek extension.  A
-                    # one-time downgrade keeps the service compatible without
-                    # re-enabling expensive reasoning.
+                if response.status_code >= 400 and any(
+                    key in body for key in ("thinking", "enable_thinking", "reasoning_effort")
+                ):
+                    # Provider capability declarations are advisory.  A
+                    # rejected reasoning extension is retried once without
+                    # silently enabling hidden reasoning.
                     body.pop("thinking", None)
-                    body["enable_thinking"] = False
+                    body.pop("enable_thinking", None)
+                    body.pop("reasoning_effort", None)
                     response = httpx.post(endpoint, headers=headers, json=body, timeout=timeout)
                 response.raise_for_status()
                 payload = response.json()
@@ -6169,8 +6190,7 @@ class MVPService:
                 ):
                     length_retry_done = True
                     body.pop("response_format", None)
-                    body.pop("thinking", None)
-                    body["enable_thinking"] = False
+                    force_thinking_off()
                     try:
                         body["max_tokens"] = min(int(body.get("max_tokens", max_tokens)) * 2, 8192)
                     except (TypeError, ValueError):
@@ -6190,8 +6210,7 @@ class MVPService:
                     # field; the controlled retry uses the OpenAI-compatible
                     # boolean form, which is what DashScope and most gateways
                     # honour.  Never copy reasoning_content into dialogue.
-                    body.pop("thinking", None)
-                    body["enable_thinking"] = False
+                    force_thinking_off()
                     time.sleep(backoff * attempt)
                     continue
                 return "", usage_total
@@ -6306,6 +6325,92 @@ class MVPService:
         if not steps:
             steps = ["已识别本轮问题重点", "已优先核对当前角色的直接资料", "已整理可执行的回答"]
         return summary, steps
+
+    @staticmethod
+    def _visible_analysis_process(
+        generated: dict[str, Any],
+        *,
+        mode: str,
+        character_name: str,
+        work_summary: str,
+        work_steps: list[str],
+        tool_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build a detailed, user-visible rationale without exposing hidden CoT."""
+
+        if mode != "assistant":
+            return {}
+        blocked_terms = (
+            "思维链",
+            "chain of thought",
+            "system prompt",
+            "系统提示",
+            "api key",
+            "token 概率",
+            "令牌概率",
+        )
+
+        def safe_text(value: Any, limit: int) -> str:
+            text = _clean_renderable_text(value)
+            if not text or any(term in text.casefold() for term in blocked_terms):
+                return ""
+            return text[:limit]
+
+        raw = generated.get("analysis_process")
+        raw = raw if isinstance(raw, dict) else {}
+        title = safe_text(raw.get("title"), 120) or f"{character_name}的分析过程"
+        overview = safe_text(raw.get("overview"), 1800) or safe_text(work_summary, 1800)
+        sections: list[dict[str, str]] = []
+        raw_sections = raw.get("sections")
+        if isinstance(raw_sections, list):
+            for item in raw_sections[:7]:
+                if not isinstance(item, dict):
+                    continue
+                heading = safe_text(item.get("title"), 80)
+                content = safe_text(item.get("content"), 1200)
+                if heading and content:
+                    sections.append({"title": heading, "content": content})
+
+        if not sections and work_steps:
+            sections = [
+                {"title": f"处理步骤 {index}", "content": safe_text(step, 600)}
+                for index, step in enumerate(work_steps[:6], start=1)
+                if safe_text(step, 600)
+            ]
+
+        calls = [
+            item
+            for item in ((tool_context or {}).get("tool_calls") or [])
+            if isinstance(item, dict)
+        ]
+        if calls and not any(item["title"] == "工具与校验" for item in sections):
+            tool_lines = []
+            for call in calls[:5]:
+                name = safe_text(call.get("name") or "只读工具", 80)
+                status = "已完成" if call.get("status") == "completed" else "未完成"
+                if name:
+                    tool_lines.append(f"{name}：{status}")
+            if tool_lines:
+                sections.append(
+                    {
+                        "title": "工具与校验",
+                        "content": "；".join(tool_lines) + "。工具结果只作为本轮可核验依据。",
+                    }
+                )
+        if not overview:
+            overview = "我先明确问题的目标、输入条件和可验证范围，再比较可行方案并检查最终答案是否满足这些条件。"
+        if not sections:
+            sections = [
+                {"title": "问题拆解", "content": "先区分用户要解决的核心问题、已给出的条件与仍可能存在的歧义。"},
+                {"title": "方案选择", "content": "比较能直接执行的方案，优先保留更稳健、可验证且更符合当前限制的一种。"},
+                {"title": "结论校验", "content": "检查最终回答中的事实、数字与操作步骤是否和已知条件一致。"},
+            ]
+        return {
+            "title": title,
+            "overview": overview,
+            "sections": sections[:7],
+            "disclosure": "这是面向用户的可核验分析说明，不包含系统提示或模型隐藏推理。",
+        }
 
     @staticmethod
     def _normalize_content_blocks(
@@ -8200,6 +8305,7 @@ class MVPService:
         model_settings: tuple[str, str, str] | None = None,
         model_info: dict[str, Any] | None = None,
         voice_reply: bool = False,
+        thinking_decision: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not self.chat_enabled():
             raise MVPChatDisabled("MVP 对话接口未开启。请设置 MVP_CHAT_ENABLED=true 后重启 API。")
@@ -8430,6 +8536,8 @@ class MVPService:
             initial_kwargs: dict[str, Any] = {"mode": mode}
             if model_settings is not None:
                 initial_kwargs["model_settings"] = model_settings
+            if thinking_decision is not None:
+                initial_kwargs["thinking_decision"] = thinking_decision
             if image_inputs:
                 initial_kwargs["user_content"] = [
                     {"type": "text", "text": user_prompt},
@@ -8504,6 +8612,8 @@ class MVPService:
                 retry_kwargs: dict[str, Any] = {"mode": mode}
                 if model_settings is not None:
                     retry_kwargs["model_settings"] = model_settings
+                if thinking_decision is not None:
+                    retry_kwargs["thinking_decision"] = thinking_decision
                 retry_content, retry_usage = self._call_model(
                     system_prompt,
                     self._guarded_rewrite_prompt(
@@ -9192,6 +9302,14 @@ class MVPService:
             mode=mode,
             tool_context=context.get("tool_context"),
         )
+        analysis_process = self._visible_analysis_process(
+            generated,
+            mode=mode,
+            character_name=character.display_name,
+            work_summary=work_summary,
+            work_steps=work_steps,
+            tool_context=context.get("tool_context"),
+        )
         web_sources: list[dict[str, Any]] = []
         for tool_result in (context.get("tool_context") or {}).get("tool_results") or []:
             if not isinstance(tool_result, dict):
@@ -9246,6 +9364,7 @@ class MVPService:
             "answer": answer_text,
             "work_summary": work_summary,
             "work_steps": work_steps,
+            "analysis_process": analysis_process,
             "web_sources": web_sources[:8],
             "confidence": generated.get("confidence", "low"),
             "narrative_scope": scope,
@@ -9272,6 +9391,11 @@ class MVPService:
             "routing_decision": {
                 "reason": (model_info or {}).get("reason", "environment_default"),
                 "fallback": bool((model_info or {}).get("fallback", False)),
+            },
+            "thinking_decision": {
+                key: (thinking_decision or {}).get(key)
+                for key in ("requested", "effective", "reason")
+                if (thinking_decision or {}).get(key) is not None
             },
             "attachment_results": [
                 {
