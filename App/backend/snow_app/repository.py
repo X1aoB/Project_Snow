@@ -54,7 +54,7 @@ _ACTOR_NODE_TYPES = {"character", "sender", "enemy"}
 _ITEM_NODE_TYPES = {"item", "weapon", "weapon_attachment", "furniture", "costume", "armor", "logistics_squad"}
 _LOCATION_NODE_TYPES = {"location"}
 _RELATION_ENDPOINT_NODE_TYPES = _ACTOR_NODE_TYPES | _ITEM_NODE_TYPES | _LOCATION_NODE_TYPES | {"event"}
-ENTITY_NODE_REVIEW_STATUSES = {"pending_review", "approved", "rejected"}
+ENTITY_NODE_REVIEW_STATUSES = {"pending_review", "needs_human_review", "approved", "rejected"}
 _SOURCE_BUCKETS = {
     "main_story": ("canonical_narrative", 4),
     "character_story": ("canonical_narrative", 4),
@@ -913,8 +913,8 @@ class RuntimeRepository:
             candidate = next((row for row in candidates if row.get("candidate_id") == candidate_id), None)
             if candidate is None:
                 raise KeyError(candidate_id)
-            if candidate.get("review_status") != "pending_review":
-                raise ValueError("Only pending_review candidates can receive a decision.")
+            if candidate.get("review_status") not in {"pending_review", "needs_human_review"}:
+                raise ValueError("Only pending_review or needs_human_review candidates can receive a human decision.")
             if decision not in {"approved", "rejected"}:
                 raise ValueError("Decision must be approved or rejected.")
 
@@ -1026,8 +1026,8 @@ class RuntimeRepository:
             )
             if candidate is None:
                 raise KeyError(entity_candidate_id)
-            if candidate.get("review_status") != "pending_review":
-                raise ValueError("Only pending_review entity candidates can receive a decision.")
+            if candidate.get("review_status") not in {"pending_review", "needs_human_review"}:
+                raise ValueError("Only pending_review or needs_human_review entity candidates can receive a human decision.")
             if decision not in {"approved", "rejected"}:
                 raise ValueError("Entity candidate decision must be approved or rejected.")
 

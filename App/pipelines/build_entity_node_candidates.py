@@ -287,10 +287,16 @@ def build_entity_node_candidates(dry_run: bool = False) -> dict[str, Any]:
     # deterministic discovery policy becomes stricter or the source changes.
     # Pending records are regenerated artifacts, not human decisions.
     retired_pending = sum(row.get("review_status") == "pending_review" for row in existing.values())
-    rows.extend(row for row in existing.values() if row.get("review_status") in {"approved", "rejected"})
+    rows.extend(
+        row
+        for row in existing.values()
+        if row.get("review_status") in {"needs_human_review", "approved", "rejected"}
+    )
     rows.sort(
         key=lambda row: (
-            {"pending_review": 0, "approved": 1, "rejected": 2}.get(str(row.get("review_status")), 3),
+            {"pending_review": 0, "needs_human_review": 1, "approved": 2, "rejected": 3}.get(
+                str(row.get("review_status")), 4
+            ),
             -len(row.get("relation_candidate_ids", [])),
             str(row.get("proposed_node_type") or ""),
             str(row.get("entity_name") or ""),

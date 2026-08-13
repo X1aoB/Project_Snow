@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from contextlib import asynccontextmanager
+import ipaddress
 import json
 from pathlib import Path
 import time
@@ -28,9 +29,18 @@ from .contracts import (
     MVPFeedbackRequest,
     MVPFeedbackIssueStatusRequest,
     MVPFeedbackTriageRequest,
+    MVPPresenceResolveRequest,
+    MVPPresenceArrivalRequest,
+    MVPPresenceTransitionRequest,
     ModelDefaultsRequest,
+    PersonaPairingRequest,
     ProviderConfigRequest,
     ProviderProbeRequest,
+    ReviewAutomationAction,
+    ReviewAutomationCalibrationLabel,
+    ReviewAutomationRunRequest,
+    DeepSeekReviewCompletionAction,
+    DeepSeekReviewCompletionRunRequest,
     VoicePreviewRequest,
     RelationReviewDecision,
     RetrievalRequest,
@@ -42,7 +52,15 @@ from .agent_store import AgentStore
 from .attachment_manager import AttachmentError, AttachmentManager
 from .connectors import ConnectorError, ConnectorManager
 from .provider_registry import ProviderRegistry
+from .persona_gateway import (
+    PERSONA_PAIRING_ID_CREDENTIAL_REF,
+    PERSONA_TOKEN_CREDENTIAL_REF,
+    PersonaGateway,
+    PersonaPairingStore,
+)
 from .repository import MACHINE_REVIEW_FILTERS, REVIEW_RISK_LEVELS, REVIEW_TIERS, RuntimeRepository
+from .review_automation import ReviewAutomationService
+from .deepseek_review_completion import DeepSeekReviewCompletionService
 from .mvp_service import (
     MVPChatDisabled,
     MVPCommunicationConflict,
@@ -54,7 +72,13 @@ from .mvp_service import (
 
 settings = Settings.from_environment()
 repository = RuntimeRepository(settings)
+review_automation = ReviewAutomationService(settings, repository)
+deepseek_review_completion = DeepSeekReviewCompletionService(settings, repository)
 mvp_service = MVPService(settings, repository)
+persona_pairing_store = PersonaPairingStore(
+    mvp_service.conversation_store.database_path.parent / "persona_pairings.sqlite3"
+)
+persona_gateway = PersonaGateway(mvp_service, persona_pairing_store)
 agent_store = AgentStore(settings.runtime_root / "chat" / "agent.sqlite3")
 provider_registry = ProviderRegistry(agent_store)
 attachment_manager = AttachmentManager(settings.runtime_root, agent_store)
@@ -86,12 +110,47 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type", "X-Filename"],
+    allow_headers=["Authorization", "Content-Type", "X-Filename"],
 )
 
 
 def get_repository() -> RuntimeRepository:
     return repository
+
+
+def _require_loopback(request: Request) -> None:
+    host = str(request.client.host if request.client else "").strip().casefold()
+    is_loopback = host in {"localhost", "testclient"}
+    if not is_loopback:
+        try:
+            is_loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            is_loopback = False
+    if not is_loopback:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Persona Gateway 仅允许本机回环连接。",
+        )
+
+
+def _persona_pairing(request: Request) -> dict:
+    _require_loopback(request)
+    authorization = str(request.headers.get("Authorization") or "").strip()
+    scheme, _, token = authorization.partition(" ")
+    if scheme.casefold() != "bearer" or not token.strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="需要 Persona Gateway 配对令牌。",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    pairing = persona_pairing_store.authenticate(token.strip())
+    if not pairing:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Persona Gateway 配对令牌无效或已撤销。",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return pairing
 
 
 def _assistant_task_is_complex(message: str, attachment_count: int = 0) -> bool:
@@ -280,7 +339,7 @@ def _validate_review_filters(
     risk_level: str | None = None,
     machine_verdict: str | None = None,
 ) -> None:
-    if review_status not in {"pending_review", "approved", "rejected"}:
+    if review_status not in {"pending_review", "approved", "rejected", "needs_human_review", "superseded"}:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unsupported review status.")
     if tier and tier not in REVIEW_TIERS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unsupported review tier.")
@@ -294,7 +353,7 @@ def _validate_review_filters(
 
 
 def _validate_entity_review_status(review_status: str) -> None:
-    if review_status not in {"pending_review", "approved", "rejected"}:
+    if review_status not in {"pending_review", "approved", "rejected", "needs_human_review"}:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Unsupported entity review status.")
 
 
@@ -652,6 +711,185 @@ def characters(repo: RuntimeRepository = Depends(get_repository)) -> list[dict]:
     return repo.list_characters()
 
 
+@app.get("/api/v1/persona/status")
+def persona_gateway_status(request: Request) -> dict:
+    _require_loopback(request)
+    return {
+        **persona_pairing_store.summary(),
+        "codex_credential_configured": bool(
+            provider_registry.vault.get(PERSONA_TOKEN_CREDENTIAL_REF)
+        ),
+        "knowledge": mvp_service.public_knowledge.public_metadata(),
+        "write_back_allowed": False,
+        "forbidden_data_types": list(persona_gateway.FORBIDDEN_DATA_TYPES),
+    }
+
+
+@app.post("/api/v1/persona/pairings")
+def create_persona_pairing(request: Request, payload: PersonaPairingRequest) -> dict:
+    _require_loopback(request)
+    character_id = None
+    if payload.default_character_id:
+        try:
+            character_id = persona_gateway.resolve_character_id(payload.default_character_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="默认角色不存在或不可对话。",
+            ) from None
+    if str(request.client.host if request.client else "") != "testclient":
+        previous_token = provider_registry.vault.get(PERSONA_TOKEN_CREDENTIAL_REF)
+        previous_id = provider_registry.vault.get(PERSONA_PAIRING_ID_CREDENTIAL_REF)
+        if previous_token and previous_id:
+            authenticated = persona_pairing_store.authenticate(previous_token)
+            if authenticated:
+                persona_pairing_store.revoke(
+                    previous_id, str(authenticated.get("pairing_id") or "")
+                )
+    result = persona_pairing_store.create(payload.label, character_id)
+    credential_saved = False
+    credential_error = None
+    # TestClient is an in-process transport, not a real desktop pairing.  It
+    # must never mutate the developer's Windows Credential Manager.
+    if str(request.client.host if request.client else "") != "testclient":
+        try:
+            provider_registry.vault.put(
+                PERSONA_TOKEN_CREDENTIAL_REF, result["pairing_token"]
+            )
+            provider_registry.vault.put(
+                PERSONA_PAIRING_ID_CREDENTIAL_REF, result["pairing_id"]
+            )
+            credential_saved = True
+        except RuntimeError as exc:
+            credential_error = str(exc)
+    return {
+        **result,
+        "credential_saved": credential_saved,
+        "credential_reference": PERSONA_TOKEN_CREDENTIAL_REF,
+        "credential_error": credential_error,
+    }
+
+
+@app.delete("/api/v1/persona/pairings/current")
+def revoke_current_persona_pairing(request: Request) -> dict:
+    _require_loopback(request)
+    pairing_id = provider_registry.vault.get(PERSONA_PAIRING_ID_CREDENTIAL_REF)
+    token = provider_registry.vault.get(PERSONA_TOKEN_CREDENTIAL_REF)
+    if not pairing_id or not token:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="当前没有由 Snow 管理的 Codex 配对。",
+        )
+    authenticated = persona_pairing_store.authenticate(token)
+    if not authenticated or not persona_pairing_store.revoke(
+        pairing_id, str(authenticated.get("pairing_id") or "")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="当前配对已经失效。",
+        )
+    provider_registry.vault.delete(PERSONA_TOKEN_CREDENTIAL_REF)
+    provider_registry.vault.delete(PERSONA_PAIRING_ID_CREDENTIAL_REF)
+    return {"pairing_id": pairing_id, "status": "revoked"}
+
+
+@app.delete("/api/v1/persona/pairings/{pairing_id}")
+def revoke_persona_pairing(
+    pairing_id: str,
+    pairing: dict = Depends(_persona_pairing),
+) -> dict:
+    if not persona_pairing_store.revoke(pairing_id, str(pairing.get("pairing_id") or "")):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="配对不存在、已撤销或不属于当前令牌。",
+        )
+    if provider_registry.vault.get(PERSONA_PAIRING_ID_CREDENTIAL_REF) == pairing_id:
+        provider_registry.vault.delete(PERSONA_TOKEN_CREDENTIAL_REF)
+        provider_registry.vault.delete(PERSONA_PAIRING_ID_CREDENTIAL_REF)
+    return {"pairing_id": pairing_id, "status": "revoked"}
+
+
+@app.get("/api/v1/persona/snapshot/{character_id}")
+def persona_snapshot(
+    character_id: str,
+    _pairing: dict = Depends(_persona_pairing),
+) -> dict:
+    try:
+        return persona_gateway.snapshot(character_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="角色人格快照不存在。",
+        ) from None
+
+
+@app.get("/api/v1/persona/management/snapshot/{character_id}")
+def persona_management_snapshot(character_id: str, request: Request) -> dict:
+    """Local UI connectivity test without disclosing the stored token."""
+
+    _require_loopback(request)
+    token = provider_registry.vault.get(PERSONA_TOKEN_CREDENTIAL_REF)
+    if not token or not persona_pairing_store.authenticate(token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Codex 插件尚未配对或配对已经失效。",
+        )
+    try:
+        return persona_gateway.snapshot(character_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="角色人格快照不存在。",
+        ) from None
+
+
+@app.get("/api/v1/persona/pairing")
+def persona_pairing_context(pairing: dict = Depends(_persona_pairing)) -> dict:
+    return {
+        "pairing_id": pairing.get("pairing_id"),
+        "label": pairing.get("label"),
+        "default_character_id": pairing.get("default_character_id"),
+        "status": pairing.get("status"),
+        "token_hint": pairing.get("token_hint"),
+        "write_back_allowed": False,
+    }
+
+
+@app.get("/api/v1/knowledge/search")
+def persona_knowledge_search(
+    query: str,
+    character_id: str,
+    limit: int = 6,
+    _pairing: dict = Depends(_persona_pairing),
+) -> dict:
+    if not str(query or "").strip() or len(query) > 1000:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="检索词长度必须为 1 至 1000 个字符。",
+        )
+    try:
+        return persona_gateway.knowledge_search(query, character_id, limit)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="角色不存在或不可对话。",
+        ) from None
+
+
+@app.get("/api/v1/relationships/{character_id}")
+def persona_relationship(
+    character_id: str,
+    _pairing: dict = Depends(_persona_pairing),
+) -> dict:
+    try:
+        return persona_gateway.relationship(character_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="角色关系快照不存在。",
+        ) from None
+
+
 @app.get("/api/v1/personas/{character_id}")
 def persona(character_id: str, repo: RuntimeRepository = Depends(get_repository)) -> dict:
     profile = repo.get_persona(character_id)
@@ -715,6 +953,82 @@ def mvp_questions(character_id: str) -> dict:
         return mvp_service.questions(character_id)
     except (KeyError, FileNotFoundError):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MVP 角色视图不存在。") from None
+
+
+@app.post("/api/v1/mvp/presence/resolve")
+def mvp_presence_resolve(request: MVPPresenceResolveRequest) -> dict:
+    try:
+        return mvp_service.resolve_presence(
+            request.character_id,
+            request.world_session_id,
+        )
+    except (KeyError, FileNotFoundError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MVP 角色视图不存在。") from None
+
+
+@app.post("/api/v1/mvp/presence/transition")
+def mvp_presence_transition(request: MVPPresenceTransitionRequest) -> dict:
+    try:
+        return mvp_service.transition_presence(
+            request.character_id,
+            session_id=request.session_id,
+            world_session_id=request.world_session_id,
+            target_channel=request.target_channel,
+            action=request.action,
+        )
+    except (KeyError, FileNotFoundError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MVP 角色视图不存在。") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/mvp/presence/arrival")
+def mvp_presence_arrival(request: MVPPresenceArrivalRequest) -> dict:
+    """Resolve a server-owned 50/50 arrival reaction and persist it idempotently."""
+
+    try:
+        prepared = mvp_service.prepare_presence_arrival(
+            request.character_id,
+            arrival_id=request.arrival_id,
+            session_id=request.session_id,
+            world_session_id=request.world_session_id,
+        )
+        ready = prepared.get("ready")
+        if ready is not None:
+            return ready
+        selection = provider_registry.route(
+            {"text"},
+            None,
+            {"text"},
+            profile="immersive_text",
+        )
+        credential = provider_registry.credential_for_selection(selection)
+        if not credential:
+            raise MVPProviderError("到场反应模型凭据不可用。")
+        result = mvp_service.finish_presence_arrival(
+            prepared,
+            model_settings=(selection.base_url, credential, selection.model_name),
+            model_info=selection.public(),
+            thinking_decision=provider_registry.resolve_thinking(
+                selection, "immersive", "off", complex_task=False
+            ),
+        )
+        return result
+    except MVPRequestInProgress as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "arrival_in_progress", "message": str(exc)},
+        ) from exc
+    except (MVPProviderError, MVPChatDisabled):
+        if "prepared" in locals() and prepared.get("ready") is None and prepared.get("scene_state"):
+            return mvp_service.fallback_presence_arrival(prepared)
+        raise
+    except (KeyError, FileNotFoundError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MVP 角色视图不存在。") from None
+    except ValueError as exc:
+        if "prepared" in locals() and prepared.get("ready") is None and prepared.get("scene_state"):
+            return mvp_service.fallback_presence_arrival(prepared)
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/mvp/chat")
@@ -1039,7 +1353,13 @@ def mvp_feedback_triage(feedback_id: str, request: MVPFeedbackTriageRequest) -> 
 @app.post("/api/v1/mvp/feedback/issues/{issue_key}/status")
 def mvp_feedback_issue_status(issue_key: str, request: MVPFeedbackIssueStatusRequest) -> dict:
     try:
-        return mvp_service.set_feedback_issue_status(issue_key, request.status, request.note)
+        return mvp_service.set_feedback_issue_status(
+            issue_key,
+            request.status,
+            request.note,
+            request.verification_tests,
+            request.code_version,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
@@ -1227,6 +1547,156 @@ def decide_relation_candidate(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Relation candidate was not found.") from None
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/review/automation/estimate")
+def review_automation_estimate(mode: str = "production") -> dict:
+    try:
+        return review_automation.estimate(mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/review/automation/runs")
+def review_automation_runs() -> dict:
+    return {"runs": review_automation.list_runs()}
+
+
+@app.post("/api/v1/review/automation/runs", status_code=status.HTTP_202_ACCEPTED)
+def create_review_automation_run(request: ReviewAutomationRunRequest) -> dict:
+    try:
+        return review_automation.create_run(request.mode, request.estimate_hash, request.calibration_run_id)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An identical run was created concurrently.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/review/automation/runs/{run_id}")
+def review_automation_run(run_id: str) -> dict:
+    try:
+        return review_automation.get_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation run was not found.") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/review/automation/runs/{run_id}/sync")
+def sync_review_automation_run(run_id: str) -> dict:
+    try:
+        return review_automation.sync_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation run was not found.") from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/review/automation/calibration/{sample_id}/label")
+def label_review_automation_sample(sample_id: str, request: ReviewAutomationCalibrationLabel) -> dict:
+    try:
+        return review_automation.label_calibration(sample_id, request.model_dump())
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Calibration sample was not found.") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/review/automation/runs/{run_id}/admit")
+def admit_review_automation_run(run_id: str, request: ReviewAutomationAction) -> dict:
+    if request.confirmation != "apply_machine_decisions":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Admission confirmation is invalid.")
+    try:
+        return review_automation.admit_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation run was not found.") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/review/automation/runs/{run_id}/rollback")
+def rollback_review_automation_run(run_id: str, request: ReviewAutomationAction) -> dict:
+    if request.confirmation != "rollback_machine_decisions":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Rollback confirmation is invalid.")
+    try:
+        return review_automation.rollback_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation run was not found.") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/review/automation/deepseek-completion/estimate")
+def deepseek_review_completion_estimate() -> dict:
+    return deepseek_review_completion.estimate()
+
+
+@app.get("/api/v1/review/automation/deepseek-completion/runs")
+def deepseek_review_completion_runs() -> dict:
+    return {"runs": deepseek_review_completion.list_runs()}
+
+
+@app.post("/api/v1/review/automation/deepseek-completion/runs", status_code=status.HTTP_202_ACCEPTED)
+def create_deepseek_review_completion_run(request: DeepSeekReviewCompletionRunRequest) -> dict:
+    try:
+        run = deepseek_review_completion.create_run(request.selection_hash)
+        if request.start_immediately:
+            return deepseek_review_completion.start(str(run["run_id"]), request.concurrency)
+        return run
+    except FileExistsError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An identical run was created concurrently.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/review/automation/deepseek-completion/runs/{run_id}")
+def deepseek_review_completion_run(run_id: str) -> dict:
+    try:
+        return deepseek_review_completion.get_run(run_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DeepSeek completion run was not found.") from None
+
+
+@app.post("/api/v1/review/automation/deepseek-completion/runs/{run_id}/resume", status_code=status.HTTP_202_ACCEPTED)
+def resume_deepseek_review_completion_run(run_id: str, request: DeepSeekReviewCompletionAction) -> dict:
+    if request.confirmation != "resume_deepseek_completion":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Resume confirmation is invalid.")
+    try:
+        return deepseek_review_completion.start(run_id, request.concurrency)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DeepSeek completion run was not found.") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/review/automation/deepseek-completion/runs/{run_id}/admit")
+def admit_deepseek_review_completion_run(run_id: str, request: DeepSeekReviewCompletionAction) -> dict:
+    if request.confirmation != "apply_deepseek_decisions":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Admission confirmation is invalid.")
+    try:
+        return deepseek_review_completion.admit(run_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DeepSeek completion run was not found.") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/review/automation/deepseek-completion/runs/{run_id}/rollback")
+def rollback_deepseek_review_completion_run(run_id: str, request: DeepSeekReviewCompletionAction) -> dict:
+    if request.confirmation != "rollback_deepseek_decisions":
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Rollback confirmation is invalid.")
+    try:
+        return deepseek_review_completion.rollback(run_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DeepSeek completion run was not found.") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/admin/reload-artifacts", status_code=status.HTTP_204_NO_CONTENT)

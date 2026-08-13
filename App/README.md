@@ -68,7 +68,8 @@ MVP_CHAT_WEB_MAX_RESULTS=5
 ```
 
 进程环境变量会覆盖 `.env` 中的同名变量。关系抽取/复核配置与聊天模型配置彼此独立；
-请使用 `RELATION_CANDIDATE_*` 和 `RELATION_REVIEW_*` 变量配置它们。任何真实 API
+请使用 `RELATION_CANDIDATE_*`、`RELATION_REVIEW_*` 和自动 Batch 审核专用的
+`EVIDENCE_REVIEW_*` 变量配置它们。任何真实 API
 Key、令牌、Cookie、私钥或导出的聊天记录都不应进入 Git。
 
 沉浸式模式默认使用 `0.45` 的较低但非固定采样温度，以避免所有日常回应落成同一种短句；
@@ -193,7 +194,8 @@ issue、截图或 Git 提交中。反馈会以追加记录写入 `runtime/mvp/`�
 反馈收件箱中筛选和标记处理状态。
 
 更多实现约束见 [架构说明](docs/architecture.md)、[数据契约](docs/data_contract.md)、
-[关系审核指南](docs/relation_review_guide.md) 和 [实体审核指南](docs/entity_node_review_guide.md)。
+[关系审核指南](docs/relation_review_guide.md)、[实体审核指南](docs/entity_node_review_guide.md) 和
+[Qwen Batch 自动审核指南](docs/qwen_batch_review_guide.md)。
 
 ## Git 与隐私
 

@@ -11,6 +11,11 @@ try:
 except ImportError:  # pragma: no cover - optional for production env-only runs
     load_dotenv = None
 
+try:  # pragma: no cover - exercised on Windows with the local credential vault
+    import keyring
+except ImportError:  # pragma: no cover - optional for env-only deployments
+    keyring = None
+
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = PACKAGE_ROOT.parent
@@ -32,6 +37,7 @@ class Settings:
     mvp_chat_api_key: str = ""
     mvp_chat_model: str = ""
     mvp_chat_timeout_seconds: float = 120.0
+    mvp_chat_credential_ref: str = ""
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -43,6 +49,15 @@ class Settings:
         data_root = Path(os.getenv("DATA_ROOT") or (PROJECT_ROOT / "Data")).resolve()
         runtime_root = Path(os.getenv("APP_RUNTIME") or (PACKAGE_ROOT / "runtime")).resolve()
         origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:8080").split(",") if origin.strip()]
+        credential_ref = os.getenv("MVP_CHAT_CREDENTIAL_REF", "").strip()
+        api_key = os.getenv("MVP_CHAT_API_KEY", "")
+        if not api_key and credential_ref and keyring is not None:
+            try:
+                api_key = str(keyring.get_password("ProjectSnow", credential_ref) or "")
+            except Exception:
+                # Read-only mode remains available when the OS credential
+                # backend cannot be reached.
+                api_key = ""
         return cls(
             data_root=data_root,
             runtime_root=runtime_root,
@@ -64,13 +79,12 @@ class Settings:
                 "MVP_CHAT_BASE_URL",
                 os.getenv("DASHSCOPE_BASE_URL", os.getenv("OPENAI_COMPATIBLE_BASE_URL", "")),
             ),
-            mvp_chat_api_key=os.getenv(
-                "MVP_CHAT_API_KEY",
-                os.getenv("DASHSCOPE_API_KEY", os.getenv("OPENAI_COMPATIBLE_API_KEY", "")),
-            ),
+            mvp_chat_api_key=api_key
+            or os.getenv("DASHSCOPE_API_KEY", os.getenv("OPENAI_COMPATIBLE_API_KEY", "")),
             mvp_chat_model=os.getenv(
                 "MVP_CHAT_MODEL",
                 os.getenv("OPENAI_COMPATIBLE_MODEL", "qwen3.7-max"),
             ),
             mvp_chat_timeout_seconds=float(os.getenv("MVP_CHAT_TIMEOUT_SECONDS", "120")),
+            mvp_chat_credential_ref=credential_ref,
         )

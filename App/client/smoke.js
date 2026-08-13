@@ -9,6 +9,8 @@ const IMMERSIVE_URL = "http://127.0.0.1:8080/immersive/";
 const ASSISTANT_URL = "http://127.0.0.1:8080/assistant/";
 const WORKSPACE_URL = "http://127.0.0.1:8080/workspace/";
 const SCREENSHOT_PATH = path.resolve(__dirname, "..", "runtime", "screenshots", "electron-mobile.png");
+const FACE_SCREENSHOT_PATH = path.resolve(__dirname, "..", "runtime", "screenshots", "electron-face-mobile.png");
+const DESKTOP_SCREENSHOT_PATH = path.resolve(__dirname, "..", "runtime", "screenshots", "electron-face-desktop.png");
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -38,6 +40,18 @@ async function waitForLanding(window) {
   throw new Error("Landing bootstrap did not finish.");
 }
 
+async function waitForPluginCenter(window) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const ready = await window.webContents.executeJavaScript(
+      "document.querySelectorAll('#plugin-character option').length === 23 && /人格网关|Codex 已配对/.test(document.getElementById('plugin-pairing-status').innerText)",
+      true,
+    );
+    if (ready) return;
+    await delay(100);
+  }
+  throw new Error("Plugin management center did not finish loading.");
+}
+
 async function waitForChatReady(window) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const ready = await window.webContents.executeJavaScript(
@@ -48,6 +62,18 @@ async function waitForChatReady(window) {
     await delay(100);
   }
   throw new Error("Conversation history did not finish loading.");
+}
+
+async function waitForChannel(window, channel) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const current = await window.webContents.executeJavaScript(
+      "document.getElementById('chat-app').dataset.channel",
+      true,
+    );
+    if (current === channel) return;
+    await delay(100);
+  }
+  throw new Error(`Immersive surface did not switch to ${channel}.`);
 }
 
 async function run() {
@@ -81,8 +107,29 @@ async function run() {
   }))()`, true);
 
   await window.loadURL(ASSISTANT_URL);
+  await waitForPluginCenter(window);
+  const assistant = await window.webContents.executeJavaScript(`(() => ({
+    surface: document.body.dataset.surface,
+    pluginVisible: !document.getElementById('plugin-center').hidden,
+    chatHidden: document.getElementById('chat-app').hidden,
+    characterOptions: document.querySelectorAll('#plugin-character option').length,
+    gatewayReady: /人格网关|Codex 已配对/.test(document.getElementById('plugin-pairing-status').innerText),
+    pairingControls: Boolean(document.getElementById('pair-codex') && document.getElementById('revoke-codex') && document.getElementById('test-persona-snapshot')),
+    horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+  }))()`, true);
+
+  await window.loadURL(IMMERSIVE_URL);
   await waitForCharacters(window);
   await waitForChatReady(window);
+  await window.webContents.insertCSS("*,*::before,*::after{animation:none!important;transition:none!important}");
+  const initialChannel = await window.webContents.executeJavaScript(
+    "document.getElementById('chat-app').dataset.channel",
+    true,
+  );
+  if (initialChannel !== "text") {
+    await window.webContents.executeJavaScript("document.getElementById('open-communicator').click()", true);
+    await waitForChannel(window, "text");
+  }
   const metrics = await window.webContents.executeJavaScript(`(() => {
     const input = document.getElementById("message-input");
     const inputRect = input.getBoundingClientRect();
@@ -99,7 +146,13 @@ async function run() {
         inputRect.top + inputRect.height / 2
       )?.id || "",
       surface: document.body.dataset.surface,
-      toolPanelHidden: document.getElementById('assistant-tool-panel').hidden
+      channel: document.getElementById('chat-app').dataset.channel,
+      textVisible: !document.getElementById('text-surface').hidden,
+      stageHidden: document.getElementById('in-person-surface').hidden,
+      actionHidden: document.getElementById('analyst-action-field').hidden,
+      oldChannelControlRemoved: !document.getElementById('channel-control'),
+      agentControlsHidden: getComputedStyle(document.getElementById('assistant-tool-toggle')).display === 'none',
+      technicalModelHidden: getComputedStyle(document.getElementById('active-model')).display === 'none'
     };
   })()`, true);
   const inputX = Math.round((metrics.inputRect.left + metrics.inputRect.right) / 2);
@@ -128,6 +181,75 @@ async function run() {
     return result;
   })()`, true);
 
+  await window.webContents.insertCSS(".toast{display:none!important}");
+
+  fs.mkdirSync(path.dirname(SCREENSHOT_PATH), { recursive: true });
+  fs.writeFileSync(SCREENSHOT_PATH, (await window.webContents.capturePage()).toPNG());
+
+  await window.webContents.executeJavaScript("document.getElementById('go-in-person').click()", true);
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const open = await window.webContents.executeJavaScript("document.getElementById('presence-dialog').open", true);
+    if (open) break;
+    await delay(100);
+  }
+  await window.webContents.executeJavaScript("document.getElementById('confirm-presence-transition').click()", true);
+  await waitForChannel(window, "in_person");
+  await delay(350);
+  const faceMetrics = await window.webContents.executeJavaScript(`(() => ({
+    channel: document.getElementById('chat-app').dataset.channel,
+    stageVisible: !document.getElementById('in-person-surface').hidden,
+    textHidden: document.getElementById('text-surface').hidden,
+    noBubbleTimelineInStage: !document.getElementById('in-person-surface').querySelector('.message'),
+    largeStagePortraitRemoved: !document.getElementById('stage-character-visual'),
+    backdropLoaded: document.getElementById('scene-backdrop').complete && document.getElementById('scene-backdrop').naturalWidth > 0,
+    onlySceneBackdropImage: [...document.querySelectorAll('#scene-stage img')].every((item) => item.id === 'scene-backdrop'),
+    stagePortraitVisible: document.getElementById('stage-portrait').getBoundingClientRect().width > 0,
+    portraitKind: document.getElementById('stage-portrait').dataset.portraitKind,
+    faceOverlayRemoved: !document.querySelector('.expression-overlay'),
+    actionToggleVisible: getComputedStyle(document.getElementById('toggle-action')).display !== 'none',
+    location: document.getElementById('stage-location').innerText,
+    horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+  }))()`, true);
+  faceMetrics.actionInputFocus = await window.webContents.executeJavaScript(`(() => {
+    document.getElementById('toggle-action').click();
+    document.getElementById('action-input').focus();
+    return !document.getElementById('analyst-action-field').hidden && document.activeElement.id === 'action-input';
+  })()`, true);
+  faceMetrics.hiddenUi = await window.webContents.executeJavaScript(`(() => {
+    document.getElementById('toggle-stage-ui').click();
+    const hidden = document.getElementById('chat-app').classList.contains('stage-ui-hidden')
+      && !document.getElementById('restore-stage-ui').hidden;
+    document.getElementById('restore-stage-ui').click();
+    return hidden && !document.getElementById('chat-app').classList.contains('stage-ui-hidden');
+  })()`, true);
+  faceMetrics.revealControl = await window.webContents.executeJavaScript(`(() => {
+    const dialogue = document.getElementById('stage-dialogue');
+    dialogue.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    return !dialogue.classList.contains('is-revealing');
+  })()`, true);
+  fs.writeFileSync(FACE_SCREENSHOT_PATH, (await window.webContents.capturePage()).toPNG());
+  await window.webContents.executeJavaScript("document.getElementById('open-transcript').click()", true);
+  await delay(250);
+  faceMetrics.transcriptOpen = await window.webContents.executeJavaScript(
+    "document.getElementById('transcript-panel').classList.contains('open') && !document.getElementById('drawer-scrim').hidden",
+    true,
+  );
+  await window.webContents.executeJavaScript("document.getElementById('close-transcript').click()", true);
+
+  window.setContentSize(1365, 900);
+  await delay(250);
+  const desktopFace = await window.webContents.executeJavaScript(`(() => ({
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    stageVisible: !document.getElementById('in-person-surface').hidden,
+    contactOffCanvas: getComputedStyle(document.getElementById('contact-panel')).transform !== 'none',
+    horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+  }))()`, true);
+  fs.writeFileSync(DESKTOP_SCREENSHOT_PATH, (await window.webContents.capturePage()).toPNG());
+  window.setContentSize(390, 844);
+  await delay(150);
+  await window.webContents.executeJavaScript("document.getElementById('open-communicator').click()", true);
+  await waitForChannel(window, "text");
+
   await window.webContents.executeJavaScript(
     "document.getElementById('open-contacts').click()",
     true,
@@ -142,32 +264,34 @@ async function run() {
   window.webContents.sendInputEvent({ type: "mouseUp", x: 370, y: 420, button: "left", clickCount: 1 });
   await delay(250);
 
-  fs.mkdirSync(path.dirname(SCREENSHOT_PATH), { recursive: true });
-  fs.writeFileSync(SCREENSHOT_PATH, (await window.webContents.capturePage()).toPNG());
-
-  await window.loadURL(IMMERSIVE_URL);
-  await waitForCharacters(window);
-  const immersive = await window.webContents.executeJavaScript(`(() => ({
-    surface: document.body.dataset.surface,
-    agentControlsHidden: getComputedStyle(document.getElementById('assistant-tool-toggle')).display === 'none',
-    technicalModelHidden: getComputedStyle(document.getElementById('active-model')).display === 'none'
-  }))()`, true);
-
   await window.loadURL(WORKSPACE_URL);
   const workspaceReady = await window.webContents.executeJavaScript(
     "Boolean(document.getElementById('feedback-inbox') && document.getElementById('mvp-message') && document.getElementById('workspace-detail-drawer'))",
     true,
   );
 
-  const result = { landing, assistant: metrics, immersive, workspaceReady, consoleErrors, screenshot: SCREENSHOT_PATH };
+  const result = { landing, assistant, immersive: metrics, faceMetrics, desktopFace, workspaceReady, consoleErrors, screenshots: [SCREENSHOT_PATH, FACE_SCREENSHOT_PATH, DESKTOP_SCREENSHOT_PATH] };
   const passed = landing.surface === "landing"
     && landing.entries === 2
     && landing.versionVisible
     && landing.rosterRemoved
+    && assistant.surface === "assistant"
+    && assistant.pluginVisible
+    && assistant.chatHidden
+    && assistant.characterOptions === 23
+    && assistant.gatewayReady
+    && assistant.pairingControls
+    && !assistant.horizontalOverflow
     && metrics.mobileMedia
     && metrics.characterCount === 22
-    && metrics.surface === "assistant"
-    && metrics.toolPanelHidden
+    && metrics.surface === "immersive"
+    && metrics.channel === "text"
+    && metrics.textVisible
+    && metrics.stageHidden
+    && metrics.actionHidden
+    && metrics.oldChannelControlRemoved
+    && metrics.agentControlsHidden
+    && metrics.technicalModelHidden
     && !metrics.horizontalOverflow
     && metrics.contactTransform !== "none"
     && metrics.contactDrawer.open
@@ -179,9 +303,27 @@ async function run() {
     && metrics.providerSettings.guideHasEndpoint
     && metrics.providerSettings.guideHasModel
     && metrics.providerSettings.guideHasSecretPlaceholder
-    && immersive.surface === "immersive"
-    && immersive.agentControlsHidden
-    && immersive.technicalModelHidden
+    && faceMetrics.channel === "in_person"
+    && faceMetrics.stageVisible
+    && faceMetrics.textHidden
+    && faceMetrics.noBubbleTimelineInStage
+    && faceMetrics.largeStagePortraitRemoved
+    && faceMetrics.backdropLoaded
+    && faceMetrics.onlySceneBackdropImage
+    && faceMetrics.stagePortraitVisible
+    && ["headshot", "full_body"].includes(faceMetrics.portraitKind)
+    && faceMetrics.faceOverlayRemoved
+    && faceMetrics.actionToggleVisible
+    && faceMetrics.actionInputFocus
+    && faceMetrics.hiddenUi
+    && faceMetrics.revealControl
+    && Boolean(faceMetrics.location)
+    && faceMetrics.transcriptOpen
+    && !faceMetrics.horizontalOverflow
+    && desktopFace.viewport.width >= 1360
+    && desktopFace.stageVisible
+    && desktopFace.contactOffCanvas
+    && !desktopFace.horizontalOverflow
     && workspaceReady
     && consoleErrors.length === 0;
   process.stdout.write(`${JSON.stringify({ ...result, passed }, null, 2)}\n`);

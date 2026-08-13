@@ -618,6 +618,12 @@ class ProviderRegistry:
     def _env_selection(self, required: set[str]) -> ModelSelection | None:
         base_url = (os.getenv("MVP_CHAT_BASE_URL") or os.getenv("DASHSCOPE_BASE_URL") or os.getenv("OPENAI_COMPATIBLE_BASE_URL") or "").rstrip("/")
         api_key = os.getenv("MVP_CHAT_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or os.getenv("OPENAI_COMPATIBLE_API_KEY") or ""
+        credential_ref = "environment"
+        if not api_key:
+            configured_ref = os.getenv("MVP_CHAT_CREDENTIAL_REF", "").strip()
+            api_key = self.vault.get(configured_ref)
+            if api_key:
+                credential_ref = configured_ref
         model = os.getenv("MVP_CHAT_MODEL") or os.getenv("OPENAI_COMPATIBLE_MODEL") or ""
         if not base_url or not api_key or not model:
             return None
@@ -631,7 +637,7 @@ class ProviderRegistry:
             else "openai-compatible"
         )
         return ModelSelection(
-            "env-default", "当前环境配置", model, base_url, "environment",
+            "env-default", "当前环境配置", model, base_url, credential_ref,
             capabilities, "environment_default", provider_kind=provider_kind,
         )
 

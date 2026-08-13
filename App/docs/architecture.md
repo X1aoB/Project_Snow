@@ -136,9 +136,9 @@ turn is sent; document excerpts are indexed for the current session only.
 ## C: two-layer knowledge graph
 
 - Deterministic edges are built only from explicit manifest fields and enter the graph as `review_status=verified`.
-- Narrative relation extraction produces `review_status=pending_review` candidates with evidence, confidence and a restricted relation vocabulary. Such edges are excluded from graph retrieval until a reviewer approves them.
+- Narrative relation extraction produces `review_status=pending_review` candidates with evidence, confidence and a restricted relation vocabulary. Such edges are excluded from graph retrieval until a human reviewer approves them or the calibrated automation gate admits them.
 - An optional independent OpenAI-compatible second-review pipeline evaluates the proposed triple against its original evidence without receiving the extractor rationale or confidence. It writes advisory reports only; deterministic evidence checks, the second model, and browser triage never mutate a candidate or graph edge.
-- Quality calibration uses fixed-seed, stratified human samples from the model-suggested pool. A future batch-admission policy may be considered only after its measured error rate is acceptable; it is not part of the current graph-write path.
+- Qwen Batch automation uses fixed-seed, stratified human calibration. Admission remains disabled per decision category until its quota, accuracy threshold and zero-critical-error rule pass. Machine-created graph artifacts carry `model_approved_audited` provenance and a run ID, and can be rolled back without changing human decisions.
 - Neo4j is a serving projection. JSONL node/edge files are the portable, versionable graph source of truth.
 
 ## Non-negotiable role rule

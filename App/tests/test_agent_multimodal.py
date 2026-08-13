@@ -94,8 +94,20 @@ class MultimodalAgentTests(unittest.TestCase):
                 {"text"}, {"provider_id": "deepseek", "model_name": "deepseek-v4-flash"}
             )
             self.assertEqual(selected.model_name, "deepseek-v4-flash")
-            with self.assertRaises(ValueError):
-                registry.route({"text"})
+            environment_defaults = {
+                "MVP_CHAT_BASE_URL": "",
+                "DASHSCOPE_BASE_URL": "",
+                "OPENAI_COMPATIBLE_BASE_URL": "",
+                "MVP_CHAT_API_KEY": "",
+                "DASHSCOPE_API_KEY": "",
+                "OPENAI_COMPATIBLE_API_KEY": "",
+                "MVP_CHAT_CREDENTIAL_REF": "",
+                "MVP_CHAT_MODEL": "",
+                "OPENAI_COMPATIBLE_MODEL": "",
+            }
+            with patch.dict("os.environ", environment_defaults, clear=False):
+                with self.assertRaises(ValueError):
+                    registry.route({"text"})
 
     def test_deepseek_probe_disables_thinking_and_keeps_text_when_json_fails(self):
         with tempfile.TemporaryDirectory() as temp:

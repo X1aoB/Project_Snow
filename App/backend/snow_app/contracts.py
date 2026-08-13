@@ -70,6 +70,11 @@ class ModelOverride(BaseModel):
     model_name: str = Field(min_length=1, max_length=200)
 
 
+class PersonaPairingRequest(BaseModel):
+    label: str = Field(default="Codex", min_length=1, max_length=120)
+    default_character_id: str | None = Field(default=None, max_length=120)
+
+
 class ProviderConfigRequest(BaseModel):
     provider_id: str | None = Field(default=None, max_length=120)
     display_name: str = Field(min_length=1, max_length=160)
@@ -183,6 +188,33 @@ class MVPChatRequest(BaseModel):
         return self
 
 
+class MVPPresenceResolveRequest(BaseModel):
+    character_id: str = Field(min_length=1, max_length=120)
+    world_session_id: str | None = Field(default=None, max_length=160)
+
+
+class MVPPresenceTransitionRequest(BaseModel):
+    character_id: str = Field(min_length=1, max_length=120)
+    session_id: str | None = Field(default=None, max_length=160)
+    world_session_id: str | None = Field(default=None, max_length=160)
+    target_channel: Literal["in_person", "text"]
+    action: Literal["join_character", "open_communicator"]
+
+    @model_validator(mode="after")
+    def validate_transition_action(self) -> "MVPPresenceTransitionRequest":
+        expected = "join_character" if self.target_channel == "in_person" else "open_communicator"
+        if self.action != expected:
+            raise ValueError("场景动作与目标交流媒介不匹配。")
+        return self
+
+
+class MVPPresenceArrivalRequest(BaseModel):
+    character_id: str = Field(min_length=1, max_length=120)
+    arrival_id: str = Field(min_length=8, max_length=160)
+    session_id: str | None = Field(default=None, max_length=160)
+    world_session_id: str | None = Field(default=None, max_length=160)
+
+
 class MVPFeedbackRequest(BaseModel):
     character_id: str | None = Field(default=None, min_length=1, max_length=120)
     session_id: str | None = Field(default=None, min_length=1, max_length=160)
@@ -229,12 +261,16 @@ class MVPFeedbackTriageRequest(BaseModel):
 class MVPFeedbackIssueStatusRequest(BaseModel):
     status: Literal[
         "open",
+        "planned",
         "needs_verification",
         "fixed_verified",
         "not_reproduced",
         "duplicate",
+        "superseded_by_architecture",
     ]
     note: str = Field(default="", max_length=2000)
+    verification_tests: list[str] = Field(default_factory=list, max_length=30)
+    code_version: str | None = Field(default=None, max_length=120)
 
 
 class GraphEdge(BaseModel):
@@ -269,6 +305,53 @@ class EntityNodeReviewDecision(BaseModel):
     decision: Literal["approved", "rejected"]
     reviewer_id: str = Field(min_length=1, max_length=120)
     note: str = Field(default="", max_length=2000)
+
+
+class ReviewAutomationRunRequest(BaseModel):
+    """Explicitly confirmed creation of a paid or no-charge batch review run."""
+
+    mode: Literal["test", "calibration", "production"] = "calibration"
+    estimate_hash: str = Field(min_length=16, max_length=128)
+    calibration_run_id: str | None = Field(default=None, max_length=160)
+    confirmation: Literal["submit_qwen_batch"]
+
+
+class ReviewAutomationCalibrationLabel(BaseModel):
+    correct: bool
+    critical_error: bool = False
+    error_category: Literal[
+        "none",
+        "identity_confusion",
+        "wrong_node_type",
+        "context_contamination",
+        "fabricated_quote",
+        "wrong_relation",
+        "other",
+    ] = "none"
+    reviewer_id: str = Field(min_length=1, max_length=120)
+    note: str = Field(default="", max_length=2000)
+
+
+class ReviewAutomationAction(BaseModel):
+    confirmation: Literal["apply_machine_decisions", "rollback_machine_decisions"]
+
+
+class DeepSeekReviewCompletionRunRequest(BaseModel):
+    """Create and optionally start a no-price-gate unresolved-review run."""
+
+    selection_hash: str | None = Field(default=None, min_length=16, max_length=128)
+    concurrency: int = Field(default=12, ge=1, le=128)
+    start_immediately: bool = True
+    confirmation: Literal["submit_deepseek_completion"]
+
+
+class DeepSeekReviewCompletionAction(BaseModel):
+    confirmation: Literal[
+        "resume_deepseek_completion",
+        "apply_deepseek_decisions",
+        "rollback_deepseek_decisions",
+    ]
+    concurrency: int = Field(default=12, ge=1, le=128)
 
 
 class StageLockResponse(BaseModel):

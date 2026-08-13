@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 from typing import Any
+from urllib.parse import quote
 
 from bs4 import BeautifulSoup
 import httpx
@@ -19,6 +20,8 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = APP_ROOT.parent
 REGISTRY_PATH = APP_ROOT / "backend" / "snow_app" / "mvp_character_registry.json"
 OUTPUT_ROOT = APP_ROOT / "frontend" / "assets" / "characters"
+WIKI_API_URL = "https://wiki.biligame.com/sonw/api.php"
+WIKI_PAGE_ROOT = "https://wiki.biligame.com/sonw/"
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -89,6 +92,38 @@ def select_image(page_path: Path, names: set[str]) -> tuple[str, str] | None:
     return (source, alt) if score >= 20 else None
 
 
+def select_named_wiki_images(
+    client: httpx.Client,
+    filenames: list[str],
+) -> dict[str, tuple[str, str, str]]:
+    response = client.get(
+        WIKI_API_URL,
+        params={
+            "action": "query",
+            "format": "json",
+            "formatversion": "2",
+            "prop": "imageinfo",
+            "iiprop": "url|size",
+            "titles": "|".join(f"文件:{filename}" for filename in filenames),
+        },
+    )
+    response.raise_for_status()
+    pages = response.json().get("query", {}).get("pages", [])
+    selections: dict[str, tuple[str, str, str]] = {}
+    for page in pages:
+        title = str(page.get("title") or "")
+        filename = title.split(":", 1)[-1]
+        image_info = page.get("imageinfo") or []
+        if page.get("missing") is not None or not image_info or not image_info[0].get("url"):
+            continue
+        selections[filename] = (
+            str(image_info[0]["url"]),
+            filename,
+            f"{WIKI_PAGE_ROOT}{quote(f'文件:{filename}')}",
+        )
+    return selections
+
+
 def extension_for(content_type: str, source_url: str) -> str:
     mapping = {
         "image/png": ".png",
@@ -109,7 +144,23 @@ def optimized_png(content: bytes, *, max_dimension: int = 512) -> tuple[bytes, t
         return output.getvalue(), normalized.size
 
 
-def build(data_root: Path, *, timeout: float = 30.0) -> dict[str, Any]:
+def portrait_crop(source_alt: str | None) -> dict[str, Any]:
+    alt = str(source_alt or "")
+    headshot = "头像" in alt and "立绘" not in alt
+    return {
+        "portrait_kind": "headshot" if headshot else "full_body",
+        "portrait_scale": 1.0 if headshot else 1.8,
+        "portrait_focus_x": 50,
+        "portrait_focus_y": 50 if headshot else 22,
+    }
+
+
+def build(
+    data_root: Path,
+    *,
+    timeout: float = 30.0,
+    prefer_patient_gown: bool = False,
+) -> dict[str, Any]:
     registry = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
     profiles = read_jsonl(data_root / "Manifest" / "character_profiles_index.jsonl")
     armors = read_jsonl(data_root / "Manifest" / "character_armors_index.jsonl")
@@ -120,9 +171,24 @@ def build(data_root: Path, *, timeout: float = 30.0) -> dict[str, Any]:
             sources.setdefault(character_id, []).append(item)
 
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    manifest_path = OUTPUT_ROOT / "avatars.json"
+    existing_by_id: dict[str, dict[str, Any]] = {}
+    if manifest_path.exists():
+        existing_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        existing_by_id = {
+            str(item.get("character_id")): item
+            for item in existing_manifest.get("characters", [])
+            if item.get("character_id")
+        }
     results = []
     headers = {"User-Agent": "Project-Snow-Local-Avatar-Builder/0.2"}
     with httpx.Client(headers=headers, follow_redirects=True, timeout=timeout) as client:
+        named_selections: dict[str, tuple[str, str, str]] = {}
+        if prefer_patient_gown:
+            named_selections = select_named_wiki_images(
+                client,
+                [f"{character['source_name']}病号服头像.png" for character in registry.get("characters", [])],
+            )
         for character in registry.get("characters", []):
             character_id = str(character["character_id"])
             names = {
@@ -132,7 +198,21 @@ def build(data_root: Path, *, timeout: float = 30.0) -> dict[str, Any]:
             }
             selection = None
             selected_page = None
+            if prefer_patient_gown:
+                patient_gown_filename = f"{character['source_name']}病号服头像.png"
+                named_selection = named_selections.get(patient_gown_filename)
+                if named_selection:
+                    selection = named_selection[:2]
+                    selected_page = {"canonical_url": named_selection[2]}
+                else:
+                    existing = existing_by_id.get(character_id)
+                    existing_path = OUTPUT_ROOT / f"{character_id}.png"
+                    if existing and existing_path.exists():
+                        results.append(existing)
+                        continue
             for source in sources.get(character_id, []):
+                if selection:
+                    break
                 page_path = resolve_source_path(str(source["local_path"]))
                 candidate = select_image(page_path, names)
                 if candidate:
@@ -149,6 +229,13 @@ def build(data_root: Path, *, timeout: float = 30.0) -> dict[str, Any]:
                 "source_alt": selection[1] if selection else None,
                 "status": "fallback",
                 "license": "CC BY-NC-SA 4.0 unless page-specific notice applies",
+                "publishable": False,
+                "stage_src": None,
+                "stage_src_deprecated": True,
+                "stage_focus_x": 50,
+                "stage_focus_y": 50,
+                "stage_fit": "contain",
+                **portrait_crop(selection[1] if selection else None),
             }
             if selection:
                 try:
@@ -171,6 +258,7 @@ def build(data_root: Path, *, timeout: float = 30.0) -> dict[str, Any]:
                             "content_length": len(optimized),
                             "width": dimensions[0],
                             "height": dimensions[1],
+                            "publishable": True,
                         }
                     )
                 except (httpx.HTTPError, OSError, ValueError, Image.UnidentifiedImageError) as exc:
@@ -178,12 +266,12 @@ def build(data_root: Path, *, timeout: float = 30.0) -> dict[str, Any]:
             results.append(row)
 
     manifest = {
-        "schema_version": "project-snow-avatar-1.0",
+        "schema_version": "project-snow-avatar-1.2",
         "registry_version": registry.get("version"),
         "policy": "Local non-commercial test assets; Data remains read-only.",
         "characters": results,
     }
-    (OUTPUT_ROOT / "avatars.json").write_text(
+    manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -199,8 +287,23 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", type=Path, default=PROJECT_ROOT / "Data")
     parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument(
+        "--prefer-patient-gown",
+        action="store_true",
+        help="Use exact '<character>病号服头像.png' Wiki assets and preserve existing missing entries.",
+    )
     args = parser.parse_args()
-    print(json.dumps(build(args.data_root.resolve(), timeout=args.timeout), ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            build(
+                args.data_root.resolve(),
+                timeout=args.timeout,
+                prefer_patient_gown=args.prefer_patient_gown,
+            ),
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -33,10 +33,24 @@ const state = {
   models: [],
   modelDefaults: {},
   recording: null,
+  personaGateway: null,
+  sceneByCharacter: new Map(),
+  presenceDialogCharacterId: "",
+  transitionPending: false,
+  arrivalPending: null,
+  stageUiHidden: false,
+  stageReveal: {
+    messageId: "",
+    fullText: "",
+    visibleCharacters: 0,
+    completed: true,
+    timer: null,
+  },
 };
 
 const MODE_LABELS = { immersive: "沉浸式", assistant: "助手" };
 const CHANNEL_LABELS = { in_person: "面对面", text: "文字通讯" };
+const SCENE_KEYS = new Set(["generic", "quarters", "lounge", "training", "archive", "canteen", "observation", "medical", "corridor"]);
 const TOOL_LABELS = {
   get_current_time: "当前时间",
   web_search: "网页搜索",
@@ -57,6 +71,19 @@ const PROVIDER_PRESETS = {
 function newClientMessageId() {
   if (window.crypto?.randomUUID) return `client_${window.crypto.randomUUID()}`;
   return `client_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function newWorldSessionId() {
+  if (window.crypto?.randomUUID) return `world_browser_${window.crypto.randomUUID()}`;
+  return `world_browser_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function ensureWorldSessionId() {
+  if (state.worldSessionId) return state.worldSessionId;
+  const stored = storageGet("project_snow:world_session_id", "");
+  state.worldSessionId = stored || newWorldSessionId();
+  storageSet("project_snow:world_session_id", state.worldSessionId);
+  return state.worldSessionId;
 }
 
 function channelPreference(characterId) {
@@ -100,6 +127,7 @@ function getThread(characterId) {
       modelOverride: storageGet(`project_snow:model:${characterId}`, ""),
       thinkingMode: storageGet(`project_snow:thinking:${characterId}`, "auto"),
       voiceReply: storageGet(`project_snow:voice:${characterId}`, "false") === "true",
+      actionExpanded: false,
     });
   }
   return state.threads.get(characterId);
@@ -118,8 +146,10 @@ function updateComposerFields() {
   const actionField = byId("analyst-action-field");
   const speechInput = byId("message-input");
   const inPerson = Boolean(thread && thread.channel === "in_person");
-  actionField.hidden = !inPerson;
-  speechInput.placeholder = inPerson ? "输入对白（可选）…" : "输入消息…";
+  const expanded = Boolean(inPerson && thread.actionExpanded);
+  actionField.hidden = !expanded;
+  byId("toggle-action").setAttribute("aria-expanded", String(expanded));
+  speechInput.placeholder = inPerson ? "对她说……" : "发送一条文字通讯…";
   speechInput.setAttribute("aria-label", inPerson ? "输入面对面对白" : "输入文字消息");
 }
 
@@ -174,9 +204,13 @@ function renderCharacterList() {
 
 function updateControls() {
   const channel = currentThread()?.channel || "text";
-  document.querySelectorAll("#channel-control [data-channel]").forEach((button) => {
-    button.setAttribute("aria-pressed", button.dataset.channel === channel ? "true" : "false");
-  });
+  const app = byId("chat-app");
+  if (channel !== "in_person" && state.stageUiHidden) setStageUiHidden(false);
+  app.dataset.channel = channel;
+  document.body.dataset.channel = channel;
+  byId("text-surface").hidden = channel !== "text";
+  byId("in-person-surface").hidden = channel !== "in_person";
+  byId("floating-feedback").hidden = state.surface === "immersive" && channel === "in_person";
   updateComposerFields();
 }
 
@@ -185,12 +219,15 @@ function renderHeader() {
   const thread = currentThread();
   const target = byId("active-character");
   if (!character) {
-    target.innerHTML = `${avatarMarkup(null, "large")}<div><h1>选择角色</h1><p>从左侧开始一段对话</p></div>`;
+    target.innerHTML = `${avatarMarkup(null, "large")}<div><h1>选择角色</h1><p>从左侧开始一段通讯</p></div>`;
   } else {
-    const coverage = character.coverage?.label || "资料覆盖状态未知";
-    target.innerHTML = `${avatarMarkup(character, "large")}<div><h1>${escapeHtml(character.character_name)}</h1><p>${escapeHtml(coverage)} · ${escapeHtml(CHANNEL_LABELS[thread.channel])}</p></div>`;
+    target.innerHTML = `${avatarMarkup(character, "large")}<div><h1>${escapeHtml(character.character_name)}</h1><p>通讯中 · 文字通讯</p></div>`;
   }
+  const scene = state.sceneByCharacter.get(character?.character_id) || {};
+  byId("go-in-person-label").textContent = scene.character_location
+    ? `去见她 · ${scene.character_location}` : "去见她";
   updateControls();
+  renderStage();
 }
 
 function normalizeHistoryMessage(item) {
@@ -241,13 +278,17 @@ async function loadConversation(characterId, { older = false } = {}) {
       thread.sessionId = conversation.session_id || thread.sessionId;
       thread.worldSessionId = conversation.world_session_id || thread.worldSessionId;
       thread.channel = conversation.communication_channel || thread.channel;
-      if (thread.worldSessionId) state.worldSessionId = thread.worldSessionId;
+      if (thread.worldSessionId) {
+        state.worldSessionId = thread.worldSessionId;
+        storageSet("project_snow:world_session_id", state.worldSessionId);
+      }
       const latestAssistant = [...thread.messages].reverse().find((item) => item.role === "assistant");
       thread.latestResult = latestAssistant?.result || null;
       state.infoResult = thread.latestResult;
       thread.messages.filter((item) => item.role === "assistant" && item.result?.agent_run_id && !["succeeded", "failed", "cancelled"].includes(item.result?.agent_status)).forEach((item) => monitorAgentRun(item, thread));
       await loadQuestions(thread);
     }
+    await resolveScene(characterId);
     thread.nextBefore = result.next_before;
   } catch (error) {
     thread.error = `历史记录读取失败：${error.message}`;
@@ -269,11 +310,15 @@ function messageBlocks(message) {
   return [{ type: message.channel === "text" ? "message" : "speech", text: message.text || "" }];
 }
 
-function messageHtml(message, character) {
+function messageHtml(message, character, { transcript = false } = {}) {
   const modeLabel = MODE_LABELS[message.mode] || message.mode;
   const channelLabel = CHANNEL_LABELS[message.channel] || message.channel;
   const statusClass = message.status === "failed" ? " failed" : message.status === "sending" ? " sending" : "";
-  const label = message.role === "user" ? "分析员" : character.character_name;
+  const label = message.role === "user" ? "你" : character.character_name;
+  const timeLabel = formatTime(message.created_at);
+  const metaPrefix = transcript
+    ? `<span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span>`
+    : `<span>${escapeHtml(label)}</span>${timeLabel ? `<span>${escapeHtml(timeLabel)}</span>` : ""}`;
   if (message.role === "user") {
     const blocks = messageBlocks(message);
     const isActionOnly = blocks.length > 0 && blocks.every((block) => block.type === "action");
@@ -294,7 +339,7 @@ function messageHtml(message, character) {
     ).join("");
     const attachments = Array.isArray(message.attachments) && message.attachments.length
       ? `<div class="message-attachments">${message.attachments.map((item) => `<span><i data-lucide="paperclip"></i>${escapeHtml(item.original_name || "附件")}</span>`).join("")}</div>` : "";
-    return `<article class="message user ${escapeHtml(message.channel)}${isActionOnly ? " analyst-action-message" : ""}${statusClass}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta"><span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span>${kindLabel}${status}</div>${renderedBlocks}${attachments}${retry}</article>`;
+    return `<article class="message user ${escapeHtml(message.channel)}${isActionOnly ? " analyst-action-message" : ""}${statusClass}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta">${metaPrefix}${kindLabel}${status}</div>${renderedBlocks}${attachments}${retry}</article>`;
   }
   let revealOffset = 0;
   const freshText = Boolean(message.fresh && message.channel === "text");
@@ -347,7 +392,7 @@ function messageHtml(message, character) {
     ? `<details class="model-meta"><summary>模型、路由与用量${result.routing_decision?.fallback ? " · 已回退" : ""}</summary><p>${escapeHtml(result.actual_model.provider_name || result.actual_model.provider_id || "模型")} · ${escapeHtml(result.actual_model.model_name)}</p><p>${escapeHtml(routingReason)} · ${escapeHtml(usageText)}</p>${thinkingText ? `<p>${escapeHtml(thinkingText)}</p>` : ""}</details>`
     : "";
   const audio = result.audio?.status === "completed" ? `<audio class="voice-reply" controls preload="metadata" src="${escapeHtml(result.audio.content_url)}"></audio>` : "";
-  return `<article class="message assistant ${escapeHtml(message.channel)}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta"><span>${escapeHtml(label)}</span><span>${escapeHtml(modeLabel)}</span><span>${escapeHtml(channelLabel)}</span></div>${blocks}${trace}${agentCard}${audio}${modelMeta}<div class="message-actions"><button type="button" data-message-info="${escapeHtml(message.id)}">查看依据</button><button type="button" data-message-feedback="${escapeHtml(message.id)}">反馈</button></div></article>`;
+  return `<article class="message assistant ${escapeHtml(message.channel)}" data-message-id="${escapeHtml(message.id)}"><div class="message-meta">${metaPrefix}</div>${blocks}${trace}${agentCard}${audio}${modelMeta}<div class="message-actions"><details class="message-menu"><summary aria-label="消息操作"><i data-lucide="more-horizontal"></i></summary><div><button type="button" data-message-info="${escapeHtml(message.id)}">查看依据</button><button type="button" data-message-feedback="${escapeHtml(message.id)}">反馈</button></div></details></div></article>`;
 }
 
 function renderTimeline(scrollToBottom = false) {
@@ -366,20 +411,23 @@ function renderTimeline(scrollToBottom = false) {
   if (thread.nextBefore) html.push(`<button class="load-older" type="button" data-load-older>${thread.loadingOlder ? "正在读取…" : "加载更早消息"}</button>`);
   if (!thread.messages.length && !thread.pending) {
     const questions = thread.questions.map((item) => `<button type="button" class="retry-button" data-suggestion="${escapeHtml(item.text)}">${escapeHtml(item.text)}</button>`).join("");
-    html.push(`<div class="empty-conversation"><div><strong>和${escapeHtml(character.character_name)}开始一段对话</strong><p>当前为${escapeHtml(MODE_LABELS[state.mode])} · ${escapeHtml(CHANNEL_LABELS[thread.channel])}</p>${questions ? `<div class="presence-actions">${questions}</div>` : ""}</div></div>`);
+    html.push(`<div class="empty-conversation"><div><strong>给${escapeHtml(character.character_name)}发一条消息</strong><p>当前使用基地通讯器</p>${questions ? `<div class="presence-actions">${questions}</div>` : ""}</div></div>`);
   } else {
-    let previousMode = null;
-    let previousChannel = null;
+    let hiddenInPersonCount = 0;
+    const flushInPersonMemory = () => {
+      if (!hiddenInPersonCount) return;
+      html.push(`<div class="channel-memory-card"><i data-lucide="users"></i><span>期间有 ${hiddenInPersonCount} 条面对面互动，可在“回看”中查看</span></div>`);
+      hiddenInPersonCount = 0;
+    };
     thread.messages.forEach((message) => {
-      if (previousMode && message.mode !== previousMode) {
-        html.push(`<div class="timeline-divider"><span>切换为${escapeHtml(MODE_LABELS[message.mode] || message.mode)}</span></div>`);
-      } else if (previousChannel && message.channel !== previousChannel) {
-        html.push(`<div class="timeline-divider"><span>改用${escapeHtml(CHANNEL_LABELS[message.channel] || message.channel)}</span></div>`);
+      if (message.channel === "in_person") {
+        hiddenInPersonCount += 1;
+        return;
       }
+      flushInPersonMemory();
       html.push(messageHtml(message, character));
-      previousMode = message.mode;
-      previousChannel = message.channel;
     });
+    flushInPersonMemory();
   }
   if (thread.pending?.sending && thread.pending.channel === "text") {
     html.push(`<article class="message assistant ${escapeHtml(thread.pending.channel)}"><div class="message-meta"><span>${escapeHtml(character.character_name)}</span><span>${escapeHtml(CHANNEL_LABELS[thread.pending.channel])}</span></div><div class="typing" aria-label="正在输入"><span></span><span></span><span></span></div></article>`);
@@ -392,6 +440,353 @@ function renderTimeline(scrollToBottom = false) {
   target.innerHTML = html.join("");
   renderIcons();
   if (scrollToBottom) requestAnimationFrame(() => { target.scrollTop = target.scrollHeight; });
+  renderTranscript();
+  renderStage();
+}
+
+function renderTranscript() {
+  const target = byId("transcript-content");
+  const character = currentCharacter();
+  const thread = currentThread();
+  if (!character || !thread) {
+    target.innerHTML = '<div class="empty-conversation"><p>选择角色后回看完整记录。</p></div>';
+    return;
+  }
+  if (!thread.messages.length) {
+    target.innerHTML = `<div class="empty-conversation"><p>尚未与${escapeHtml(character.character_name)}产生对话记录。</p></div>`;
+    return;
+  }
+  const html = [];
+  let previousChannel = null;
+  thread.messages.forEach((message) => {
+    if (previousChannel && previousChannel !== message.channel) {
+      html.push(`<div class="timeline-divider"><span>转为${escapeHtml(CHANNEL_LABELS[message.channel] || message.channel)}</span></div>`);
+    }
+    html.push(messageHtml(message, character, { transcript: true }));
+    previousChannel = message.channel;
+  });
+  target.innerHTML = html.join("");
+  renderIcons();
+}
+
+function latestAssistantMessage(channel = null) {
+  const messages = currentThread()?.messages || [];
+  return [...messages].reverse().find((item) => (
+    item.role === "assistant" && (!channel || item.channel === channel)
+  )) || null;
+}
+
+function headerPortraitInnerHtml(character) {
+  const source = character?.avatar?.src;
+  if (source && character?.avatar?.publishable !== false) {
+    return `<img src="${escapeHtml(source)}" alt="" />`;
+  }
+  return escapeHtml((character?.character_name || "?").slice(0, 1));
+}
+
+function stagePortraitInnerHtml(character) {
+  const source = character?.avatar?.src;
+  if (source && character?.avatar?.publishable !== false) {
+    return `<img src="${escapeHtml(source)}" alt="" loading="eager" />`;
+  }
+  return escapeHtml((character?.character_name || "?").slice(0, 1));
+}
+
+function clearStageRevealTimer() {
+  if (state.stageReveal.timer) window.clearInterval(state.stageReveal.timer);
+  state.stageReveal.timer = null;
+}
+
+function setStageSpeech(text) {
+  byId("stage-speech").innerHTML = text
+    ? `<p>${escapeHtml(text)}</p>`
+    : "<p></p>";
+}
+
+function completeStageReveal() {
+  if (state.stageReveal.completed) return false;
+  clearStageRevealTimer();
+  state.stageReveal.visibleCharacters = state.stageReveal.fullText.length;
+  state.stageReveal.completed = true;
+  const message = currentThread()?.messages.find((item) => item.id === state.stageReveal.messageId);
+  if (message) message.fresh = false;
+  setStageSpeech(state.stageReveal.fullText);
+  byId("stage-dialogue").classList.remove("is-revealing");
+  return true;
+}
+
+function beginStageReveal(messageId, fullText, fresh, delay = 0) {
+  clearStageRevealTimer();
+  state.stageReveal = {
+    messageId,
+    fullText,
+    visibleCharacters: fresh ? 0 : fullText.length,
+    completed: !fresh,
+    timer: null,
+  };
+  if (!fresh || !fullText || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    state.stageReveal.completed = true;
+    state.stageReveal.visibleCharacters = fullText.length;
+    setStageSpeech(fullText);
+    byId("stage-dialogue").classList.remove("is-revealing");
+    const message = currentThread()?.messages.find((item) => item.id === messageId);
+    if (message) message.fresh = false;
+    return;
+  }
+  setStageSpeech("");
+  byId("stage-dialogue").classList.add("is-revealing");
+  const startTyping = () => {
+    state.stageReveal.timer = window.setInterval(() => {
+      state.stageReveal.visibleCharacters = Math.min(fullText.length, state.stageReveal.visibleCharacters + 1);
+      setStageSpeech(fullText.slice(0, state.stageReveal.visibleCharacters));
+      if (state.stageReveal.visibleCharacters >= fullText.length) completeStageReveal();
+    }, 24);
+  };
+  state.stageReveal.timer = delay ? window.setTimeout(startTyping, delay) : (startTyping(), state.stageReveal.timer);
+}
+
+function setStageUiHidden(hidden) {
+  state.stageUiHidden = Boolean(hidden);
+  byId("chat-app").classList.toggle("stage-ui-hidden", state.stageUiHidden);
+  byId("restore-stage-ui").hidden = !state.stageUiHidden;
+  byId("toggle-stage-ui").setAttribute("aria-pressed", String(state.stageUiHidden));
+  byId("toggle-stage-ui").setAttribute("aria-label", state.stageUiHidden ? "显示界面" : "隐藏界面");
+  if (!state.stageUiHidden && currentThread()?.channel === "in_person") {
+    requestAnimationFrame(() => byId("stage-dialogue").focus({ preventScroll: true }));
+  }
+}
+
+function renderStage() {
+  const character = currentCharacter();
+  const thread = currentThread();
+  const surface = byId("in-person-surface");
+  if (!character || !thread) {
+    byId("stage-character-name").textContent = "选择角色";
+    byId("stage-location").textContent = "场景尚未建立";
+    byId("stage-activity").textContent = "选择角色后读取当前位置";
+    byId("scene-backdrop").src = "/assets/immersive/scenes/generic.svg";
+    byId("stage-portrait-avatar").textContent = "?";
+    byId("stage-speech").innerHTML = "<p>选择一位角色，开始一段面对面的对话。</p>";
+    return;
+  }
+  const scene = state.sceneByCharacter.get(character.character_id) || {};
+  const visualKey = SCENE_KEYS.has(scene.visual_key) ? scene.visual_key : "generic";
+  surface.dataset.scene = visualKey;
+  byId("scene-backdrop").src = `/assets/immersive/scenes/${visualKey}.svg`;
+  byId("stage-character-name").textContent = character.character_name;
+  byId("stage-header-avatar").innerHTML = headerPortraitInnerHtml(character);
+  byId("stage-location").textContent = scene.character_location || "当前位置尚未建立";
+  byId("stage-activity").textContent = scene.character_activity || "她正在这里";
+
+  const latest = latestAssistantMessage("in_person");
+  const blocks = latest ? messageBlocks(latest) : [];
+  const actions = blocks.filter((block) => block.type === "action").map((block) => String(block.text || "").trim()).filter(Boolean);
+  const speeches = blocks.filter((block) => block.type !== "action").map((block) => String(block.text || "").trim()).filter(Boolean);
+  const narration = byId("stage-narration");
+  narration.textContent = actions.join("\n") || (latest ? "" : (scene.character_activity || ""));
+  narration.classList.remove("scene-reveal");
+  void narration.offsetWidth;
+  if (narration.textContent) narration.classList.add("scene-reveal");
+  const portrait = byId("stage-portrait");
+  const portraitKind = character.avatar?.portrait_kind === "full_body" ? "full_body" : "headshot";
+  portrait.dataset.portraitKind = portraitKind;
+  portrait.setAttribute("aria-label", `${character.character_name}头像`);
+  portrait.style.setProperty("--portrait-scale", String(Number(character.avatar?.portrait_scale || (portraitKind === "full_body" ? 1.8 : 1))));
+  portrait.style.setProperty("--portrait-focus-x", `${Number(character.avatar?.portrait_focus_x ?? 50)}%`);
+  portrait.style.setProperty("--portrait-focus-y", `${Number(character.avatar?.portrait_focus_y ?? (portraitKind === "full_body" ? 22 : 50))}%`);
+  byId("stage-portrait-avatar").innerHTML = stagePortraitInnerHtml(character);
+  byId("stage-speaker").textContent = latest ? character.character_name : "此刻";
+  const fullSpeech = speeches.join("\n\n") || (scene.co_located ? "你已经来到她身边。可以先开口。" : "前往她所在的地点后，才能开始面对面对话。");
+  const revealId = latest?.id || `scene:${visualKey}:${scene.co_located ? "together" : "apart"}`;
+  if (state.stageReveal.messageId !== revealId) beginStageReveal(revealId, fullSpeech, Boolean(latest?.fresh), actions.length ? 220 : 80);
+  else if (state.stageReveal.completed) setStageSpeech(fullSpeech);
+  byId("stage-channel-state").textContent = scene.co_located ? "同处一地" : "尚未同处";
+  const status = byId("stage-presence-status");
+  status.hidden = !(thread.pending?.sending && thread.pending.channel === "in_person") && !state.transitionPending;
+  status.textContent = state.transitionPending
+    ? "正在切换场景…"
+    : `${character.character_name}正在回应你…`;
+  surface.classList.toggle("is-waiting", !status.hidden);
+  const arrivalLoading = byId("presence-arrival-loading");
+  if (arrivalLoading) {
+    const active = Boolean(state.arrivalPending && state.arrivalPending.characterId === character.character_id);
+    arrivalLoading.hidden = !active;
+    arrivalLoading.setAttribute("aria-hidden", String(!active));
+  }
+  byId("stage-message-info").disabled = !latest;
+  byId("stage-message-feedback").disabled = !latest;
+  byId("stage-message-info").dataset.messageInfo = latest?.id || "";
+  byId("stage-message-feedback").dataset.messageFeedback = latest?.id || "";
+  renderIcons();
+}
+
+function arrivalId() {
+  if (window.crypto?.randomUUID) return `arrival_${window.crypto.randomUUID()}`;
+  return `arrival_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function arrivalMessage(result, thread) {
+  const reaction = result?.reaction;
+  if (!reaction?.message_id || !reaction.answer) return;
+  const message = {
+    id: reaction.message_id,
+    role: "assistant",
+    mode: "immersive",
+    channel: "in_person",
+    text: reaction.answer,
+    blocks: reaction.content_blocks || [{ type: "speech", text: reaction.answer }],
+    result: { ...reaction, source: "presence_arrival", arrival_id: result.arrival_id },
+    clientMessageId: "",
+    created_at: new Date().toISOString(),
+    status: "sent",
+    fresh: true,
+  };
+  if (!thread.messages.some((item) => item.id === message.id)) thread.messages.push(message);
+}
+
+async function arriveInPerson(characterId = state.selectedCharacterId) {
+  const character = state.characterMap.get(characterId);
+  if (!character || state.arrivalPending) return false;
+  const thread = getThread(characterId);
+  const startedAt = performance.now();
+  const currentArrivalId = arrivalId();
+  state.arrivalPending = { characterId, arrivalId: currentArrivalId, startedAt, phase: "transitioning" };
+  state.transitionPending = true;
+  byId("presence-dialog").close();
+  thread.channel = "in_person";
+  storageSet(`project_snow:channel:${thread.characterId}`, "in_person");
+  renderHeader();
+  renderTimeline(false);
+  let result = null;
+  try {
+    state.arrivalPending.phase = "resolving";
+    result = await api("/api/v1/mvp/presence/arrival", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        character_id: characterId,
+        arrival_id: currentArrivalId,
+        session_id: thread.sessionId || null,
+        world_session_id: ensureWorldSessionId(),
+      }),
+    }, 135000);
+    if (state.arrivalPending?.arrivalId !== currentArrivalId) return false;
+    const elapsed = performance.now() - startedAt;
+    if (result.decision !== "noticed" || result.status !== "completed") {
+      await new Promise((resolve) => window.setTimeout(resolve, Math.max(0, 1000 - elapsed)));
+    }
+    state.worldSessionId = result.world_session_id || state.worldSessionId;
+    thread.sessionId = result.session_id || thread.sessionId;
+    thread.conversationId = result.conversation_id || thread.conversationId;
+    thread.worldSessionId = result.world_session_id || thread.worldSessionId;
+    state.sceneByCharacter.set(characterId, result.scene_state || {});
+    state.arrivalPending.phase = "completed";
+  } catch (error) {
+    showToast(`前往失败：${error.message}`);
+    if (state.arrivalPending?.arrivalId === currentArrivalId) state.arrivalPending = null;
+    state.transitionPending = false;
+    renderStage();
+    return false;
+  }
+  if (state.arrivalPending?.arrivalId !== currentArrivalId) return false;
+  state.arrivalPending = null;
+  state.transitionPending = false;
+  // Paint the settled scene without the loading card before inserting the
+  // proactive reply. This keeps its typewriter reveal from running behind the
+  // translucent loader and appearing to play twice.
+  renderStage();
+  await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+  arrivalMessage(result, thread);
+  if (result.decision === "noticed") showToast(`${character.character_name}发现你来了。`);
+  else if (result.status === "fallback_unnoticed") showToast(`${character.character_name}暂时没有注意到你。`);
+  else showToast(`${character.character_name}还在忙自己的事情。`);
+  renderCharacterList(); renderHeader(); renderTimeline(false); renderInfo();
+  return true;
+}
+
+async function resolveScene(characterId) {
+  if (!characterId) return null;
+  try {
+    const result = await api("/api/v1/mvp/presence/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        character_id: characterId,
+        world_session_id: ensureWorldSessionId(),
+      }),
+    }, 15000);
+    state.worldSessionId = result.world_session_id || state.worldSessionId;
+    storageSet("project_snow:world_session_id", state.worldSessionId);
+    state.sceneByCharacter.set(characterId, result.scene_state || {});
+    return result.scene_state || {};
+  } catch (error) {
+    showToast(`场景读取失败：${error.message}`);
+    return null;
+  }
+}
+
+function openPresenceDialog(characterId = state.selectedCharacterId) {
+  const character = state.characterMap.get(characterId);
+  if (!character) return;
+  const scene = state.sceneByCharacter.get(characterId) || {};
+  state.presenceDialogCharacterId = characterId;
+  byId("presence-dialog-title").textContent = `去见${character.character_name}`;
+  byId("presence-dialog-location").textContent = scene.character_location || "正在读取她的位置";
+  byId("presence-dialog-activity").textContent = scene.character_activity || "场景建立后即可前往。";
+  byId("presence-dialog-message").textContent = scene.co_located
+    ? "你们已经在同一地点，可以直接进入面对面场景。"
+    : "前往后会更新你在当前世界会话中的位置，并进入面对面场景。";
+  byId("confirm-presence-transition").textContent = scene.co_located ? "进入面对面" : "前往";
+  byId("presence-dialog").showModal();
+  renderIcons();
+}
+
+async function transitionPresence(targetChannel, characterId = state.selectedCharacterId) {
+  const character = state.characterMap.get(characterId);
+  if (!character || state.transitionPending) return false;
+  const thread = getThread(characterId);
+  if (state.arrivalPending) state.arrivalPending = null;
+  state.transitionPending = true;
+  renderStage();
+  try {
+    const result = await api("/api/v1/mvp/presence/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        character_id: characterId,
+        session_id: thread.sessionId || null,
+        world_session_id: ensureWorldSessionId(),
+        target_channel: targetChannel,
+        action: targetChannel === "in_person" ? "join_character" : "open_communicator",
+      }),
+    }, 15000);
+    state.worldSessionId = result.world_session_id || state.worldSessionId;
+    storageSet("project_snow:world_session_id", state.worldSessionId);
+    thread.worldSessionId = state.worldSessionId;
+    thread.channel = result.communication_channel || targetChannel;
+    if (thread.channel !== "in_person") thread.actionExpanded = false;
+    storageSet(`project_snow:channel:${thread.characterId}`, thread.channel);
+    state.sceneByCharacter.set(characterId, result.scene_state || {});
+    if (state.selectedCharacterId !== characterId) state.selectedCharacterId = characterId;
+    byId("presence-dialog").close();
+    renderCharacterList();
+    renderHeader();
+    restoreDraft();
+    renderTimeline(false);
+    renderInfo();
+    closeDrawers();
+    showToast(thread.channel === "in_person"
+      ? `已来到${result.scene_state?.character_location || character.character_name}身边。`
+      : "已打开通讯器，当前位置保持不变。");
+    requestAnimationFrame(() => byId("message-input").focus());
+    return true;
+  } catch (error) {
+    showToast(`场景切换失败：${error.message}`);
+    return false;
+  } finally {
+    state.transitionPending = false;
+    renderStage();
+  }
 }
 
 function renderAttachments() {
@@ -518,6 +913,7 @@ function restoreDraft() {
   actionInput.value = state.selectedCharacterId && thread && thread.channel === "in_person"
     ? storageGet(draftKey(state.selectedCharacterId, state.mode, thread.channel, "action"), "")
     : "";
+  if (thread && actionInput.value) thread.actionExpanded = true;
   updateComposerFields();
   resizeComposer();
 }
@@ -570,14 +966,33 @@ function updateRequestStatus() {
   }
   const attachmentBusy = Boolean(thread?.attachments?.some((item) => item.transcribing));
   byId("send-message").disabled = !state.selectedCharacterId || Boolean(thread?.pending) || Boolean(thread?.uploadingAttachments) || attachmentBusy;
+  renderStage();
 }
 
 async function selectCharacter(characterId) {
   if (!state.characterMap.has(characterId)) return;
+  if (state.arrivalPending && state.arrivalPending.characterId !== characterId) {
+    state.arrivalPending = null;
+    state.transitionPending = false;
+  }
+  const switchingFromStage = Boolean(
+    state.selectedCharacterId
+    && state.selectedCharacterId !== characterId
+    && currentThread()?.channel === "in_person"
+  );
   saveDraft();
   state.selectedCharacterId = characterId;
   storageSet(`project_snow:selected_character:${state.mode}`, characterId);
   const thread = getThread(characterId);
+  const scene = await resolveScene(characterId);
+  const needsPresenceChoice = Boolean(
+    scene && !scene.co_located && (thread.channel === "in_person" || switchingFromStage)
+  );
+  if (needsPresenceChoice) {
+    thread.channel = "text";
+    thread.actionExpanded = false;
+    storageSet(`project_snow:channel:${thread.characterId}`, "text");
+  }
   byId("model-override").value = thread.modelOverride || "";
   byId("thinking-mode").value = thread.thinkingMode || "auto";
   byId("voice-reply").checked = Boolean(thread.voiceReply);
@@ -592,19 +1007,27 @@ async function selectCharacter(characterId) {
   closeDrawers();
   byId("message-input").focus();
   await loadConversation(characterId);
+  const refreshedScene = state.sceneByCharacter.get(characterId) || scene;
+  const unresolvedFaceChannel = Boolean(
+    thread.channel === "in_person" && refreshedScene && !refreshedScene.co_located
+  );
+  if (unresolvedFaceChannel) {
+    thread.channel = "text";
+    thread.actionExpanded = false;
+    storageSet(`project_snow:channel:${thread.characterId}`, "text");
+    renderHeader();
+    restoreDraft();
+    renderTimeline(false);
+  }
+  if (needsPresenceChoice || unresolvedFaceChannel) openPresenceDialog(characterId);
 }
 
 function setChannel(channel) {
   const thread = currentThread();
   if (!thread || !CHANNEL_LABELS[channel] || thread.channel === channel) return;
   saveDraft();
-  thread.channel = channel;
-  storageSet(`project_snow:channel:${thread.characterId}`, channel);
-  renderHeader();
-  restoreDraft();
-  renderTimeline(false);
-  renderInfo();
-  byId("message-input").focus();
+  if (channel === "in_person") openPresenceDialog(thread.characterId);
+  else transitionPresence("text", thread.characterId);
 }
 
 function optimisticUserMessage(pending) {
@@ -743,7 +1166,9 @@ async function queueMessage() {
   thread.messages.push(optimisticUserMessage(pending));
   speechInput.value = "";
   actionInput.value = "";
+  if (thread.channel === "in_person") thread.actionExpanded = false;
   saveDraft();
+  updateComposerFields();
   resizeComposer();
   speechInput.focus();
   await dispatchPending();
@@ -797,6 +1222,7 @@ async function dispatchPending({ channel = null, presenceAction = null } = {}) {
     const resultingChannel = result.channel_transition?.to || result.communication_channel || pending.channel;
     if (thread.channel === pending.channel) thread.channel = resultingChannel;
     storageSet(`project_snow:channel:${thread.characterId}`, thread.channel);
+    if (result.scene_state) state.sceneByCharacter.set(thread.characterId, result.scene_state);
     const assistantMessage = {
       id: result.message_id,
       role: "assistant",
@@ -808,7 +1234,7 @@ async function dispatchPending({ channel = null, presenceAction = null } = {}) {
       clientMessageId: pending.clientMessageId,
       created_at: new Date().toISOString(),
       status: "sent",
-      fresh: pending.channel === "text" && (result.content_blocks || []).length > 1,
+      fresh: pending.channel === "in_person" || (pending.channel === "text" && (result.content_blocks || []).length > 1),
     };
     if (!thread.messages.some((item) => item.id === assistantMessage.id)) thread.messages.push(assistantMessage);
     if (result.agent_run_id) monitorAgentRun(assistantMessage, thread);
@@ -850,6 +1276,10 @@ async function dispatchPending({ channel = null, presenceAction = null } = {}) {
     if (userMessage) userMessage.status = "failed";
     if (error.status === 409 && error.detail?.code === "communication_context_conflict") {
       thread.conflict = error.detail;
+      if (error.detail.scene_state) state.sceneByCharacter.set(thread.characterId, error.detail.scene_state);
+      thread.channel = "text";
+      thread.actionExpanded = false;
+      storageSet(`project_snow:channel:${thread.characterId}`, "text");
       if (userMessage) userMessage.status = "awaiting_choice";
     } else {
       thread.pending = null;
@@ -888,6 +1318,8 @@ function presenceChoice(action) {
     storageSet(`project_snow:channel:${thread.characterId}`, "text");
     dispatchPending({ channel: "text" });
   } else if (action === "join_character") {
+    thread.channel = "in_person";
+    storageSet(`project_snow:channel:${thread.characterId}`, "in_person");
     dispatchPending({ channel: "in_person", presenceAction: "join_character" });
   }
 }
@@ -902,14 +1334,14 @@ function renderInfo() {
   }
   const result = state.infoResult || thread.latestResult || {};
   const coverage = result.coverage || character.coverage || {};
-  const scene = result.scene_state || {};
+  const scene = result.scene_state || state.sceneByCharacter.get(character.character_id) || {};
   const style = result.style_context || {};
   const citations = result.citations || [];
   const webSources = Array.isArray(result.web_sources) ? result.web_sources : [];
   const toolCalls = state.mode === "assistant" && Array.isArray(result.tool_calls) ? result.tool_calls : [];
-  const sceneText = scene.location_visibility === "visible_for_current_turn"
-    ? (scene.co_located ? `双方同处：${scene.character_location || "未定位"}` : `分析员：${scene.analyst_location || "未定位"}；角色：${scene.character_location || "未定位"}`)
-    : "当前位置未在本轮对话中公开";
+  const sceneText = scene.co_located
+    ? `双方同处：${scene.character_location || "未定位"}`
+    : `你：${scene.analyst_location || "未定位"}；角色：${scene.character_location || "未定位"}`;
   let styleText = "角色本体设定优先";
   if (style.status === "active") styleText = style.kind === "costume" ? `时装：${style.costume_name || "已识别"}` : `装甲：${style.armor_name || "已识别"}`;
   else if (style.status === "ambiguous") styleText = "检测到多个语境，本轮未自动启用";
@@ -917,6 +1349,7 @@ function renderInfo() {
     <section class="info-section"><h3>资料覆盖</h3><p>${escapeHtml(coverage.label || "资料覆盖状态未知")}</p><div class="info-metrics"><div class="info-metric"><strong>${Number(coverage.direct_document_count || 0)}</strong><span>直接资料</span></div><div class="info-metric"><strong>${Number(coverage.linked_document_count || 0)}</strong><span>关联资料</span></div><div class="info-metric"><strong>${Number(coverage.address_term_count || 0)}</strong><span>称呼证据</span></div><div class="info-metric"><strong>${Number(coverage.voice_evidence_count || 0)}</strong><span>语气证据</span></div></div></section>
     <section class="info-section"><h3>当前场景</h3><p>${escapeHtml(CHANNEL_LABELS[thread.channel])}</p><p>${escapeHtml(sceneText)}</p></section>
     <section class="info-section"><h3>装甲 / 时装语境</h3><p>${escapeHtml(styleText)}</p></section>
+    <section class="info-section"><h3>角色视觉素材</h3><p>${escapeHtml(character.avatar?.license || "当前使用界面回退肖像")}</p>${character.avatar?.source_page ? `<a class="source-link" href="${escapeHtml(character.avatar.source_page)}" target="_blank" rel="noreferrer">查看素材来源与页面说明</a>` : ""}</section>
     <section class="info-section"><h3>本条回答依据</h3>${citations.length ? citations.map((item) => `<article class="citation"><strong>${escapeHtml(item.source_type || "资料")} · ${escapeHtml(item.title || "未命名来源")}</strong><blockquote>${escapeHtml(item.excerpt || "")}</blockquote></article>`).join("") : "<p>当前未选择带引用的回答。</p>"}${webSources.length ? `<h4 class="info-subheading">联网参考</h4>${webSources.map((item) => `<article class="citation"><strong>${escapeHtml(item.title || "网页")}</strong><a class="source-link" href="${escapeHtml(item.url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(item.url || "")}</a><blockquote>${escapeHtml(item.snippet || "")}</blockquote></article>`).join("")}` : ""}${toolCalls.length ? `<p class="tool-note">本轮只读工具：${toolCalls.map((item) => `${escapeHtml(item.name || "工具")}（${item.status === "completed" ? "完成" : "未完成"}）`).join("、")}</p>` : ""}</section>`;
 }
 
@@ -928,10 +1361,19 @@ function openInfo(result = null) {
   byId("drawer-scrim").hidden = false;
 }
 
+function openTranscript() {
+  renderTranscript();
+  byId("transcript-panel").classList.add("open");
+  byId("transcript-panel").setAttribute("aria-hidden", "false");
+  byId("drawer-scrim").hidden = false;
+}
+
 function closeDrawers() {
   byId("contact-panel").classList.remove("open");
   byId("info-panel").classList.remove("open");
+  byId("transcript-panel").classList.remove("open");
   byId("info-panel").setAttribute("aria-hidden", "true");
+  byId("transcript-panel").setAttribute("aria-hidden", "true");
   byId("drawer-scrim").hidden = true;
 }
 
@@ -1339,10 +1781,127 @@ async function saveModelDefaults() {
   }
 }
 
+function setPluginStatus(message, kind = "") {
+  const target = byId("plugin-pairing-status");
+  if (target) {
+    target.textContent = message;
+    target.className = `plugin-status ${kind}`.trim();
+  }
+}
+
+function renderPluginCharacters() {
+  const select = byId("plugin-character");
+  if (!select) return;
+  const saved = storageGet("project_snow:plugin_default_character", "");
+  select.innerHTML = '<option value="">请选择默认角色</option>' + state.characters.map((character) => (
+    `<option value="${escapeHtml(character.character_id)}">${escapeHtml(character.character_name)}</option>`
+  )).join("");
+  if (state.characterMap.has(saved)) select.value = saved;
+  else select.value = "";
+}
+
+async function loadPersonaGatewayStatus() {
+  const indicator = byId("plugin-service-status");
+  try {
+    const result = await api("/api/v1/persona/status", {}, 15000);
+    state.personaGateway = result;
+    if (indicator) {
+      indicator.className = "connection-pill online";
+      indicator.textContent = "人格网关已连接";
+    }
+    const configured = Boolean(result.codex_credential_configured);
+    setPluginStatus(
+      configured
+        ? `Codex 已配对 · 公共知识 ${result.knowledge?.knowledge_version || "版本未知"} · 当前 ${result.active_pairing_count || 0} 个有效令牌`
+        : `人格网关已就绪，但 Codex 尚未配对 · 公共知识 ${result.knowledge?.knowledge_version || "版本未知"}`,
+      configured ? "success" : "",
+    );
+  } catch (error) {
+    if (indicator) {
+      indicator.className = "connection-pill offline";
+      indicator.textContent = "人格网关未连接";
+    }
+    setPluginStatus(`无法读取人格网关：${error.message}`, "error");
+  }
+}
+
+async function pairCodex() {
+  const characterId = byId("plugin-character")?.value || "";
+  if (!characterId) {
+    setPluginStatus("请先选择默认角色。", "error");
+    return;
+  }
+  const button = byId("pair-codex");
+  button.disabled = true;
+  setPluginStatus("正在创建可撤销配对并写入 Windows 凭据库…");
+  try {
+    const result = await api("/api/v1/persona/pairings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "Codex snow-role-assistant", default_character_id: characterId }),
+    });
+    storageSet("project_snow:plugin_default_character", characterId);
+    const manual = byId("plugin-manual-token");
+    if (result.credential_saved) {
+      manual.hidden = true;
+      manual.textContent = "";
+      setPluginStatus("配对完成。令牌已写入 Windows 凭据库；现在安装插件并在新任务中输入 @Snow。", "success");
+    } else {
+      manual.hidden = false;
+      manual.textContent = `$env:SNOW_PERSONA_TOKEN='${result.pairing_token}'\n# 仅在启动 Codex 的同一 PowerShell 会话中有效`;
+      setPluginStatus(`配对已创建，但 Windows 凭据库写入失败：${result.credential_error || "未知原因"}。可临时使用下方环境变量。`, "error");
+    }
+    await loadPersonaGatewayStatus();
+  } catch (error) {
+    setPluginStatus(`配对失败：${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function revokeCodexPairing() {
+  if (!window.confirm("撤销后，已安装的 Codex 插件将无法再读取 Snow 人格。继续吗？")) return;
+  try {
+    await api("/api/v1/persona/pairings/current", { method: "DELETE" });
+    byId("plugin-manual-token").hidden = true;
+    setPluginStatus("当前 Codex 配对已撤销。", "success");
+    await loadPersonaGatewayStatus();
+  } catch (error) {
+    setPluginStatus(`撤销失败：${error.message}`, "error");
+  }
+}
+
+function renderPersonaSnapshot(snapshot) {
+  const target = byId("plugin-snapshot");
+  const forbidden = (snapshot.forbidden_data_types || []).join("、");
+  target.innerHTML = `<dl>
+    <dt>角色</dt><dd>${escapeHtml(snapshot.character?.display_name || "未知")}</dd>
+    <dt>人格版本</dt><dd>${escapeHtml(snapshot.profile_version || "未知")}</dd>
+    <dt>关系</dt><dd>${escapeHtml(snapshot.relationship?.status || "未确认")}</dd>
+    <dt>有效称呼</dt><dd>${escapeHtml(snapshot.relationship?.preferred_address || "分析员")}</dd>
+    <dt>历史写回</dt><dd>${snapshot.relationship?.write_back_allowed ? "允许" : "禁止"}</dd>
+    <dt>明确排除</dt><dd>${escapeHtml(forbidden || "沉浸式与 Agent 私有数据")}</dd>
+  </dl>`;
+}
+
+async function testPersonaSnapshot() {
+  const characterId = byId("plugin-character")?.value || "";
+  if (!characterId) return;
+  setPluginStatus("正在使用 Windows 凭据中的当前配对读取人格快照…");
+  try {
+    const snapshot = await api(`/api/v1/persona/management/snapshot/${encodeURIComponent(characterId)}`, {}, 15000);
+    renderPersonaSnapshot(snapshot);
+    setPluginStatus("人格快照测试通过；沉浸式历史和 Agent 数据均不在返回范围内。", "success");
+  } catch (error) {
+    setPluginStatus(`人格快照测试失败：${error.message}`, "error");
+  }
+}
+
 async function bootstrap() {
   document.body.dataset.surface = state.surface;
   byId("landing-view").hidden = state.surface !== "landing";
-  byId("chat-app").hidden = state.surface === "landing";
+  byId("plugin-center").hidden = state.surface !== "assistant";
+  byId("chat-app").hidden = state.surface !== "immersive";
   byId("surface-label").textContent = state.mode === "assistant" ? "角色助手" : "沉浸式陪伴";
   try {
     const result = await api("/api/v1/mvp/bootstrap", {}, 30000);
@@ -1352,11 +1911,17 @@ async function bootstrap() {
     state.characters = (result.characters || []).filter((item) => item.selector_enabled !== false && item.view_available !== false);
     state.characterMap = new Map(state.characters.map((item) => [item.character_id, item]));
     state.feedbackCategories = result.feedback_categories || [];
-    state.worldSessionId = result.active_world_session_id || "";
-    await Promise.all([loadModels(), loadProviders()]);
+    state.worldSessionId = storageGet("project_snow:world_session_id", "") || newWorldSessionId();
+    storageSet("project_snow:world_session_id", state.worldSessionId);
+    if (state.surface !== "assistant") await Promise.all([loadModels(), loadProviders()]);
     setConnection(true, state.enabled ? `已连接 · ${result.model || "模型已配置"}` : "已连接 · 模型未开启");
     renderFeedbackCategories();
     if (state.surface === "landing") return;
+    if (state.surface === "assistant") {
+      renderPluginCharacters();
+      await loadPersonaGatewayStatus();
+      return;
+    }
     const savedCharacter = storageGet(`project_snow:selected_character:${state.mode}`, "");
     const selected = state.characterMap.has(savedCharacter) ? savedCharacter : state.characters[0]?.character_id;
     renderCharacterList();
@@ -1378,9 +1943,29 @@ byId("character-search").addEventListener("input", (event) => {
   state.search = event.target.value;
   renderCharacterList();
 });
-byId("channel-control").addEventListener("click", (event) => {
-  const button = event.target.closest("[data-channel]");
-  if (button) setChannel(button.dataset.channel);
+byId("go-in-person").addEventListener("click", async () => {
+  await resolveScene(state.selectedCharacterId);
+  openPresenceDialog();
+});
+byId("confirm-presence-transition").addEventListener("click", () => (
+  arriveInPerson(state.presenceDialogCharacterId || state.selectedCharacterId)
+));
+byId("stay-on-communicator").addEventListener("click", () => (
+  transitionPresence("text", state.presenceDialogCharacterId || state.selectedCharacterId)
+));
+byId("open-communicator").addEventListener("click", () => transitionPresence("text"));
+byId("toggle-stage-ui").addEventListener("click", () => setStageUiHidden(!state.stageUiHidden));
+byId("restore-stage-ui").addEventListener("click", () => setStageUiHidden(false));
+byId("scene-stage").addEventListener("click", () => {
+  if (state.stageUiHidden) setStageUiHidden(false);
+});
+byId("stage-dialogue").addEventListener("click", () => completeStageReveal());
+byId("toggle-action").addEventListener("click", () => {
+  const thread = currentThread();
+  if (!thread || thread.channel !== "in_person") return;
+  thread.actionExpanded = !thread.actionExpanded;
+  updateComposerFields();
+  if (thread.actionExpanded) requestAnimationFrame(() => byId("action-input").focus());
 });
 byId("composer").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -1422,9 +2007,34 @@ byId("timeline").addEventListener("click", (event) => {
     byId("message-input").focus();
   } else if (older) loadConversation(state.selectedCharacterId, { older: true });
 });
+byId("transcript-content").addEventListener("click", (event) => {
+  const feedback = event.target.closest("[data-message-feedback]");
+  const info = event.target.closest("[data-message-info]");
+  const retry = event.target.closest("[data-retry-message]");
+  if (feedback) openFeedback(findAssistantMessage(feedback.dataset.messageFeedback));
+  else if (info) {
+    const message = findAssistantMessage(info.dataset.messageInfo);
+    openInfo(message?.result || null);
+  } else if (retry) retryMessage(retry.dataset.retryMessage);
+});
 byId("open-info").addEventListener("click", () => openInfo());
+byId("open-stage-info").addEventListener("click", () => openInfo());
 byId("close-info").addEventListener("click", closeDrawers);
+byId("open-transcript").addEventListener("click", openTranscript);
+byId("close-transcript").addEventListener("click", closeDrawers);
+byId("stage-message-info").addEventListener("click", () => {
+  const message = latestAssistantMessage("in_person");
+  if (message) openInfo(message.result || null);
+});
+byId("stage-message-feedback").addEventListener("click", () => {
+  const message = latestAssistantMessage("in_person");
+  if (message) openFeedback(message);
+});
 byId("open-contacts").addEventListener("click", () => {
+  byId("contact-panel").classList.add("open");
+  byId("drawer-scrim").hidden = false;
+});
+byId("open-stage-contacts").addEventListener("click", () => {
   byId("contact-panel").classList.add("open");
   byId("drawer-scrim").hidden = false;
 });
@@ -1433,6 +2043,13 @@ byId("drawer-scrim").addEventListener("click", closeDrawers);
 byId("open-global-feedback").addEventListener("click", () => openFeedback(null));
 byId("floating-feedback").addEventListener("click", () => openFeedback(null, state.surface === "landing"));
 byId("landing-open-feedback").addEventListener("click", () => openFeedback(null, true));
+byId("plugin-open-feedback").addEventListener("click", () => openFeedback(null, true));
+byId("plugin-character").addEventListener("change", (event) => {
+  storageSet("project_snow:plugin_default_character", event.target.value);
+});
+byId("pair-codex").addEventListener("click", pairCodex);
+byId("revoke-codex").addEventListener("click", revokeCodexPairing);
+byId("test-persona-snapshot").addEventListener("click", testPersonaSnapshot);
 [byId("open-settings"), byId("landing-open-settings")].forEach((button) => button?.addEventListener("click", () => byId("settings-dialog").showModal()));
 const allAttachmentTypes = "image/jpeg,image/png,image/webp,image/gif,.pdf,.txt,.md,.csv,.json,.docx,.xlsx,.pptx,.py,.js,.ts,.html,.css,audio/wav,audio/mpeg,audio/mp4,audio/webm,audio/ogg";
 byId("add-image").addEventListener("click", () => {
@@ -1535,6 +2152,28 @@ document.querySelectorAll("[data-settings-tab]").forEach((button) => {
 });
 document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   button.addEventListener("click", () => byId(button.dataset.closeDialog)?.close());
+});
+
+window.addEventListener("keydown", (event) => {
+  const target = event.target;
+  const editing = target?.matches?.("input, textarea, select, [contenteditable='true']");
+  if (editing) return;
+  if (state.stageUiHidden && ["Escape", " ", "h", "H"].includes(event.key)) {
+    event.preventDefault();
+    setStageUiHidden(false);
+    return;
+  }
+  if (currentThread()?.channel === "in_person" && event.key === " ") {
+    event.preventDefault();
+    if (!completeStageReveal()) setStageUiHidden(false);
+    return;
+  }
+  if (currentThread()?.channel === "in_person" && ["h", "H"].includes(event.key)) {
+    event.preventDefault();
+    setStageUiHidden(!state.stageUiHidden);
+    return;
+  }
+  if (event.key === "Escape") closeDrawers();
 });
 
 window.addEventListener("online", () => setConnection(true));

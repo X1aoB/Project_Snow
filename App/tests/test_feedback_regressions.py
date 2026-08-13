@@ -309,6 +309,31 @@ class FeedbackRegressionTests(unittest.TestCase):
         self.assertIn("凯西娅", second_action)
         self.assertNotEqual(first_action, second_action)
 
+    def test_in_person_actions_use_third_person_and_leave_speech_separate(self) -> None:
+        service = self._service()
+        blocks = service._normalize_content_blocks(
+            {
+                "content_blocks": [
+                    {
+                        "type": "speech",
+                        "text": "（（我歪了歪头，眼睛亮晶晶地看着分析员。））\n分析员～你来啦！",
+                    }
+                ]
+            },
+            "in_person",
+            "",
+            "伊切尔",
+        )
+
+        self.assertEqual(
+            blocks,
+            [
+                {"type": "action", "text": "伊切尔歪了歪头，眼睛亮晶晶地看着分析员。"},
+                {"type": "speech", "text": "分析员～你来啦！"},
+            ],
+        )
+        self.assertFalse(blocks[0]["text"].startswith(("我", "她")))
+
     def test_shared_meal_keeps_food_supplied_in_the_current_turn(self) -> None:
         service = self._service()
         message = "我拿了些西餐过来，今天先吃点工作餐，下次再带你出去吃好吗？"
@@ -476,22 +501,22 @@ class FeedbackRegressionTests(unittest.TestCase):
     def test_feedback_families_distinguish_fixed_regressions(self) -> None:
         service = self._service()
         cases = {
-            "character_signature_frequency": {
+            "signature_trait_repetition": {
                 "category": "conversation_experience",
                 "free_text": "一直在提算卦，角色特点不至于反复提及，请减少频次",
                 "message_excerpt": "吃火锅怎么样",
             },
-            "location_continuity": {
+            "location_repetition": {
                 "category": "conversation_experience",
                 "free_text": "刚才已经提到了地点，不需要再次揭露",
                 "message_excerpt": "那我去找你？",
             },
-            "routine_activity_logic": {
+            "current_activity_choice": {
                 "category": "conversation_experience",
                 "free_text": "这句话回答逻辑有问题",
                 "message_excerpt": "早上训练还是休息？",
             },
-            "client_dual_input": {
+            "composer_action_and_speech": {
                 "category": "client_function",
                 "free_text": "动作和对白应该支持同时输入，文字通讯时隐藏动作按钮",
             },

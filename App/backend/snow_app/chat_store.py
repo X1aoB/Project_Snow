@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import sqlite3
 from threading import RLock
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 
 _STORE_LOCK = RLock()
@@ -107,6 +107,20 @@ class ConversationStore:
                     claimed_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS presence_arrivals (
+                    arrival_id TEXT PRIMARY KEY,
+                    character_id TEXT NOT NULL,
+                    session_id TEXT,
+                    world_session_id TEXT NOT NULL,
+                    decision TEXT NOT NULL CHECK(decision IN ('noticed', 'unnoticed')),
+                    status TEXT NOT NULL CHECK(status IN ('processing', 'completed', 'fallback_unnoticed')),
+                    response_json TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS presence_arrivals_character_created
+                    ON presence_arrivals(character_id, created_at DESC);
+
                 CREATE TABLE IF NOT EXISTS world_states (
                     world_session_id TEXT PRIMARY KEY,
                     state_json TEXT NOT NULL,
@@ -119,6 +133,150 @@ class ConversationStore:
                 );
                 """
             )
+
+    def begin_presence_arrival(
+        self,
+        *,
+        arrival_id: str,
+        character_id: str,
+        session_id: str | None,
+        world_session_id: str,
+        decision_factory: Callable[[], str],
+    ) -> dict[str, Any]:
+        """Claim one arrival decision exactly once."""
+
+        now = _utc_now()
+        with _STORE_LOCK, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM presence_arrivals WHERE arrival_id = ?",
+                (arrival_id,),
+            ).fetchone()
+            if row:
+                existing = dict(row)
+                if str(existing["character_id"]) != character_id:
+                    connection.rollback()
+                    raise ValueError("arrival_id 已被其他角色使用。")
+                connection.commit()
+                existing["response"] = _json_load(existing.pop("response_json"), None)
+                return existing
+            decision = decision_factory()
+            if decision not in {"noticed", "unnoticed"}:
+                connection.rollback()
+                raise ValueError("到场决策必须是 noticed 或 unnoticed。")
+            connection.execute(
+                """
+                INSERT INTO presence_arrivals (
+                    arrival_id, character_id, session_id, world_session_id,
+                    decision, status, response_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'processing', NULL, ?, ?)
+                """,
+                (arrival_id, character_id, session_id, world_session_id, decision, now, now),
+            )
+            connection.commit()
+        return {
+            "new": True,
+            "arrival_id": arrival_id,
+            "character_id": character_id,
+            "session_id": session_id,
+            "world_session_id": world_session_id,
+            "decision": decision,
+            "status": "processing",
+            "response": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    def complete_presence_arrival(
+        self,
+        arrival_id: str,
+        *,
+        status: str,
+        response: dict[str, Any],
+    ) -> None:
+        now = _utc_now()
+        with _STORE_LOCK, self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE presence_arrivals
+                SET status = ?, response_json = ?, updated_at = ?
+                WHERE arrival_id = ?
+                """,
+                (status, _json_dump(response), now, arrival_id),
+            )
+
+    def save_assistant_message(
+        self,
+        *,
+        character_id: str,
+        session_id: str,
+        world_session_id: str,
+        response: dict[str, Any],
+        session_state: dict[str, Any],
+        world_state: dict[str, Any],
+    ) -> str:
+        """Persist an unsolicited assistant message without a user row."""
+
+        conversation_id = self.conversation_id(session_id, character_id)
+        created_at = _utc_now()
+        message_id = str(response["message_id"])
+        mode = str(response.get("mode") or "immersive")
+        channel = str(response.get("communication_channel") or "in_person")
+        payload = {**response, "conversation_id": conversation_id, "persisted": True}
+        with _STORE_LOCK, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT character_id FROM conversations WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if existing and str(existing["character_id"]) != character_id:
+                connection.rollback()
+                raise ValueError("session_id 已属于其他角色会话。")
+            connection.execute(
+                """
+                INSERT INTO conversations (
+                    conversation_id, session_id, character_id, world_session_id,
+                    communication_channel, session_state_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    world_session_id = excluded.world_session_id,
+                    communication_channel = excluded.communication_channel,
+                    session_state_json = excluded.session_state_json,
+                    updated_at = excluded.updated_at
+                """,
+                (conversation_id, session_id, character_id, world_session_id, channel,
+                 _json_dump(session_state), created_at, created_at),
+            )
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO messages (
+                    message_id, conversation_id, role, mode, communication_channel,
+                    text, content_blocks_json, response_json, client_message_id, created_at
+                ) VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, NULL, ?)
+                """,
+                (message_id, conversation_id, mode, channel,
+                 str(response.get("answer") or ""),
+                 _json_dump(response.get("content_blocks") or []),
+                 _json_dump(payload), created_at),
+            )
+            connection.execute(
+                """
+                INSERT INTO world_states (world_session_id, state_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(world_session_id) DO UPDATE SET
+                    state_json = excluded.state_json, updated_at = excluded.updated_at
+                """,
+                (world_session_id, _json_dump(world_state), created_at),
+            )
+            connection.execute(
+                """
+                INSERT INTO app_meta (key, value) VALUES ('active_world_session_id', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (world_session_id,),
+            )
+            connection.commit()
+        return conversation_id
 
     @staticmethod
     def conversation_id(session_id: str, character_id: str) -> str:
@@ -197,6 +355,64 @@ class ConversationStore:
                 "SELECT value FROM app_meta WHERE key = 'active_world_session_id'"
             ).fetchone()
         return str(row["value"]) if row else None
+
+    def save_presence_state(
+        self,
+        *,
+        character_id: str,
+        session_id: str | None,
+        world_session_id: str,
+        communication_channel: str,
+        session_state: dict[str, Any] | None,
+        world_state: dict[str, Any],
+    ) -> bool:
+        """Persist a channel/location transition without creating chat messages."""
+
+        updated_at = _utc_now()
+        conversation_updated = False
+        with _STORE_LOCK, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if session_id:
+                row = connection.execute(
+                    "SELECT conversation_id FROM conversations WHERE session_id = ? AND character_id = ?",
+                    (session_id, character_id),
+                ).fetchone()
+                if row:
+                    connection.execute(
+                        """
+                        UPDATE conversations
+                        SET world_session_id = ?, communication_channel = ?,
+                            session_state_json = ?, updated_at = ?
+                        WHERE conversation_id = ?
+                        """,
+                        (
+                            world_session_id,
+                            communication_channel,
+                            _json_dump(session_state or {}),
+                            updated_at,
+                            row["conversation_id"],
+                        ),
+                    )
+                    conversation_updated = True
+            connection.execute(
+                """
+                INSERT INTO world_states (world_session_id, state_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(world_session_id) DO UPDATE SET
+                    state_json = excluded.state_json,
+                    updated_at = excluded.updated_at
+                """,
+                (world_session_id, _json_dump(world_state), updated_at),
+            )
+            connection.execute(
+                """
+                INSERT INTO app_meta (key, value) VALUES ('active_world_session_id', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (world_session_id,),
+            )
+            connection.commit()
+        return conversation_updated
 
     def save_exchange(
         self,

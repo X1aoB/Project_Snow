@@ -14,6 +14,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import socket
 import threading
 import time
@@ -30,6 +31,7 @@ import httpx
 
 from .chat_store import ConversationStore
 from .config import Settings
+from .public_knowledge import PublicKnowledge
 from .mvp_policy import (
     FEEDBACK_CATEGORIES,
     FEEDBACK_OPTIONS,
@@ -40,19 +42,23 @@ from .mvp_policy import (
     feedback_category_ids,
     feedback_option_ids,
     layer_policy,
+    scene_visual_key,
     scene_templates_for,
     source_layer,
 )
 from .repository import RuntimeRepository
+from .user_fact_store import UserFactStore
 
 
 _FEEDBACK_LOCK = threading.RLock()
 _FEEDBACK_RESOLUTION_STATUSES = {
     "open",
+    "planned",
     "needs_verification",
     "fixed_verified",
     "not_reproduced",
     "duplicate",
+    "superseded_by_architecture",
 }
 # These families have deterministic guardrails and regression coverage in the
 # current build.  They are defaults only: an explicit status event in the
@@ -61,25 +67,91 @@ _FEEDBACK_DEFAULT_RESOLUTION: dict[str, str] = {
     "formal_relationship_address": "fixed_verified",
     "formal_relationship_roster": "fixed_verified",
     "food_current_fact": "fixed_verified",
+    "current_food_continuity": "fixed_verified",
     "logistics_linkage": "fixed_verified",
     "json_or_implementation_leak": "fixed_verified",
     "communication_state": "fixed_verified",
     "mode_continuity": "fixed_verified",
     "client_input_state": "needs_verification",
     "client_dual_input": "fixed_verified",
+    "composer_action_and_speech": "fixed_verified",
+    "text_action_visibility": "fixed_verified",
     "character_signature_frequency": "fixed_verified",
+    "signature_trait_repetition": "fixed_verified",
     "shared_meal_continuity": "fixed_verified",
     "routine_activity_logic": "fixed_verified",
+    "current_activity_choice": "fixed_verified",
     "location_continuity": "fixed_verified",
+    "visit_location_disclosure": "fixed_verified",
+    "location_repetition": "fixed_verified",
+    "location_conflict": "fixed_verified",
     "intimacy_continuity": "fixed_verified",
+    "forced_plot_recap": "fixed_verified",
+    "relationship_warmth": "fixed_verified",
     "assistant_market_data": "fixed_verified",
     "assistant_current_research": "fixed_verified",
     "assistant_opinion": "fixed_verified",
+    "assistant_execution_summary": "superseded_by_architecture",
+    "assistant_markdown": "superseded_by_architecture",
+    "assistant_request_failure": "superseded_by_architecture",
+    "assistant_typing_simulation": "superseded_by_architecture",
     "narrative_continuity": "needs_verification",
     "costume_context": "needs_verification",
     "nickname_mapping": "needs_verification",
     "other": "needs_verification",
 }
+
+# A fixed status is evidence-backed only when the corresponding regression is
+# named.  These references are returned by the feedback inbox and appended to
+# generated status events; they prevent a broad historical label from silently
+# becoming a new implementation task.
+_FEEDBACK_VERIFICATION_TESTS: dict[str, tuple[str, ...]] = {
+    "current_activity_choice": (
+        "test_feedback_regressions.test_routine_choice_rejects_rest_training_contradiction",
+    ),
+    "forced_plot_recap": (
+        "test_feedback_regressions.test_intimate_invitation_rejects_an_unasked_plot_recap",
+    ),
+    "relationship_warmth": (
+        "test_feedback_regressions.test_intimate_invitation_keeps_a_warm_non_lore_extension",
+        "test_feedback_regressions.test_open_invitation_continues_intimacy_without_activity_reset",
+    ),
+    "signature_trait_repetition": (
+        "test_feedback_regressions.test_bubu_signature_trait_is_rate_limited_but_explicit_request_is_allowed",
+    ),
+    "visit_location_disclosure": (
+        "test_feedback_regressions.test_visit_request_repairs_a_reply_that_omits_its_location",
+    ),
+    "location_repetition": (
+        "test_feedback_regressions.test_recently_disclosed_location_is_not_repeated_on_visit_followup",
+    ),
+    "location_conflict": (
+        "test_feedback_regressions.test_jointly_confirmed_room_overrides_neutral_training_scene",
+    ),
+    "current_food_continuity": (
+        "test_feedback_regressions.test_shared_meal_keeps_food_supplied_in_the_current_turn",
+    ),
+    "composer_action_and_speech": (
+        "test_feedback_regressions.test_in_person_accepts_action_and_speech_in_the_same_turn",
+    ),
+    "text_action_visibility": (
+        "test_feedback_regressions.test_analyst_action_blocks_are_persisted_and_text_rejects_them",
+        "test_ui_v050.test_landing_and_chat_surfaces_are_declared",
+    ),
+}
+_FEEDBACK_LEGACY_BROAD_KEYS = frozenset(
+    {
+        "narrative_continuity",
+        "client_input_state",
+        "json_or_implementation_leak",
+        "food_current_fact",
+        "shared_meal_continuity",
+        "routine_activity_logic",
+        "character_signature_frequency",
+        "location_continuity",
+        "client_dual_input",
+    }
+)
 _SESSION_LOCK = threading.RLock()
 _WORLD_STATE_LOCK = threading.RLock()
 _SESSION_STATES: dict[str, dict[str, Any]] = {}
@@ -89,7 +161,6 @@ _MAX_WORLD_STATES = 512
 _CONTINUITY_CARD_TURNS = 3
 _MAX_SHARED_PREMISES = 8
 _MAX_RECENT_STORY_TITLES = 8
-
 # The assistant mode deliberately exposes one small, deterministic read-only
 # tool first.  Keeping this allowlist in the service (rather than accepting
 # arbitrary tool names from the model) prevents a persona prompt from turning
@@ -472,45 +543,14 @@ _MECHANICAL_DIALOGUE_MARKERS = (
     "请提供更多信息",
 )
 
-# These forms of address are enabled only after the immutable story corpus has
-# established an explicit analyst relationship for the selected character.
-# They are intentionally not part of the global persona card: a relationship
-# label should not make every factual sentence start with a pet name.
-_EXPLICIT_RELATIONSHIP_ADDRESSES = {
-    "1b0a6b35719a": "\u8fbe\u4ee4",  # \u82ac\u59ae: direct story dialogue and affinity scenes
-    "ca0144ccd81b": "\u4eb2\u7231\u7684",  # \u91cc\u8299: covenant/anniversary mail and stories
-    "25b23cb64398": "\u4eb2\u7231\u7684",  # \u51ef\u897f\u5a05: explicit covenant/partner scenes
-    "673ba6851b05": "\u4eb2\u7231\u7684",  # \u82d4\u4e1d
-    "cf0569ac6de9": "\u90ce\u541b",  # \u80b4
-    "daab0f4cceb4": "\u4eb2\u7231\u7684",  # \u8309\u8389\u5b89
-    "9f5804761c56": "\u4eb2\u7231\u7684",  # \u5b89\u5361\u5e0c\u96c5
-    "98322bd505f4": "\u90ce\u541b",  # \u8fb0\u661f
-}
-
-# The source corpus contains the word \u201c\u6052\u7ea6\u201d in several kinds of
-# context (including a character merely discussing somebody else\u2019s future
-# or a generic anniversary item).  Only this audited set is allowed to upgrade
-# the runtime relationship card to ``explicit``.  In particular, \u6069\u96c5 is
-# intentionally absent: affectionate wording in her stories is not a formal
-# covenant premise.
-_EXPLICIT_RELATIONSHIP_CHARACTER_IDS = frozenset(_EXPLICIT_RELATIONSHIP_ADDRESSES)
-
-# This is the small, audited covenant roster used when the analyst asks for
-# the list of established partners.  It is intentionally separate from the
-# per-character relationship card: a character may have an explicit story
-# relationship with the analyst without being allowed to infer that every
-# other affectionate scene is part of this roster.  In particular, 恩雅 is
-# not a formal covenant partner and must never be added by a model guess.
-_FORMAL_RELATIONSHIP_ROSTER = (
-    "里芙",
-    "芬妮",
-    "凯西娅",
-    "苔丝",
-    "肴",
-    "茉莉安",
-    "安卡希雅",
-    "辰星",
-)
+# Reviewed relationship premises are a versioned public-knowledge release,
+# not mutable chat state or scattered business-code constants.  These aliases
+# keep the existing generation code stable while making the release artifact
+# the only source of truth.
+_PUBLIC_KNOWLEDGE = PublicKnowledge()
+_EXPLICIT_RELATIONSHIP_ADDRESSES = _PUBLIC_KNOWLEDGE.preferred_addresses()
+_EXPLICIT_RELATIONSHIP_CHARACTER_IDS = _PUBLIC_KNOWLEDGE.formal_character_ids()
+_FORMAL_RELATIONSHIP_ROSTER = _PUBLIC_KNOWLEDGE.formal_roster()
 
 # \u7434\u8bfa\u7684\u201c\u83ab\u5c14\u7d22\u201dis a second personality, not a selectable
 # character.  It is activated only when the analyst names her (or asks about
@@ -1588,11 +1628,19 @@ class MVPService:
             / "avatars.json"
         )
         database_override = str(os.getenv("MVP_CHAT_DATABASE_PATH") or "").strip()
-        self.conversation_store = ConversationStore(
+        conversation_database_path = (
             Path(database_override).expanduser().resolve()
             if database_override
             else self.runtime_root / "chat" / "conversations.sqlite3"
         )
+        self.conversation_store = ConversationStore(
+            conversation_database_path
+        )
+        self.public_knowledge = _PUBLIC_KNOWLEDGE
+        self.user_fact_store = UserFactStore(
+            conversation_database_path.parent / "user_facts.sqlite3"
+        )
+        self.user_fact_store.seed_public_relationships(self.public_knowledge)
         self.dialogue_profiles_path = self.runtime_root / "personas" / "dialogue_style_profiles.jsonl"
         self._views_cache: dict[str, dict[str, Any]] | None = None
         self._views_mtime: int | None = None
@@ -2223,14 +2271,44 @@ class MVPService:
         for item in status["selected_characters"]:
             character_id = str(item["character_id"])
             avatar = avatars.get(character_id) or {}
+            source_alt = str(avatar.get("source_alt") or "")
+            portrait_kind = (
+                "headshot"
+                if "头像" in source_alt and "立绘" not in source_alt
+                else str(avatar.get("portrait_kind") or "").strip()
+            )
+            if portrait_kind not in {"headshot", "full_body"}:
+                portrait_kind = (
+                    "headshot"
+                    if "头像" in source_alt and "立绘" not in source_alt
+                    else "full_body"
+                )
             characters.append(
                 {
                     **item,
                     "avatar": {
                         "src": avatar.get("local_path"),
+                        "stage_src": avatar.get("stage_src"),
+                        "stage_src_deprecated": True,
+                        "stage_focus_x": avatar.get("stage_focus_x", 50),
+                        "stage_focus_y": avatar.get("stage_focus_y", 50),
+                        "stage_fit": avatar.get("stage_fit", "contain"),
+                        "portrait_kind": portrait_kind,
+                        "portrait_scale": avatar.get(
+                            "portrait_scale", 1.0 if portrait_kind == "headshot" else 1.8
+                        ),
+                        "portrait_focus_x": avatar.get("portrait_focus_x", 50),
+                        "portrait_focus_y": avatar.get(
+                            "portrait_focus_y", 50 if portrait_kind == "headshot" else 22
+                        ),
                         "fallback": str(item["character_name"])[:1],
                         "source_page": avatar.get("source_page"),
                         "source_url": avatar.get("source_url"),
+                        "license": avatar.get("license"),
+                        "publishable": avatar.get(
+                            "publishable",
+                            bool(avatar.get("local_path") and avatar.get("license")),
+                        ),
                     },
                     "conversation": summaries.get(character_id),
                     "conversations": {
@@ -2286,7 +2364,12 @@ class MVPService:
                 "content_blocks": item.get("content_blocks") or response.get("content_blocks") or [],
             }
             clean_answer = self._generated_answer(generated, str(generated.get("answer") or ""))
-            blocks = self._normalize_content_blocks(generated, channel, clean_answer)
+            blocks = self._normalize_content_blocks(
+                generated,
+                channel,
+                clean_answer,
+                character.display_name,
+            )
             clean_answer = self._render_content_blocks(blocks)
             if not clean_answer:
                 clean_answer = "这条回复没有完整保存。你可以把刚才的问题再发一次。"
@@ -2771,6 +2854,7 @@ class MVPService:
             "analyst_location": analyst_location,
             "character_location": character_location,
             "character_activity": character_scene.get("activity"),
+            "visual_key": scene_visual_key(character_location),
             "co_located": bool(
                 analyst_location
                 and character_location
@@ -2778,6 +2862,303 @@ class MVPService:
             ),
             "state_scope": str(character_scene.get("state_scope") or "session_simulation"),
         }
+
+    def resolve_presence(
+        self,
+        character_value: str,
+        world_session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve one character's current scene without exposing the full world."""
+
+        character = self.character(character_value)
+        resolved_world_session = str(world_session_id or "").strip() or "world_" + sha256(
+            f"{character.character_id}\x1f{_utc_now()}\x1fpresence".encode("utf-8")
+        ).hexdigest()[:16]
+        self._hydrate_persistent_world(resolved_world_session)
+        world_state = self._world_snapshot(resolved_world_session)
+        return {
+            "character_id": character.character_id,
+            "character_name": character.display_name,
+            "world_session_id": resolved_world_session,
+            "scene_state": self._scene_state(world_state, character),
+        }
+
+    def transition_presence(
+        self,
+        character_value: str,
+        *,
+        session_id: str | None,
+        world_session_id: str | None,
+        target_channel: str,
+        action: str,
+    ) -> dict[str, Any]:
+        """Change communication context without generating or storing a message."""
+
+        character = self.character(character_value)
+        target_channel = self._normalize_communication_channel(target_channel)
+        expected_action = "join_character" if target_channel == "in_person" else "open_communicator"
+        if action != expected_action:
+            raise ValueError("场景动作与目标交流媒介不匹配。")
+        resolved = self.resolve_presence(character.character_id, world_session_id)
+        resolved_world_session = str(resolved["world_session_id"])
+        world_state = self._world_snapshot(resolved_world_session)
+        scene_state = self._scene_state(world_state, character)
+        previous_channel = "text" if target_channel == "in_person" else "in_person"
+        session_state: dict[str, Any] | None = None
+        if session_id:
+            self._hydrate_persistent_session(session_id, character.character_id)
+            snapshot = self._session_snapshot(session_id, character.character_id, "immersive")
+            if snapshot.get("communication_channel"):
+                previous_channel = self._normalize_communication_channel(
+                    snapshot.get("communication_channel")
+                )
+
+        presence_transition: dict[str, Any] = {
+            "status": "communicator_opened",
+            "location": scene_state.get("analyst_location"),
+        }
+        if target_channel == "in_person":
+            character_location = str(scene_state.get("character_location") or "").strip()
+            if not character_location:
+                raise ValueError("当前角色没有可用的场景位置。")
+            world_state = self._set_analyst_location(
+                resolved_world_session,
+                character_location,
+            )
+            scene_state = self._scene_state(world_state, character)
+            presence_transition = {
+                "status": "joined_character",
+                "location": scene_state.get("analyst_location"),
+            }
+
+        if session_id:
+            with _SESSION_LOCK:
+                cached = _SESSION_STATES.get(session_id)
+                if cached and cached.get("character_id") == character.character_id:
+                    cached["communication_channel"] = target_channel
+                    session_state = json.loads(json.dumps(cached, ensure_ascii=False))
+
+        conversation_updated = self.conversation_store.save_presence_state(
+            character_id=character.character_id,
+            session_id=session_id,
+            world_session_id=resolved_world_session,
+            communication_channel=target_channel,
+            session_state=session_state,
+            world_state=self._durable_world_state(resolved_world_session),
+        )
+        return {
+            "character_id": character.character_id,
+            "character_name": character.display_name,
+            "session_id": session_id,
+            "world_session_id": resolved_world_session,
+            "communication_channel": target_channel,
+            "scene_state": scene_state,
+            "channel_transition": {
+                "status": "applied_immediately",
+                "from": previous_channel,
+                "to": target_channel,
+                "trigger": "presence_ui",
+            },
+            "presence_transition": presence_transition,
+            "conversation_updated": conversation_updated,
+            "message_created": False,
+            "model_called": False,
+        }
+
+    def prepare_presence_arrival(
+        self,
+        character_value: str,
+        *,
+        arrival_id: str,
+        session_id: str | None,
+        world_session_id: str | None,
+    ) -> dict[str, Any]:
+        """Make the server-owned arrival decision and move the analyst in person."""
+
+        character = self.character(character_value)
+        resolved_session = str(session_id or "").strip() or (
+            "presence_session_" + sha256(arrival_id.encode("utf-8")).hexdigest()[:18]
+        )
+        resolved_world = str(world_session_id or "").strip() or (
+            "presence_world_" + sha256((arrival_id + "\x1fworld").encode("utf-8")).hexdigest()[:18]
+        )
+        existing = self.conversation_store.begin_presence_arrival(
+            arrival_id=arrival_id,
+            character_id=character.character_id,
+            session_id=resolved_session,
+            world_session_id=resolved_world,
+            # The factory is evaluated only after the store has proved that
+            # this is a new idempotency key. Replays therefore do not consume
+            # another random draw and can never change branches.
+            decision_factory=lambda: (
+                "noticed" if secrets.randbelow(2) == 0 else "unnoticed"
+            ),
+        )
+        if existing.get("status") in {"completed", "fallback_unnoticed"}:
+            return {"ready": existing.get("response") or {}}
+        if existing.get("status") == "processing" and not existing.get("new"):
+            raise MVPRequestInProgress("同一到场请求正在处理中，请稍后重试。")
+        transition = self.transition_presence(
+            character.character_id,
+            session_id=resolved_session,
+            world_session_id=resolved_world,
+            target_channel="in_person",
+            action="join_character",
+        )
+        if existing.get("decision") == "unnoticed":
+            response = {
+                "arrival_id": arrival_id,
+                "character_id": character.character_id,
+                "character_name": character.display_name,
+                "session_id": resolved_session,
+                "world_session_id": resolved_world,
+                "conversation_id": None,
+                "communication_channel": "in_person",
+                "scene_state": transition["scene_state"],
+                "decision": "unnoticed",
+                "status": "completed",
+                "reaction": None,
+            }
+            self.conversation_store.complete_presence_arrival(
+                arrival_id, status="completed", response=response
+            )
+            return {"ready": response}
+        return {
+            "ready": None,
+            "arrival_id": arrival_id,
+            "character": character,
+            "session_id": resolved_session,
+            "world_session_id": resolved_world,
+            "scene_state": transition["scene_state"],
+        }
+
+    def finish_presence_arrival(
+        self,
+        prepared: dict[str, Any],
+        *,
+        model_settings: tuple[str, str, str],
+        model_info: dict[str, Any],
+        thinking_decision: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Generate and persist the noticed branch after routing is resolved."""
+
+        character = prepared["character"]
+        arrival_id = str(prepared["arrival_id"])
+        session_id = str(prepared["session_id"])
+        world_session_id = str(prepared["world_session_id"])
+        result = self.chat(
+            character.character_id,
+            "（到场事件）分析员刚刚来到你身边。请主动问候，并自然承接当前角色最近的聊天内容。动作或神态必须放在 action 内容块并用角色名开头的第三人称描写；真正说出口的话放在 speech 内容块。",
+            session_id=session_id,
+            limit=8,
+            mode="immersive",
+            world_session_id=world_session_id,
+            communication_channel="in_person",
+            model_settings=model_settings,
+            model_info=model_info,
+            thinking_decision=thinking_decision,
+            persist_exchange=False,
+            remember_session=False,
+            presence_arrival=True,
+        )
+        answer = str(result.get("answer") or "").strip()
+        # Normal chat deliberately has a local empty-output continuation. An
+        # unsolicited arrival must not use it: doing so would present a
+        # fabricated proactive reply as if the model had generated it.
+        if not answer or "empty_model_output_guard" in (
+            result.get("response_adjustments") or []
+        ):
+            raise MVPProviderError("到场反应模型没有返回可用正文。")
+        blocks = self._normalize_content_blocks(
+            {"content_blocks": result.get("content_blocks") or []},
+            "in_person",
+            answer,
+            character.display_name,
+        )
+        spoken_answer = "\n".join(
+            str(block.get("text") or "").strip()
+            for block in blocks
+            if block.get("type") == "speech" and str(block.get("text") or "").strip()
+        )
+        if not spoken_answer:
+            raise MVPProviderError("到场反应模型没有返回可用对白。")
+        response = {
+            "message_id": "presence_message_" + sha256(
+                f"{session_id}\x1f{arrival_id}".encode("utf-8")
+            ).hexdigest()[:16],
+            "character_id": character.character_id,
+            "character_name": character.display_name,
+            "session_id": session_id,
+            "world_session_id": world_session_id,
+            "mode": "immersive",
+            "communication_channel": "in_person",
+            "answer": spoken_answer,
+            "content_blocks": blocks,
+            "scene_state": prepared["scene_state"],
+            "source": "presence_arrival",
+            "arrival_id": arrival_id,
+            "usage": result.get("usage") or {},
+            "actual_model": result.get("actual_model") or model_info,
+            "routing_decision": result.get("routing_decision") or {},
+            "thinking_decision": result.get("thinking_decision") or {},
+        }
+        self._remember_session(
+            session_id,
+            character.character_id,
+            "",
+            spoken_answer,
+            "immersive",
+            result.get("style_context"),
+            "in_person",
+            blocks,
+            None,
+            [],
+            [],
+        )
+        conversation_id = self.conversation_store.save_assistant_message(
+            character_id=character.character_id,
+            session_id=session_id,
+            world_session_id=world_session_id,
+            response=response,
+            session_state=self._durable_session_state(session_id),
+            world_state=self._durable_world_state(world_session_id),
+        )
+        final = {
+            "arrival_id": arrival_id,
+            "character_id": character.character_id,
+            "character_name": character.display_name,
+            "session_id": session_id,
+            "world_session_id": world_session_id,
+            "conversation_id": conversation_id,
+            "communication_channel": "in_person",
+            "scene_state": prepared["scene_state"],
+            "decision": "noticed",
+            "status": "completed",
+            "reaction": {**response, "source": "presence_arrival"},
+        }
+        self.conversation_store.complete_presence_arrival(
+            arrival_id, status="completed", response=final
+        )
+        return final
+
+    def fallback_presence_arrival(self, prepared: dict[str, Any]) -> dict[str, Any]:
+        response = {
+            "arrival_id": str(prepared["arrival_id"]),
+            "character_id": prepared["character"].character_id,
+            "character_name": prepared["character"].display_name,
+            "session_id": str(prepared["session_id"]),
+            "world_session_id": str(prepared["world_session_id"]),
+            "conversation_id": None,
+            "communication_channel": "in_person",
+            "scene_state": prepared["scene_state"],
+            "decision": "unnoticed",
+            "status": "fallback_unnoticed",
+            "reaction": None,
+        }
+        self.conversation_store.complete_presence_arrival(
+            str(prepared["arrival_id"]), status="fallback_unnoticed", response=response
+        )
+        return response
 
     @staticmethod
     def _scene_state_for_prompt(
@@ -3639,6 +4020,7 @@ class MVPService:
             or "qwen3.7-max"
         )
         return base_url.rstrip("/"), api_key, model
+
 
     def chat_enabled(self) -> bool:
         return os.getenv("MVP_CHAT_ENABLED", "true" if self.settings.mvp_chat_enabled else "false").lower() == "true"
@@ -5863,7 +6245,7 @@ class MVPService:
         else:
             communication_rule = f"""
 【交流媒介：面对面】
-当前与分析员面对面交谈，只能输出 type=speech 或 type=action 的内容块。action 只能是角色自身在当前地点可以完成的动作或神态，且不得编造分析员的反应、动作或感受。
+当前与分析员面对面交谈，只能输出 type=speech 或 type=action 的内容块。action 只能是角色自身在当前地点可以完成的动作或神态，必须用角色名开头的第三人称描述，禁止使用“我/我的”作为动作主语，且不得编造分析员的反应、动作或感受。
 沉浸式的自然陪伴对话中，只要语境合适，通常先用一条简短的 action 写出你自己的目光、神态或小动作，再用 speech 接住分析员的话；它应当让对话更有在场感，而不是每句都写成舞台剧。不要为了动作强行加入触碰、靠近、戏剧化情绪或剧情回顾。
 如果本轮“分析员输入块”含 type=action，那是分析员已经明确写下的动作；可以自然回应这一动作，但仍不能补写分析员没有声明的反应、感受或后续动作。
 不要因为历史剧情出现通讯，就把当前回答写成消息；历史剧情中的通讯或见面只能作为回忆，不能改变当前媒介。当前可见空间状态：{json.dumps(scene_for_rules, ensure_ascii=False)}。
@@ -6417,9 +6799,58 @@ class MVPService:
         generated: dict[str, Any],
         communication_channel: str,
         answer: str,
+        character_name: str = "",
     ) -> list[dict[str, str]]:
         allowed = {"message"} if communication_channel == "text" else {"speech", "action"}
         blocks: list[dict[str, str]] = []
+
+        def normalize_action(value: str) -> str:
+            action = value.strip()
+            while len(action) >= 2 and action[0] in "（(" and action[-1] in "）)":
+                action = action[1:-1].strip()
+            if not action:
+                return ""
+            if character_name:
+                if action.startswith("我的"):
+                    action = character_name + "的" + action[2:]
+                elif action.startswith(("我", "她")):
+                    action = character_name + action[1:]
+                elif action.startswith(("少女", "女孩", "角色")):
+                    action = re.sub(r"^(?:少女|女孩|角色)", character_name, action, count=1)
+                elif not action.startswith(character_name):
+                    action = character_name + action
+            return action
+
+        def split_leading_actions(value: str) -> tuple[list[str], str]:
+            actions: list[str] = []
+            remainder = value.strip()
+            for _ in range(2):
+                match = re.match(
+                    r"^[（(]+\s*([^（）()\r\n]{2,240}?)\s*[）)]+\s*(?:\r?\n+|$)",
+                    remainder,
+                )
+                if not match:
+                    break
+                action = normalize_action(match.group(1))
+                if action:
+                    actions.append(action)
+                remainder = remainder[match.end():].strip()
+            return actions, remainder
+
+        def append_block(block_type: str, text: str) -> None:
+            if communication_channel == "in_person" and block_type == "action":
+                normalized = normalize_action(text)
+                if normalized:
+                    blocks.append({"type": "action", "text": normalized})
+                return
+            if communication_channel == "in_person" and block_type == "speech":
+                actions, speech = split_leading_actions(text)
+                blocks.extend({"type": "action", "text": action} for action in actions)
+                if speech:
+                    blocks.append({"type": "speech", "text": speech})
+                return
+            blocks.append({"type": block_type, "text": text})
+
         raw_blocks = generated.get("content_blocks")
         if isinstance(raw_blocks, list):
             for item in raw_blocks:
@@ -6432,12 +6863,14 @@ class MVPService:
                     else ""
                 )
                 if block_type in allowed and text:
-                    blocks.append({"type": block_type, "text": text})
+                    append_block(block_type, text)
         if blocks:
             return blocks
         default_type = "message" if communication_channel == "text" else "speech"
         clean_answer = _clean_renderable_text(answer) if isinstance(answer, str) else ""
-        return [{"type": default_type, "text": clean_answer}] if clean_answer else []
+        if clean_answer:
+            append_block(default_type, clean_answer)
+        return blocks
 
     @staticmethod
     def _ensure_in_person_presence_block(
@@ -8306,6 +8739,9 @@ class MVPService:
         model_info: dict[str, Any] | None = None,
         voice_reply: bool = False,
         thinking_decision: dict[str, Any] | None = None,
+        persist_exchange: bool = True,
+        remember_session: bool = True,
+        presence_arrival: bool = False,
     ) -> dict[str, Any]:
         if not self.chat_enabled():
             raise MVPChatDisabled("MVP 对话接口未开启。请设置 MVP_CHAT_ENABLED=true 后重启 API。")
@@ -8454,6 +8890,15 @@ class MVPService:
             mode=mode,
             world_state=world_state,
         )
+        if presence_arrival:
+            context["question_focus"] = "casual_check_in"
+            context["conversation_mode"] = "natural_chat"
+            context["response_contract"] = (
+                "这是一次面对面到场事件。角色已经发现分析员来到身边，先自然问候，"
+                "再用一两句承接当前角色最近的聊天内容。不要虚构新的共同经历，不要解释系统或模型，"
+                "只输出适合直接说出口的简短角色台词。"
+            )
+            context["live_scene"] = None
         if self._is_visit_request(message.strip()) and confirmed_location:
             context["question_focus"] = "visit_followup"
             context["conversation_mode"] = "natural_chat"
@@ -9222,6 +9667,7 @@ class MVPService:
             generated,
             active_channel,
             answer_text,
+            character.display_name,
         )
         answer_text = self._render_content_blocks(content_blocks)
         # A malformed envelope can survive a provider retry as an otherwise
@@ -9280,23 +9726,24 @@ class MVPService:
         if relationship_address_normalized:
             generated["citation_notes"] = list(generated.get("citation_notes") or [])
             generated["citation_notes"].append("明确关系中的直接称呼已按角色证据自然校正。")
-        self._remember_session(
-            resolved_session,
-            character.character_id,
-            message.strip(),
-            answer_text,
-            mode,
-            context.get("style_context"),
-            active_channel,
-            content_blocks,
-            next_channel,
-            [
-                str(citation.get("title") or "")
-                for citation in citations
-                if str(citation.get("title") or "").strip()
-            ],
-            normalized_analyst_blocks,
-        )
+        if remember_session:
+            self._remember_session(
+                resolved_session,
+                character.character_id,
+                message.strip(),
+                answer_text,
+                mode,
+                context.get("style_context"),
+                active_channel,
+                content_blocks,
+                next_channel,
+                [
+                    str(citation.get("title") or "")
+                    for citation in citations
+                    if str(citation.get("title") or "").strip()
+                ],
+                normalized_analyst_blocks,
+            )
         work_summary, work_steps = self._visible_work_trace(
             generated,
             mode=mode,
@@ -9463,21 +9910,23 @@ class MVPService:
             )
             + "未审核关系仅为临时证据，本次回答不会改变人格、候选状态或图谱。",
         }
-        conversation_id = self.conversation_store.save_exchange(
-            character_id=character.character_id,
-            session_id=resolved_session,
-            world_session_id=resolved_world_session,
-            client_message_id=request_key,
-            user_text=message.strip(),
-            user_content_blocks=normalized_analyst_blocks,
-            response=result,
-            session_state=self._durable_session_state(resolved_session),
-            world_state=self._durable_world_state(resolved_world_session),
-        )
+        conversation_id = None
+        if persist_exchange:
+            conversation_id = self.conversation_store.save_exchange(
+                character_id=character.character_id,
+                session_id=resolved_session,
+                world_session_id=resolved_world_session,
+                client_message_id=request_key,
+                user_text=message.strip(),
+                user_content_blocks=normalized_analyst_blocks,
+                response=result,
+                session_state=self._durable_session_state(resolved_session),
+                world_state=self._durable_world_state(resolved_world_session),
+            )
         return {
             **result,
             "conversation_id": conversation_id,
-            "persisted": True,
+            "persisted": bool(persist_exchange),
             "idempotent_replay": False,
         }
 
@@ -9517,12 +9966,12 @@ class MVPService:
         ) and has("亲爱的", "郎君", "达令", "老婆", "妻子")
         if relationship_address_signal or address_error_signal:
             return "formal_relationship_address"
-        if has("西餐", "工作餐", "餐品", "已经拿", "带了") and has(
-            "重复", "前文", "没决定", "重新", "没有被纳入", "询问吃什么"
+        if has("西餐", "工作餐", "餐品", "已经拿", "带了", "刚吃", "刚喝") and has(
+            "重复", "前文", "没决定", "重新", "没有被纳入", "询问吃什么", "已经说"
         ):
-            return "shared_meal_continuity"
-        if has("刚吃", "刚喝", "吃了什么", "吃什么", "喝了什么", "饮食", "食物"):
-            return "food_current_fact"
+            return "current_food_continuity"
+        if has("吃了什么", "吃什么", "喝了什么", "饮食", "食物"):
+            return "current_food_continuity"
         if has("后勤", "小队", "成员", "队员", "推荐角色", "装备时"):
             return "logistics_linkage"
         if has("猫猫", "小老师", "昵称", "外号"):
@@ -9530,15 +9979,21 @@ class MVPService:
         if has("算卦", "卦象", "运势", "本天师") and has(
             "一直", "反复", "重复", "频次", "频率", "减少"
         ):
-            return "character_signature_frequency"
-        if has("地点", "位置") and has(
-            "重复", "再次", "揭露", "前后", "矛盾", "不一致"
+            return "signature_trait_repetition"
+        if has("地点", "位置") and has("重复", "再次", "又说", "再次揭露"):
+            return "location_repetition"
+        if has("地点", "位置") and has("前后", "矛盾", "不一致", "冲突", "改口"):
+            return "location_conflict"
+        if has("去找", "过来", "过去找", "去见") and has(
+            "地点", "位置", "在哪里", "告诉"
         ):
-            return "location_continuity"
-        if has("训练", "休息") and has("逻辑", "矛盾", "答非所问"):
-            return "routine_activity_logic"
-        if has("动作") and has("同时输入", "语言", "对白", "隐藏", "文字"):
-            return "client_dual_input"
+            return "visit_location_disclosure"
+        if has("训练", "休息", "赖床", "活动") and has("逻辑", "矛盾", "答非所问", "同时"):
+            return "current_activity_choice"
+        if has("动作") and has("同时输入", "语言", "对白", "一起输入"):
+            return "composer_action_and_speech"
+        if has("动作") and has("隐藏", "文字通讯", "文字通信", "文字时", "禁用"):
+            return "text_action_visibility"
         if has("色情", "暧昧", "亲密", "隐晦") and has(
             "中断", "重置", "跳", "连续", "审核"
         ):
@@ -9555,6 +10010,16 @@ class MVPService:
             has("怎么看", "评价", "观点") and has("角色性格", "角色口吻", "具体事务")
         ):
             return "assistant_opinion"
+        if has("思考过程", "分析过程", "工作摘要", "执行摘要", "步骤") and has(
+            "样式", "风格", "框线", "展示", "功能性文字"
+        ):
+            return "assistant_execution_summary"
+        if has("markdown", "md格式", "格式渲染"):
+            return "assistant_markdown"
+        if has("输入中", "打字", "延迟") and has("模拟", "多段", "字数", "等待"):
+            return "assistant_typing_simulation"
+        if has("未知原因失败", "请求失败", "生成失败", "一直失败", "异常失败"):
+            return "assistant_request_failure"
         if has("json", "api", "模型", "系统", "检索", "资料库", "正在读取"):
             return "json_or_implementation_leak"
         if has("文字通讯", "面对面", "媒介", "输入中", "发送中", "通信", "通讯"):
@@ -9563,6 +10028,10 @@ class MVPService:
             return "mode_continuity"
         if has("文本框", "输入框", "点击", "按钮", "加载", "卡住", "崩溃", "客户端"):
             return "client_input_state"
+        if has("强行提", "强行引用", "剧情太多", "复述剧情", "剧情复述", "旧剧情"):
+            return "forced_plot_recap"
+        if has("生硬", "太短", "不够热情", "不热情", "平淡", "不够有感情", "缺乏感情"):
+            return "relationship_warmth"
         if has("剧情", "故事", "主线", "记忆", "连续", "中断", "背景"):
             return "narrative_continuity"
         if has("皮肤", "时装", "装甲", "换装", "语气"):
@@ -9593,6 +10062,20 @@ class MVPService:
         base_key = issue_key.split(":", 1)[0]
         return _FEEDBACK_DEFAULT_RESOLUTION.get(base_key, "needs_verification")
 
+    @classmethod
+    def _feedback_effective_issue_key(cls, row: dict[str, Any]) -> str:
+        """Return a precise family without rewriting the append-only source row."""
+
+        stored_key = str(row.get("issue_key") or "").strip()
+        derived_key = cls._feedback_issue_key(row)
+        if (
+            stored_key in _FEEDBACK_LEGACY_BROAD_KEYS
+            and derived_key
+            and derived_key != stored_key
+        ):
+            return derived_key
+        return stored_key or derived_key
+
     def _annotate_feedback_rows(
         self,
         rows: list[dict[str, Any]],
@@ -9600,25 +10083,7 @@ class MVPService:
     ) -> list[dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            stored_key = str(row.get("issue_key") or "").strip()
-            derived_key = self._feedback_issue_key(row)
-            # Early previews grouped nearly every dialogue report into one of
-            # two coarse buckets.  Re-evaluate only those legacy buckets so a
-            # fixed location regression no longer makes an unrelated story
-            # problem look like the same duplicate.  Already-specific and
-            # hashed keys remain immutable.
-            key = (
-                derived_key
-                if stored_key
-                in {
-                    "narrative_continuity",
-                    "client_input_state",
-                    "json_or_implementation_leak",
-                    "food_current_fact",
-                }
-                and derived_key != stored_key
-                else stored_key or derived_key
-            )
+            key = self._feedback_effective_issue_key(row)
             row["issue_key"] = key
             grouped.setdefault(key, []).append(row)
         for key, group in grouped.items():
@@ -9628,21 +10093,30 @@ class MVPService:
             if family_status not in _FEEDBACK_RESOLUTION_STATUSES:
                 family_status = "needs_verification"
             updated_at = str(event.get("updated_at") or event.get("created_at") or "")
+            verification_tests = list(
+                event.get("verification_tests") or _FEEDBACK_VERIFICATION_TESTS.get(key, ())
+            )
             first_id = str(group[0].get("feedback_id") or "") if group else ""
             for index, row in enumerate(group):
                 row["issue_status"] = family_status
+                row["verification_tests"] = verification_tests
+                row["verified_at"] = str(event.get("verified_at") or "") or None
+                row["status_source"] = str(event.get("source") or "build_default")
                 row["issue_occurrence"] = "first" if index == 0 else "duplicate"
+                row["issue_report_count"] = len(group)
+                row["recurrence_index"] = index
                 if index > 0 and first_id:
                     row["duplicate_of"] = first_id
-                # A report created after a family was marked fixed is a useful
-                # regression signal, not proof that the fix is invalid.
-                row["resolution_status"] = (
-                    "regression_candidate"
-                    if family_status == "fixed_verified"
+                # Repeated reports remain visible as recurrence evidence, but
+                # they do not reopen a verified family. Reopening requires a
+                # current-version reproduction, a failing regression test and
+                # an explicit status event.
+                row["reported_after_verification"] = bool(
+                    family_status == "fixed_verified"
                     and updated_at
                     and str(row.get("created_at") or "") > updated_at
-                    else family_status
                 )
+                row["resolution_status"] = family_status
         return rows
 
     def sync_feedback_issue_status(self) -> dict[str, Any]:
@@ -9650,7 +10124,7 @@ class MVPService:
 
         rows = _read_jsonl(self.feedback_path)
         events = self._feedback_status_events()
-        keys = {str(row.get("issue_key") or self._feedback_issue_key(row)) for row in rows}
+        keys = {self._feedback_effective_issue_key(row) for row in rows}
         added: list[dict[str, Any]] = []
         now = _utc_now()
         for key in sorted(keys):
@@ -9660,8 +10134,17 @@ class MVPService:
                 "event_id": "feedback_issue_status_" + sha256(f"{key}\x1f{now}".encode()).hexdigest()[:16],
                 "issue_key": key,
                 "status": self._feedback_default_status(key),
-                "note": "由当前回归覆盖规则生成；若新反馈再次出现，将标记为 regression_candidate。",
+                "note": (
+                    "该旧助手问题由插件化架构替代，不再进入 Snow 内置助手修复队列。"
+                    if self._feedback_default_status(key) == "superseded_by_architecture"
+                    else "由当前回归覆盖规则生成；重复反馈只累计复发次数，不会在未经复现和失败测试时重新打开修复任务。"
+                ),
                 "updated_at": now,
+                "verified_at": (
+                    now if self._feedback_default_status(key) == "fixed_verified" else None
+                ),
+                "verification_tests": list(_FEEDBACK_VERIFICATION_TESTS.get(key, ())),
+                "code_version": "v0.5.0",
                 "source": "build_default",
             }
             added.append(event)
@@ -9682,6 +10165,8 @@ class MVPService:
         issue_key: str,
         resolution_status: str,
         note: str = "",
+        verification_tests: list[str] | None = None,
+        code_version: str | None = None,
     ) -> dict[str, Any]:
         """Append an explicit family-level resolution decision."""
 
@@ -9690,13 +10175,18 @@ class MVPService:
             raise ValueError("反馈问题标识不能为空。")
         if resolution_status not in _FEEDBACK_RESOLUTION_STATUSES:
             raise ValueError("不支持的反馈问题解决状态。")
+        now = _utc_now()
+        tests = list(verification_tests or _FEEDBACK_VERIFICATION_TESTS.get(key, ()))[:30]
         event = {
             "event_id": "feedback_issue_status_"
-            + sha256(f"{key}\x1f{resolution_status}\x1f{_utc_now()}".encode()).hexdigest()[:16],
+            + sha256(f"{key}\x1f{resolution_status}\x1f{now}".encode()).hexdigest()[:16],
             "issue_key": key,
             "status": resolution_status,
             "note": str(note or "").strip(),
-            "updated_at": _utc_now(),
+            "updated_at": now,
+            "verified_at": now if resolution_status == "fixed_verified" else None,
+            "verification_tests": tests,
+            "code_version": str(code_version or "v0.5.0").strip(),
             "source": "manual",
         }
         self.feedback_issue_status_path.parent.mkdir(parents=True, exist_ok=True)
@@ -9858,7 +10348,7 @@ class MVPService:
             "total": total,
             "feedback": rows,
             "categories": list(FEEDBACK_CATEGORIES),
-            "resolution_statuses": sorted(_FEEDBACK_RESOLUTION_STATUSES | {"regression_candidate"}),
+            "resolution_statuses": sorted(_FEEDBACK_RESOLUTION_STATUSES),
             "issue_summary": issue_summary,
             "resolution_summary": resolution_summary,
         }

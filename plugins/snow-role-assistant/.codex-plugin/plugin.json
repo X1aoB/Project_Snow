@@ -1,0 +1,24 @@
+{
+  "name": "snow-role-assistant",
+  "version": "0.5.0",
+  "description": "Read-only Project Snow persona and public knowledge for real Codex tasks.",
+  "author": {
+    "name": "Project Snow"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Snow",
+    "shortDescription": "让 Codex 以指定角色风格完成真实任务。",
+    "longDescription": "Codex 负责模型、工具、附件、审批和任务历史；Project Snow 只提供只读的人格、称呼、关系与公开知识快照。沉浸式聊天历史不会进入 Codex。",
+    "developerName": "Project Snow",
+    "category": "Productivity",
+    "capabilities": ["Read-only persona", "Public knowledge", "Character rendering"],
+    "defaultPrompt": [
+      "@Snow 用默认角色帮我分析这个任务。",
+      "@Snow 固定为里芙，先检查项目状态再给建议。",
+      "@Snow 用角色风格解释结果，但保持代码与数字原样。"
+    ],
+    "brandColor": "#0A5CFF"
+  },
+  "mcpServers": "./.mcp.json"
+}
