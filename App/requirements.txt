@@ -9,6 +9,11 @@ python-dotenv>=1.0,<2
 uvicorn[standard]>=0.32,<1
 python-multipart>=0.0.12,<1
 keyring>=25.5,<26
+cryptography>=43,<46
+psycopg[binary]>=3.2,<4
+psycopg-pool>=3.2,<4
+SQLAlchemy>=2.0,<3
+alembic>=1.14,<2
 
 # Wiki/source processing and local avatar preparation.
 beautifulsoup4>=4.12,<5
@@ -21,6 +26,7 @@ python-pptx>=1.0,<2
 reportlab>=4.2,<5
 mutagen>=1.47,<2
 playwright>=1.49,<2
+pytest>=8.3,<10
 
 # Lakehouse, hybrid retrieval and optional graph/vector serving. These are
 # intentionally installed together so every command documented in README.md

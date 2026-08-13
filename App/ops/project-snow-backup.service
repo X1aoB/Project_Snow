@@ -1,0 +1,8 @@
+[Unit]
+Description=Project Snow encrypted R2 backup
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/project-snow/restic.env
+ExecStart=/srv/project-snow/app/ops/backup.sh

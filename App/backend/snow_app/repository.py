@@ -1240,6 +1240,16 @@ class RuntimeRepository:
         results.sort(key=lambda item: item["score"], reverse=True)
         return ("rrf" if vectors else "lexical_only"), bool(vectors), results[:limit]
 
+    def serving_graph_context(
+        self,
+        query: str,
+        character_id: str | None,
+        intents: tuple[str, ...],
+    ) -> dict[str, Any]:
+        """Optional production graph hook; local artifact mode stays unchanged."""
+
+        return {"status": "not_configured", "nodes": [], "edges": []}
+
     def neighborhood(self, graph_node_id: str) -> dict[str, Any] | None:
         node = self.graph_nodes().get(graph_node_id)
         if node is None:

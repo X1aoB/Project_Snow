@@ -223,6 +223,7 @@ __marimo__/
 # benchmarks and local chat history all live below App/runtime.
 /Data/
 /App/runtime/
+/App/runtime_preview_*/
 
 # Wiki-derived avatar media is retained only for local, non-commercial testing.
 # The client has a text-avatar fallback, so do not redistribute these files in

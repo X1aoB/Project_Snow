@@ -16,6 +16,12 @@ __pycache__/
 # All generated indexes, relation-review data, feedback, benchmarks, logs and
 # the local SQLite conversation store are reproducible/private runtime state.
 runtime/
+runtime_preview_*/
+
+# Production and local public secrets never enter Git.
+*.env.production
+secrets/
+backups/
 
 # Electron dependencies, caches and Windows packaging output.
 client/node_modules/

@@ -1610,10 +1610,18 @@ def _parse_model_json(content: str) -> dict[str, Any]:
 
 
 class MVPService:
-    def __init__(self, settings: Settings, repository: RuntimeRepository):
+    def __init__(
+        self,
+        settings: Settings,
+        repository: RuntimeRepository,
+        *,
+        force_chat_enabled: bool = False,
+        conversation_store: Any | None = None,
+    ):
         _load_local_environment()
         self.settings = settings
         self.repository = repository
+        self.force_chat_enabled = force_chat_enabled
         self.runtime_root = settings.runtime_root
         self.views_path = self.runtime_root / "mvp" / "character_views.jsonl"
         self.question_path = self.runtime_root / "mvp" / "question_bank.json"
@@ -1633,9 +1641,7 @@ class MVPService:
             if database_override
             else self.runtime_root / "chat" / "conversations.sqlite3"
         )
-        self.conversation_store = ConversationStore(
-            conversation_database_path
-        )
+        self.conversation_store = conversation_store or ConversationStore(conversation_database_path)
         self.public_knowledge = _PUBLIC_KNOWLEDGE
         self.user_fact_store = UserFactStore(
             conversation_database_path.parent / "user_facts.sqlite3"
@@ -4023,7 +4029,9 @@ class MVPService:
 
 
     def chat_enabled(self) -> bool:
-        return os.getenv("MVP_CHAT_ENABLED", "true" if self.settings.mvp_chat_enabled else "false").lower() == "true"
+        return self.force_chat_enabled or os.getenv(
+            "MVP_CHAT_ENABLED", "true" if self.settings.mvp_chat_enabled else "false"
+        ).lower() == "true"
 
     def _allowed_document(
         self,
@@ -5780,6 +5788,18 @@ class MVPService:
             message,
             limit,
         )
+        graph_context = {"status": "not_requested", "nodes": [], "edges": []}
+        if set(query_intents).intersection({"relationship", "experience", "current_state"}) or any(
+            term in message for term in ("关系", "地点", "在哪", "事件", "经历", "和谁", "认识")
+        ):
+            try:
+                graph_context = self.repository.serving_graph_context(
+                    message,
+                    character.character_id,
+                    tuple(query_intents),
+                )
+            except Exception:
+                graph_context = {"status": "degraded", "nodes": [], "edges": []}
         question_focus = self._question_focus(message, query_intents)
         if question_focus == "current_condition":
             latest_state_hits = self._latest_state_hits(
@@ -5981,6 +6001,7 @@ class MVPService:
             "interaction_hint": interaction_hint,
             "dual_persona_context": dual_persona_context,
             "relationship_background": relationship_background,
+            "graph_context": graph_context,
             "dialogue_profile": self._dialogue_profiles().get(character.character_id),
             "session_context": session_context or self._empty_session_context(),
         }
@@ -6437,6 +6458,7 @@ class MVPService:
                 "dialogue_style_profile": dialogue_profile,
                 "evidence": evidence,
                 "provisional_relation_evidence": provisional,
+                "verified_graph_context": context.get("graph_context") or {},
             },
             ensure_ascii=False,
         )
@@ -6473,6 +6495,7 @@ class MVPService:
         model_settings: tuple[str, str, str] | None = None,
         user_content: list[dict[str, Any]] | None = None,
         thinking_decision: dict[str, Any] | None = None,
+        max_tokens_override: int | None = None,
     ) -> tuple[str, dict[str, Any]]:
         base_url, api_key, model = model_settings or self.provider_settings()
         if not base_url or not api_key or not model:
@@ -6487,6 +6510,8 @@ class MVPService:
             max_tokens = max(1024, min(int(configured_max), 16384 if mode == "assistant" else 8192))
         except ValueError:
             max_tokens = 8192 if mode == "assistant" else 4096
+        if max_tokens_override is not None:
+            max_tokens = max(256, min(int(max_tokens_override), 8192))
         body: dict[str, Any] = {
             "model": model,
             "messages": [
@@ -6569,6 +6594,7 @@ class MVPService:
                     and finish_reason in {"length", "max_tokens"}
                     and not length_retry_done
                     and attempt < max_attempts
+                    and max_tokens_override is None
                 ):
                     length_retry_done = True
                     body.pop("response_format", None)
@@ -8742,6 +8768,7 @@ class MVPService:
         persist_exchange: bool = True,
         remember_session: bool = True,
         presence_arrival: bool = False,
+        max_tokens_override: int | None = None,
     ) -> dict[str, Any]:
         if not self.chat_enabled():
             raise MVPChatDisabled("MVP 对话接口未开启。请设置 MVP_CHAT_ENABLED=true 后重启 API。")
@@ -8983,6 +9010,8 @@ class MVPService:
                 initial_kwargs["model_settings"] = model_settings
             if thinking_decision is not None:
                 initial_kwargs["thinking_decision"] = thinking_decision
+            if max_tokens_override is not None:
+                initial_kwargs["max_tokens_override"] = max_tokens_override
             if image_inputs:
                 initial_kwargs["user_content"] = [
                     {"type": "text", "text": user_prompt},
@@ -9059,6 +9088,8 @@ class MVPService:
                     retry_kwargs["model_settings"] = model_settings
                 if thinking_decision is not None:
                     retry_kwargs["thinking_decision"] = thinking_decision
+                if max_tokens_override is not None:
+                    retry_kwargs["max_tokens_override"] = max_tokens_override
                 retry_content, retry_usage = self._call_model(
                     system_prompt,
                     self._guarded_rewrite_prompt(

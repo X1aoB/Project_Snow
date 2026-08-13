@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Project Snow backup daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=45m
+
+[Install]
+WantedBy=timers.target

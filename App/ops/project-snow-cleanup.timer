@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Project Snow retention cleanup daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

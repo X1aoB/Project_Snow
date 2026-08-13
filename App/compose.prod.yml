@@ -1,0 +1,176 @@
+name: project-snow-public
+
+x-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-api: &api
+  image: ${PUBLIC_API_IMAGE:?Set immutable PUBLIC_API_IMAGE digest}
+  restart: unless-stopped
+  env_file: ${PUBLIC_ENV_FILE:-/etc/project-snow/public.env}
+  environment:
+    DATA_ROOT: /srv/project-snow/data/current
+    APP_RUNTIME: /srv/project-snow/runtime
+    PUBLIC_DATABASE_URL_FILE: /run/secrets/public_database_url
+    TURNSTILE_SECRET_FILE: /run/secrets/turnstile_secret
+    PUBLIC_CREDENTIAL_KEY_FILE: /run/secrets/public_credential_key
+    PUBLIC_STATE_HMAC_KEY_FILE: /run/secrets/public_state_hmac_key
+    PUBLIC_IP_HMAC_KEY_FILE: /run/secrets/public_ip_hmac_key
+    PUBLIC_QQ_KEY_FILE: /run/secrets/public_qq_key
+    PUBLIC_ADMIN_TOKEN_FILE: /run/secrets/public_admin_token
+    NEO4J_PASSWORD_FILE: /run/secrets/neo4j_password
+    QDRANT_API_KEY_FILE: /run/secrets/qdrant_api_key
+    HTTPS_PROXY: http://egress-proxy:3128
+    NO_PROXY: postgres,qdrant,neo4j,embedding,localhost,127.0.0.1
+    PUBLIC_TRUST_PROXY_HEADERS: "true"
+  volumes:
+    - /srv/project-snow/data:/srv/project-snow/data:ro
+    - /srv/project-snow/runtime:/srv/project-snow/runtime:ro
+    - /etc/project-snow/secrets:/run/secrets:ro
+  cpus: 2
+  mem_limit: 1536m
+  pids_limit: 256
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=128m"]
+  logging: *bounded-logging
+  depends_on:
+    postgres:
+      condition: service_healthy
+  networks: [app, data, outbound]
+
+services:
+  public-api-blue:
+    <<: *api
+    profiles: [blue]
+
+  public-api-green:
+    <<: *api
+    profiles: [green]
+
+  admin:
+    <<: *api
+    command: ["python", "-m", "uvicorn", "backend.snow_app.admin_main:app", "--host", "0.0.0.0", "--port", "19090"]
+    ports:
+      - "127.0.0.1:19090:19090"
+    profiles: [admin]
+    networks: [data]
+
+  caddy:
+    image: ${CADDY_IMAGE:?Set immutable CADDY_IMAGE digest}
+    restart: unless-stopped
+    environment:
+      SNOW_UPSTREAM: ${SNOW_UPSTREAM:-public-api-blue:8000}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+    expose: ["8080"]
+    cpus: 0.5
+    mem_limit: 256m
+    read_only: true
+    tmpfs: ["/config:rw,nosuid,size=16m", "/data:rw,nosuid,size=16m"]
+    logging: *bounded-logging
+    networks: [edge, app]
+
+  cloudflared:
+    image: ${CLOUDFLARED_IMAGE:?Set immutable CLOUDFLARED_IMAGE digest}
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"]
+    volumes:
+      - /etc/project-snow/cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+      - /etc/project-snow/cloudflared/credentials.json:/etc/cloudflared/credentials.json:ro
+    cpus: 0.5
+    mem_limit: 256m
+    logging: *bounded-logging
+    depends_on: [caddy]
+    networks: [edge]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  postgres:
+    image: ${POSTGRES_IMAGE:?Set immutable POSTGRES_IMAGE digest}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: project_snow
+      POSTGRES_USER: project_snow
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - /etc/project-snow/secrets/postgres_password:/run/secrets/postgres_password:ro
+    cpus: 2
+    mem_limit: 2560m
+    shm_size: 512m
+    logging: *bounded-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U project_snow -d project_snow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [data]
+
+  qdrant:
+    image: ${QDRANT_IMAGE:?Set immutable QDRANT_IMAGE digest}
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "export QDRANT__SERVICE__API_KEY=$$(cat /run/secrets/qdrant_api_key); exec ./entrypoint.sh"
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - /etc/project-snow/secrets/qdrant_api_key:/run/secrets/qdrant_api_key:ro
+    cpus: 2
+    mem_limit: 2g
+    logging: *bounded-logging
+    networks: [data]
+
+  neo4j:
+    image: ${NEO4J_IMAGE:?Set immutable NEO4J_IMAGE digest}
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:?Set NEO4J_AUTH in root-only deployment environment}
+      NEO4J_server_memory_heap_initial__size: 1G
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 1G
+    volumes: ["neo4j_data:/data"]
+    cpus: 2
+    mem_limit: 3g
+    logging: *bounded-logging
+    networks: [data]
+
+  embedding:
+    image: ${EMBEDDING_IMAGE:?Set immutable EMBEDDING_IMAGE digest}
+    restart: unless-stopped
+    environment:
+      EMBEDDING_MODEL: BAAI/bge-small-zh-v1.5
+    volumes: ["embedding_models:/models"]
+    cpus: 2
+    mem_limit: 1536m
+    logging: *bounded-logging
+    networks: [data]
+
+  egress-proxy:
+    image: ${EGRESS_PROXY_IMAGE:?Set immutable EGRESS_PROXY_IMAGE digest}
+    restart: unless-stopped
+    volumes:
+      - ./infra/egress-squid.conf:/etc/squid/squid.conf:ro
+    cpus: 0.5
+    mem_limit: 256m
+    read_only: true
+    tmpfs: ["/var/log/squid:rw,nosuid,size=16m", "/var/spool/squid:rw,nosuid,size=16m", "/run:rw,nosuid,size=4m"]
+    logging: *bounded-logging
+    networks: [outbound]
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  neo4j_data:
+  embedding_models:
+
+networks:
+  edge:
+  app:
+    internal: true
+  data:
+    internal: true
+  outbound:
