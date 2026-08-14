@@ -36,9 +36,20 @@ class DeploymentContractTests(TestCase):
     def test_prepare_script_installs_host_tuning_and_deploy_key(self) -> None:
         script = self.read("ops/prepare_debian.sh")
         self.assertIn('cp "$script_dir/sysctl-project-snow.conf"', script)
+        self.assertIn("/srv/project-snow/repo/App", script)
+        self.assertIn("must be a symlink", script)
         self.assertIn("/home/deploy/.ssh/authorized_keys", script)
         self.assertIn("PasswordAuthentication no", script)
         self.assertIn("ufw allow 43556/tcp", script)
+
+    def test_local_deploy_selects_a_verified_main_commit(self) -> None:
+        script = self.read("scripts/deploy.ps1")
+        self.assertIn("/srv/project-snow/repo", script)
+        self.assertIn("git fetch --quiet origin main", script)
+        self.assertIn("git merge-base --is-ancestor", script)
+        self.assertIn("git checkout --quiet --detach", script)
+        self.assertIn("git rev-parse HEAD | grep -Fx", script)
+        self.assertIn("&& cd App &&", script)
 
     def test_production_examples_separate_public_settings_from_secrets(self) -> None:
         public_env = self.read("ops/public.env.example")

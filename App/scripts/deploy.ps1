@@ -14,5 +14,6 @@ if ($AppDigest -notmatch $digestPattern -or $EmbeddingDigest -notmatch $digestPa
 $appImage = "ghcr.io/x1aob/project_snow-public@$AppDigest"
 $embeddingImage = "ghcr.io/x1aob/project_snow-embedding@$EmbeddingDigest"
 Write-Host "Deploying main commit $Sha to private acceptance colour $Colour using immutable image digests."
-ssh -i $IdentityFile -p $Port "deploy@$HostName" "cd /srv/project-snow/app && PUBLIC_API_IMAGE='$appImage' EMBEDDING_IMAGE='$embeddingImage' ./ops/deploy.sh '$Colour' '$Sha'"
+$remoteCommand = "cd /srv/project-snow/repo && git fetch --quiet origin main && git cat-file -e '$Sha^{commit}' && git merge-base --is-ancestor '$Sha' origin/main && git checkout --quiet --detach '$Sha' && git rev-parse HEAD | grep -Fx '$Sha' && cd App && PUBLIC_API_IMAGE='$appImage' EMBEDDING_IMAGE='$embeddingImage' ./ops/deploy.sh '$Colour' '$Sha'"
+ssh -i $IdentityFile -p $Port "deploy@$HostName" $remoteCommand
 if ($LASTEXITCODE -ne 0) { throw 'Remote deployment failed.' }
