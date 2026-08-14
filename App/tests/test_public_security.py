@@ -58,8 +58,11 @@ class PublicSecurityTests(TestCase):
 
         embedding_dockerfile = (app_root / "infra" / "embedding.Dockerfile").read_text(encoding="utf-8")
         self.assertIn("https://download.pytorch.org/whl/cpu", embedding_dockerfile)
+        self.assertIn("--no-deps", embedding_dockerfile)
         self.assertIn("torch==2.13.0+cpu", embedding_dockerfile)
         self.assertIn("transformers==5.15.0", embedding_dockerfile)
+        self.assertIn("msgpack==1.2.1", embedding_dockerfile)
+        self.assertIn("RUN pip check", embedding_dockerfile)
         self.assertIn("setuptools==84.0.0", embedding_dockerfile)
         self.assertIn("wheel==0.48.0", embedding_dockerfile)
 
