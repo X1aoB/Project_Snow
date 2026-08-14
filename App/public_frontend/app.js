@@ -3,6 +3,21 @@ const dbName = "project-snow-public";
 const dbVersion = 1;
 const state = { config:null, credential:null, credentialExpiresAt:0, provider:"", model:"", characters:[], selected:"", stateByCharacter:new Map(), latest:new Map() };
 const $ = (id) => document.getElementById(id);
+const errorMessages = {
+  invalid_request:"请求内容不完整，请确认模型厂商、API Key 和模型 ID 已填写。",
+  provider_not_enabled:"该模型厂商尚未启用，请刷新页面或选择其他厂商。",
+  provider_credential_rejected:"API Key 被模型厂商拒绝，请检查密钥、余额和模型权限。",
+  provider_model_discovery_failed:"无法获取模型列表；你仍可手动填写正确的模型 ID。",
+  provider_network_error:"暂时无法连接模型厂商，请稍后重试。",
+  provider_timeout:"模型厂商响应超时，请稍后重试。",
+  provider_rate_limited:"模型厂商触发了频率限制，请稍后重试。",
+  provider_request_failed:"模型厂商拒绝了本次请求，请检查模型 ID 和账户权限。",
+  turnstile_required:"人机验证未完成，请稍后重试。",
+  turnstile_unavailable:"人机验证组件加载失败，请刷新页面后重试。",
+  rate_limit_exceeded:"操作过于频繁，请稍后重试。",
+  credential_invalid:"模型会话已失效，请重新输入 API Key。",
+  request_failed:"请求失败，请稍后重试。",
+};
 
 function id() { return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function text(value) { return String(value || ""); }
@@ -20,9 +35,10 @@ async function storageBytes() { const db=await openDB(); return new Promise((res
 function formatBytes(bytes) { return bytes < 1024 ? `${bytes} B` : bytes < 1048576 ? `${(bytes/1024).toFixed(1)} KB` : `${(bytes/1048576).toFixed(1)} MB`; }
 
 async function request(path, options={}) { const headers={...(options.headers||{})}; if(options.method && options.method!=="GET") headers["Content-Type"]="application/json"; const response=await fetch(`${apiRoot}${path}`, { credentials:"same-origin", ...options, headers }); const payload=await response.json().catch(()=>({})); if(!response.ok) throw new Error(payload?.detail?.code || "request_failed"); return payload; }
-function showError(id, error) { $(id).textContent = error instanceof Error ? error.message : text(error); }
+function showError(id, error) { const code=error instanceof Error ? error.message : text(error); $(id).textContent=errorMessages[code] || errorMessages.request_failed; }
 
-function tokenFor(action) { if (state.config?.turnstile_site_key && window.turnstile) { return new Promise((resolve)=>{ const container=document.createElement("div"); container.hidden=true; document.body.append(container); const widget=window.turnstile.render(container,{sitekey:state.config.turnstile_site_key,action,execution:"execute",appearance:"interaction-only",callback:(token)=>{window.turnstile.remove(widget);container.remove();resolve(token);},"error-callback":()=>{container.remove();resolve("");},"expired-callback":()=>{container.remove();resolve("");}}); window.turnstile.execute(widget); }); } return state.config?.turnstile_site_key ? "" : "development-bypass"; }
+async function waitForTurnstile() { for(let attempt=0;attempt<100;attempt+=1) { if(window.turnstile) return window.turnstile; await new Promise(resolve=>setTimeout(resolve,100)); } return null; }
+async function tokenFor(action) { const sitekey=state.config?.turnstile_site_key; if(!sitekey) return "development-bypass"; const turnstile=await waitForTurnstile(); if(!turnstile) throw new Error("turnstile_unavailable"); return new Promise((resolve,reject)=>{ const container=document.createElement("div"); container.className="turnstile-container"; document.body.append(container); let widget=""; const cleanup=()=>{ if(widget!=="") turnstile.remove(widget); container.remove(); }; try { widget=turnstile.render(container,{sitekey,action,execution:"execute",appearance:"interaction-only",callback:(token)=>{cleanup();resolve(token);},"error-callback":()=>{cleanup();reject(new Error("turnstile_required"));},"expired-callback":()=>{cleanup();reject(new Error("turnstile_required"));}}); turnstile.execute(widget); } catch(error) { cleanup(); reject(new Error("turnstile_unavailable")); } }); }
 function attachTurnstile() { if (!state.config?.turnstile_site_key || document.querySelector("script[data-turnstile]")) return; const script=document.createElement("script"); script.src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"; script.async=true; script.defer=true; script.dataset.turnstile="true"; document.head.append(script); }
 
 async function loadConfig() { state.config=await request("/config",{headers:{}}); $("version-badge").textContent=`应用 ${state.config.app_version} · 数据 ${state.config.data_version}`; $("github-link").href=state.config.source_links.project_snow; $("website-github-link").href=state.config.source_links.mywebsite; $("releases-link").href=state.config.source_links.releases; $("provider-select").innerHTML=state.config.providers.map((p)=>`<option value="${escape(p.provider_id)}">${escape(p.display_name)}</option>`).join(""); if(!state.config.providers.length) showError("setup-error","私有验收尚未启用任何模型厂商；请先完成真实 API Key 冒烟测试。"); attachTurnstile(); const stored=sessionStorage.getItem(sessionKey()); if(stored) { try { const saved=JSON.parse(stored); if(saved.expiresAt > Date.now()) { state.credential=saved.credential; state.credentialExpiresAt=saved.expiresAt; state.provider=saved.provider; state.model=saved.model; openChat(); return; } } catch {} clearCredential(); } }
