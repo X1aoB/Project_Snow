@@ -36,7 +36,21 @@ compose run --rm "public-api-$colour" alembic upgrade head
 compose up -d postgres qdrant neo4j embedding egress-proxy
 compose run --rm --no-deps "public-api-$colour" python -m backend.snow_app.data_loader
 compose up -d "public-api-$colour" caddy cloudflared
-compose exec -T "public-api-$colour" python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/public/v1/health/ready', timeout=10).read()"
+ready=0
+attempt=0
+while [ "$attempt" -lt 30 ]; do
+  if compose exec -T "public-api-$colour" python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/public/v1/health/ready', timeout=5).read()" >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  attempt=$((attempt + 1))
+  sleep 2
+done
+if [ "$ready" -ne 1 ]; then
+  echo 'Public API did not become ready within 60 seconds.' >&2
+  compose logs --tail=100 "public-api-$colour" caddy >&2 || true
+  exit 69
+fi
 
 export SNOW_UPSTREAM="public-api-$colour:8000"
 compose up -d --no-deps --force-recreate caddy

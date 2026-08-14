@@ -20,7 +20,8 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
 
 id deploy >/dev/null 2>&1 || useradd --create-home --shell /bin/bash deploy
 usermod -aG docker deploy
-install -o deploy -g deploy -m 0750 -d /srv/project-snow/repo /srv/project-snow/data /srv/project-snow/runtime /srv/project-snow/releases /srv/project-snow/backups/staging
+install -o deploy -g deploy -m 0750 -d /srv/project-snow/repo /srv/project-snow/runtime /srv/project-snow/releases /srv/project-snow/backups/staging
+install -o deploy -g deploy -m 0755 -d /srv/project-snow/data
 if [ -d /srv/project-snow/app ] && [ ! -L /srv/project-snow/app ] && [ -z "$(find /srv/project-snow/app -mindepth 1 -maxdepth 1 -print -quit)" ]; then
   rmdir /srv/project-snow/app
 fi
@@ -32,6 +33,7 @@ if [ ! -L /srv/project-snow/app ]; then
   echo '/srv/project-snow/app must be a symlink to /srv/project-snow/repo/App.' >&2
   exit 78
 fi
+install -o root -g deploy -m 0750 -d /etc/project-snow
 install -o root -g root -m 0700 -d /etc/project-snow/secrets
 install -o root -g root -m 0700 -d /etc/project-snow/cloudflared
 touch /etc/project-snow/public.env

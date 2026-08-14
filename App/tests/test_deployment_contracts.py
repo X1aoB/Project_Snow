@@ -15,9 +15,28 @@ class DeploymentContractTests(TestCase):
 
     def test_neo4j_uses_file_backed_auth(self) -> None:
         compose = self.read("compose.prod.yml")
-        self.assertIn("NEO4J_AUTH_FILE: /run/secrets/neo4j_auth", compose)
-        self.assertIn("/etc/project-snow/secrets/neo4j_auth:/run/secrets/neo4j_auth:ro", compose)
+        entrypoint = self.read("infra/neo4j-entrypoint.sh")
+        self.assertIn("/etc/project-snow/secrets/neo4j_auth:/run/host-secrets/neo4j_auth:ro", compose)
+        self.assertIn('entrypoint: ["/bin/bash", "/opt/project-snow/neo4j-entrypoint.sh"]', compose)
+        self.assertIn('export NEO4J_AUTH_FILE="$runtime_dir/neo4j_auth"', entrypoint)
+        self.assertIn('install -o neo4j -g neo4j -m 0700 -d "$runtime_dir"', entrypoint)
+        self.assertIn(
+            'install -o neo4j -g neo4j -m 0400 "$source_file" "$runtime_dir/neo4j_auth"',
+            entrypoint,
+        )
         self.assertNotIn("NEO4J_AUTH:?", compose)
+
+    def test_database_and_egress_services_can_bind_inside_the_compose_network(self) -> None:
+        postgres = self.read("infra/postgres/postgresql.conf")
+        compose = self.read("compose.prod.yml")
+        squid = self.read("infra/egress-squid.conf")
+        self.assertIn("listen_addresses = '*'", postgres)
+        self.assertIn("command: [\"neo4j\"]", compose)
+        self.assertIn("uid=13,gid=13,mode=0750", compose)
+        self.assertIn("cache_log /var/log/squid/cache.log", squid)
+        self.assertIn("access_log stdio:/var/log/squid/access.log", squid)
+        self.assertIn("cache_store_log none", squid)
+        self.assertIn("pinger_enable off", squid)
 
     def test_public_api_bootstraps_root_only_secrets_then_drops_privileges(self) -> None:
         compose = self.read("compose.prod.yml")
@@ -45,6 +64,7 @@ class DeploymentContractTests(TestCase):
         self.assertIn('--env-file "$candidate_env"', script)
         self.assertIn("/etc/project-snow/images.env", script)
         self.assertIn("/srv/project-snow/runtime/compose.env", script)
+        self.assertIn("Public API did not become ready within 60 seconds.", script)
 
     def test_maintenance_commands_use_last_promoted_environment(self) -> None:
         for relative in ("ops/backup.sh", "ops/restore-postgres.sh", "ops/rollback.sh"):
@@ -60,6 +80,8 @@ class DeploymentContractTests(TestCase):
         self.assertIn("/home/deploy/.ssh/authorized_keys", script)
         self.assertIn("PasswordAuthentication no", script)
         self.assertIn("ufw allow 43556/tcp", script)
+        self.assertIn("-m 0755 -d /srv/project-snow/data", script)
+        self.assertIn("-g deploy -m 0750 -d /etc/project-snow", script)
 
     def test_local_deploy_selects_a_verified_main_commit(self) -> None:
         script = self.read("scripts/deploy.ps1")
@@ -80,6 +102,7 @@ class DeploymentContractTests(TestCase):
             "App/ops/rollback.sh",
             "App/ops/promote-data.sh",
             "App/infra/public-entrypoint.sh",
+            "App/infra/neo4j-entrypoint.sh",
         )
         result = subprocess.run(
             ["git", "ls-files", "-s", "--", *paths],
