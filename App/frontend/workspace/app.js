@@ -26,6 +26,8 @@ const machineVerdictLabels = {
 };
 let reviewListState = { filters: {}, groups: [], total: 0, sampleMode: false };
 let entityReviewListState = { candidates: [], total: 0 };
+let automationState = { estimate: null, runs: [], activeRunId: "" };
+let automationPollTimer = null;
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (character) => ({
@@ -386,12 +388,12 @@ async function loadMoreRelationReview() {
 
 async function openReviewGroup(button) {
   const groupId = button.dataset.reviewOpen;
-  const container = button.closest("[data-review-group]");
-  if (!groupId || !container) return;
+  if (!groupId) return;
   button.disabled = true;
   try {
     const detail = await api(`/api/v1/review/relations/groups/${encodeURIComponent(groupId)}${queryString({ review_status: "pending_review", candidate_limit: 12, candidate_offset: 0 })}`);
-    container.innerHTML = reviewGroupDetail(detail);
+    openWorkspaceDetail("关系审核详情", `<article class="review-group" data-review-group="${escapeHtml(groupId)}">${reviewGroupDetail(detail)}</article>`);
+    button.disabled = false;
   } catch (error) {
     button.disabled = false;
     window.alert(`读取关系组详情失败：${error.message}`);
@@ -422,7 +424,7 @@ async function loadMoreGroupCandidates(button) {
 }
 
 async function collapseReviewGroup(button) {
-  await loadRelationReview();
+  closeWorkspaceDetail();
 }
 
 async function decideRelationCandidate(button) {
@@ -449,6 +451,7 @@ async function decideRelationCandidate(button) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    closeWorkspaceDetail();
     await loadRelationReview();
     if (currentCharacter()) await loadGraph();
   } catch (error) {
@@ -471,14 +474,17 @@ function entityReviewCandidate(candidate) {
     ? `<details><summary>查看来源证据片段</summary><ul class="review-evidence">${candidate.evidence.map((item) => reviewEvidence(item, "")).join("")}</ul></details>`
     : '<p class="muted">来源证据片段已不存在，不能批准。</p>';
   const relationCount = (candidate.relation_candidate_ids || []).length;
-  return `<article class="review-item entity-candidate" data-entity-candidate="${entityCandidateId}">
+  return `<article class="review-item entity-candidate entity-candidate-summary" data-entity-candidate="${entityCandidateId}">
     <div><span class="chip">${escapeHtml(candidate.proposed_node_type)}</span><span class="chip">关联关系 ${escapeHtml(relationCount)} 条</span></div>
     <h4>${escapeHtml(candidate.entity_name)} <span class="muted">→</span> <code>${escapeHtml(candidate.proposed_node_id)}</code></h4>
     <p class="muted">来源类型：${escapeHtml((candidate.source_types || []).join("、") || "未知")}；证据页：${escapeHtml((candidate.evidence_page_ids || []).join("、") || "无")}</p>
+    <button type="button" class="secondary" data-entity-review-open="${entityCandidateId}">查看证据并审核</button>
+    <div class="entity-candidate-detail" hidden>
     ${entityEvidenceExamples(candidate)}
     ${evidence}
     <p class="review-detail-policy">批准仅创建这个可追溯的 ${escapeHtml(candidate.proposed_node_type)} 节点；不会自动批准上方列出的任何关系。创建后请回到关系审核页面，重新核对具体关系。</p>
     <div class="review-actions"><button data-entity-review-decision="approved">批准并创建节点</button><button class="secondary" data-entity-review-decision="rejected">驳回节点候选</button></div>
+    </div>
   </article>`;
 }
 
@@ -546,11 +552,267 @@ async function decideEntityNodeCandidate(button) {
         note: byId("review-note").value.trim(),
       }),
     });
+    closeWorkspaceDetail();
     await Promise.all([loadEntityReview(), loadRelationReview()]);
     if (currentCharacter()) await loadGraph();
   } catch (error) {
     button.disabled = false;
     window.alert(`实体节点审核操作失败：${error.message}`);
+  }
+}
+
+const automationStatusLabels = {
+  creating: "正在创建", submitted: "已提交", running: "执行中", completed: "已完成",
+  awaiting_calibration: "等待校准", ready_to_admit: "可自动采纳", admitted: "已采纳",
+  rolled_back: "已回滚", failed: "失败", expired: "已过期", cancelled: "已取消", canceled: "已取消",
+};
+
+function formatCny(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `¥${number.toFixed(2)}` : "—";
+}
+
+async function loadAutomationEstimate() {
+  const target = byId("automation-estimate");
+  const mode = byId("automation-mode")?.value || "calibration";
+  if (!target) return;
+  target.textContent = "正在计算候选规模与保守费用…";
+  try {
+    const estimate = await api(`/api/v1/review/automation/estimate${queryString({ mode })}`);
+    automationState.estimate = estimate;
+    const counts = estimate.counts || {};
+    target.classList.remove("empty");
+    target.innerHTML = `<div class="automation-metrics">
+      <div><span>首轮模型请求</span><strong>${escapeHtml(counts.first_calls ?? 0)}</strong></div>
+      <div><span>预计二轮请求</span><strong>${escapeHtml(counts.second_calls ?? 0)}</strong></div>
+      <div><span>本地免费判定</span><strong>${escapeHtml(counts.deterministic ?? 0)}</strong></div>
+      <div><span>成功报告复用</span><strong>${escapeHtml(counts.reused_reports ?? 0)}</strong></div>
+      <div><span>Batch 预计</span><strong>${escapeHtml(formatCny(estimate.projected_batch_cny))}</strong></div>
+      <div><span>费用熔断</span><strong>${escapeHtml(formatCny(estimate.budget_cny))}</strong></div>
+    </div>
+    <p class="muted">模型 ${escapeHtml(estimate.model)} · 输入约 ${escapeHtml(estimate.estimated_tokens?.input ?? 0)} tokens · 输出约 ${escapeHtml(estimate.estimated_tokens?.output ?? 0)} tokens · 估算有效至 ${escapeHtml(estimate.expires_at || "")}</p>
+    <p class="muted">Provider：${estimate.provider_configured ? "已配置" : "未配置；提交前需设置 EVIDENCE_REVIEW_*"}。估算不会写文件或调用模型。</p>`;
+  } catch (error) {
+    automationState.estimate = null;
+    target.textContent = `费用估算失败：${error.message}`;
+  }
+}
+
+function calibrationGateSummary(calibration) {
+  const categories = Object.entries(calibration?.categories || {});
+  if (!categories.length) return "尚未生成校准样本";
+  return categories.map(([name, item]) => (
+    `${name} ${item.labelled}/${item.required} · ${Math.round((item.accuracy || 0) * 100)}%${item.passed ? " ✓" : ""}`
+  )).join("；");
+}
+
+function automationPassSummary(reportSummary) {
+  const render = (passName, label) => {
+    const pass = reportSummary?.by_pass?.[passName] || {};
+    const relation = pass.relation || {};
+    const entity = pass.entity || {};
+    return `${label}：关系 批准 ${relation.recommend_approve || 0} / 拒绝 ${relation.recommend_reject || 0} / 弃权 ${relation.abstain || 0}；实体 批准 ${entity.recommend_approve || 0} / 拒绝 ${entity.recommend_reject || 0} / 弃权 ${entity.abstain || 0}`;
+  };
+  return `${render("pass_1", "首轮")} · ${render("pass_2", "二轮")}`;
+}
+
+function automationRunCard(run) {
+  const status = run.status || "unknown";
+  const active = (run.phases || []).find((phase) => phase.name === run.active_phase);
+  const latest = active || (run.phases || []).at(-1);
+  const requestCounts = latest?.request_counts || {};
+  const requestTotal = requestCounts.total ?? latest?.request_count ?? 0;
+  const requestCompleted = requestCounts.completed ?? (latest?.completed_at ? requestTotal : 0);
+  const requestFailed = requestCounts.failed ?? latest?.failed_custom_ids?.length ?? 0;
+  const actionSync = ["submitted", "running"].includes(status)
+    ? `<button class="secondary" data-automation-sync="${escapeHtml(run.run_id)}">同步状态</button>` : "";
+  const actionAdmit = status === "ready_to_admit"
+    ? `<button data-automation-admit="${escapeHtml(run.run_id)}">应用自动决策</button>` : "";
+  const actionRollback = status === "admitted"
+    ? `<button class="secondary danger" data-automation-rollback="${escapeHtml(run.run_id)}">回滚本次采纳</button>` : "";
+  const actionCalibration = status === "awaiting_calibration"
+    ? `<button class="secondary" data-automation-calibration="${escapeHtml(run.run_id)}">打开校准样本</button>` : "";
+  return `<article class="automation-run-card" data-automation-run="${escapeHtml(run.run_id)}">
+    <header><div><span class="chip">${escapeHtml(run.mode)}</span><span class="chip">${escapeHtml(automationStatusLabels[status] || status)}</span><strong>${escapeHtml(run.run_id)}</strong></div><small>${escapeHtml(run.updated_at || run.created_at || "")}</small></header>
+    <p class="muted">${active ? `当前阶段 ${escapeHtml(active.name)} · ${escapeHtml(active.provider_status || "等待提交")}` : "无活动中的远端阶段"} · 复用报告 ${escapeHtml(run.reused_report_count || 0)} · 实际费用 ${escapeHtml(formatCny(run.actual_cost_cny || 0))}</p>
+    <p class="muted">最近阶段进度 ${escapeHtml(requestCompleted)}/${escapeHtml(requestTotal)} · 失败 ${escapeHtml(requestFailed)} · ${escapeHtml(automationPassSummary(run.report_summary))}</p>
+    ${run.last_error ? `<p class="automation-error">${escapeHtml(run.last_error)}</p>` : ""}
+    ${run.calibration ? `<p class="muted">${escapeHtml(calibrationGateSummary(run.calibration))}</p>` : ""}
+    <div class="review-actions">${actionSync}${actionCalibration}${actionAdmit}${actionRollback}</div>
+  </article>`;
+}
+
+async function loadAutomationRuns() {
+  const target = byId("automation-runs");
+  if (!target) return;
+  try {
+    const response = await api("/api/v1/review/automation/runs");
+    const summaries = response.runs || [];
+    const runs = await Promise.all(summaries.slice(0, 20).map(async (summary) => {
+      try { return await api(`/api/v1/review/automation/runs/${encodeURIComponent(summary.run_id)}`); }
+      catch (_) { return summary; }
+    }));
+    automationState.runs = runs;
+    byId("automation-run-meta").textContent = `${runs.length} 个本地运行；远端状态仅在点击“同步状态”时查询。`;
+    target.innerHTML = runs.length ? runs.map(automationRunCard).join("") : '<p class="empty">尚未创建自动审核运行。</p>';
+    scheduleAutomationSync();
+  } catch (error) {
+    target.textContent = `运行记录读取失败：${error.message}`;
+  }
+}
+
+function scheduleAutomationSync() {
+  if (automationPollTimer) window.clearTimeout(automationPollTimer);
+  automationPollTimer = null;
+  const activeRuns = automationState.runs.filter((run) => ["submitted", "running"].includes(run.status));
+  if (!activeRuns.length || currentWorkspaceView() !== "automation") return;
+  automationPollTimer = window.setTimeout(async () => {
+    if (currentWorkspaceView() !== "automation") return;
+    await Promise.allSettled(activeRuns.map((run) => api(
+      `/api/v1/review/automation/runs/${encodeURIComponent(run.run_id)}/sync`,
+      { method: "POST", timeoutMs: 180000 },
+    )));
+    await loadAutomationRuns();
+  }, 90000);
+}
+
+async function loadAutomation(forceEstimate = false) {
+  await Promise.all([forceEstimate || !automationState.estimate ? loadAutomationEstimate() : Promise.resolve(), loadAutomationRuns()]);
+}
+
+async function createAutomationRun() {
+  const estimate = automationState.estimate;
+  const mode = byId("automation-mode").value;
+  const calibrationRunId = byId("automation-calibration-run").value.trim() || null;
+  if (!estimate || estimate.mode !== mode) {
+    await loadAutomationEstimate();
+    return window.alert("估算已刷新；请核对费用后再次点击提交。");
+  }
+  if (mode === "production" && !calibrationRunId) {
+    return window.alert("正式全量运行必须填写一个已完成标注并通过门槛的校准运行 ID。");
+  }
+  const confirmed = window.confirm(`将向 DashScope 提交 ${estimate.counts.first_calls} 个首轮请求，预计复用 ${estimate.counts.reused_reports || 0} 份同策略成功报告，预计总费用 ${formatCny(estimate.projected_batch_cny)}，熔断线 ${formatCny(estimate.budget_cny)}。\n\n候选证据将发送到已配置的账户。确认提交吗？`);
+  if (!confirmed) return;
+  const button = byId("create-automation-run");
+  button.disabled = true;
+  try {
+    const run = await api("/api/v1/review/automation/runs", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      timeoutMs: 180000,
+      body: JSON.stringify({
+        mode,
+        estimate_hash: estimate.estimate_hash,
+        calibration_run_id: calibrationRunId,
+        confirmation: "submit_qwen_batch",
+      }),
+    });
+    window.alert(`Batch 已提交：${run.run_id}`);
+    await loadAutomation(true);
+  } catch (error) {
+    window.alert(`Batch 创建失败：${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function syncAutomationRun(runId, button) {
+  button.disabled = true;
+  try {
+    await api(`/api/v1/review/automation/runs/${encodeURIComponent(runId)}/sync`, { method: "POST", timeoutMs: 180000 });
+    await loadAutomationRuns();
+  } catch (error) {
+    window.alert(`同步失败：${error.message}`);
+    button.disabled = false;
+  }
+}
+
+function calibrationSampleCard(sample) {
+  const display = sample.display || {};
+  const title = sample.kind === "relation"
+    ? `${display.subject || "?"} ${display.relation_type || ""} ${display.object || "?"}`
+    : `${display.entity_name || "?"} → ${display.proposed_node_type || "?"}`;
+  const evidence = display.evidence_quote || display.evidence_examples?.[0]?.evidence_quote || "未提供候选引文";
+  const reports = (sample.reports || []).map((report) => (
+    `<li>第 ${escapeHtml(report.pass_index)} 轮：<strong>${escapeHtml(report.verdict)}</strong> · ${escapeHtml(report.verdict_rationale || "")}${report.supporting_quote ? `<blockquote class="review-quote">${escapeHtml(report.supporting_quote)}</blockquote>` : ""}</li>`
+  )).join("");
+  const labelled = typeof sample.correct === "boolean" ? `<span class="chip">已标注：${sample.correct ? "正确" : "错误"}</span>` : "";
+  return `<article class="automation-sample" data-calibration-sample="${escapeHtml(sample.sample_id)}">
+    <div><span class="chip">${escapeHtml(sample.category)}</span>${labelled}</div><h4>${escapeHtml(title)}</h4>
+    <blockquote class="review-quote">${escapeHtml(evidence)}</blockquote><ul>${reports}</ul>
+    <div class="automation-label-fields">
+      <label>错误类别<select data-calibration-error><option value="other">其他</option><option value="identity_confusion">身份混淆</option><option value="wrong_node_type">节点类型错误</option><option value="context_contamination">临时语境污染</option><option value="fabricated_quote">伪造引文</option><option value="wrong_relation">关系判断错误</option></select></label>
+      <label class="automation-critical"><input type="checkbox" data-calibration-critical /> 严重错误</label>
+      <label>备注<input data-calibration-note maxlength="2000" placeholder="可选" /></label>
+    </div>
+    <div class="review-actions"><button data-calibration-label="correct">正确</button><button class="secondary" data-calibration-label="incorrect">错误</button></div>
+  </article>`;
+}
+
+async function openAutomationCalibration(runId) {
+  try {
+    const run = await api(`/api/v1/review/automation/runs/${encodeURIComponent(runId)}`);
+    const calibration = run.calibration || {};
+    automationState.activeRunId = runId;
+    byId("automation-calibration").hidden = false;
+    byId("automation-calibration-meta").textContent = `${calibration.labelled_count || 0}/${calibration.sample_count || 0} 已标注 · ${calibration.all_passed ? "所有门槛已通过" : "尚未通过全部门槛"}`;
+    byId("automation-calibration-samples").innerHTML = (calibration.samples || []).map(calibrationSampleCard).join("") || '<p class="empty">当前候选结果无法填满校准配额；对应自动决策类别将保持关闭。</p>';
+    byId("automation-calibration").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (error) {
+    window.alert(`校准样本读取失败：${error.message}`);
+  }
+}
+
+async function labelAutomationSample(button) {
+  const card = button.closest("[data-calibration-sample]");
+  if (!card) return;
+  const correct = button.dataset.calibrationLabel === "correct";
+  const payload = {
+    correct,
+    critical_error: correct ? false : card.querySelector("[data-calibration-critical]").checked,
+    error_category: correct ? "none" : card.querySelector("[data-calibration-error]").value,
+    reviewer_id: byId("reviewer")?.value.trim() || "local-reviewer",
+    note: card.querySelector("[data-calibration-note]").value.trim(),
+  };
+  button.disabled = true;
+  try {
+    await api(`/api/v1/review/automation/calibration/${encodeURIComponent(card.dataset.calibrationSample)}/label`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    await openAutomationCalibration(automationState.activeRunId);
+    await loadAutomationRuns();
+  } catch (error) {
+    window.alert(`校准标注失败：${error.message}`);
+    button.disabled = false;
+  }
+}
+
+async function admitAutomationRun(runId, button) {
+  if (!window.confirm("将按已通过的校准门槛批量修改审核状态，并创建带机器 provenance 的 verified 节点和关系。确认应用吗？")) return;
+  button.disabled = true;
+  try {
+    await api(`/api/v1/review/automation/runs/${encodeURIComponent(runId)}/admit`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation: "apply_machine_decisions" }), timeoutMs: 180000,
+    });
+    await Promise.all([loadAutomationRuns(), loadRelationReview(), loadEntityReview()]);
+  } catch (error) {
+    window.alert(`自动采纳失败：${error.message}`);
+    button.disabled = false;
+  }
+}
+
+async function rollbackAutomationRun(runId, button) {
+  if (!window.confirm("将只恢复本次运行修改的候选并移除本次创建的节点/边；若存在后续人工修改，回滚会拒绝执行。确认回滚吗？")) return;
+  button.disabled = true;
+  try {
+    await api(`/api/v1/review/automation/runs/${encodeURIComponent(runId)}/rollback`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation: "rollback_machine_decisions" }), timeoutMs: 180000,
+    });
+    await Promise.all([loadAutomationRuns(), loadRelationReview(), loadEntityReview()]);
+  } catch (error) {
+    window.alert(`回滚失败：${error.message}`);
+    button.disabled = false;
   }
 }
 
@@ -1057,11 +1319,119 @@ const FEEDBACK_STATUS_LABELS = {
 const FEEDBACK_RESOLUTION_LABELS = {
   fixed_verified: "已验证修复",
   needs_verification: "待验证",
-  regression_candidate: "修复后再现",
+  planned: "已计划",
   not_reproduced: "未能复现",
   duplicate: "重复反馈",
   open: "开放问题",
+  superseded_by_architecture: "由新架构替代",
 };
+
+const WORKSPACE_VIEWS = {
+  overview: ["服务概览", "资料、模型、审核和对话服务的运行状态。"],
+  automation: ["AI 批量审核", "估算、校准并运行 Qwen3.8-Max Batch 证据审核。"],
+  evidence: ["证据检索", "检索角色证据、人格档案和已验证关系图谱。"],
+  relations: ["关系审核", "按证据组筛选候选，并在详情抽屉中逐条审核。"],
+  entities: ["实体审核", "创建或驳回缺失的地点与事件节点候选。"],
+  feedback: ["用户反馈", "按问题族、角色、模式、版本和处理状态跟进反馈。"],
+  "dialogue-debug": ["对话 / Legacy Agent", "保留一版内置 AgentRuntime，用于对照调试；正式助手已迁移到 Codex 插件。"],
+};
+
+function currentWorkspaceView() {
+  const requested = window.location.hash.replace(/^#/, "");
+  return Object.prototype.hasOwnProperty.call(WORKSPACE_VIEWS, requested) ? requested : "overview";
+}
+
+function renderWorkspaceView() {
+  const view = currentWorkspaceView();
+  if (view !== "automation" && automationPollTimer) {
+    window.clearTimeout(automationPollTimer);
+    automationPollTimer = null;
+  }
+  document.querySelectorAll("[data-workspace-view]").forEach((element) => {
+    element.hidden = element.dataset.workspaceView !== view;
+  });
+  document.querySelectorAll("[data-workspace-target]").forEach((link) => {
+    const active = link.dataset.workspaceTarget === view;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  const [title, description] = WORKSPACE_VIEWS[view];
+  byId("workspace-view-title").textContent = title;
+  byId("workspace-view-description").textContent = description;
+  closeWorkspaceDetail();
+  loadWorkspaceViewData(view);
+  if (view === "automation") scheduleAutomationSync();
+}
+
+const loadedWorkspaceViews = new Set();
+
+function loadWorkspaceViewData(view, force = false) {
+  if (!force && loadedWorkspaceViews.has(view)) return;
+  loadedWorkspaceViews.add(view);
+  if (view === "overview") loadServiceOverview();
+  else if (view === "automation") loadAutomation();
+  else if (view === "relations") loadRelationReview();
+  else if (view === "entities") loadEntityReview();
+  else if (view === "feedback") loadFeedbackInbox();
+  else if (view === "dialogue-debug") loadMvpStatus();
+}
+
+function openWorkspaceDetail(title, content) {
+  const drawer = byId("workspace-detail-drawer");
+  const scrim = byId("workspace-drawer-scrim");
+  byId("workspace-detail-title").textContent = title;
+  byId("workspace-detail-content").innerHTML = content;
+  drawer.classList.add("open");
+  drawer.setAttribute("aria-hidden", "false");
+  scrim.hidden = false;
+  byId("close-workspace-detail").focus({ preventScroll: true });
+}
+
+function closeWorkspaceDetail() {
+  const drawer = byId("workspace-detail-drawer");
+  const scrim = byId("workspace-drawer-scrim");
+  if (!drawer || !scrim) return;
+  drawer.classList.remove("open");
+  drawer.setAttribute("aria-hidden", "true");
+  scrim.hidden = true;
+  byId("workspace-detail-content").replaceChildren();
+}
+
+function summarizeModels(providerResult, modelResult) {
+  const providers = providerResult?.providers || providerResult?.items || [];
+  const models = modelResult?.models || modelResult?.items || [];
+  const enabled = providers.filter((item) => item.enabled !== false).length;
+  const selectable = models.filter((item) => item.selectable !== false).length;
+  const ready = models.filter((item) => item.text_status === "ready").length;
+  return `${enabled}/${providers.length} 个 Provider 已启用 · ${selectable}/${models.length} 个模型可选${models.length ? ` · ${ready} 个文本连接已验证` : ""}`;
+}
+
+async function loadServiceOverview() {
+  const modelTarget = byId("overview-models");
+  const runTarget = byId("overview-agent-runs");
+  if (!modelTarget || !runTarget) return;
+  modelTarget.textContent = "正在读取…";
+  runTarget.textContent = "正在读取…";
+  const [providersResult, modelsResult, runsResult] = await Promise.allSettled([
+    api("/api/v1/providers"),
+    api("/api/v1/models"),
+    api("/api/v1/agent/runs?limit=5"),
+  ]);
+  if (providersResult.status === "fulfilled" && modelsResult.status === "fulfilled") {
+    modelTarget.textContent = summarizeModels(providersResult.value, modelsResult.value);
+  } else {
+    modelTarget.textContent = "Provider 或模型状态暂不可用；聊天与审核服务仍可独立运行。";
+  }
+  if (runsResult.status === "fulfilled") {
+    const runs = runsResult.value?.runs || runsResult.value?.items || [];
+    runTarget.textContent = runs.length
+      ? runs.slice(0, 5).map((item) => `${item.character_name || item.character_id || "Agent"} · ${item.status || "unknown"}`).join("；")
+      : "暂无 Agent 任务。";
+  } else {
+    runTarget.textContent = "Agent 任务状态暂不可用。";
+  }
+}
 
 async function loadFeedbackInbox() {
   const category = byId("feedback-category-filter")?.value || "";
@@ -1091,7 +1461,9 @@ async function loadFeedbackInbox() {
     const items = result.feedback || [];
     const characterFilter = byId("feedback-character-filter");
     if (characterFilter && characterFilter.options.length <= 1) {
-      const characters = [...new Map(items.map((item) => [item.character_id, item.character_name])).entries()];
+      const characters = [...new Map(items
+        .filter((item) => item.character_id)
+        .map((item) => [item.character_id, item.character_name || item.character_id])).entries()];
       characterFilter.innerHTML = '<option value="">全部角色</option>' + characters.map(([id, name]) => (
         `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`
       )).join("");
@@ -1101,21 +1473,37 @@ async function loadFeedbackInbox() {
     target.innerHTML = items.map((item) => {
       const legacy = (item.selected_options || []).join("、");
       const categoryLabel = categoryLabels[item.category] || item.category || legacy || "未分类";
+      const issueReportCount = Math.max(1, Number(item.issue_report_count) || 1);
       const occurrenceLabel = item.issue_occurrence === "duplicate"
-        ? `重复反馈${item.duplicate_of ? " · 同问题族" : ""}`
-        : "首次反馈";
+        ? `重复反馈 · 本问题族共 ${issueReportCount} 条`
+        : (issueReportCount > 1 ? `首次反馈 · 本问题族共 ${issueReportCount} 条` : "首次反馈");
+      const recurrenceNotice = item.reported_after_verification
+        ? '<p class="muted feedback-recurrence-note"><strong>已验证后再次反馈：</strong>本条只累计复发记录，不会自动重开修复任务；需在当前版本复现并产生失败测试后显式改为“开放问题”。</p>'
+        : "";
       const issueKey = item.issue_key || "other";
-      return `<article class="feedback-inbox-item">
-        <header><strong>${escapeHtml(item.character_name || "未知角色")} · ${escapeHtml(categoryLabel)}</strong><span class="chip">${escapeHtml(occurrenceLabel)}</span><span class="chip">${escapeHtml(FEEDBACK_STATUS_LABELS[item.status] || item.status || "待处理")}</span><span class="chip">${escapeHtml(FEEDBACK_RESOLUTION_LABELS[item.resolution_status] || item.resolution_status || "待验证")}</span></header>
+      const verificationTests = item.verification_tests || [];
+      const verificationText = verificationTests.length
+        ? `<p class="muted"><strong>回归依据：</strong>${verificationTests.map((name) => escapeHtml(name)).join("；")}</p>`
+        : '<p class="muted"><strong>回归依据：</strong>尚无独立测试；不得直接视为待修代码。</p>';
+      const subjectLabel = item.scope === "product" ? "产品级反馈" : (item.character_name || "未绑定角色");
+      return `<article class="feedback-inbox-item" data-feedback-row="${escapeHtml(item.feedback_id)}">
+        <header><strong>${escapeHtml(subjectLabel)} · ${escapeHtml(categoryLabel)}</strong><span class="chip">${escapeHtml(item.ui_surface || "legacy")}</span><span class="chip">${escapeHtml(occurrenceLabel)}</span><span class="chip">${escapeHtml(FEEDBACK_STATUS_LABELS[item.status] || item.status || "待处理")}</span><span class="chip">${escapeHtml(FEEDBACK_RESOLUTION_LABELS[item.resolution_status] || item.resolution_status || "待验证")}</span></header>
         <p class="muted feedback-issue-key">问题族：${escapeHtml(issueKey)}</p>
         <p>${escapeHtml(item.free_text || "（未填写说明）")}</p>
-        <details><summary>查看对话上下文</summary><p><strong>分析员：</strong>${escapeHtml(item.message_excerpt || "")}</p><p><strong>角色：</strong>${escapeHtml(item.answer_excerpt || "")}</p><p class="muted">${escapeHtml(item.mode || "")} · ${escapeHtml(item.communication_channel || "")} · ${escapeHtml(item.created_at || "")}</p></details>
+        <button type="button" class="secondary" data-feedback-open="${escapeHtml(item.feedback_id)}">查看上下文与处理</button>
+        <div class="feedback-row-detail" hidden><p><strong>分析员：</strong>${escapeHtml(item.message_excerpt || "（产品级反馈无对话消息）")}</p><p><strong>角色：</strong>${escapeHtml(item.answer_excerpt || "（无回答上下文）")}</p><p class="muted">${escapeHtml(item.mode || "未指定模式")} · ${escapeHtml(item.communication_channel || "未指定媒介")} · ${escapeHtml(item.client_version || "未知版本")} · ${escapeHtml(item.created_at || "")}</p>${recurrenceNotice}${verificationText}
+        <div class="feedback-triage-actions">
+          <button type="button" class="secondary" data-feedback-issue="${escapeHtml(issueKey)}" data-issue-status="fixed_verified">验证通过</button>
+          <button type="button" class="secondary" data-feedback-issue="${escapeHtml(issueKey)}" data-issue-status="needs_verification">需要复验</button>
+          <button type="button" class="secondary" data-feedback-issue="${escapeHtml(issueKey)}" data-issue-status="open">确认复现</button>
+          <button type="button" class="secondary" data-feedback-issue="${escapeHtml(issueKey)}" data-issue-status="superseded_by_architecture">架构替代</button>
+        </div>
         <div class="feedback-triage-actions">
           <button type="button" class="secondary" data-feedback-id="${escapeHtml(item.feedback_id)}" data-feedback-status="planned">计划修复</button>
           <button type="button" class="secondary" data-feedback-id="${escapeHtml(item.feedback_id)}" data-feedback-status="resolved">已解决</button>
           <button type="button" class="secondary" data-feedback-id="${escapeHtml(item.feedback_id)}" data-feedback-status="ignored">忽略</button>
           <button type="button" class="secondary" data-feedback-id="${escapeHtml(item.feedback_id)}" data-feedback-status="pending_triage">恢复待处理</button>
-        </div>
+        </div></div>
       </article>`;
     }).join("") || "当前筛选下没有反馈。";
   } catch (error) {
@@ -1135,11 +1523,66 @@ async function triageFeedback(button) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: feedbackStatus, note }),
     });
+    closeWorkspaceDetail();
     await loadFeedbackInbox();
   } catch (error) {
     window.alert(`反馈状态更新失败：${error.message}`);
     button.disabled = false;
   }
+}
+
+async function updateFeedbackIssueStatus(button) {
+  const issueKey = button.dataset.feedbackIssue;
+  const issueStatus = button.dataset.issueStatus;
+  if (!issueKey || !issueStatus) return;
+  const note = window.prompt("问题族状态备注（建议填写复现步骤或测试依据）", "") ?? "";
+  button.disabled = true;
+  try {
+    await api(`/api/v1/mvp/feedback/issues/${encodeURIComponent(issueKey)}/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: issueStatus, note, code_version: "v0.5.0" }),
+    });
+    closeWorkspaceDetail();
+    await loadFeedbackInbox();
+  } catch (error) {
+    window.alert(`问题族状态更新失败：${error.message}`);
+    button.disabled = false;
+  }
+}
+
+function openEntityReviewDetail(button) {
+  const item = button.closest("[data-entity-candidate]");
+  const detail = item?.querySelector(".entity-candidate-detail");
+  if (!item || !detail) return;
+  const title = item.querySelector("h4")?.textContent?.trim() || "实体审核详情";
+  openWorkspaceDetail(
+    title,
+    `<article class="review-item entity-candidate" data-entity-candidate="${escapeHtml(item.dataset.entityCandidate)}">${detail.innerHTML}</article>`,
+  );
+}
+
+function openFeedbackDetail(button) {
+  const item = button.closest("[data-feedback-row]");
+  const detail = item?.querySelector(".feedback-row-detail");
+  if (!item || !detail) return;
+  const title = item.querySelector("header strong")?.textContent?.trim() || "反馈详情";
+  openWorkspaceDetail(title, `<article class="feedback-inbox-item">${detail.innerHTML}</article>`);
+}
+
+function handleReviewDetailClick(event) {
+  const decisionButton = event.target.closest("button[data-review-decision]");
+  const collapseButton = event.target.closest("button[data-review-collapse]");
+  const moreCandidatesButton = event.target.closest("button[data-review-more-candidates]");
+  const entityDecisionButton = event.target.closest("button[data-entity-review-decision]");
+  const feedbackButton = event.target.closest("button[data-feedback-id]");
+  const feedbackIssueButton = event.target.closest("button[data-feedback-issue]");
+  if (decisionButton) decideRelationCandidate(decisionButton);
+  else if (collapseButton) collapseReviewGroup(collapseButton);
+  else if (moreCandidatesButton) loadMoreGroupCandidates(moreCandidatesButton);
+  else if (entityDecisionButton) decideEntityNodeCandidate(entityDecisionButton);
+  else if (feedbackIssueButton) updateFeedbackIssueStatus(feedbackIssueButton);
+  else if (feedbackButton) triageFeedback(feedbackButton);
 }
 
 byId("mvp-channel")?.addEventListener("click", (event) => {
@@ -1168,6 +1611,24 @@ byId("load-persona").addEventListener("click", loadPersona);
 byId("load-graph").addEventListener("click", loadGraph);
 byId("refresh-review").addEventListener("click", loadRelationReview);
 byId("refresh-entity-review").addEventListener("click", loadEntityReview);
+byId("refresh-automation")?.addEventListener("click", () => loadAutomation(true));
+byId("estimate-automation")?.addEventListener("click", loadAutomationEstimate);
+byId("create-automation-run")?.addEventListener("click", createAutomationRun);
+byId("automation-mode")?.addEventListener("change", loadAutomationEstimate);
+byId("automation-runs")?.addEventListener("click", (event) => {
+  const syncButton = event.target.closest("button[data-automation-sync]");
+  const calibrationButton = event.target.closest("button[data-automation-calibration]");
+  const admitButton = event.target.closest("button[data-automation-admit]");
+  const rollbackButton = event.target.closest("button[data-automation-rollback]");
+  if (syncButton) syncAutomationRun(syncButton.dataset.automationSync, syncButton);
+  else if (calibrationButton) openAutomationCalibration(calibrationButton.dataset.automationCalibration);
+  else if (admitButton) admitAutomationRun(admitButton.dataset.automationAdmit, admitButton);
+  else if (rollbackButton) rollbackAutomationRun(rollbackButton.dataset.automationRollback, rollbackButton);
+});
+byId("automation-calibration-samples")?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-calibration-label]");
+  if (button) labelAutomationSample(button);
+});
 byId("load-audit-sample").addEventListener("click", loadAuditSample);
 byId("load-more-review").addEventListener("click", loadMoreRelationReview);
 byId("load-more-entity-review").addEventListener("click", loadMoreEntityReview);
@@ -1187,7 +1648,9 @@ byId("review-groups").addEventListener("click", (event) => {
 });
 byId("entity-review-candidates").addEventListener("click", (event) => {
   const decisionButton = event.target.closest("button[data-entity-review-decision]");
+  const openButton = event.target.closest("button[data-entity-review-open]");
   if (decisionButton) decideEntityNodeCandidate(decisionButton);
+  else if (openButton) openEntityReviewDetail(openButton);
 });
 byId("character").addEventListener("change", () => { loadPersona(); loadGraph(); });
 byId("mvp-character").addEventListener("change", () => { resetMvpSession(); loadMvpQuestions(); });
@@ -1205,12 +1668,22 @@ byId("refresh-feedback-inbox")?.addEventListener("click", loadFeedbackInbox);
 });
 byId("feedback-inbox-list")?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-feedback-id]");
-  if (button) triageFeedback(button);
+  const issueButton = event.target.closest("button[data-feedback-issue]");
+  const openButton = event.target.closest("button[data-feedback-open]");
+  if (issueButton) updateFeedbackIssueStatus(issueButton);
+  else if (button) triageFeedback(button);
+  else if (openButton) openFeedbackDetail(openButton);
+});
+
+byId("workspace-detail-content")?.addEventListener("click", handleReviewDetailClick);
+byId("close-workspace-detail")?.addEventListener("click", closeWorkspaceDetail);
+byId("workspace-drawer-scrim")?.addEventListener("click", closeWorkspaceDetail);
+byId("refresh-service-overview")?.addEventListener("click", () => loadWorkspaceViewData("overview", true));
+window.addEventListener("hashchange", renderWorkspaceView);
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeWorkspaceDetail();
 });
 
 loadHealth();
 loadCharacters();
-loadMvpStatus();
-loadRelationReview();
-loadEntityReview();
-loadFeedbackInbox();
+renderWorkspaceView();

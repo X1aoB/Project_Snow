@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
+import tempfile
 import unittest
 
+from backend.snow_app.chat_store import ConversationStore
 from backend.snow_app.mvp_policy import (
     MVP_CHARACTERS,
     MVP_CHARACTER_BY_ID,
@@ -64,6 +66,53 @@ class Mvp22ProductTests(unittest.TestCase):
             {item.character_id for item in MVP_CHARACTERS},
         )
         self.assertEqual(len(result["feedback_categories"]), 5)
+
+    def test_product_bootstrap_returns_independent_mode_summaries(self) -> None:
+        settings = Settings.from_environment()
+        service = MVPService(settings, RuntimeRepository(settings))
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            service.conversation_store = ConversationStore(
+                Path(temporary_directory) / "conversations.sqlite3"
+            )
+            for mode, message_id, answer in (
+                ("immersive", "immersive_message", "沉浸式回复"),
+                ("assistant", "assistant_message", "助手回复"),
+            ):
+                service.conversation_store.save_exchange(
+                    character_id="ca0144ccd81b",
+                    session_id="bootstrap_session",
+                    world_session_id="bootstrap_world",
+                    client_message_id=f"client_{mode}",
+                    user_text=f"{mode} question",
+                    response={
+                        "message_id": message_id,
+                        "character_id": "ca0144ccd81b",
+                        "character_name": "里芙",
+                        "session_id": "bootstrap_session",
+                        "world_session_id": "bootstrap_world",
+                        "mode": mode,
+                        "communication_channel": "text",
+                        "answer": answer,
+                        "content_blocks": [{"type": "message", "text": answer}],
+                    },
+                    session_state={
+                        "character_id": "ca0144ccd81b",
+                        "communication_channel": "text",
+                        "mode": mode,
+                        "turns": [],
+                        "mode_turns": {"immersive": [], "assistant": []},
+                    },
+                    world_state={"world_session_id": "bootstrap_world"},
+                )
+            result = service.bootstrap()
+
+        liv = next(
+            item for item in result["characters"] if item["character_id"] == "ca0144ccd81b"
+        )
+        self.assertEqual(liv["conversations"]["immersive"]["last_message"], "沉浸式回复")
+        self.assertEqual(liv["conversations"]["assistant"]["last_message"], "助手回复")
+        self.assertEqual(liv["generated_portrait"], None)
+        self.assertEqual(result["client_version"], "v0.5.0")
 
     def test_shared_inheritance_requires_scope_or_explicit_mention(self) -> None:
         character = MVP_CHARACTER_BY_ID["ca0144ccd81b"]

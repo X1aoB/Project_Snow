@@ -13,11 +13,17 @@ import httpx
 from fastapi.testclient import TestClient
 
 import backend.snow_app.repository as snow_repository
+from backend.snow_app.chat_store import ConversationStore
 from backend.snow_app.config import Settings
 from backend.snow_app.contracts import MVPChatRequest
 from backend.snow_app.main import app, get_repository, repository
 from backend.snow_app.mvp_policy import MVP_CHARACTERS, question_bank
-from backend.snow_app.mvp_service import MVPService, _parse_model_json
+from backend.snow_app.mvp_service import (
+    MVPProviderError,
+    MVPRequestInProgress,
+    MVPService,
+    _parse_model_json,
+)
 from backend.snow_app.repository import RuntimeRepository
 from pipelines.benchmark_relation_extraction import _balanced_sample, _completed_before
 from pipelines.build_entity_node_candidates import discover_entity_node_candidates
@@ -2688,14 +2694,15 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertGreaterEqual(len(selected), 2)
         first, second = selected[0], selected[1]
         service._set_analyst_location(world_id, first["location"])
-        with self.assertRaises(Exception) as caught:
-            service.chat(
-                second["character_id"],
-                "我们见面聊吧。",
-                session_id="channel-conflict-session",
-                world_session_id=world_id,
-                communication_channel="in_person",
-            )
+        with patch.object(service, "chat_enabled", return_value=True):
+            with self.assertRaises(Exception) as caught:
+                service.chat(
+                    second["character_id"],
+                    "我们见面聊吧。",
+                    session_id="channel-conflict-session",
+                    world_session_id=world_id,
+                    communication_channel="in_person",
+                )
         self.assertEqual(getattr(caught.exception, "detail", {}).get("code"), "communication_context_conflict")
         options = getattr(caught.exception, "detail", {}).get("options") or []
         self.assertEqual({item["action"] for item in options}, {"join_character", "switch_to_text"})
@@ -2724,6 +2731,224 @@ class ApplicationLayerTests(unittest.TestCase):
             )
         self.assertTrue(result["scene_state"]["co_located"])
         self.assertEqual(result["scene_state"]["presence_transition"]["status"], "joined_character")
+
+    def test_mvp_presence_resolve_is_idempotent_and_scoped_to_one_character(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        first = service.resolve_presence("ca0144ccd81b", "presence-resolve-world")
+        second = service.resolve_presence("ca0144ccd81b", "presence-resolve-world")
+        self.assertEqual(first, second)
+        self.assertEqual(first["character_id"], "ca0144ccd81b")
+        self.assertIn(first["scene_state"]["visual_key"], {
+            "quarters", "lounge", "training", "archive", "canteen",
+            "observation", "medical", "corridor", "generic",
+        })
+        self.assertNotIn("presence", first)
+
+    def test_mvp_presence_transition_changes_state_without_model_or_message(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        world_id = "presence-transition-world"
+        resolved = service.resolve_presence("ca0144ccd81b", world_id)
+        target_location = resolved["scene_state"]["character_location"]
+        joined = service.transition_presence(
+            "ca0144ccd81b",
+            session_id=None,
+            world_session_id=world_id,
+            target_channel="in_person",
+            action="join_character",
+        )
+        self.assertTrue(joined["scene_state"]["co_located"])
+        self.assertEqual(joined["scene_state"]["analyst_location"], target_location)
+        self.assertFalse(joined["message_created"])
+        self.assertFalse(joined["model_called"])
+        communicator = service.transition_presence(
+            "ca0144ccd81b",
+            session_id=None,
+            world_session_id=world_id,
+            target_channel="text",
+            action="open_communicator",
+        )
+        self.assertEqual(communicator["scene_state"]["analyst_location"], target_location)
+        self.assertEqual(communicator["communication_channel"], "text")
+
+    def test_mvp_presence_transition_rejects_mismatched_action(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        with self.assertRaisesRegex(ValueError, "场景动作与目标交流媒介不匹配"):
+            service.transition_presence(
+                "ca0144ccd81b",
+                session_id=None,
+                world_session_id="presence-invalid-world",
+                target_channel="text",
+                action="join_character",
+            )
+
+    def test_mvp_presence_arrival_unnoticed_is_idempotent_and_skips_model(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            service.conversation_store = ConversationStore(
+                Path(temporary_directory) / "arrival.sqlite3"
+            )
+            with patch(
+                "backend.snow_app.mvp_service.secrets.randbelow", return_value=1
+            ) as random_draw, patch.object(service, "chat") as chat:
+                first = service.prepare_presence_arrival(
+                    "ca0144ccd81b",
+                    arrival_id="arrival_unnoticed_test",
+                    session_id="arrival_unnoticed_session",
+                    world_session_id="arrival_unnoticed_world",
+                )["ready"]
+                replay = service.prepare_presence_arrival(
+                    "ca0144ccd81b",
+                    arrival_id="arrival_unnoticed_test",
+                    session_id="arrival_unnoticed_session",
+                    world_session_id="arrival_unnoticed_world",
+                )["ready"]
+
+            self.assertEqual(first, replay)
+            self.assertEqual(first["decision"], "unnoticed")
+            self.assertEqual(first["status"], "completed")
+            self.assertIsNone(first["reaction"])
+            self.assertEqual(random_draw.call_count, 1)
+            chat.assert_not_called()
+            history = service.conversation_store.history(
+                "ca0144ccd81b", session_id="arrival_unnoticed_session"
+            )
+            self.assertEqual(history["messages"], [])
+
+    def test_mvp_presence_arrival_noticed_persists_assistant_only_once(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            service.conversation_store = ConversationStore(
+                Path(temporary_directory) / "arrival.sqlite3"
+            )
+            with patch(
+                "backend.snow_app.mvp_service.secrets.randbelow", return_value=0
+            ) as random_draw:
+                prepared = service.prepare_presence_arrival(
+                    "ca0144ccd81b",
+                    arrival_id="arrival_noticed_test",
+                    session_id="arrival_noticed_session",
+                    world_session_id="arrival_noticed_world",
+                )
+                with patch.object(
+                    service,
+                    "chat",
+                    return_value={
+                        "answer": "（我抬头看向你。）\n你来了。刚才说到的事，我们接着聊吧。",
+                        "content_blocks": [
+                            {"type": "action", "text": "我抬头看向你。"},
+                            {"type": "speech", "text": "你来了。刚才说到的事，我们接着聊吧。"},
+                        ],
+                        "usage": {"total_tokens": 20},
+                        "actual_model": {"model_name": "deepseek-v4-flash"},
+                        "routing_decision": {"reason": "immersive_text_default"},
+                        "thinking_decision": {"effective": "off"},
+                        "style_context": None,
+                        "response_adjustments": [],
+                    },
+                ) as chat:
+                    first = service.finish_presence_arrival(
+                        prepared,
+                        model_settings=(
+                            "https://api.deepseek.com/v1",
+                            "credential",
+                            "deepseek-v4-flash",
+                        ),
+                        model_info={"model_name": "deepseek-v4-flash"},
+                        thinking_decision={"effective": "off"},
+                    )
+                replay = service.prepare_presence_arrival(
+                    "ca0144ccd81b",
+                    arrival_id="arrival_noticed_test",
+                    session_id="arrival_noticed_session",
+                    world_session_id="arrival_noticed_world",
+                )["ready"]
+
+            self.assertEqual(first, replay)
+            self.assertEqual(random_draw.call_count, 1)
+            self.assertEqual(chat.call_count, 1)
+            self.assertEqual(first["decision"], "noticed")
+            self.assertEqual(first["reaction"]["source"], "presence_arrival")
+            self.assertEqual(first["reaction"]["arrival_id"], "arrival_noticed_test")
+            self.assertEqual(
+                first["reaction"]["content_blocks"],
+                [
+                    {"type": "action", "text": f"{first['character_name']}抬头看向你。"},
+                    {"type": "speech", "text": "你来了。刚才说到的事，我们接着聊吧。"},
+                ],
+            )
+            self.assertEqual(first["reaction"]["answer"], "你来了。刚才说到的事，我们接着聊吧。")
+            history = service.conversation_store.history(
+                "ca0144ccd81b", session_id="arrival_noticed_session"
+            )
+            self.assertEqual([item["role"] for item in history["messages"]], ["assistant"])
+            self.assertEqual(
+                history["messages"][0]["response"]["source"], "presence_arrival"
+            )
+
+    def test_mvp_presence_arrival_rejects_reuse_and_reports_processing(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            service.conversation_store = ConversationStore(
+                Path(temporary_directory) / "arrival.sqlite3"
+            )
+            with patch("backend.snow_app.mvp_service.secrets.randbelow", return_value=0):
+                service.prepare_presence_arrival(
+                    "ca0144ccd81b",
+                    arrival_id="arrival_processing_test",
+                    session_id="arrival_processing_session",
+                    world_session_id="arrival_processing_world",
+                )
+                with self.assertRaises(MVPRequestInProgress):
+                    service.prepare_presence_arrival(
+                        "ca0144ccd81b",
+                        arrival_id="arrival_processing_test",
+                        session_id="arrival_processing_session",
+                        world_session_id="arrival_processing_world",
+                    )
+                with self.assertRaisesRegex(ValueError, "arrival_id"):
+                    service.prepare_presence_arrival(
+                        MVP_CHARACTERS[1].character_id,
+                        arrival_id="arrival_processing_test",
+                        session_id="arrival_processing_session_other",
+                        world_session_id="arrival_processing_world",
+                    )
+
+    def test_mvp_presence_arrival_empty_model_output_falls_back_unnoticed(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            service.conversation_store = ConversationStore(
+                Path(temporary_directory) / "arrival.sqlite3"
+            )
+            with patch("backend.snow_app.mvp_service.secrets.randbelow", return_value=0):
+                prepared = service.prepare_presence_arrival(
+                    "ca0144ccd81b",
+                    arrival_id="arrival_empty_model_test",
+                    session_id="arrival_empty_model_session",
+                    world_session_id="arrival_empty_model_world",
+                )
+            with patch.object(
+                service,
+                "chat",
+                return_value={
+                    "answer": "本地伪造兜底",
+                    "response_adjustments": ["empty_model_output_guard"],
+                },
+            ):
+                with self.assertRaises(MVPProviderError):
+                    service.finish_presence_arrival(
+                        prepared,
+                        model_settings=("base", "credential", "deepseek-v4-flash"),
+                        model_info={"model_name": "deepseek-v4-flash"},
+                        thinking_decision={"effective": "off"},
+                    )
+            fallback = service.fallback_presence_arrival(prepared)
+            self.assertEqual(fallback["decision"], "unnoticed")
+            self.assertEqual(fallback["status"], "fallback_unnoticed")
+            self.assertIsNone(fallback["reaction"])
+            history = service.conversation_store.history(
+                "ca0144ccd81b", session_id="arrival_empty_model_session"
+            )
+            self.assertEqual(history["messages"], [])
 
     def test_mvp_text_action_block_is_rewritten_to_deterministic_fallback(self) -> None:
         service = MVPService(self.settings, self.repository)
@@ -2924,6 +3149,83 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertEqual(annotated[0]["issue_key"], "formal_relationship_address")
         self.assertEqual(annotated[1]["issue_occurrence"], "duplicate")
         self.assertEqual(annotated[1]["duplicate_of"], "one")
+
+    def test_mvp_feedback_legacy_buckets_are_reclassified_without_reopening_fixes(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        rows = [
+            {
+                "feedback_id": "composer",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "issue_key": "client_input_state",
+                "category": "client_function",
+                "free_text": "动作和对白应该支持同时输入",
+            },
+            {
+                "feedback_id": "markdown",
+                "created_at": "2026-01-02T00:00:00+00:00",
+                "issue_key": "client_input_state",
+                "category": "client_function",
+                "free_text": "助手疑似不兼容 Markdown 格式",
+            },
+        ]
+
+        annotated = service._annotate_feedback_rows(rows, {})
+
+        self.assertEqual(annotated[0]["issue_key"], "composer_action_and_speech")
+        self.assertEqual(annotated[0]["issue_status"], "fixed_verified")
+        self.assertTrue(annotated[0]["verification_tests"])
+        self.assertEqual(annotated[1]["issue_key"], "assistant_markdown")
+        self.assertEqual(
+            annotated[1]["issue_status"], "superseded_by_architecture"
+        )
+
+    def test_mvp_repeated_feedback_keeps_verified_status_until_explicitly_reopened(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        rows = [
+            {
+                "feedback_id": "before-verification",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "category": "client_function",
+                "free_text": "动作和对白应该支持同时输入",
+            },
+            {
+                "feedback_id": "after-verification",
+                "created_at": "2026-01-03T00:00:00+00:00",
+                "category": "client_function",
+                "free_text": "动作和对白应该支持同时输入",
+            },
+        ]
+        verified_event = {
+            "composer_action_and_speech": {
+                "status": "fixed_verified",
+                "updated_at": "2026-01-02T00:00:00+00:00",
+                "verified_at": "2026-01-02T00:00:00+00:00",
+                "source": "manual",
+                "verification_tests": ["test_current_version_reproduction"],
+            }
+        }
+
+        annotated = service._annotate_feedback_rows(rows, verified_event)
+
+        self.assertEqual(annotated[1]["resolution_status"], "fixed_verified")
+        self.assertEqual(annotated[1]["issue_occurrence"], "duplicate")
+        self.assertEqual(annotated[1]["issue_report_count"], 2)
+        self.assertEqual(annotated[1]["recurrence_index"], 1)
+        self.assertTrue(annotated[1]["reported_after_verification"])
+
+        reopened = service._annotate_feedback_rows(
+            rows,
+            {
+                "composer_action_and_speech": {
+                    "status": "open",
+                    "updated_at": "2026-01-04T00:00:00+00:00",
+                    "source": "manual",
+                    "verification_tests": ["test_current_version_reproduction"],
+                }
+            },
+        )
+        self.assertEqual(reopened[1]["resolution_status"], "open")
+        self.assertFalse(reopened[1]["reported_after_verification"])
 
     def test_mvp_parser_extracts_answer_from_truncated_json_without_leaking_syntax(self) -> None:
         parsed = _parse_model_json('{"answer":"自然答复","')

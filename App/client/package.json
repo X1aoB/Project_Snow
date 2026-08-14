@@ -1,9 +1,9 @@
 {
   "name": "project-snow-desktop",
-  "version": "0.2.3",
+  "version": "0.5.0",
   "private": true,
   "author": "Project Snow",
-  "description": "Local Windows preview client for Project Snow chat",
+  "description": "Local Windows v0.5.0 dual-entry preview client for Project Snow",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -17,6 +17,7 @@
   "build": {
     "appId": "com.projectsnow.mvp",
     "productName": "Project Snow Preview",
+    "electronDist": "node_modules/electron/dist",
     "asar": true,
     "files": [
       "main.js",

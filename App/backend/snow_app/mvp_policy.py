@@ -129,6 +129,28 @@ MVP_DEFAULT_SCENE_TEMPLATES: tuple[tuple[str, str], ...] = (
 def scene_templates_for(character_id: str) -> tuple[tuple[str, str], ...]:
     return MVP_SCENE_TEMPLATES.get(character_id) or MVP_DEFAULT_SCENE_TEMPLATES
 
+
+def scene_visual_key(location: str | None) -> str:
+    """Map simulated locations to stable, presentation-only scene keys."""
+
+    normalized = str(location or "").strip()
+    if not normalized:
+        return "generic"
+    mappings = (
+        (("个人房间", "宿舍"), "quarters"),
+        (("休息区", "公共区"), "lounge"),
+        (("训练区",), "training"),
+        (("资料室", "资料阅览区", "阅览区"), "archive"),
+        (("餐厅", "食堂"), "canteen"),
+        (("观景区",), "observation"),
+        (("医务室",), "medical"),
+        (("走廊",), "corridor"),
+    )
+    for terms, key in mappings:
+        if any(term in normalized for term in terms):
+            return key
+    return "generic"
+
 # The layer is a retrieval/prompt scope, not a truth score.  Main and personal
 # stories remain the authoritative narrative; situational material is real
 # background but must be phrased as a scene, message, memory or event; costume

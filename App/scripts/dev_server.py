@@ -66,6 +66,15 @@ class WorkspaceHandler(http.server.SimpleHTTPRequestHandler):
         if self.path == "/health" or self.path.startswith("/api/"):
             self._proxy()
             return
+        route = urlsplit(self.path).path.rstrip("/")
+        if route in {"/immersive", "/assistant"}:
+            original = self.path
+            self.path = "/index.html"
+            try:
+                super().do_GET()
+            finally:
+                self.path = original
+            return
         super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802
@@ -87,6 +96,8 @@ def main() -> None:
     args = parser.parse_args()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), WorkspaceHandler)
     print(f"Project Snow chat client: http://127.0.0.1:{args.port}/")
+    print(f"Project Snow immersive client: http://127.0.0.1:{args.port}/immersive/")
+    print(f"Project Snow assistant client: http://127.0.0.1:{args.port}/assistant/")
     print(f"Project Snow evidence workspace: http://127.0.0.1:{args.port}/workspace/")
     server.serve_forever()
 

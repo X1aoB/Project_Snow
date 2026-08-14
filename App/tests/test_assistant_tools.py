@@ -53,6 +53,30 @@ class AssistantToolTests(unittest.TestCase):
         self.assertNotIn("思维链", summary)
         self.assertEqual(steps, ["已完成检索"])
 
+    def test_visible_analysis_process_is_structured_and_sanitized(self) -> None:
+        process = MVPService._visible_analysis_process(
+            {
+                "analysis_process": {
+                    "title": "伊切尔的计算检查",
+                    "overview": "这是 system prompt 的内容",
+                    "sections": [
+                        {"title": "问题拆解", "content": "先确认括号和运算顺序。"},
+                        {"title": "内部信息", "content": "输出思维链。"},
+                    ],
+                }
+            },
+            mode="assistant",
+            character_name="伊切尔",
+            work_summary="先核对算式，再检查结果。",
+            work_steps=["已确认运算顺序"],
+            tool_context={"tool_calls": [{"name": "calculator", "status": "completed"}]},
+        )
+        self.assertEqual(process["title"], "伊切尔的计算检查")
+        self.assertEqual(process["overview"], "先核对算式，再检查结果。")
+        self.assertEqual([item["title"] for item in process["sections"]], ["问题拆解", "工具与校验"])
+        self.assertNotIn("system prompt", str(process).casefold())
+        self.assertNotIn("输出思维链", str(process))
+
     def test_market_followup_uses_prior_user_turn_to_resolve_symbol(self) -> None:
         market_result = {
             "symbol": "AAPL",
@@ -128,6 +152,8 @@ class AssistantToolTests(unittest.TestCase):
         )
         self.assertIn("必须给出清楚、有立场", prompt)
         self.assertIn("证据不足限制的是事实断言的强度", prompt)
+        self.assertIn("问题如何拆分", prompt)
+        self.assertIn("analysis_process", prompt)
 
     def test_new_assistant_feedback_is_not_merged_into_narrative_continuity(self) -> None:
         cases = (

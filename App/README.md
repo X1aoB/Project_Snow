@@ -4,12 +4,17 @@
 运行时检索索引，并提供 22 名角色的聊天测试客户端、证据工作台和安全的 Electron
 桌面壳。`Data/` 保持只读；所有可再生成或私密的产物均写入 `App/runtime/`。
 
+当前应用版本为 `v0.5.0`。`/` 是固定的体验选择页，`/immersive/` 与 `/assistant/` 分别保存
+角色选择、草稿和模式内历史；`/workspace/` 使用固定侧栏承载证据、审核、反馈与对话调试。角色助手
+保留 Provider Registry、多模态附件、STT/TTS、质量优先路由、持久化 Agent 状态机、授权目录工具、
+风险审批和可下载 Artifact；沉浸式模式只获得多模态理解，不开放系统工具或技术状态。
+
 ## 目录
 
 ```text
 App/
 ├── backend/       FastAPI API、检索、会话与媒介规则
-├── frontend/      浏览器聊天客户端（`/`）和工作台（`/workspace/`）
+├── frontend/      入口页、沉浸式/助手客户端和工作台
 ├── pipelines/     湖仓、检索、人格资料、图谱与审核管线
 ├── client/        不含凭据的 Electron Windows 桌面壳
 ├── docs/          数据契约、架构与审核说明
@@ -32,12 +37,15 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m playwright install chromium
 Copy-Item .env.example .env
 ```
 
 `requirements.txt` 是本地运行的完整 Python 依赖清单：FastAPI/HTTP 客户端、
 dotenv 配置加载、资料/头像处理，以及检索与可选图谱组件。测试使用 Python 标准库
-`unittest`，无需单独安装 pytest。
+`unittest`，无需单独安装 pytest。文档/媒体依赖同时包括 PyPDF、PyMuPDF、python-docx、openpyxl、
+python-pptx、Pillow、Mutagen 和 ReportLab；浏览器任务使用 Playwright Chromium，凭据通过 keyring
+写入 Windows Credential Manager。
 
 ## 模型配置（不要提交密钥）
 
@@ -60,7 +68,8 @@ MVP_CHAT_WEB_MAX_RESULTS=5
 ```
 
 进程环境变量会覆盖 `.env` 中的同名变量。关系抽取/复核配置与聊天模型配置彼此独立；
-请使用 `RELATION_CANDIDATE_*` 和 `RELATION_REVIEW_*` 变量配置它们。任何真实 API
+请使用 `RELATION_CANDIDATE_*`、`RELATION_REVIEW_*` 和自动 Batch 审核专用的
+`EVIDENCE_REVIEW_*` 变量配置它们。任何真实 API
 Key、令牌、Cookie、私钥或导出的聊天记录都不应进入 Git。
 
 沉浸式模式默认使用 `0.45` 的较低但非固定采样温度，以避免所有日常回应落成同一种短句；
@@ -111,12 +120,20 @@ python scripts/dev_server.py
 
 聊天客户端提供沉浸式陪伴/角色助手、面对面/文字通讯的正交切换。完整显示历史、
 当前场景和共享关系前提仅保存在本机 `runtime/chat/conversations.sqlite3`；生成时仅使用
-受限的当前模式历史和明确共享上下文。助手模式开放受后端白名单控制的只读工具：
+受限的当前模式历史和明确共享上下文。普通助手对话开放受后端白名单控制的只读工具：
 `get_current_time`、`calculator`、`web_search`、`research_current_info`、`fetch_web_page` 和
 `get_market_history`。天气、突发事件、运营状态和精确日线行情可以自动触发对应的只读查询；
 联网结果只作为临时外部资料，
 不会写入 `Data/`、人格档案或图谱。助手回复可以显示角色化的“工作摘要/步骤”，这是已经执行的
 工具、证据范围和结论依据，不是模型隐藏思维链；沉浸式模式不暴露工具或内部系统概念。
+
+在设置中新增 Provider 后，可以为会话选择已探测模型，也可勾选“仅本轮”。图片、文档和录音从
+输入区上传到 `runtime/chat/attachments/` 并按 SHA-256 去重；视觉或语音附件只有在 Provider
+能力与数据授权都满足时才会离开本机。勾选“作为 Agent 执行”后，客户端显示真实步骤、审批、
+停止/重试按钮、实际模型、用量和 Artifact 下载。Agent 默认限制为 20 步、15 分钟和 2 个并发任务。
+扫描 PDF 会在本地渲染有限页供视觉模型读取；录音会先生成可编辑转写。Agent 还可以使用授权目录
+文件、PowerShell、Git、Playwright 和已配置账号连接器，但最终网页提交、邮件发送、日程/云端修改、
+Git push 及删除均需审批，删除要求二次确认。
 
 助手在评价现实事务时会分开标注已核实事实、用户给定前提和条件判断，并在证据允许的范围内
 给出明确的角色化观点，不再用“是否需要我继续搜索”替代已经要求的分析。公开行情数据可能延迟，
@@ -177,7 +194,8 @@ issue、截图或 Git 提交中。反馈会以追加记录写入 `runtime/mvp/`�
 反馈收件箱中筛选和标记处理状态。
 
 更多实现约束见 [架构说明](docs/architecture.md)、[数据契约](docs/data_contract.md)、
-[关系审核指南](docs/relation_review_guide.md) 和 [实体审核指南](docs/entity_node_review_guide.md)。
+[关系审核指南](docs/relation_review_guide.md)、[实体审核指南](docs/entity_node_review_guide.md) 和
+[Qwen Batch 自动审核指南](docs/qwen_batch_review_guide.md)。
 
 ## Git 与隐私
 

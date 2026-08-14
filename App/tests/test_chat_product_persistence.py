@@ -4,8 +4,11 @@ import tempfile
 from pathlib import Path
 import unittest
 
+from pydantic import ValidationError
+
 from backend.snow_app.chat_store import ConversationStore
 from backend.snow_app.config import Settings
+from backend.snow_app.contracts import MVPFeedbackRequest
 from backend.snow_app.mvp_service import MVPService
 from backend.snow_app.repository import RuntimeRepository
 
@@ -107,6 +110,44 @@ class ConversationStoreTests(unittest.TestCase):
             )
         )
 
+    def test_mode_history_filters_messages_while_legacy_history_stays_mixed(self) -> None:
+        self.save("immersive_reply", client_message_id="immersive_client")
+        self.save(
+            "assistant_reply",
+            client_message_id="assistant_client",
+            mode="assistant",
+            channel="in_person",
+        )
+
+        immersive = self.store.history("ca0144ccd81b", limit=20, mode="immersive")
+        assistant = self.store.history("ca0144ccd81b", limit=20, mode="assistant")
+        legacy = self.store.history("ca0144ccd81b", limit=20)
+
+        self.assertEqual({item["mode"] for item in immersive["messages"]}, {"immersive"})
+        self.assertEqual({item["mode"] for item in assistant["messages"]}, {"assistant"})
+        self.assertEqual({item["mode"] for item in legacy["messages"]}, {"immersive", "assistant"})
+        self.assertEqual(immersive["conversation"]["communication_channel"], "text")
+        self.assertEqual(assistant["conversation"]["communication_channel"], "in_person")
+
+    def test_latest_conversation_summaries_are_independent_per_mode(self) -> None:
+        self.save("immersive_reply", client_message_id="immersive_client")
+        self.save(
+            "assistant_reply",
+            client_message_id="assistant_client",
+            mode="assistant",
+            channel="in_person",
+        )
+
+        immersive = self.store.latest_conversation("ca0144ccd81b", "immersive")
+        assistant = self.store.latest_conversation("ca0144ccd81b", "assistant")
+        legacy = self.store.latest_conversation("ca0144ccd81b")
+
+        self.assertEqual(immersive["last_message"], "reply for immersive_reply")
+        self.assertEqual(immersive["communication_channel"], "text")
+        self.assertEqual(assistant["last_message"], "reply for assistant_reply")
+        self.assertEqual(assistant["communication_channel"], "in_person")
+        self.assertEqual(legacy["last_message"], "reply for assistant_reply")
+
     def test_mode_clear_preserves_other_mode_and_full_clear_removes_conversation(self) -> None:
         self.save("assistant_immersive", client_message_id="client_immersive")
         self.save(
@@ -184,6 +225,84 @@ class FeedbackWorkflowTests(unittest.TestCase):
                 len((runtime_root / "mvp" / "feedback_triage.jsonl").read_text(encoding="utf-8").splitlines()),
                 1,
             )
+
+    def test_product_feedback_needs_no_character_or_session(self) -> None:
+        request = MVPFeedbackRequest(
+            scope="product",
+            ui_surface="landing",
+            category="client_function",
+            free_text="入口页在窄屏下需要更清晰。",
+            client_version="v0.5.0",
+        )
+        self.assertIsNone(request.character_id)
+        self.assertIsNone(request.session_id)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            runtime_root = Path(temporary_directory)
+            for directory in ("lakehouse", "graph", "review", "mvp"):
+                (runtime_root / directory).mkdir(parents=True, exist_ok=True)
+            (runtime_root / "lakehouse" / "documents.jsonl").write_text("", encoding="utf-8")
+            (runtime_root / "graph" / "nodes.jsonl").write_text("", encoding="utf-8")
+            (runtime_root / "graph" / "edges.jsonl").write_text("", encoding="utf-8")
+            (runtime_root / "mvp" / "character_views.jsonl").write_text("", encoding="utf-8")
+            settings = Settings(
+                data_root=APP_ROOT.parent / "Data",
+                runtime_root=runtime_root,
+                chat_enabled=False,
+                embedding_model="unused",
+                allowed_origins=("http://127.0.0.1:8080",),
+            )
+            service = MVPService(settings, RuntimeRepository(settings))
+            stored = service.append_feedback(
+                None,
+                None,
+                None,
+                [],
+                request.free_text,
+                category=request.category,
+                client_version=request.client_version,
+                scope=request.scope,
+                ui_surface=request.ui_surface,
+            )
+            self.assertEqual(stored["scope"], "product")
+            self.assertEqual(stored["ui_surface"], "landing")
+            self.assertIsNone(stored["character_id"])
+
+        with self.assertRaises(ValidationError):
+            MVPFeedbackRequest(
+                scope="conversation",
+                ui_surface="assistant",
+                category="conversation_experience",
+                free_text="缺少会话绑定。",
+            )
+
+    def test_continuity_card_ignores_other_mode_index(self) -> None:
+        card = MVPService._continuity_card(
+            {
+                "turns": [
+                    {
+                        "mode": "immersive",
+                        "communication_channel": "text",
+                        "user": "陪我聊一会儿。",
+                        "assistant": "好，我在这里。",
+                    }
+                ],
+                "cross_mode_turns": [
+                    {
+                        "mode": "assistant",
+                        "communication_channel": "text",
+                        "user": "运行测试。",
+                        "assistant": "测试完成。",
+                    }
+                ],
+                "premises": ["分析员与角色的确认关系"],
+            },
+            "text",
+        )
+        serialized = str(card)
+        self.assertIn("陪我聊一会儿", serialized)
+        self.assertNotIn("运行测试", serialized)
+        self.assertIn("分析员与角色的确认关系", serialized)
 
 
 if __name__ == "__main__":
