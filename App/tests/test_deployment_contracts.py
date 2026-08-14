@@ -164,6 +164,6 @@ class DeploymentContractTests(TestCase):
         self.assertIn("[hidden] { display:none !important; }", css)
         self.assertIn('invalid_request:"请求内容不完整', javascript)
         self.assertIn('provider_not_enabled:"该模型厂商尚未启用', javascript)
-        self.assertIn("errorMessages[code] || errorMessages.request_failed", javascript)
+        self.assertIn("/^[a-z][a-z0-9_]*$/.test(code) ? errorMessages.request_failed : code", javascript)
         self.assertIn("async function waitForTurnstile()", javascript)
         self.assertIn('throw new Error("turnstile_unavailable")', javascript)
