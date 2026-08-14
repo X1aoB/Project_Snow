@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from migrations.secret_config import load_required_secret
+
 
 config = context.config
 if config.config_file_name:
     fileConfig(config.config_file_name)
-database_url = os.getenv("PUBLIC_DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+database_url = load_required_secret("PUBLIC_DATABASE_URL")
+config.set_main_option("sqlalchemy.url", database_url)
 target_metadata = None
 
 
