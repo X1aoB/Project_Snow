@@ -1,0 +1,14 @@
+# Minimal runtime dependencies for the public API/admin image.
+# Embedding, data construction, desktop tooling, and tests live in separate
+# environments and must not increase the production API image attack surface.
+fastapi>=0.115,<1
+httpx>=0.27,<1
+pydantic>=2.9,<3
+python-dotenv>=1.0,<2
+uvicorn>=0.32,<1
+cryptography>=50,<51
+psycopg[binary]>=3.2,<4
+psycopg-pool>=3.2,<4
+SQLAlchemy>=2.0,<3
+alembic>=1.14,<2
+neo4j>=5.24,<6

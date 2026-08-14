@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 from unittest import TestCase
 
 from backend.snow_app.config import PublicSettings
@@ -44,6 +45,16 @@ def _settings() -> PublicSettings:
 
 
 class PublicSecurityTests(TestCase):
+    def test_public_image_uses_a_minimal_runtime_dependency_set(self) -> None:
+        app_root = Path(__file__).resolve().parents[1]
+        dockerfile = (app_root / "infra" / "public-api.Dockerfile").read_text(encoding="utf-8")
+        requirements = (app_root / "requirements-public.txt").read_text(encoding="utf-8")
+
+        self.assertIn("COPY requirements-public.txt", dockerfile)
+        self.assertIn("cryptography>=50,<51", requirements)
+        for excluded in ("sentence-transformers", "torch", "playwright", "pypdf"):
+            self.assertNotIn(excluded, requirements.casefold())
+
     def test_byok_credential_is_bound_to_anonymous_session_and_provider(self) -> None:
         settings = _settings()
         token, _ = issue_byok_credential(
