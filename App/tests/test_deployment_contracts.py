@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest import TestCase
 
@@ -50,6 +51,25 @@ class DeploymentContractTests(TestCase):
         self.assertIn("git checkout --quiet --detach", script)
         self.assertIn("git rev-parse HEAD | grep -Fx", script)
         self.assertIn("&& cd App &&", script)
+
+    def test_directly_invoked_operations_are_executable_in_git(self) -> None:
+        repo_root = self.app_root.parent
+        paths = (
+            "App/ops/backup.sh",
+            "App/ops/deploy.sh",
+            "App/ops/prepare_debian.sh",
+            "App/ops/restore-postgres.sh",
+            "App/ops/rollback.sh",
+        )
+        result = subprocess.run(
+            ["git", "ls-files", "-s", "--", *paths],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        modes = {line.split(maxsplit=1)[0] for line in result.stdout.splitlines() if line.strip()}
+        self.assertEqual(modes, {"100755"}, result.stdout)
 
     def test_production_examples_separate_public_settings_from_secrets(self) -> None:
         public_env = self.read("ops/public.env.example")
