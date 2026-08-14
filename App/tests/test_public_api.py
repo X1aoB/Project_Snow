@@ -232,25 +232,42 @@ class PublicAPITests(TestCase):
     def test_all_public_characters_reach_the_immersive_engine(self) -> None:
         credential, _ = self._byok()
         service = self.app.state.chat_service
-        with patch.object(service.mvp, "chat", return_value={"answer": "测试回复"}) as chat:
-            for character in MVP_CHARACTERS:
-                response = self.client.post(
-                    "/public/v1/chat/stream",
-                    headers={"Origin": "http://testserver"},
-                    json={
-                        "request_id": str(uuid4()),
-                        "provider": "openai",
-                        "credential": credential,
-                        "model": "gpt-test",
-                        "character_id": character.character_id,
-                        "message": "你好",
-                        "recent_history": [],
-                        "history_summary": "",
-                        "state_package": "",
-                    },
-                )
-                self.assertEqual(response.status_code, 200, character.display_name)
-                self.assertIn("event: done", response.text)
+        original_path = service.mvp.views_path
+        with TemporaryDirectory() as directory:
+            service.mvp.views_path = Path(directory) / "character_views.jsonl"
+            service.mvp.views_path.write_text(
+                "".join(
+                    json.dumps({"character_id": character.character_id}) + "\n"
+                    for character in MVP_CHARACTERS
+                ),
+                encoding="utf-8",
+            )
+            service.mvp._views_cache = None
+            service.mvp._views_mtime = None
+            try:
+                with patch.object(service.mvp, "chat", return_value={"answer": "测试回复"}) as chat:
+                    for character in MVP_CHARACTERS:
+                        response = self.client.post(
+                            "/public/v1/chat/stream",
+                            headers={"Origin": "http://testserver"},
+                            json={
+                                "request_id": str(uuid4()),
+                                "provider": "openai",
+                                "credential": credential,
+                                "model": "gpt-test",
+                                "character_id": character.character_id,
+                                "message": "你好",
+                                "recent_history": [],
+                                "history_summary": "",
+                                "state_package": "",
+                            },
+                        )
+                        self.assertEqual(response.status_code, 200, character.display_name)
+                        self.assertIn("event: done", response.text)
+            finally:
+                service.mvp.views_path = original_path
+                service.mvp._views_cache = None
+                service.mvp._views_mtime = None
         self.assertEqual(chat.call_count, len(MVP_CHARACTERS))
 
     def test_missing_character_view_returns_controlled_error(self) -> None:
