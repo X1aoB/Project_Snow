@@ -19,6 +19,19 @@ class DeploymentContractTests(TestCase):
         self.assertIn("/etc/project-snow/secrets/neo4j_auth:/run/secrets/neo4j_auth:ro", compose)
         self.assertNotIn("NEO4J_AUTH:?", compose)
 
+    def test_public_api_bootstraps_root_only_secrets_then_drops_privileges(self) -> None:
+        compose = self.read("compose.prod.yml")
+        dockerfile = self.read("infra/public-api.Dockerfile")
+        entrypoint = self.read("infra/public-entrypoint.sh")
+        self.assertIn("/etc/project-snow/secrets:/run/host-secrets:ro", compose)
+        self.assertIn("/run/project-snow-secrets:rw,noexec,nosuid,size=1m,mode=0700", compose)
+        self.assertIn("PUBLIC_DATABASE_URL_FILE: /run/project-snow-secrets/public_database_url", compose)
+        self.assertIn("apt-get install -y --no-install-recommends gosu", dockerfile)
+        self.assertIn('ENTRYPOINT ["/app/infra/public-entrypoint.sh"]', dockerfile)
+        self.assertIn('install -o snow -g snow -m 0400', entrypoint)
+        self.assertIn('exec gosu snow "$@"', entrypoint)
+        self.assertNotIn("/etc/project-snow/secrets:/run/secrets:ro", compose)
+
     def test_deploy_promotes_compose_environment_only_after_smoke(self) -> None:
         script = self.read("ops/deploy.sh")
         smoke = script.index("/app/public_smoke.py")
@@ -60,6 +73,7 @@ class DeploymentContractTests(TestCase):
             "App/ops/prepare_debian.sh",
             "App/ops/restore-postgres.sh",
             "App/ops/rollback.sh",
+            "App/infra/public-entrypoint.sh",
         )
         result = subprocess.run(
             ["git", "ls-files", "-s", "--", *paths],
@@ -68,8 +82,12 @@ class DeploymentContractTests(TestCase):
             capture_output=True,
             text=True,
         )
-        modes = {line.split(maxsplit=1)[0] for line in result.stdout.splitlines() if line.strip()}
-        self.assertEqual(modes, {"100755"}, result.stdout)
+        indexed_modes = {
+            fields[3].replace("\\", "/"): fields[0]
+            for line in result.stdout.splitlines()
+            if line.strip() and len(fields := line.split(maxsplit=3)) == 4
+        }
+        self.assertEqual(indexed_modes, {path: "100755" for path in paths}, result.stdout)
 
     def test_production_examples_separate_public_settings_from_secrets(self) -> None:
         public_env = self.read("ops/public.env.example")

@@ -13,28 +13,30 @@ x-api: &api
   environment:
     DATA_ROOT: /srv/project-snow/data/current
     APP_RUNTIME: /srv/project-snow/runtime
-    PUBLIC_DATABASE_URL_FILE: /run/secrets/public_database_url
-    TURNSTILE_SECRET_FILE: /run/secrets/turnstile_secret
-    PUBLIC_CREDENTIAL_KEY_FILE: /run/secrets/public_credential_key
-    PUBLIC_STATE_HMAC_KEY_FILE: /run/secrets/public_state_hmac_key
-    PUBLIC_IP_HMAC_KEY_FILE: /run/secrets/public_ip_hmac_key
-    PUBLIC_QQ_KEY_FILE: /run/secrets/public_qq_key
-    PUBLIC_ADMIN_TOKEN_FILE: /run/secrets/public_admin_token
-    NEO4J_PASSWORD_FILE: /run/secrets/neo4j_password
-    QDRANT_API_KEY_FILE: /run/secrets/qdrant_api_key
+    PUBLIC_DATABASE_URL_FILE: /run/project-snow-secrets/public_database_url
+    TURNSTILE_SECRET_FILE: /run/project-snow-secrets/turnstile_secret
+    PUBLIC_CREDENTIAL_KEY_FILE: /run/project-snow-secrets/public_credential_key
+    PUBLIC_STATE_HMAC_KEY_FILE: /run/project-snow-secrets/public_state_hmac_key
+    PUBLIC_IP_HMAC_KEY_FILE: /run/project-snow-secrets/public_ip_hmac_key
+    PUBLIC_QQ_KEY_FILE: /run/project-snow-secrets/public_qq_key
+    PUBLIC_ADMIN_TOKEN_FILE: /run/project-snow-secrets/public_admin_token
+    NEO4J_PASSWORD_FILE: /run/project-snow-secrets/neo4j_password
+    QDRANT_API_KEY_FILE: /run/project-snow-secrets/qdrant_api_key
     HTTPS_PROXY: http://egress-proxy:3128
     NO_PROXY: postgres,qdrant,neo4j,embedding,localhost,127.0.0.1
     PUBLIC_TRUST_PROXY_HEADERS: "true"
   volumes:
     - /srv/project-snow/data:/srv/project-snow/data:ro
     - /srv/project-snow/runtime:/srv/project-snow/runtime:ro
-    - /etc/project-snow/secrets:/run/secrets:ro
+    - /etc/project-snow/secrets:/run/host-secrets:ro
   cpus: 2
   mem_limit: 1536m
   pids_limit: 256
   security_opt: ["no-new-privileges:true"]
   read_only: true
-  tmpfs: ["/tmp:rw,noexec,nosuid,size=128m"]
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=128m
+    - /run/project-snow-secrets:rw,noexec,nosuid,size=1m,mode=0700
   logging: *bounded-logging
   depends_on:
     postgres:
