@@ -23,7 +23,7 @@ jobs:
           cache-dependency-path: App/requirements.txt
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
-      - run: python -m pytest tests/test_public_security.py tests/test_public_api.py -q
+      - run: python -m pytest tests/test_public_security.py tests/test_public_api.py tests/test_migration_secret_config.py -q
       - run: python -m compileall -q backend migrations scripts
       - uses: actions/setup-node@v5
         with:
