@@ -9,6 +9,11 @@ RUN pip install --no-cache-dir \
     uvicorn==0.52.3 \
     sentence-transformers==5.7.0 \
     transformers==5.15.0
+RUN pip install --no-cache-dir --upgrade \
+    pip==26.2.1 \
+    setuptools==84.0.0 \
+    wheel==0.48.0 \
+    jaraco.context==6.1.2
 COPY infra/embedding_service.py /app/embedding_service.py
 USER embedding
 CMD ["python", "-m", "uvicorn", "embedding_service:app", "--host", "0.0.0.0", "--port", "8000"]

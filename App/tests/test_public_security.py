@@ -60,6 +60,8 @@ class PublicSecurityTests(TestCase):
         self.assertIn("https://download.pytorch.org/whl/cpu", embedding_dockerfile)
         self.assertIn("torch==2.13.0+cpu", embedding_dockerfile)
         self.assertIn("transformers==5.15.0", embedding_dockerfile)
+        self.assertIn("setuptools==84.0.0", embedding_dockerfile)
+        self.assertIn("wheel==0.48.0", embedding_dockerfile)
 
     def test_byok_credential_is_bound_to_anonymous_session_and_provider(self) -> None:
         settings = _settings()
