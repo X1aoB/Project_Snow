@@ -47,8 +47,14 @@ class PublicAPITests(TestCase):
         self.settings = _settings()
         self.store = PublicStore(self.settings.database_url)
         self.store.create_schema()
-        self.app = create_app(self.settings, Settings.from_environment(), self.store)
+        self.internal_settings = Settings.from_environment()
+        self.app = create_app(self.settings, self.internal_settings, self.store)
         self.client = TestClient(self.app)
+
+    def test_public_mvp_state_is_ephemeral_and_outside_read_only_runtime(self) -> None:
+        path = self.app.state.chat_service.mvp.user_fact_store.database_path
+        self.assertFalse(path.is_relative_to(self.internal_settings.runtime_root))
+        self.assertIn("project-snow-public", path.parts)
 
     def test_public_routes_do_not_expose_internal_api(self) -> None:
         self.assertEqual(self.client.get("/api/v1/mvp/bootstrap").status_code, 404)

@@ -6,7 +6,10 @@ import asyncio
 from contextlib import contextmanager
 from hashlib import sha256
 import json
+import os
+from pathlib import Path
 import threading
+import tempfile
 from typing import Any, Iterator
 
 from .config import PublicSettings, Settings
@@ -97,10 +100,17 @@ class PublicChatService:
         self.repository = PublicRuntimeRepository(settings, public_settings)
         # Pass the inert store at construction time: the public process never
         # opens, reads, or writes the internal SQLite conversation database.
+        ephemeral_database = (
+            Path(tempfile.gettempdir())
+            / "project-snow-public"
+            / str(os.getpid())
+            / "conversations.sqlite3"
+        )
         self.mvp = MVPService(
             settings,
             self.repository,
             force_chat_enabled=True,
+            conversation_database_path=ephemeral_database,
             conversation_store=StatelessConversationStore(),
         )
         self.gate = GenerationGate()

@@ -1616,6 +1616,7 @@ class MVPService:
         repository: RuntimeRepository,
         *,
         force_chat_enabled: bool = False,
+        conversation_database_path: Path | None = None,
         conversation_store: Any | None = None,
     ):
         _load_local_environment()
@@ -1635,12 +1636,15 @@ class MVPService:
             / "characters"
             / "avatars.json"
         )
-        database_override = str(os.getenv("MVP_CHAT_DATABASE_PATH") or "").strip()
-        conversation_database_path = (
-            Path(database_override).expanduser().resolve()
-            if database_override
-            else self.runtime_root / "chat" / "conversations.sqlite3"
-        )
+        if conversation_database_path is None:
+            database_override = str(os.getenv("MVP_CHAT_DATABASE_PATH") or "").strip()
+            conversation_database_path = (
+                Path(database_override).expanduser().resolve()
+                if database_override
+                else self.runtime_root / "chat" / "conversations.sqlite3"
+            )
+        else:
+            conversation_database_path = Path(conversation_database_path).expanduser().resolve()
         self.conversation_store = conversation_store or ConversationStore(conversation_database_path)
         self.public_knowledge = _PUBLIC_KNOWLEDGE
         self.user_fact_store = UserFactStore(
