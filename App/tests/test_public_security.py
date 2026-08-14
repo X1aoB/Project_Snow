@@ -67,6 +67,9 @@ class PublicSecurityTests(TestCase):
         self.assertIn("&& pip check", embedding_dockerfile)
         self.assertIn("setuptools==84.0.0", embedding_dockerfile)
         self.assertIn("wheel==0.48.0", embedding_dockerfile)
+        self.assertIn("/opt/venv/lib/python3.12/site-packages/pip", embedding_dockerfile)
+        self.assertIn("/opt/venv/lib/python3.12/site-packages/setuptools", embedding_dockerfile)
+        self.assertIn("/opt/venv/lib/python3.12/site-packages/wheel", embedding_dockerfile)
 
     def test_byok_credential_is_bound_to_anonymous_session_and_provider(self) -> None:
         settings = _settings()

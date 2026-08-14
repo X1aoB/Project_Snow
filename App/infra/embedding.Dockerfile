@@ -16,7 +16,18 @@ RUN pip install --no-cache-dir --upgrade \
         sentence-transformers==5.7.0 \
         transformers==5.15.0 \
         msgpack==1.2.1 \
-    && pip check
+    && pip check \
+    && rm -rf \
+        /opt/venv/bin/pip \
+        /opt/venv/bin/pip3 \
+        /opt/venv/bin/pip3.12 \
+        /opt/venv/bin/wheel \
+        /opt/venv/lib/python3.12/site-packages/pip \
+        /opt/venv/lib/python3.12/site-packages/pip-*.dist-info \
+        /opt/venv/lib/python3.12/site-packages/setuptools \
+        /opt/venv/lib/python3.12/site-packages/setuptools-*.dist-info \
+        /opt/venv/lib/python3.12/site-packages/wheel \
+        /opt/venv/lib/python3.12/site-packages/wheel-*.dist-info
 
 FROM python:3.12-slim
 
