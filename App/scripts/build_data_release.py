@@ -16,6 +16,7 @@ if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
 from backend.snow_app.data_release import file_sha256, iter_jsonl, verify_data_release
+from backend.snow_app.mvp_policy import MVP_CHARACTERS
 
 
 PUBLIC_CONTENT_LICENSE = "CC BY-NC-SA; version unspecified by source; page-specific notices take precedence"
@@ -131,6 +132,11 @@ def build_release(
             "graph/nodes.jsonl": runtime / "release" / "graph" / "nodes.jsonl",
             "graph/edges.jsonl": runtime / "release" / "graph" / "edges.jsonl",
             "personas/persona_profiles.jsonl": runtime / "personas" / "persona_profiles.jsonl",
+            "personas/dialogue_style_profiles.jsonl": (
+                runtime / "personas" / "dialogue_style_profiles.jsonl"
+            ),
+            "mvp/character_views.jsonl": runtime / "mvp" / "character_views.jsonl",
+            "mvp/question_bank.json": runtime / "mvp" / "question_bank.json",
         }
         missing = [str(path) for path in required.values() if not path.is_file()]
         if missing:
@@ -147,12 +153,45 @@ def build_release(
         vector_count, vector_dimension = validate_vectors(required["vectors/local_vectors.jsonl"], document_ids)
         node_count, edge_count = validate_graph(required["graph/nodes.jsonl"], required["graph/edges.jsonl"])
         persona_count = sum(1 for _ in iter_jsonl(required["personas/persona_profiles.jsonl"]))
+        expected_character_ids = {character.character_id for character in MVP_CHARACTERS}
+        view_character_ids = {
+            str(row.get("character_id") or "")
+            for row in iter_jsonl(required["mvp/character_views.jsonl"])
+        }
+        dialogue_character_ids = {
+            str(row.get("character_id") or "")
+            for row in iter_jsonl(required["personas/dialogue_style_profiles.jsonl"])
+        }
+        try:
+            question_payload = json.loads(required["mvp/question_bank.json"].read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("invalid MVP question bank") from exc
+        question_character_ids = {
+            str(row.get("character_id") or "")
+            for row in question_payload.get("questions", [])
+            if isinstance(row, dict)
+        }
+        for label, actual in (
+            ("character views", view_character_ids),
+            ("dialogue profiles", dialogue_character_ids),
+            ("question bank", question_character_ids),
+        ):
+            if actual != expected_character_ids:
+                missing_ids = sorted(expected_character_ids - actual)
+                extra_ids = sorted(actual - expected_character_ids)
+                raise RuntimeError(
+                    f"{label} do not cover the public character registry; "
+                    f"missing={missing_ids}, extra={extra_ids}"
+                )
         for relative in (
             "indexes/lexical.sqlite3",
             "vectors/local_vectors.jsonl",
             "graph/nodes.jsonl",
             "graph/edges.jsonl",
             "personas/persona_profiles.jsonl",
+            "personas/dialogue_style_profiles.jsonl",
+            "mvp/character_views.jsonl",
+            "mvp/question_bank.json",
         ):
             files.append(copy_file(required[relative], output / relative, output))
 
@@ -181,6 +220,8 @@ def build_release(
                 "graph_nodes": node_count,
                 "graph_edges": edge_count,
                 "personas": persona_count,
+                "character_views": len(view_character_ids),
+                "dialogue_profiles": len(dialogue_character_ids),
             },
             "files": sorted(files, key=lambda item: item["path"]),
         }

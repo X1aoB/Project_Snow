@@ -13,6 +13,7 @@ from backend.snow_app.data_loader import (
     versioned_collection_name,
 )
 from backend.snow_app.data_release import DataReleaseError, verify_data_release
+from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from scripts.build_data_release import PUBLIC_CONTENT_LICENSE, build_release
 
 
@@ -91,6 +92,32 @@ def _build_fixture(root: Path, version: str = "2026.08.14.1") -> Path:
     _write_jsonl(
         runtime / "personas" / "persona_profiles.jsonl",
         [{"character_id": "a", "character_name": "A"}],
+    )
+    _write_jsonl(
+        runtime / "personas" / "dialogue_style_profiles.jsonl",
+        [
+            {"character_id": character.character_id, "character_name": character.display_name}
+            for character in MVP_CHARACTERS
+        ],
+    )
+    _write_jsonl(
+        runtime / "mvp" / "character_views.jsonl",
+        [
+            {"character_id": character.character_id, "character_name": character.display_name}
+            for character in MVP_CHARACTERS
+        ],
+    )
+    (runtime / "mvp" / "question_bank.json").write_text(
+        json.dumps(
+            {
+                "questions": [
+                    {"character_id": character.character_id, "question": "测试问题"}
+                    for character in MVP_CHARACTERS
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
     )
     denylist = root / "denylist.json"
     denylist.write_text("{}", encoding="utf-8")
@@ -174,6 +201,8 @@ class DataReleaseTests(TestCase):
             manifest = verify_data_release(release, "2026.08.14.1")
             self.assertEqual(manifest["statistics"]["documents"], 2)
             self.assertEqual(manifest["statistics"]["vector_dimension"], 2)
+            self.assertEqual(manifest["statistics"]["character_views"], 22)
+            self.assertEqual(manifest["statistics"]["dialogue_profiles"], 22)
             for relative in (
                 "indexes/lexical.sqlite3",
                 "lakehouse/documents.jsonl",
@@ -181,6 +210,9 @@ class DataReleaseTests(TestCase):
                 "graph/nodes.jsonl",
                 "graph/edges.jsonl",
                 "personas/persona_profiles.jsonl",
+                "personas/dialogue_style_profiles.jsonl",
+                "mvp/character_views.jsonl",
+                "mvp/question_bank.json",
                 "ATTRIBUTION.jsonl",
                 "LICENSES.json",
             ):

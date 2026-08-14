@@ -167,6 +167,9 @@ class DeploymentContractTests(TestCase):
         self.assertIn("/^[a-z][a-z0-9_]*$/.test(code) ? errorMessages.request_failed : code", javascript)
         self.assertIn("async function waitForTurnstile()", javascript)
         self.assertIn('throw new Error("turnstile_unavailable")', javascript)
+        self.assertIn("function saveCredential()", javascript)
+        self.assertIn('showError("chat-error",error)', javascript)
+        self.assertNotIn('showError("feedback-error",error); $("service-state").textContent="请求失败"', javascript)
 
     def test_public_frontend_assets_are_not_cached_across_deployments(self) -> None:
         caddyfile = self.read("infra/Caddyfile")
@@ -174,6 +177,6 @@ class DeploymentContractTests(TestCase):
         public_env = self.read("ops/public.env.example")
         self.assertIn("@frontend_assets path / /index.html /app.js /app.css", caddyfile)
         self.assertIn('header @frontend_assets Cache-Control "no-store, max-age=0"', caddyfile)
-        self.assertIn('href="/app.css?v=0.6.1"', public_html)
-        self.assertIn('src="/app.js?v=0.6.1"', public_html)
-        self.assertIn("PUBLIC_APP_VERSION=0.6.1", public_env)
+        self.assertIn('href="/app.css?v=0.6.2"', public_html)
+        self.assertIn('src="/app.js?v=0.6.2"', public_html)
+        self.assertIn("PUBLIC_APP_VERSION=0.6.2", public_env)

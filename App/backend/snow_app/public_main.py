@@ -40,7 +40,7 @@ from .public_security import (
     verify_turnstile,
 )
 from .mvp_service import MVPProviderError
-from .public_service import GenerationBusy, PublicChatService
+from .public_service import CharacterUnavailable, GenerationBusy, PublicChatService
 from .public_store import (
     DuplicateFeedback,
     PublicStore,
@@ -443,7 +443,16 @@ def create_app(
             )
         except (OSError, json.JSONDecodeError):
             pass
-        required_data = ("lakehouse", "lexical_index", "vector_index", "personas", "graph")
+        required_data = (
+            "lakehouse",
+            "lexical_index",
+            "vector_index",
+            "personas",
+            "graph",
+            "character_views",
+            "question_bank",
+            "dialogue_profiles",
+        )
         data_ok = all(data_status.get(name) for name in required_data) and (
             public_settings.allow_insecure_dev or manifest_version == public_settings.data_version
         )
@@ -496,6 +505,10 @@ def create_app(
     @app.exception_handler(GenerationBusy)
     async def generation_busy(_request: Request, exc: GenerationBusy):
         return JSONResponse(status_code=503, content={"detail": {"code": str(exc)}})
+
+    @app.exception_handler(CharacterUnavailable)
+    async def character_unavailable(_request: Request, _exc: CharacterUnavailable):
+        return JSONResponse(status_code=503, content={"detail": {"code": "character_unavailable"}})
 
     @app.exception_handler(RequestValidationError)
     @app.exception_handler(ValidationError)

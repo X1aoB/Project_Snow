@@ -6,11 +6,13 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
 from backend.snow_app.config import PublicSettings, Settings
+from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from backend.snow_app.public_main import create_app
 from backend.snow_app.public_store import PublicStore
 
@@ -125,6 +127,9 @@ class PublicAPITests(TestCase):
                 "personas/persona_profiles.jsonl",
                 "graph/nodes.jsonl",
                 "graph/edges.jsonl",
+                "mvp/character_views.jsonl",
+                "mvp/question_bank.json",
+                "personas/dialogue_style_profiles.jsonl",
             ):
                 path = runtime_root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -223,3 +228,58 @@ class PublicAPITests(TestCase):
         self.assertIn("event: done", first.text)
         self.assertIn('"safety_category":"illegal_instructions"', first.text)
         self.assertIn('"idempotent_replay":true', second.text)
+
+    def test_all_public_characters_reach_the_immersive_engine(self) -> None:
+        credential, _ = self._byok()
+        service = self.app.state.chat_service
+        with patch.object(service.mvp, "chat", return_value={"answer": "测试回复"}) as chat:
+            for character in MVP_CHARACTERS:
+                response = self.client.post(
+                    "/public/v1/chat/stream",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "request_id": str(uuid4()),
+                        "provider": "openai",
+                        "credential": credential,
+                        "model": "gpt-test",
+                        "character_id": character.character_id,
+                        "message": "你好",
+                        "recent_history": [],
+                        "history_summary": "",
+                        "state_package": "",
+                    },
+                )
+                self.assertEqual(response.status_code, 200, character.display_name)
+                self.assertIn("event: done", response.text)
+        self.assertEqual(chat.call_count, len(MVP_CHARACTERS))
+
+    def test_missing_character_view_returns_controlled_error(self) -> None:
+        credential, _ = self._byok()
+        service = self.app.state.chat_service
+        original_path = service.mvp.views_path
+        with TemporaryDirectory() as directory:
+            service.mvp.views_path = Path(directory) / "missing-character-views.jsonl"
+            service.mvp._views_cache = None
+            service.mvp._views_mtime = None
+            try:
+                response = self.client.post(
+                    "/public/v1/chat/stream",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "request_id": str(uuid4()),
+                        "provider": "openai",
+                        "credential": credential,
+                        "model": "gpt-test",
+                        "character_id": MVP_CHARACTERS[0].character_id,
+                        "message": "你好",
+                        "recent_history": [],
+                        "history_summary": "",
+                        "state_package": "",
+                    },
+                )
+            finally:
+                service.mvp.views_path = original_path
+                service.mvp._views_cache = None
+                service.mvp._views_mtime = None
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"]["code"], "character_unavailable")

@@ -26,6 +26,7 @@ textarea { resize:vertical; min-height:86px; }
 .primary-button { background:var(--accent-strong); border-color:var(--accent-strong); color:#061323; font-weight:700; }
 .danger-button { color:#ffd9df; border-color:#934454; background:#351a24; }
 .form-error { color:#ffbac5; min-height:1.4em; margin:0; }
+.form-hint { color:#b9d9ff; margin:0; font-size:.84rem; }
 .chat-view { flex:1; min-height:0; display:grid; grid-template-columns:300px 1fr; }
 .characters-panel { min-height:0; display:flex; flex-direction:column; background:#0e1422c9; border-right:1px solid var(--line); }
 .panel-heading,.conversation-header { padding:16px 18px; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--line); }
@@ -43,5 +44,6 @@ textarea { resize:vertical; min-height:86px; }
 .message { max-width:min(780px,88%); padding:13px 15px; border:1px solid var(--line); border-radius:14px; white-space:pre-wrap; line-height:1.65; }
 .message.user { align-self:flex-end; background:#1e4677; border-color:#3772af; }.message.assistant { align-self:flex-start; background:#131d31; }.message .meta { display:block; font-size:.75rem; color:var(--muted); margin-bottom:5px; }
 .empty { margin:auto; text-align:center; }.composer { border-top:1px solid var(--line); padding:12px clamp(16px,5vw,80px) 18px; background:#0d1321e8; }.composer textarea { min-height:70px; }.composer-footer { display:flex; justify-content:space-between; align-items:center; margin-top:8px; color:var(--muted); font-size:.8rem; }
+.chat-error { padding:0 clamp(16px,5vw,80px); min-height:0; }
 .dialog { width:min(600px,calc(100vw - 30px)); color:var(--ink); border:0; padding:0; background:transparent; }.dialog::backdrop { background:#000b; }.dialog .card { display:grid; gap:14px; }.dialog header { display:flex; justify-content:space-between; align-items:center; gap:12px; }
 @media (max-width:760px) { .topbar { padding:14px 16px; }.badge { display:none; }.setup-view { grid-template-columns:1fr; gap:20px; padding:36px 0; }.chat-view { grid-template-columns:1fr; }.characters-panel { max-height:36vh; border-right:0; border-bottom:1px solid var(--line); }.character-list { grid-template-columns:repeat(2,minmax(0,1fr)); }.character { font-size:.85rem; }.characters-panel footer { display:none; }.messages { padding:16px; }.composer { padding:10px 16px 14px; } }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="same-origin" />
     <title>Project Snow · 沉浸式</title>
-    <link rel="stylesheet" href="/app.css?v=0.6.1" />
+    <link rel="stylesheet" href="/app.css?v=0.6.2" />
   </head>
   <body>
     <main class="shell">
@@ -28,7 +28,8 @@
         <form id="byok-form" class="card byok-form">
           <h2>连接你的模型</h2>
           <label>模型厂商<select id="provider-select" required></select></label>
-          <label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" required minlength="8" /></label>
+          <label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" minlength="8" /></label>
+          <p id="credential-status" class="form-hint" hidden></p>
           <label>模型 ID<input id="model-id" type="text" autocomplete="off" placeholder="可手动填写；也可在连接后获取列表" maxlength="200" /></label>
           <button id="discover-models" class="quiet-button" type="button">获取模型列表</button>
           <select id="discovered-models" hidden aria-label="已发现的模型"></select>
@@ -38,6 +39,7 @@
           <input id="turnstile-token" type="hidden" />
           <p id="setup-error" class="form-error" role="alert"></p>
           <button class="primary-button" type="submit">开始体验</button>
+          <button id="clear-credential" class="quiet-button" type="button" hidden>清除 API 会话</button>
         </form>
       </section>
 
@@ -51,6 +53,7 @@
         <section class="conversation-panel">
           <header id="conversation-header" class="conversation-header"><div><h1>选择一位角色</h1><p>纯文本沉浸式对话</p></div><span id="service-state" class="state">准备中</span></header>
           <div id="messages" class="messages" aria-live="polite"><p class="empty">选择左侧角色，开始一段新的对话。</p></div>
+          <p id="chat-error" class="form-error chat-error" role="alert"></p>
           <form id="composer" class="composer">
             <textarea id="message-input" maxlength="2000" placeholder="输入想说的话（最多 2,000 字）" disabled></textarea>
             <div class="composer-footer"><span id="input-count">0 / 2000</span><button id="send-button" class="primary-button" type="submit" disabled>发送</button></div>
@@ -61,6 +64,6 @@
 
     <dialog id="feedback-dialog" class="dialog"><form id="feedback-form" method="dialog" class="card"><header><h2>提交反馈</h2><button type="button" data-close="feedback-dialog" class="quiet-button">关闭</button></header><p>提交时会附带当前一问一答、角色、模型、版本和错误状态，方便定位问题。反馈保留 30 天。</p><label>反馈内容<textarea id="feedback-body" maxlength="1000" required placeholder="最多 1,000 字"></textarea></label><label>QQ（可选）<input id="feedback-qq" inputmode="numeric" pattern="[0-9]{5,12}" maxlength="12" placeholder="如愿意进一步交流，可留下 QQ" /></label><input id="feedback-turnstile" type="hidden" /><p id="feedback-error" class="form-error" role="alert"></p><button class="primary-button" type="submit">提交反馈</button></form></dialog>
     <dialog id="history-dialog" class="dialog"><section class="card"><header><h2>本地聊天记录</h2><button type="button" data-close="history-dialog" class="quiet-button">关闭</button></header><p>完整记录只存于当前浏览器 IndexedDB，服务器不保存长期聊天历史。</p><p id="storage-usage">正在计算占用空间…</p><label>删除某个角色的历史<select id="history-character"></select></label><button id="delete-character-history" class="quiet-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部本地历史</button></section></dialog>
-    <script src="/app.js?v=0.6.1" type="module"></script>
+    <script src="/app.js?v=0.6.2" type="module"></script>
   </body>
 </html>
