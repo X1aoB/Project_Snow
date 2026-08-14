@@ -51,6 +51,7 @@ class PublicSecurityTests(TestCase):
         requirements = (app_root / "requirements-public.txt").read_text(encoding="utf-8")
 
         self.assertIn("COPY requirements-public.txt", dockerfile)
+        self.assertIn("COPY config/public_knowledge", dockerfile)
         self.assertIn("cryptography>=50,<51", requirements)
         for excluded in ("sentence-transformers", "torch", "playwright", "pypdf"):
             self.assertNotIn(excluded, requirements.casefold())

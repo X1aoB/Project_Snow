@@ -6,6 +6,7 @@ RUN useradd --create-home --uid 10001 snow
 COPY requirements-public.txt ./
 RUN pip install --no-cache-dir -r requirements-public.txt
 COPY backend ./backend
+COPY config/public_knowledge ./config/public_knowledge
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
 COPY public_frontend ./public_frontend
