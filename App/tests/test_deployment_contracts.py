@@ -170,5 +170,10 @@ class DeploymentContractTests(TestCase):
 
     def test_public_frontend_assets_are_not_cached_across_deployments(self) -> None:
         caddyfile = self.read("infra/Caddyfile")
+        public_html = self.read("public_frontend/index.html")
+        public_env = self.read("ops/public.env.example")
         self.assertIn("@frontend_assets path / /index.html /app.js /app.css", caddyfile)
         self.assertIn('header @frontend_assets Cache-Control "no-store, max-age=0"', caddyfile)
+        self.assertIn('href="/app.css?v=0.6.1"', public_html)
+        self.assertIn('src="/app.js?v=0.6.1"', public_html)
+        self.assertIn("PUBLIC_APP_VERSION=0.6.1", public_env)
