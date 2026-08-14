@@ -15,8 +15,8 @@ jobs:
       run:
         working-directory: App
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
@@ -25,7 +25,7 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m pytest tests/test_public_security.py tests/test_public_api.py -q
       - run: python -m compileall -q backend migrations scripts
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
       - run: node --check public_frontend/app.js
@@ -36,12 +36,15 @@ jobs:
   compose-and-secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - name: Create Compose validation env
+        run: install -m 600 /dev/null /tmp/project-snow-public.env
       - name: Validate production Compose
         working-directory: App
         env:
+          PUBLIC_ENV_FILE: /tmp/project-snow-public.env
           PUBLIC_API_IMAGE: ghcr.io/example/public@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           EMBEDDING_IMAGE: ghcr.io/example/embedding@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           CLOUDFLARED_IMAGE: cloudflare/cloudflared@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -62,7 +65,7 @@ jobs:
   container-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
@@ -72,7 +75,7 @@ jobs:
           load: true
           tags: project-snow-public:ci
       - name: Scan application image
-        uses: aquasecurity/trivy-action@0.31.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: project-snow-public:ci
           format: table
