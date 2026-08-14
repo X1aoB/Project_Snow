@@ -56,6 +56,11 @@ class PublicSecurityTests(TestCase):
         for excluded in ("sentence-transformers", "torch", "playwright", "pypdf"):
             self.assertNotIn(excluded, requirements.casefold())
 
+        embedding_dockerfile = (app_root / "infra" / "embedding.Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("https://download.pytorch.org/whl/cpu", embedding_dockerfile)
+        self.assertIn("torch==2.13.0+cpu", embedding_dockerfile)
+        self.assertIn("transformers==5.15.0", embedding_dockerfile)
+
     def test_byok_credential_is_bound_to_anonymous_session_and_provider(self) -> None:
         settings = _settings()
         token, _ = issue_byok_credential(

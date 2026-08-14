@@ -99,3 +99,30 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18000/public/v1/health/live && exit 0; sleep 1; done
           docker logs snow-public
           exit 1
+
+  embedding-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: App
+          file: App/infra/embedding.Dockerfile
+          push: false
+          load: true
+          tags: project-snow-embedding:ci
+      - name: Scan embedding image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: project-snow-embedding:ci
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Embedding container live check
+        run: |
+          docker run -d --name snow-embedding -p 18001:8000 project-snow-embedding:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18001/health && exit 0; sleep 1; done
+          docker logs snow-embedding
+          exit 1
