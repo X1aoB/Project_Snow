@@ -1,5 +1,22 @@
 # Project Snow Application
 
+## Public immersive surface (private acceptance)
+
+`backend.snow_app.public_main` is a separate registration-free application for `snow.xiaob.dev`. It exposes only `/public/v1`, serves a pure-text immersive client, stores full history in browser IndexedDB, and accepts BYOK credentials as two-hour AES-GCM envelopes bound to an anonymous HttpOnly cookie. The internal `/api/v1` workspace is not mounted.
+
+Provider adapters exist for OpenAI, DeepSeek, Alibaba Cloud Model Studio, Zhipu and Moonshot. `PUBLIC_ENABLED_PROVIDERS` is empty by default; enable each adapter only after a real-key smoke test. Custom base URLs are not accepted.
+
+Local entry points:
+
+```powershell
+Copy-Item .env.example .env.local
+.\scripts\local.ps1 Start
+.\scripts\validate_all.ps1
+.\scripts\local.ps1 DataLab
+```
+
+Production deployment, graph quarantine, data release, backups and the second-approval public gate are documented in [docs/public_deployment.md](docs/public_deployment.md). The `data-lab` profile is a Docker Compose simulation with Kafka KRaft, Spark master plus two workers, Hive Metastore and MinIO; it is not a production multi-host cluster.
+
 `App/` 是 Project Snow 的本地应用层：它读取上级 `Data/` 中已采集的资料，建立
 运行时检索索引，并提供 22 名角色的聊天测试客户端、证据工作台和安全的 Electron
 桌面壳。`Data/` 保持只读；所有可再生成或私密的产物均写入 `App/runtime/`。

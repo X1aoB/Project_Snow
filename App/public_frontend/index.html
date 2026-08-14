@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="same-origin" />
+    <title>Project Snow · 沉浸式</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">Project Snow</a>
+        <span class="badge">沉浸式体验 · 私有验收</span>
+        <span id="version-badge" class="badge">版本加载中</span>
+        <div class="top-actions">
+          <button id="history-settings" class="quiet-button" type="button">本地记录</button>
+          <button id="feedback-open" class="quiet-button" type="button">反馈</button>
+        </div>
+      </header>
+
+      <section id="setup-view" class="setup-view">
+        <div class="setup-copy">
+          <p class="eyebrow">BYOK · 浏览器本地历史</p>
+          <h1>带上自己的模型，进入她们的故事。</h1>
+          <p>无需注册。你的完整聊天记录默认只保存在这台设备的浏览器里；模型 API Key 只会短暂经过服务器内存，用于转发本次请求。</p>
+        </div>
+        <form id="byok-form" class="card byok-form">
+          <h2>连接你的模型</h2>
+          <label>模型厂商<select id="provider-select" required></select></label>
+          <label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" required minlength="8" /></label>
+          <label>模型 ID<input id="model-id" type="text" autocomplete="off" placeholder="可手动填写；也可在连接后获取列表" maxlength="200" /></label>
+          <button id="discover-models" class="quiet-button" type="button">获取模型列表</button>
+          <select id="discovered-models" hidden aria-label="已发现的模型"></select>
+          <label class="check"><input id="notice-transit" type="checkbox" required />我知晓 Key 会短暂经过服务器内存，且不会存入数据库或日志。</label>
+          <label class="check"><input id="notice-cost" type="checkbox" required />我知晓模型调用费用由我的 API 账户承担。</label>
+          <label class="check"><input id="notice-history" type="checkbox" required />我知晓聊天记录主要明文存于本机浏览器，共用设备请自行清理。</label>
+          <input id="turnstile-token" type="hidden" />
+          <p id="setup-error" class="form-error" role="alert"></p>
+          <button class="primary-button" type="submit">开始体验</button>
+        </form>
+      </section>
+
+      <section id="chat-view" class="chat-view" hidden>
+        <aside class="characters-panel">
+          <div class="panel-heading"><strong>角色</strong><button id="change-model" class="quiet-button" type="button">更换模型</button></div>
+          <label class="search"><span>搜索</span><input id="character-search" type="search" placeholder="输入角色名" /></label>
+          <div id="character-list" class="character-list" role="listbox"></div>
+          <footer><a href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">返回项目介绍</a><a id="github-link" href="https://github.com/X1aoB/Project_Snow" rel="noreferrer">Project Snow 源码</a><a id="website-github-link" href="https://github.com/X1aoB/MyWebsite" rel="noreferrer">MyWebsite 源码</a><a id="releases-link" href="https://github.com/X1aoB/Project_Snow/releases" rel="noreferrer">版本发布</a></footer>
+        </aside>
+        <section class="conversation-panel">
+          <header id="conversation-header" class="conversation-header"><div><h1>选择一位角色</h1><p>纯文本沉浸式对话</p></div><span id="service-state" class="state">准备中</span></header>
+          <div id="messages" class="messages" aria-live="polite"><p class="empty">选择左侧角色，开始一段新的对话。</p></div>
+          <form id="composer" class="composer">
+            <textarea id="message-input" maxlength="2000" placeholder="输入想说的话（最多 2,000 字）" disabled></textarea>
+            <div class="composer-footer"><span id="input-count">0 / 2000</span><button id="send-button" class="primary-button" type="submit" disabled>发送</button></div>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="feedback-dialog" class="dialog"><form id="feedback-form" method="dialog" class="card"><header><h2>提交反馈</h2><button type="button" data-close="feedback-dialog" class="quiet-button">关闭</button></header><p>提交时会附带当前一问一答、角色、模型、版本和错误状态，方便定位问题。反馈保留 30 天。</p><label>反馈内容<textarea id="feedback-body" maxlength="1000" required placeholder="最多 1,000 字"></textarea></label><label>QQ（可选）<input id="feedback-qq" inputmode="numeric" pattern="[0-9]{5,12}" maxlength="12" placeholder="如愿意进一步交流，可留下 QQ" /></label><input id="feedback-turnstile" type="hidden" /><p id="feedback-error" class="form-error" role="alert"></p><button class="primary-button" type="submit">提交反馈</button></form></dialog>
+    <dialog id="history-dialog" class="dialog"><section class="card"><header><h2>本地聊天记录</h2><button type="button" data-close="history-dialog" class="quiet-button">关闭</button></header><p>完整记录只存于当前浏览器 IndexedDB，服务器不保存长期聊天历史。</p><p id="storage-usage">正在计算占用空间…</p><label>删除某个角色的历史<select id="history-character"></select></label><button id="delete-character-history" class="quiet-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部本地历史</button></section></dialog>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

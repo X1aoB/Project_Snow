@@ -20,6 +20,7 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+    profiles: [dev]
 
   frontend:
     build:
@@ -29,6 +30,33 @@ services:
       - "8080:80"
     depends_on:
       - api
+    profiles: [dev]
+
+  public-api:
+    build:
+      context: .
+      dockerfile: infra/public-api.Dockerfile
+    env_file: .env.local
+    environment:
+      DATA_ROOT: /workspace/Data
+      APP_RUNTIME: /workspace/App/runtime
+      PUBLIC_ALLOW_INSECURE_DEV: "true"
+      PUBLIC_AUTO_CREATE_SCHEMA: "true"
+      PUBLIC_DATABASE_URL: postgresql+psycopg://project_snow:${POSTGRES_PASSWORD}@postgres/project_snow
+      EMBEDDING_URL: http://embedding:8000
+      QDRANT_URL: http://qdrant:6333
+      NEO4J_URI: bolt://neo4j:7687
+    volumes:
+      - ../Data:/workspace/Data:ro
+      - ./runtime:/workspace/App/runtime:ro
+      - ./public_frontend:/app/public_frontend:ro
+    ports: ["8081:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      qdrant: {condition: service_started}
+      neo4j: {condition: service_started}
+      embedding: {condition: service_started}
+    profiles: [dev, prod-like]
 
   worker:
     build:
@@ -50,6 +78,7 @@ services:
       - qdrant_data:/qdrant/storage
     ports:
       - "6333:6333"
+    profiles: [dev, test, prod-like]
 
   postgres:
     image: postgres:16-alpine
@@ -65,10 +94,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    profiles: [dev, test, prod-like]
 
   neo4j:
     image: neo4j:5.26-community
-    profiles: ["graph"]
+    profiles: [dev, test, prod-like]
     environment:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in App/.env before starting Compose}
       NEO4J_server_memory_heap_initial__size: 512m
@@ -79,7 +109,87 @@ services:
     volumes:
       - neo4j_data:/data
 
+  embedding:
+    build:
+      context: .
+      dockerfile: infra/embedding.Dockerfile
+    volumes:
+      - embedding_models:/models
+    profiles: [dev, test, prod-like]
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: infra/public-api.Dockerfile
+    environment:
+      PYTHONPATH: /app
+      PUBLIC_DATABASE_URL: postgresql+psycopg://project_snow:${POSTGRES_PASSWORD}@postgres/project_snow
+    volumes:
+      - ./tests:/app/tests:ro
+    command: ["python", "-m", "pytest", "-q"]
+    profiles: [test]
+
+  kafka:
+    image: bitnami/kafka:4.0.0
+    environment:
+      KAFKA_ENABLE_KRAFT: "yes"
+      KAFKA_CFG_NODE_ID: 1
+      KAFKA_CFG_PROCESS_ROLES: broker,controller
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    profiles: [data-lab]
+
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: snowlab
+      MINIO_ROOT_PASSWORD: snowlab-development-only
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio_data:/data"]
+    profiles: [data-lab]
+
+  hive-metastore:
+    image: apache/hive:4.0.1
+    environment:
+      SERVICE_NAME: metastore
+    ports: ["9083:9083"]
+    profiles: [data-lab]
+
+  spark-master:
+    image: bitnami/spark:3.5.5
+    environment:
+      SPARK_MODE: master
+    ports: ["8088:8080"]
+    profiles: [data-lab]
+
+  spark-worker-1:
+    image: bitnami/spark:3.5.5
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2G
+    depends_on: [spark-master]
+    profiles: [data-lab]
+
+  spark-worker-2:
+    image: bitnami/spark:3.5.5
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2G
+    depends_on: [spark-master]
+    profiles: [data-lab]
+
 volumes:
   postgres_data:
   qdrant_data:
   neo4j_data:
+  embedding_models:
+  minio_data:

@@ -1,0 +1,140 @@
+name: required-checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  public-api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: App
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: App/requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests/test_public_security.py tests/test_public_api.py -q
+      - run: python -m compileall -q backend migrations scripts
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - run: node --check public_frontend/app.js
+      - run: alembic upgrade head --sql > migration.sql
+        env:
+          PUBLIC_DATABASE_URL: postgresql+psycopg://project_snow:ci@postgres/project_snow
+
+  compose-and-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Create Compose validation env
+        run: install -m 600 /dev/null /tmp/project-snow-public.env
+      - name: Validate production Compose
+        working-directory: App
+        env:
+          PUBLIC_ENV_FILE: /tmp/project-snow-public.env
+          PUBLIC_API_IMAGE: ghcr.io/example/public@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          EMBEDDING_IMAGE: ghcr.io/example/embedding@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          CLOUDFLARED_IMAGE: cloudflare/cloudflared@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+          CADDY_IMAGE: caddy@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+          POSTGRES_IMAGE: postgres@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+          QDRANT_IMAGE: qdrant/qdrant@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+          NEO4J_IMAGE: neo4j@sha256:1111111111111111111111111111111111111111111111111111111111111111
+          EGRESS_PROXY_IMAGE: ubuntu/squid@sha256:2222222222222222222222222222222222222222222222222222222222222222
+          NEO4J_AUTH: neo4j/ci-placeholder
+        run: docker compose -f compose.prod.yml --profile blue --profile admin config --quiet
+      - name: Reject committed secrets
+        run: |
+          secret_pattern='(sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA |OPENSSH )?PRIVATE KEY|cloudflare_''tunnel_token=)'
+          ! git grep -niE "$secret_pattern" -- ':!App/tests/**'
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  container-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: App
+          file: App/infra/public-api.Dockerfile
+          push: false
+          load: true
+          tags: project-snow-public:ci
+      - name: Scan application image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: project-snow-public:ci
+          format: json
+          output: trivy-application.json
+          exit-code: '0'
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Enforce application vulnerability gate
+        run: python App/scripts/report_trivy_findings.py trivy-application.json
+      - name: Container live check
+        run: |
+          docker run -d --name snow-public -p 18000:8000 \
+            -e PUBLIC_ALLOW_INSECURE_DEV=true \
+            -e PUBLIC_AUTO_CREATE_SCHEMA=true \
+            -e PUBLIC_DATABASE_URL=sqlite+pysqlite:////tmp/public.db \
+            -e PUBLIC_ENABLED_PROVIDERS= \
+            -e PUBLIC_CREDENTIAL_KEY=eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg \
+            -e PUBLIC_STATE_HMAC_KEY=eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg \
+            -e PUBLIC_IP_HMAC_KEY=eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg \
+            -e PUBLIC_QQ_KEY=eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg \
+            -e PUBLIC_ADMIN_TOKEN=ci-only \
+            project-snow-public:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18000/public/v1/health/live && exit 0; sleep 1; done
+          docker logs snow-public
+          exit 1
+
+  embedding-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: App
+          file: App/infra/embedding.Dockerfile
+          push: false
+          load: true
+          tags: project-snow-embedding:ci
+      - name: Audit embedding package metadata
+        run: |
+          docker run --rm --entrypoint sh project-snow-embedding:ci -c \
+            'grep -RIlE "^Name: (msgpack|setuptools)$" /usr/local/lib/python3.12 /opt/venv 2>/dev/null | while read -r path; do echo "$path"; grep -E "^(Name|Version):" "$path"; done'
+      - name: Scan embedding image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: project-snow-embedding:ci
+          format: json
+          output: trivy-embedding.json
+          exit-code: '0'
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Enforce embedding vulnerability gate
+        run: python App/scripts/report_trivy_findings.py trivy-embedding.json
+      - name: Embedding container live check
+        run: |
+          docker run -d --name snow-embedding -p 18001:8000 project-snow-embedding:ci
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18001/health && exit 0; sleep 1; done
+          docker logs snow-embedding
+          exit 1

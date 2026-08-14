@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import base64
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,28 @@ except ImportError:  # pragma: no cover - optional for env-only deployments
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = PACKAGE_ROOT.parent
+
+
+def _secret_value(name: str, default: str = "") -> str:
+    """Read a secret from an env value or an explicitly configured file."""
+
+    file_path = str(os.getenv(f"{name}_FILE") or "").strip()
+    if file_path:
+        try:
+            return Path(file_path).read_text(encoding="utf-8").strip()
+        except OSError:
+            return default
+    return str(os.getenv(name) or default).strip()
+
+
+def _decode_32_byte_key(value: str) -> bytes | None:
+    if not value:
+        return None
+    try:
+        decoded = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+    except (ValueError, TypeError):
+        return None
+    return decoded if len(decoded) == 32 else None
 
 
 @dataclass(frozen=True)
@@ -88,3 +111,99 @@ class Settings:
             mvp_chat_timeout_seconds=float(os.getenv("MVP_CHAT_TIMEOUT_SECONDS", "120")),
             mvp_chat_credential_ref=credential_ref,
         )
+
+
+@dataclass(frozen=True)
+class PublicSettings:
+    app_version: str
+    data_version: str
+    database_url: str
+    public_origin: str
+    development_origins: tuple[str, ...]
+    turnstile_site_key: str
+    turnstile_secret: str
+    credential_key: bytes | None
+    state_hmac_key: bytes | None
+    ip_hmac_key: bytes | None
+    qq_key: bytes | None
+    admin_token: str
+    enabled_providers: tuple[str, ...]
+    allow_insecure_dev: bool
+    qdrant_url: str
+    qdrant_collection: str
+    qdrant_api_key: str
+    embedding_url: str
+    neo4j_uri: str
+    neo4j_user: str
+    neo4j_password: str
+    auto_create_schema: bool = False
+    trust_proxy_headers: bool = False
+
+    @classmethod
+    def from_environment(cls) -> "PublicSettings":
+        if load_dotenv is not None:
+            load_dotenv(PACKAGE_ROOT / ".env", override=False)
+        providers = tuple(
+            value.strip().casefold()
+            # Adapters exist for every supported vendor, but a vendor must not
+            # appear in the public UI until its real-key smoke test succeeds.
+            for value in os.getenv("PUBLIC_ENABLED_PROVIDERS", "").split(",")
+            if value.strip()
+        )
+        development_origins = tuple(
+            value.strip()
+            for value in os.getenv(
+                "PUBLIC_DEVELOPMENT_ORIGINS",
+                "http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000,http://127.0.0.1:8000",
+            ).split(",")
+            if value.strip()
+        )
+        return cls(
+            app_version=os.getenv("PUBLIC_APP_VERSION", "0.6.0"),
+            data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
+            database_url=_secret_value("PUBLIC_DATABASE_URL"),
+            public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),
+            development_origins=development_origins,
+            turnstile_site_key=os.getenv("TURNSTILE_SITE_KEY", ""),
+            turnstile_secret=_secret_value("TURNSTILE_SECRET"),
+            credential_key=_decode_32_byte_key(_secret_value("PUBLIC_CREDENTIAL_KEY")),
+            state_hmac_key=_decode_32_byte_key(_secret_value("PUBLIC_STATE_HMAC_KEY")),
+            ip_hmac_key=_decode_32_byte_key(_secret_value("PUBLIC_IP_HMAC_KEY")),
+            qq_key=_decode_32_byte_key(_secret_value("PUBLIC_QQ_KEY")),
+            admin_token=_secret_value("PUBLIC_ADMIN_TOKEN"),
+            enabled_providers=providers,
+            allow_insecure_dev=os.getenv("PUBLIC_ALLOW_INSECURE_DEV", "false").casefold() == "true",
+            qdrant_url=os.getenv("QDRANT_URL", "http://qdrant:6333").rstrip("/"),
+            qdrant_collection=os.getenv("QDRANT_COLLECTION", "project_snow_documents"),
+            qdrant_api_key=_secret_value("QDRANT_API_KEY"),
+            embedding_url=os.getenv("EMBEDDING_URL", "http://embedding:80").rstrip("/"),
+            neo4j_uri=os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
+            neo4j_user=os.getenv("NEO4J_USER", "neo4j"),
+            neo4j_password=_secret_value("NEO4J_PASSWORD"),
+            auto_create_schema=os.getenv("PUBLIC_AUTO_CREATE_SCHEMA", "false").casefold() == "true",
+            trust_proxy_headers=os.getenv("PUBLIC_TRUST_PROXY_HEADERS", "false").casefold() == "true",
+        )
+
+    @property
+    def allowed_origins(self) -> tuple[str, ...]:
+        return (
+            (self.public_origin, *self.development_origins)
+            if self.allow_insecure_dev
+            else (self.public_origin,)
+        )
+
+    def missing_production_secrets(self) -> list[str]:
+        missing = []
+        for name, value in (
+            ("PUBLIC_DATABASE_URL", self.database_url),
+            ("TURNSTILE_SECRET", self.turnstile_secret),
+            ("PUBLIC_CREDENTIAL_KEY", self.credential_key),
+            ("PUBLIC_STATE_HMAC_KEY", self.state_hmac_key),
+            ("PUBLIC_IP_HMAC_KEY", self.ip_hmac_key),
+            ("PUBLIC_QQ_KEY", self.qq_key),
+            ("PUBLIC_ADMIN_TOKEN", self.admin_token),
+            ("QDRANT_API_KEY", self.qdrant_api_key),
+        ):
+            if not value:
+                missing.append(name)
+        return missing
