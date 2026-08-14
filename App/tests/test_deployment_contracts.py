@@ -147,6 +147,7 @@ class DeploymentContractTests(TestCase):
         self.assertIn("PUBLIC_AUTO_CREATE_SCHEMA=false", public_env)
         self.assertNotIn("PUBLIC_DATABASE_URL=", public_env)
         self.assertNotIn("TURNSTILE_SECRET=", public_env)
+        self.assertIn("PUBLIC_ENABLED_PROVIDERS=openai,deepseek,dashscope,zhipu,moonshot", public_env)
         for variable in (
             "CADDY_IMAGE",
             "CLOUDFLARED_IMAGE",
@@ -156,3 +157,13 @@ class DeploymentContractTests(TestCase):
             "EGRESS_PROXY_IMAGE",
         ):
             self.assertIn(f"{variable}=", images_env)
+
+    def test_public_frontend_hides_inactive_views_and_explains_byok_failures(self) -> None:
+        css = self.read("public_frontend/app.css")
+        javascript = self.read("public_frontend/app.js")
+        self.assertIn("[hidden] { display:none !important; }", css)
+        self.assertIn('invalid_request:"请求内容不完整', javascript)
+        self.assertIn('provider_not_enabled:"该模型厂商尚未启用', javascript)
+        self.assertIn("errorMessages[code] || errorMessages.request_failed", javascript)
+        self.assertIn("async function waitForTurnstile()", javascript)
+        self.assertIn('throw new Error("turnstile_unavailable")', javascript)
