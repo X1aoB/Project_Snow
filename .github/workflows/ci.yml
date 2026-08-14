@@ -112,6 +112,10 @@ jobs:
           push: false
           load: true
           tags: project-snow-embedding:ci
+      - name: Audit embedding package metadata
+        run: |
+          docker run --rm --entrypoint sh project-snow-embedding:ci -c \
+            'grep -RIlE "^Name: (msgpack|setuptools)$" /usr/local/lib/python3.12 2>/dev/null | while read -r path; do echo "$path"; grep -E "^(Name|Version):" "$path"; done'
       - name: Scan embedding image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
