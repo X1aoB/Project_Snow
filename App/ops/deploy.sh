@@ -30,8 +30,12 @@ compose() {
 }
 
 compose pull "public-api-$colour" embedding
+compose run --rm --no-deps "public-api-$colour" \
+  python -m backend.snow_app.data_loader --verify-only
 compose run --rm "public-api-$colour" alembic upgrade head
-compose up -d "public-api-$colour" postgres qdrant neo4j embedding egress-proxy caddy cloudflared
+compose up -d postgres qdrant neo4j embedding egress-proxy
+compose run --rm --no-deps "public-api-$colour" python -m backend.snow_app.data_loader
+compose up -d "public-api-$colour" caddy cloudflared
 compose exec -T "public-api-$colour" python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/public/v1/health/ready', timeout=10).read()"
 
 export SNOW_UPSTREAM="public-api-$colour:8000"

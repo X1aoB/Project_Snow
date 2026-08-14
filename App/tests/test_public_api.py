@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 from uuid import uuid4
 
@@ -96,6 +99,48 @@ class PublicAPITests(TestCase):
         response = self.client.get("/public/v1/characters")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["count"], 22)
+
+    def test_production_readiness_requires_matching_data_release(self) -> None:
+        production_settings = replace(
+            self.settings,
+            allow_insecure_dev=False,
+            turnstile_secret="turnstile-test",
+        )
+        with TemporaryDirectory() as directory:
+            runtime_root = Path(directory)
+            internal_settings = replace(
+                self.internal_settings,
+                data_root=runtime_root,
+                runtime_root=runtime_root,
+            )
+            app = create_app(production_settings, internal_settings, self.store)
+            client = TestClient(app)
+            missing = client.get("/public/v1/health/ready")
+            self.assertEqual(missing.status_code, 503)
+            self.assertEqual(missing.json()["data"], "unavailable")
+            for relative in (
+                "lakehouse/documents.jsonl",
+                "indexes/lexical.sqlite3",
+                "vectors/local_vectors.jsonl",
+                "personas/persona_profiles.jsonl",
+                "graph/nodes.jsonl",
+                "graph/edges.jsonl",
+            ):
+                path = runtime_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fixture\n", encoding="utf-8")
+            (runtime_root / "manifest.json").write_text(
+                json.dumps({"data_version": "wrong-version"}), encoding="utf-8"
+            )
+            mismatch = client.get("/public/v1/health/ready")
+            self.assertEqual(mismatch.status_code, 503)
+            self.assertEqual(mismatch.json()["manifest_version"], "wrong-version")
+            (runtime_root / "manifest.json").write_text(
+                json.dumps({"data_version": production_settings.data_version}), encoding="utf-8"
+            )
+            ready = client.get("/public/v1/health/ready")
+            self.assertEqual(ready.status_code, 200)
+            self.assertEqual(ready.json()["data"], "ok")
 
     def _byok(self) -> tuple[str, str]:
         response = self.client.post(

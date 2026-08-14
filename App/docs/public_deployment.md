@@ -38,7 +38,7 @@ The production Compose file caps API, PostgreSQL, Qdrant, Neo4j, embedding, Cadd
 
 ## Data publication
 
-`export_publishable_graph.py` quarantines reviewed nodes that lack traceable page evidence or use unsupported node types. `build_data_release.py` then packages FTS5, the publishable graph and persona profiles with SHA-256 and license metadata. Raw Wiki pages and images are not copied into the application image or Git history.
+`export_publishable_graph.py` quarantines reviewed nodes that lack traceable page evidence or use unsupported node types. `build_data_release.py` then packages the derived documents, 512-dimensional vectors, FTS5 database, publishable graph, persona profiles, attribution index and license metadata in the exact read-only directory layout consumed by the public API. Raw Wiki pages and images are not copied into the application image or Git history. `ops/promote-data.sh` verifies every byte and atomically moves the `current`/`previous` symlinks; deployment loads a versioned Qdrant collection before switching its alias and loads a versioned Neo4j dataset before switching the active pointer.
 
 Before a data build, refuse work when disk usage is at least 70% or free space is below 12 GiB. Run builders with a maximum of eight CPUs and 8 GiB of memory. A failed build never changes the `current` symlink or Qdrant/Neo4j active version.
 

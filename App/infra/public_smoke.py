@@ -19,6 +19,7 @@ def get(path: str) -> tuple[int, dict]:
 
 assert get("/public/v1/health/live")[1].get("status") == "ok"
 assert get("/public/v1/health/ready")[1].get("status") == "ok"
+assert get("/public/v1/health/full")[1].get("status") == "ok"
 assert get("/public/v1/config")[1].get("history_policy") == "browser_indexeddb_plaintext"
 assert get("/public/v1/characters")[1].get("count") == 22
 assert get("/api/v1/mvp/bootstrap")[0] == 404

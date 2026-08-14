@@ -34,8 +34,13 @@ class DeploymentContractTests(TestCase):
 
     def test_deploy_promotes_compose_environment_only_after_smoke(self) -> None:
         script = self.read("ops/deploy.sh")
+        verify_data = script.index("backend.snow_app.data_loader --verify-only")
+        load_data = script.index("python -m backend.snow_app.data_loader", verify_data + 1)
+        start_api = script.index('compose up -d "public-api-$colour" caddy cloudflared')
         smoke = script.index("/app/public_smoke.py")
         promote = script.index('mv -f "$candidate_env" "$current_env"')
+        self.assertLess(verify_data, load_data)
+        self.assertLess(load_data, start_api)
         self.assertLess(smoke, promote)
         self.assertIn('--env-file "$candidate_env"', script)
         self.assertIn("/etc/project-snow/images.env", script)
@@ -73,6 +78,7 @@ class DeploymentContractTests(TestCase):
             "App/ops/prepare_debian.sh",
             "App/ops/restore-postgres.sh",
             "App/ops/rollback.sh",
+            "App/ops/promote-data.sh",
             "App/infra/public-entrypoint.sh",
         )
         result = subprocess.run(
@@ -88,6 +94,14 @@ class DeploymentContractTests(TestCase):
             if line.strip() and len(fields := line.split(maxsplit=3)) == 4
         }
         self.assertEqual(indexed_modes, {path: "100755" for path in paths}, result.stdout)
+
+    def test_production_runtime_uses_promoted_data_release(self) -> None:
+        compose = self.read("compose.prod.yml")
+        self.assertIn("APP_RUNTIME: /srv/project-snow/data/current", compose)
+        self.assertNotIn("APP_RUNTIME: /srv/project-snow/runtime", compose)
+        promote = self.read("ops/promote-data.sh")
+        self.assertIn("verify_data_release.py", promote)
+        self.assertIn('mv -Tf "$temporary_current" "$current_link"', promote)
 
     def test_production_examples_separate_public_settings_from_secrets(self) -> None:
         public_env = self.read("ops/public.env.example")

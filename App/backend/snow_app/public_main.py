@@ -432,13 +432,31 @@ def create_app(
     def ready(response: Response) -> dict[str, Any]:
         missing = public_settings.missing_production_secrets()
         database_ok = store.health()
-        ready_ok = database_ok and not missing
+        data_status = chat_service.repository.status()
+        manifest_version = ""
+        try:
+            manifest_version = str(
+                json.loads((internal_settings.runtime_root / "manifest.json").read_text(encoding="utf-8")).get(
+                    "data_version"
+                )
+                or ""
+            )
+        except (OSError, json.JSONDecodeError):
+            pass
+        required_data = ("lakehouse", "lexical_index", "vector_index", "personas", "graph")
+        data_ok = all(data_status.get(name) for name in required_data) and (
+            public_settings.allow_insecure_dev or manifest_version == public_settings.data_version
+        )
+        ready_ok = database_ok and data_ok and not missing
         if not ready_ok:
             response.status_code = 503
         return {
             "status": "ok" if ready_ok else "not_ready",
             "database": "ok" if database_ok else "unavailable",
+            "data": "ok" if data_ok else "unavailable",
+            "data_artifacts": data_status,
             "data_version": public_settings.data_version,
+            "manifest_version": manifest_version,
             "missing_configuration": missing,
         }
 
