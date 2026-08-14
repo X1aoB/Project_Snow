@@ -44,6 +44,10 @@ class GenerationBusy(RuntimeError):
     pass
 
 
+class CharacterUnavailable(RuntimeError):
+    pass
+
+
 class GenerationGate:
     def __init__(self, active: int = 4, queued: int = 8, queue_timeout: float = 30):
         self.semaphore = asyncio.Semaphore(active)
@@ -202,6 +206,8 @@ class PublicChatService:
         provider: ProviderSpec,
         api_key: str,
     ) -> dict[str, Any]:
+        if request.character_id not in self.mvp._views():
+            raise CharacterUnavailable(request.character_id)
         self.repository.reset_request_health()
         with self._request_state(request, subject_hash) as (session_id, world_id, prior_state):
             result = self.mvp.chat(

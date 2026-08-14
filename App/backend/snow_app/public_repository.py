@@ -29,6 +29,20 @@ class PublicRuntimeRepository(RuntimeRepository):
     def reset_request_health(self) -> None:
         self._health_local.value = {}
 
+    def status(self) -> dict[str, bool]:
+        status = super().status()
+        runtime_root = self.settings.runtime_root
+        status.update(
+            {
+                "character_views": (runtime_root / "mvp" / "character_views.jsonl").is_file(),
+                "question_bank": (runtime_root / "mvp" / "question_bank.json").is_file(),
+                "dialogue_profiles": (
+                    runtime_root / "personas" / "dialogue_style_profiles.jsonl"
+                ).is_file(),
+            }
+        )
+        return status
+
     def _embed_query(self, query: str) -> list[float] | None:
         try:
             response = httpx.post(
