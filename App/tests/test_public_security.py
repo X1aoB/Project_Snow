@@ -62,7 +62,9 @@ class PublicSecurityTests(TestCase):
         self.assertIn("torch==2.13.0+cpu", embedding_dockerfile)
         self.assertIn("transformers==5.15.0", embedding_dockerfile)
         self.assertIn("msgpack==1.2.1", embedding_dockerfile)
-        self.assertIn("RUN pip check", embedding_dockerfile)
+        self.assertIn("msgpack-1.1.2.dist-info", embedding_dockerfile)
+        self.assertIn("setuptools-70.3.0.dist-info", embedding_dockerfile)
+        self.assertIn("&& pip check", embedding_dockerfile)
         self.assertIn("setuptools==84.0.0", embedding_dockerfile)
         self.assertIn("wheel==0.48.0", embedding_dockerfile)
 

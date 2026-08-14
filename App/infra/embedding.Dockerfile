@@ -17,7 +17,10 @@ RUN pip install --no-cache-dir \
     sentence-transformers==5.7.0 \
     transformers==5.15.0 \
     msgpack==1.2.1
-RUN pip check
+RUN find /usr/local/lib/python3.12/site-packages -type d \
+    \( -name 'msgpack-1.1.2.dist-info' -o -name 'setuptools-70.3.0.dist-info' \) \
+    -prune -exec rm -rf -- {} + \
+    && pip check
 COPY infra/embedding_service.py /app/embedding_service.py
 USER embedding
 CMD ["python", "-m", "uvicorn", "embedding_service:app", "--host", "0.0.0.0", "--port", "8000"]
