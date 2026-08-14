@@ -79,10 +79,14 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: project-snow-public:ci
-          format: table
-          exit-code: '1'
+          format: json
+          output: trivy-application.json
+          exit-code: '0'
+          scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+      - name: Enforce application vulnerability gate
+        run: python App/scripts/report_trivy_findings.py trivy-application.json
       - name: Container live check
         run: |
           docker run -d --name snow-public -p 18000:8000 \
@@ -120,10 +124,14 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: project-snow-embedding:ci
-          format: table
-          exit-code: '1'
+          format: json
+          output: trivy-embedding.json
+          exit-code: '0'
+          scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+      - name: Enforce embedding vulnerability gate
+        run: python App/scripts/report_trivy_findings.py trivy-embedding.json
       - name: Embedding container live check
         run: |
           docker run -d --name snow-embedding -p 18001:8000 project-snow-embedding:ci
