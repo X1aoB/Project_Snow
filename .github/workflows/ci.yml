@@ -57,7 +57,8 @@ jobs:
         run: docker compose -f compose.prod.yml --profile blue --profile admin config --quiet
       - name: Reject committed secrets
         run: |
-          ! git grep -nE '(sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA |OPENSSH )?PRIVATE KEY|cloudflare_tunnel_token=)' -- ':!App/tests/**'
+          secret_pattern='(sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA |OPENSSH )?PRIVATE KEY|cloudflare_''tunnel_token=)'
+          ! git grep -niE "$secret_pattern" -- ':!App/tests/**'
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
