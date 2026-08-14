@@ -18,7 +18,9 @@ Keep Cloudflare Access enabled and do not add the MyWebsite play button until a 
 - `/etc/project-snow/secrets`: root-only secret files, mode `0700`; individual files mode `0600`. The public image starts with a minimal root entrypoint, copies only its approved secret files into a private container tmpfs with mode `0400`, and immediately drops to the unprivileged `snow` user before Alembic, Uvicorn or admin code runs. Secret values are never placed in Compose environment interpolation.
 - `/etc/project-snow/cloudflared`: root-only named-tunnel configuration and credentials. Ingress maps only `snow.xiaob.dev` to `http://caddy:8080`, followed by an explicit `http_status:404` catch-all.
 - Caddy port `8080` exists only on the private Docker `edge` network; it is not published on the host.
-- `127.0.0.1:19090`: feedback administration through an SSH tunnel only.
+- `127.0.0.1:19090`: feedback administration through an SSH tunnel only. The admin container keeps its
+  database access on the internal `data` network and uses a dedicated `management` bridge solely so Docker
+  can publish the loopback-bound port; Docker's userland proxy is enabled explicitly for this binding.
 
 Run Alembic before starting a new application colour. Never let the web process auto-create production schema. Application migrations follow expand/contract compatibility with the previous application image.
 

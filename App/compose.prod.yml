@@ -57,7 +57,7 @@ services:
     ports:
       - "127.0.0.1:19090:19090"
     profiles: [admin]
-    networks: [data]
+    networks: [data, management]
 
   caddy:
     image: ${CADDY_IMAGE:?Set immutable CADDY_IMAGE digest}
@@ -181,3 +181,4 @@ networks:
   data:
     internal: true
   outbound:
+  management:

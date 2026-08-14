@@ -38,6 +38,18 @@ class DeploymentContractTests(TestCase):
         self.assertIn("cache_store_log none", squid)
         self.assertIn("pinger_enable off", squid)
 
+    def test_admin_is_published_only_on_loopback_through_a_host_reachable_network(self) -> None:
+        compose = self.read("compose.prod.yml")
+        admin_start = compose.index("  admin:\n")
+        admin_end = compose.index("\n  caddy:\n", admin_start)
+        admin = compose[admin_start:admin_end]
+        networks_start = compose.index("\nnetworks:\n")
+        networks = compose[networks_start:]
+        self.assertIn('"127.0.0.1:19090:19090"', admin)
+        self.assertIn("networks: [data, management]", admin)
+        self.assertIn("  management:\n", networks)
+        self.assertNotIn("  management:\n    internal: true", networks)
+
     def test_public_api_bootstraps_root_only_secrets_then_drops_privileges(self) -> None:
         compose = self.read("compose.prod.yml")
         dockerfile = self.read("infra/public-api.Dockerfile")
@@ -74,6 +86,7 @@ class DeploymentContractTests(TestCase):
 
     def test_prepare_script_installs_host_tuning_and_deploy_key(self) -> None:
         script = self.read("ops/prepare_debian.sh")
+        daemon = self.read("ops/docker-daemon.json")
         self.assertIn('cp "$script_dir/sysctl-project-snow.conf"', script)
         self.assertIn("/srv/project-snow/repo/App", script)
         self.assertIn("must be a symlink", script)
@@ -82,6 +95,7 @@ class DeploymentContractTests(TestCase):
         self.assertIn("ufw allow 43556/tcp", script)
         self.assertIn("-m 0755 -d /srv/project-snow/data", script)
         self.assertIn("-g deploy -m 0750 -d /etc/project-snow", script)
+        self.assertIn('"userland-proxy": true', daemon)
 
     def test_local_deploy_selects_a_verified_main_commit(self) -> None:
         script = self.read("scripts/deploy.ps1")
