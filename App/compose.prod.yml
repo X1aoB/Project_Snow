@@ -12,7 +12,7 @@ x-api: &api
   env_file: ${PUBLIC_ENV_FILE:-/etc/project-snow/public.env}
   environment:
     DATA_ROOT: /srv/project-snow/data/current
-    APP_RUNTIME: /srv/project-snow/runtime
+    APP_RUNTIME: /srv/project-snow/data/current
     PUBLIC_DATABASE_URL_FILE: /run/project-snow-secrets/public_database_url
     TURNSTILE_SECRET_FILE: /run/project-snow-secrets/turnstile_secret
     PUBLIC_CREDENTIAL_KEY_FILE: /run/project-snow-secrets/public_credential_key
@@ -27,7 +27,6 @@ x-api: &api
     PUBLIC_TRUST_PROXY_HEADERS: "true"
   volumes:
     - /srv/project-snow/data:/srv/project-snow/data:ro
-    - /srv/project-snow/runtime:/srv/project-snow/runtime:ro
     - /etc/project-snow/secrets:/run/host-secrets:ro
   cpus: 2
   mem_limit: 1536m

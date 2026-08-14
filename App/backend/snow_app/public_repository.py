@@ -103,11 +103,14 @@ class PublicRuntimeRepository(RuntimeRepository):
                 with driver.session() as session:
                     rows = session.run(
                         """
+                        MATCH (pointer:SnowDatasetPointer {name: 'active'})
                         MATCH (start:SnowEntity)
-                        WHERE start.node_id = $character_node_id
-                           OR any(term IN $terms WHERE start.name CONTAINS term)
+                        WHERE start.dataset_version = pointer.version
+                          AND (start.node_id = $character_node_id
+                           OR any(term IN $terms WHERE start.name CONTAINS term))
                         WITH DISTINCT start LIMIT 4
                         OPTIONAL MATCH path=(start)-[rels:SNOW_RELATION*1..2]-(other:SnowEntity)
+                        WHERE other.dataset_version = start.dataset_version
                         RETURN start, other, relationships(path) AS rels LIMIT 16
                         """,
                         character_node_id=f"character:{character_id}" if character_id else "",
@@ -148,7 +151,10 @@ class PublicRuntimeRepository(RuntimeRepository):
         health: dict[str, str] = {}
         for service, url in (
             ("embedding", f"{self.public_settings.embedding_url}/health"),
-            ("qdrant", f"{self.public_settings.qdrant_url}/healthz"),
+            (
+                "qdrant",
+                f"{self.public_settings.qdrant_url}/collections/{self.public_settings.qdrant_collection}",
+            ),
         ):
             try:
                 response = httpx.get(
@@ -157,7 +163,12 @@ class PublicRuntimeRepository(RuntimeRepository):
                     timeout=5,
                     follow_redirects=False,
                 )
-                health[service] = "ok" if response.status_code < 400 else "degraded"
+                response.raise_for_status()
+                if service == "qdrant":
+                    points_count = int(((response.json().get("result") or {}).get("points_count") or 0))
+                    health[service] = "ok" if points_count > 0 else "degraded"
+                else:
+                    health[service] = "ok"
             except Exception:
                 health[service] = "degraded"
         if self.public_settings.neo4j_password:
@@ -170,8 +181,14 @@ class PublicRuntimeRepository(RuntimeRepository):
                     connection_timeout=5,
                 )
                 try:
-                    driver.verify_connectivity()
-                    health["neo4j"] = "ok"
+                    with driver.session() as session:
+                        active = session.run(
+                            "MATCH (pointer:SnowDatasetPointer {name: 'active'}) "
+                            "MATCH (node:SnowEntity) "
+                            "WHERE node.dataset_version = pointer.version "
+                            "RETURN count(node) AS nodes"
+                        ).single()
+                    health["neo4j"] = "ok" if active and int(active["nodes"]) > 0 else "degraded"
                 finally:
                     driver.close()
             except Exception:
