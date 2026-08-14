@@ -15,7 +15,7 @@ Keep Cloudflare Access enabled and do not add the MyWebsite play button until a 
 - `/etc/project-snow/public.env`: non-secret production settings, mode `0640` and group `deploy`, so Compose can read the service environment without placing secrets there.
 - `/etc/project-snow/images.env`: deploy-readable fixed infrastructure image digests, mode `0640` and group `deploy`.
 - `/srv/project-snow/runtime/compose.env`: the last smoke-tested application, embedding and infrastructure image set, written atomically by the deployment script.
-- `/etc/project-snow/secrets`: root-only secret files, mode `0700`; individual files mode `0600`.
+- `/etc/project-snow/secrets`: root-only secret files, mode `0700`; individual files mode `0600`. The public image starts with a minimal root entrypoint, copies only its approved secret files into a private container tmpfs with mode `0400`, and immediately drops to the unprivileged `snow` user before Alembic, Uvicorn or admin code runs. Secret values are never placed in Compose environment interpolation.
 - `/etc/project-snow/cloudflared`: root-only named-tunnel configuration and credentials. Ingress maps only `snow.xiaob.dev` to `http://caddy:8080`, followed by an explicit `http_status:404` catch-all.
 - Caddy port `8080` exists only on the private Docker `edge` network; it is not published on the host.
 - `127.0.0.1:19090`: feedback administration through an SSH tunnel only.
