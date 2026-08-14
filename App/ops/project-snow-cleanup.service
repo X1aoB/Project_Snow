@@ -1,8 +1,9 @@
 [Unit]
 Description=Project Snow public retention cleanup
 After=docker.service
+ConditionPathExists=/srv/project-snow/runtime/compose.env
 
 [Service]
 Type=oneshot
 WorkingDirectory=/srv/project-snow/app
-ExecStart=/usr/bin/docker compose -f compose.prod.yml --profile admin run --rm admin python -c "from backend.snow_app.config import PublicSettings; from backend.snow_app.public_store import PublicStore; s=PublicSettings.from_environment(); print(PublicStore(s.database_url).cleanup())"
+ExecStart=/usr/bin/docker compose --env-file /srv/project-snow/runtime/compose.env -f compose.prod.yml --profile admin run --rm admin python -c "from backend.snow_app.config import PublicSettings; from backend.snow_app.public_store import PublicStore; s=PublicSettings.from_environment(); print(PublicStore(s.database_url).cleanup())"

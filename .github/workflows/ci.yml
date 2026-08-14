@@ -53,7 +53,6 @@ jobs:
           QDRANT_IMAGE: qdrant/qdrant@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
           NEO4J_IMAGE: neo4j@sha256:1111111111111111111111111111111111111111111111111111111111111111
           EGRESS_PROXY_IMAGE: ubuntu/squid@sha256:2222222222222222222222222222222222222222222222222222222222222222
-          NEO4J_AUTH: neo4j/ci-placeholder
         run: docker compose -f compose.prod.yml --profile blue --profile admin config --quiet
       - name: Reject committed secrets
         run: |
