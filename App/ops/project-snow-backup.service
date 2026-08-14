@@ -1,6 +1,7 @@
 [Unit]
 Description=Project Snow encrypted R2 backup
 After=docker.service network-online.target
+ConditionPathExists=/srv/project-snow/runtime/compose.env
 
 [Service]
 Type=oneshot

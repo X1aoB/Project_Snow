@@ -6,6 +6,8 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 77
 fi
 
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
 apt-get update
 apt-get install -y ca-certificates curl git jq restic rsync ufw unattended-upgrades
 install -m 0755 -d /etc/apt/keyrings
@@ -22,19 +24,38 @@ install -o deploy -g deploy -m 0750 -d /srv/project-snow/app /srv/project-snow/d
 install -o root -g root -m 0700 -d /etc/project-snow/secrets
 install -o root -g root -m 0700 -d /etc/project-snow/cloudflared
 touch /etc/project-snow/public.env
-chmod 0600 /etc/project-snow/public.env
+chown root:deploy /etc/project-snow/public.env
+chmod 0640 /etc/project-snow/public.env
+touch /etc/project-snow/images.env
+chown root:deploy /etc/project-snow/images.env
+chmod 0640 /etc/project-snow/images.env
+
+if [ -f /root/.ssh/authorized_keys ]; then
+  install -o deploy -g deploy -m 0700 -d /home/deploy/.ssh
+  install -o deploy -g deploy -m 0600 /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
+fi
 
 install -m 0755 -d /etc/docker
-cp /srv/project-snow/app/ops/docker-daemon.json /etc/docker/daemon.json
-systemctl enable --now docker
+cp "$script_dir/docker-daemon.json" /etc/docker/daemon.json
+cp "$script_dir/sysctl-project-snow.conf" /etc/sysctl.d/60-project-snow.conf
+sysctl --system
+systemctl enable docker
+systemctl restart docker
 
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 43556/tcp
 ufw --force enable
 
-sed -ri 's/^#?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
-sed -ri 's/^#?PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+cat > /etc/ssh/sshd_config.d/60-project-snow.conf <<'EOF'
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+MaxAuthTries 3
+AllowTcpForwarding yes
+X11Forwarding no
+EOF
 sshd -t
 systemctl reload ssh
 

@@ -128,11 +128,13 @@ services:
     image: ${NEO4J_IMAGE:?Set immutable NEO4J_IMAGE digest}
     restart: unless-stopped
     environment:
-      NEO4J_AUTH: ${NEO4J_AUTH:?Set NEO4J_AUTH in root-only deployment environment}
+      NEO4J_AUTH_FILE: /run/secrets/neo4j_auth
       NEO4J_server_memory_heap_initial__size: 1G
       NEO4J_server_memory_heap_max__size: 1G
       NEO4J_server_memory_pagecache_size: 1G
-    volumes: ["neo4j_data:/data"]
+    volumes:
+      - neo4j_data:/data
+      - /etc/project-snow/secrets/neo4j_auth:/run/secrets/neo4j_auth:ro
     cpus: 2
     mem_limit: 3g
     logging: *bounded-logging
