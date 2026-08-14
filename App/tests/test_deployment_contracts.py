@@ -167,3 +167,8 @@ class DeploymentContractTests(TestCase):
         self.assertIn("/^[a-z][a-z0-9_]*$/.test(code) ? errorMessages.request_failed : code", javascript)
         self.assertIn("async function waitForTurnstile()", javascript)
         self.assertIn('throw new Error("turnstile_unavailable")', javascript)
+
+    def test_public_frontend_assets_are_not_cached_across_deployments(self) -> None:
+        caddyfile = self.read("infra/Caddyfile")
+        self.assertIn("@frontend_assets path / /index.html /app.js /app.css", caddyfile)
+        self.assertIn('header @frontend_assets Cache-Control "no-store, max-age=0"', caddyfile)

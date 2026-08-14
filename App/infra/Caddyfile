@@ -5,6 +5,8 @@
 
 :8080 {
   encode zstd gzip
+  @frontend_assets path / /index.html /app.js /app.css
+  header @frontend_assets Cache-Control "no-store, max-age=0"
   header {
     X-Content-Type-Options nosniff
     Referrer-Policy same-origin
