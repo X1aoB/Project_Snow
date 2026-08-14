@@ -44,6 +44,12 @@ class V050SurfaceTests(unittest.TestCase):
         self.assertIn('$env:MVP_CHAT_BASE_URL', application)
         self.assertIn('discover-models', application)
         self.assertNotIn('filter((item) => item.probe_status === "verified")', application)
+        self.assertIn('const modelName = byId("provider-model").value.trim()', application)
+        self.assertIn('byId("provider-model-field").hidden = false;', application)
+        self.assertIn(
+            'const model = byId("provider-model").value.trim() || byId("provider-model-select").value;',
+            application,
+        )
 
     def test_assistant_surface_is_a_codex_plugin_management_center(self) -> None:
         html = (APP_ROOT / "frontend" / "index.html").read_text(encoding="utf-8")

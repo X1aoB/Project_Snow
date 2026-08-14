@@ -1495,8 +1495,8 @@ function updateWindowsEnvGuide() {
   if (!target) return;
   const preset = PROVIDER_PRESETS[byId("provider-kind").value] || PROVIDER_PRESETS["openai-compatible"];
   const baseUrl = byId("provider-url").value.trim() || preset.baseUrl || "<兼容接口 Base URL>";
-  const modelName = byId("provider-model-select").value
-    || byId("provider-model").value.trim()
+  const modelName = byId("provider-model").value.trim()
+    || byId("provider-model-select").value
     || "<从厂商列表选择的模型 ID>";
   const quote = (value) => String(value).replaceAll('"', '`"');
   target.textContent = [
@@ -1528,7 +1528,7 @@ function selectProvider(kind, resetModel = true) {
   if (resetModel) byId("provider-model").value = "";
   byId("provider-key").value = "";
   byId("provider-url-field").hidden = !custom;
-  byId("provider-model-field").hidden = !custom;
+  byId("provider-model-field").hidden = false;
   document.querySelectorAll("[data-provider-choice]").forEach((button) => {
     const active = button.dataset.providerChoice === kind;
     button.classList.toggle("active", active);
@@ -1646,12 +1646,12 @@ async function configureProvider() {
     if (discovery.status === "failed") {
       status.textContent = `${discovery.error}${discovery.stale ? " 已保留缓存模型。" : ""}`;
       const manual = byId("provider-model").value.trim();
-      if (payload.kind === "openai-compatible" && manual) {
+      if (manual) {
         byId("provider-model-select").innerHTML = `<option value="${escapeHtml(manual)}">${escapeHtml(manual)} · 手动模型</option>`;
       }
       return;
     }
-    const selectedModel = byId("provider-model-select").value;
+    const selectedModel = byId("provider-model").value.trim() || byId("provider-model-select").value;
     status.textContent = `已读取 ${discovery.models?.length || 0} 个模型；模型现在即可选择，附加能力验证不会阻止文本使用。`;
     if (selectedModel) {
       await ensureInitialModelDefaults(saved.provider_id, selectedModel);
@@ -1665,7 +1665,7 @@ async function configureProvider() {
 async function verifySelectedProviderModel({ background = false } = {}) {
   const status = byId("provider-status");
   const providerId = activeProviderId();
-  const model = byId("provider-model-select").value || byId("provider-model").value.trim();
+  const model = byId("provider-model").value.trim() || byId("provider-model-select").value;
   if (!model) {
     if (!background) status.textContent = "请先从厂商列表选择模型。";
     return;

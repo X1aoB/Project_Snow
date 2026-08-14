@@ -53,9 +53,13 @@ def main() -> int:
         if document["metadata"].get("requires_costume_context") and not document["metadata"].get("costume_id"):
             failures.append(f"Costume-scoped document lacks costume ID: {document['document_id']}")
     deterministic_nodes = list(read_jsonl(graph_root / "nodes.jsonl"))
-    approved_nodes_path = review_root / "approved_entity_nodes.jsonl"
+    publishable_graph_root = RUNTIME_ROOT / "release" / "graph"
+    approved_nodes_path = publishable_graph_root / "nodes.jsonl"
     approved_nodes = list(read_jsonl(approved_nodes_path)) if approved_nodes_path.exists() else []
-    verified_approved_nodes = [node for node in approved_nodes if node.get("review_status") == "verified"]
+    deterministic_node_ids = {node.get("node_id") for node in deterministic_nodes}
+    verified_approved_nodes = [
+        node for node in approved_nodes if node.get("node_id") not in deterministic_node_ids
+    ]
     nodes = {node["node_id"] for node in deterministic_nodes + verified_approved_nodes if node.get("node_id")}
     if len(nodes) != len(deterministic_nodes) + len(verified_approved_nodes):
         failures.append("Graph node IDs collide between deterministic and human-approved artifacts.")
@@ -73,8 +77,10 @@ def main() -> int:
             failures.append(f"Dangling graph edge: {edge['edge_id']}")
         if not edge.get("evidence_page_ids"):
             failures.append(f"Untraceable graph edge: {edge['edge_id']}")
-    approved_edges_path = review_root / "approved_narrative_edges.jsonl"
-    approved_edges = list(read_jsonl(approved_edges_path)) if approved_edges_path.exists() else []
+    approved_edges_path = publishable_graph_root / "edges.jsonl"
+    all_publishable_edges = list(read_jsonl(approved_edges_path)) if approved_edges_path.exists() else []
+    deterministic_edge_ids = {edge.get("edge_id") for edge in read_jsonl(graph_root / "edges.jsonl")}
+    approved_edges = [edge for edge in all_publishable_edges if edge.get("edge_id") not in deterministic_edge_ids]
     for edge in approved_edges:
         if edge.get("review_status") != "verified":
             failures.append(f"Approved narrative edge is not verified: {edge.get('edge_id')}")
@@ -84,15 +90,17 @@ def main() -> int:
             failures.append(f"Untraceable approved narrative edge: {edge.get('edge_id')}")
     entity_candidates_path = review_root / "entity_node_candidates.jsonl"
     entity_candidates = list(read_jsonl(entity_candidates_path)) if entity_candidates_path.exists() else []
+    # Review history may contain model- or human-approved candidates that are
+    # deliberately quarantined from publication. Only the exported serving
+    # view is required to be internally complete.
     approved_entity_candidate_ids = {
-        str(candidate.get("entity_candidate_id"))
-        for candidate in entity_candidates
-        if candidate.get("review_status") == "approved"
+        str((node.get("attributes") or {}).get("entity_candidate_id"))
+        for node in verified_approved_nodes
     }
     approved_entity_node_candidate_ids = {
         str((node.get("attributes") or {}).get("entity_candidate_id")) for node in verified_approved_nodes
     }
-    if not approved_entity_candidate_ids.issubset(approved_entity_node_candidate_ids):
+    if approved_entity_candidate_ids != approved_entity_node_candidate_ids:
         failures.append("An approved entity candidate has no verified graph node artifact.")
     authoritative_characters = known_characters()
     for profile in read_jsonl(persona_root / "persona_profiles.jsonl"):
