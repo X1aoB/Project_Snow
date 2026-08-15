@@ -23,6 +23,9 @@ from .public_contracts import (
     ChatRequest,
     FeedbackRequest,
     ModelDiscoveryRequest,
+    PresenceArrivalRequest,
+    PresenceResolveRequest,
+    PresenceTransitionRequest,
     SummarizeRequest,
 )
 from .public_providers import PROVIDERS, ProviderRequestError, discover_models, provider_spec
@@ -197,6 +200,10 @@ def create_app(
                 "history_rounds_per_request": 12,
             },
             "history_policy": "browser_indexeddb_plaintext",
+            "history_schema": "indexeddb-v2",
+            "state_schema": "public-state-2",
+            "communication_channels": ["text", "in_person"],
+            "content_block_types": ["message", "speech", "action"],
             "source_links": {
                 "project_snow": "https://github.com/X1aoB/Project_Snow",
                 "mywebsite": "https://github.com/X1aoB/MyWebsite",
@@ -263,6 +270,101 @@ def create_app(
             raise _error(exc.code, exc.status_code) from exc
         return {"provider": spec.provider_id, "models": discovered, "manual_model_allowed": True}
 
+    @app.post("/public/v1/presence/resolve")
+    def presence_resolve(request: Request, payload: PresenceResolveRequest) -> dict[str, Any]:
+        return chat_service.resolve_presence(payload, request.state.subject_hash)
+
+    @app.post("/public/v1/presence/transition")
+    def presence_transition(request: Request, payload: PresenceTransitionRequest) -> dict[str, Any]:
+        cache_id = "presence-transition:" + str(payload.request_id)
+        request_body = payload.model_dump(mode="json")
+        claim_status, cached = store.claim_request(
+            cache_id,
+            request.state.subject_hash,
+            _request_hash(request_body),
+        )
+        if claim_status == "conflict":
+            raise _error("request_id_conflict", 409)
+        if claim_status == "processing":
+            raise _error("request_in_progress", 409)
+        if claim_status == "completed" and cached is not None:
+            return {**cached, "idempotent_replay": True}
+        try:
+            result = chat_service.transition_presence(payload, request.state.subject_hash)
+            store.complete_request(cache_id, result)
+            return result
+        except ValueError as exc:
+            store.release_request(cache_id)
+            raise _error("invalid_presence_transition", 422) from exc
+        except Exception:
+            store.release_request(cache_id)
+            raise
+
+    @app.post("/public/v1/presence/arrival")
+    async def presence_arrival(request: Request, payload: PresenceArrivalRequest) -> dict[str, Any]:
+        spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        claims = open_byok_credential(
+            public_settings,
+            anonymous_id=request.state.anonymous_id,
+            token=payload.credential,
+            expected_provider=spec.provider_id,
+        )
+        cache_id = "presence-arrival:" + str(payload.arrival_id)
+        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        claim_status, cached = store.claim_request(
+            cache_id,
+            request.state.subject_hash,
+            _request_hash(request_body),
+        )
+        if claim_status == "conflict":
+            raise _error("request_id_conflict", 409)
+        if claim_status == "processing":
+            raise _error("request_in_progress", 409)
+        if claim_status == "completed" and cached is not None:
+            return {**cached, "idempotent_replay": True}
+        try:
+            prepared = chat_service.prepare_presence_arrival(
+                payload,
+                request.state.subject_hash,
+            )
+            if prepared["decision"] == "unnoticed":
+                result = {key: value for key, value in prepared.items() if key != "state"}
+            else:
+                try:
+                    store.consume_limits(
+                        request.state.subject_hash,
+                        [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
+                    )
+                except RateLimitExceeded:
+                    result = chat_service.failed_presence_arrival(
+                        prepared,
+                        "rate_limit_exceeded",
+                        model_called=False,
+                    )
+                else:
+                    try:
+                        result = await chat_service.finish_presence_arrival(
+                            prepared,
+                            payload,
+                            request.state.subject_hash,
+                            spec,
+                            str(claims["api_key"]),
+                        )
+                    except GenerationBusy as exc:
+                        result = chat_service.failed_presence_arrival(
+                            prepared,
+                            str(exc),
+                            model_called=False,
+                        )
+            store.complete_request(cache_id, result)
+            return result
+        except ValueError as exc:
+            store.release_request(cache_id)
+            raise _error("invalid_presence_request", 422) from exc
+        except Exception:
+            store.release_request(cache_id)
+            raise
+
     @app.post("/public/v1/chat/stream")
     async def chat_stream(request: Request, payload: ChatRequest):
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
@@ -295,26 +397,12 @@ def create_app(
                 if unsafe_category:
                     # The rejection follows the same credential, idempotency,
                     # and quota path, so blocked input cannot bypass controls.
-                    result = {
-                        "request_id": str(payload.request_id),
-                        "character_id": payload.character_id,
-                        "provider": spec.provider_id,
-                        "model": payload.model,
-                        "answer": "抱歉，这个方向我不能继续提供具体指导。我们可以换成安全、合法且不伤害他人的话题。",
-                        "truncated": False,
-                        "state_package": payload.state_package,
-                        "degraded_services": [],
-                        "retrieval": {},
-                        "usage": {},
-                        "safety_category": unsafe_category,
-                        "generation_outcome": "valid_initial",
-                        "response_adjustments": [],
-                        "terminal_error": "",
-                        "diagnostics": {
-                            "timings_ms": {"total": 0, "provider_http_calls": 0},
-                            "dependency_health": {},
-                        },
-                    }
+                    result = chat_service.policy_rejection(
+                        payload,
+                        request.state.subject_hash,
+                        spec,
+                        unsafe_category,
+                    )
                 else:
                     result = await chat_service.chat(
                         payload,
@@ -335,6 +423,7 @@ def create_app(
                     "character_id": result["character_id"],
                     "provider": result["provider"],
                     "model": result["model"],
+                    "communication_channel": result.get("communication_channel", "text"),
                     "data_version": public_settings.data_version,
                     "idempotent_replay": bool(result.get("idempotent_replay")),
                 },
@@ -361,6 +450,8 @@ def create_app(
                     "degraded_services": result.get("degraded_services") or [],
                     "usage": result.get("usage") or {},
                     "safety_category": result.get("safety_category"),
+                    "communication_channel": result.get("communication_channel", "text"),
+                    "content_blocks": result.get("content_blocks") or [],
                 },
             )
 

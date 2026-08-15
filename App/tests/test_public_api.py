@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from backend.snow_app.config import PublicSettings, Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from backend.snow_app.public_main import create_app
+from backend.snow_app.public_security import sign_state, verify_state
 from backend.snow_app.public_store import PublicStore
 
 
@@ -398,3 +399,254 @@ class PublicAPITests(TestCase):
                 service.mvp._views_mtime = None
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["detail"]["code"], "character_unavailable")
+
+    def test_public_state_v1_is_upgraded_without_losing_known_presence(self) -> None:
+        character = MVP_CHARACTERS[0]
+        legacy = sign_state(
+            self.settings,
+            {
+                "schema_version": "public-state-1",
+                "data_version": "legacy-data",
+                "revision": 7,
+                "relationships": {character.character_id: {"address": "分析员"}},
+                "world": {
+                    "presence": {
+                        character.character_id: {
+                            "location": "观景区",
+                            "activity": "正在看雪",
+                            "state_scope": "conversation_confirmed",
+                        }
+                    }
+                },
+            },
+        )
+        response = self.client.post(
+            "/public/v1/presence/resolve",
+            headers={"Origin": "http://testserver"},
+            json={
+                "request_id": str(uuid4()),
+                "character_id": character.character_id,
+                "state_package": legacy,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        upgraded = verify_state(self.settings, response.json()["state_package"])
+        self.assertEqual(upgraded["schema_version"], "public-state-2")
+        self.assertEqual(upgraded["revision"], 7)
+        self.assertEqual(len(upgraded["presence"]), 22)
+        self.assertEqual(upgraded["presence"][character.character_id]["location"], "观景区")
+        self.assertEqual(upgraded["relationships"][character.character_id]["address"], "分析员")
+
+    def test_text_channel_rejects_action_blocks(self) -> None:
+        response = self.client.post(
+            "/public/v1/chat/stream",
+            headers={"Origin": "http://testserver"},
+            json={
+                "request_id": str(uuid4()),
+                "provider": "openai",
+                "credential": "x" * 40,
+                "model": "gpt-test",
+                "character_id": MVP_CHARACTERS[0].character_id,
+                "communication_channel": "text",
+                "content_blocks": [{"type": "action", "text": "向她挥手"}],
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"]["code"], "invalid_request")
+
+    def test_presence_rejects_tampered_state_package(self) -> None:
+        signed = sign_state(
+            self.settings,
+            {"schema_version": "public-state-1", "data_version": "legacy", "revision": 0},
+        )
+        response = self.client.post(
+            "/public/v1/presence/resolve",
+            headers={"Origin": "http://testserver"},
+            json={
+                "request_id": str(uuid4()),
+                "character_id": MVP_CHARACTERS[0].character_id,
+                "state_package": signed[:-1] + ("A" if signed[-1] != "A" else "B"),
+            },
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"]["code"], "credential_invalid")
+
+    def test_in_person_action_only_turn_reaches_mvp_with_structured_blocks(self) -> None:
+        credential, _ = self._byok()
+        payload = {
+            "request_id": str(uuid4()),
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": MVP_CHARACTERS[0].character_id,
+            "communication_channel": "in_person",
+            "content_blocks": [{"type": "action", "text": "向她挥了挥手"}],
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        generated = {
+            "answer": "她轻轻点头。\n晚上好。",
+            "content_blocks": [
+                {"type": "action", "text": "她轻轻点头。"},
+                {"type": "speech", "text": "晚上好。"},
+            ],
+            "response_adjustments": [],
+        }
+        with patch.object(self.app.state.chat_service.mvp, "chat", return_value=generated) as chat:
+            response = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"communication_channel":"in_person"', response.text)
+        self.assertIn('"type":"action"', response.text)
+        self.assertEqual(chat.call_args.kwargs["communication_channel"], "in_person")
+        self.assertEqual(
+            chat.call_args.kwargs["analyst_content_blocks"],
+            [{"type": "action", "text": "向她挥了挥手"}],
+        )
+
+    def test_presence_transition_moves_analyst_and_replays(self) -> None:
+        character = MVP_CHARACTERS[0]
+        resolved = self.client.post(
+            "/public/v1/presence/resolve",
+            headers={"Origin": "http://testserver"},
+            json={
+                "request_id": str(uuid4()),
+                "character_id": character.character_id,
+                "state_package": "",
+            },
+        ).json()
+        request_id = str(uuid4())
+        payload = {
+            "request_id": request_id,
+            "character_id": character.character_id,
+            "target_channel": "in_person",
+            "action": "join_character",
+            "state_package": resolved["state_package"],
+        }
+        first = self.client.post(
+            "/public/v1/presence/transition",
+            headers={"Origin": "http://testserver"},
+            json=payload,
+        )
+        second = self.client.post(
+            "/public/v1/presence/transition",
+            headers={"Origin": "http://testserver"},
+            json=payload,
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertTrue(first.json()["scene_state"]["co_located"])
+        transitioned = verify_state(self.settings, first.json()["state_package"])
+        self.assertEqual(transitioned["revision"], 1)
+        self.assertEqual(transitioned["recent_events"][-1]["event_type"], "presence_transition")
+        self.assertTrue(second.json()["idempotent_replay"])
+
+    def test_arrival_unnoticed_does_not_call_model_and_is_idempotent(self) -> None:
+        credential, _ = self._byok()
+        character = MVP_CHARACTERS[0]
+        arrival_id = str(uuid4())
+        payload = {
+            "arrival_id": arrival_id,
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": character.character_id,
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        with patch("backend.snow_app.public_service.secrets.randbelow", return_value=1), patch.object(
+            self.app.state.chat_service.mvp,
+            "chat",
+        ) as chat:
+            first = self.client.post(
+                "/public/v1/presence/arrival",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+            second = self.client.post(
+                "/public/v1/presence/arrival",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["decision"], "unnoticed")
+        self.assertFalse(first.json()["model_called"])
+        self.assertIsNone(first.json()["reaction"])
+        self.assertTrue(first.json()["scene_state"]["co_located"])
+        self.assertTrue(second.json()["idempotent_replay"])
+        chat.assert_not_called()
+
+    def test_arrival_guard_failure_keeps_transition_without_fake_dialogue(self) -> None:
+        credential, _ = self._byok()
+        payload = {
+            "arrival_id": str(uuid4()),
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": MVP_CHARACTERS[0].character_id,
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        generated = {
+            "answer": "机械兜底",
+            "content_blocks": [{"type": "speech", "text": "机械兜底"}],
+            "response_adjustments": ["empty_model_output_guard"],
+        }
+        with patch("backend.snow_app.public_service.secrets.randbelow", return_value=0), patch.object(
+            self.app.state.chat_service.mvp,
+            "chat",
+            return_value=generated,
+        ):
+            response = self.client.post(
+                "/public/v1/presence/arrival",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["decision"], "noticed")
+        self.assertEqual(response.json()["terminal_error"], "upstream_invalid_response")
+        self.assertIsNone(response.json()["reaction"])
+        self.assertTrue(response.json()["scene_state"]["co_located"])
+
+    def test_arrival_noticed_returns_guarded_structured_reaction(self) -> None:
+        credential, _ = self._byok()
+        payload = {
+            "arrival_id": str(uuid4()),
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": MVP_CHARACTERS[0].character_id,
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        generated = {
+            "answer": "她抬眼看向你。\n你来了。",
+            "content_blocks": [
+                {"type": "action", "text": "她抬眼看向你。"},
+                {"type": "speech", "text": "你来了。"},
+            ],
+            "response_adjustments": [],
+            "usage": {"total_tokens": 12},
+        }
+        with patch("backend.snow_app.public_service.secrets.randbelow", return_value=0), patch.object(
+            self.app.state.chat_service.mvp,
+            "chat",
+            return_value=generated,
+        ) as chat:
+            response = self.client.post(
+                "/public/v1/presence/arrival",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["decision"], "noticed")
+        self.assertTrue(response.json()["model_called"])
+        self.assertEqual(response.json()["reaction"]["content_blocks"][0]["type"], "action")
+        self.assertEqual(response.json()["reaction"]["content_blocks"][1]["type"], "speech")
+        self.assertEqual(chat.call_count, 1)
