@@ -36,6 +36,11 @@ class ChangeClassifierTests(TestCase):
         self.assertTrue(result["deploy"])
         self.assertFalse(result["app_image"])
 
+    def test_promotion_script_is_a_deployment_change(self) -> None:
+        result = classify(["App/scripts/promote.ps1"])
+        self.assertTrue(result["deploy"])
+        self.assertFalse(result["app_image"])
+
     def test_unknown_source_change_is_conservative(self) -> None:
         result = classify(["App/new_runtime_component.py"])
         self.assertTrue(result["api"])

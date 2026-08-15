@@ -75,6 +75,7 @@ DEPLOY_PATTERNS = (
     "App/infra/public_smoke.py",
     "App/ops/**",
     "App/scripts/deploy.ps1",
+    "App/scripts/promote.ps1",
     "App/scripts/rollback.ps1",
     "App/scripts/release_manifest.py",
     "App/scripts/validate_shared_design.py",

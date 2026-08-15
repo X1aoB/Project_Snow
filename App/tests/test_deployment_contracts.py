@@ -63,24 +63,39 @@ class DeploymentContractTests(TestCase):
         self.assertIn('exec gosu snow "$@"', entrypoint)
         self.assertNotIn("/etc/project-snow/secrets:/run/secrets:ro", compose)
 
-    def test_deploy_promotes_compose_environment_only_after_smoke(self) -> None:
+    def test_deploy_stages_only_the_inactive_colour(self) -> None:
         script = self.read("ops/deploy.sh")
         verify_data = script.index("backend.snow_app.data_loader --verify-only")
         load_data = script.index("python -m backend.snow_app.data_loader", verify_data + 1)
-        start_api = script.index('compose up -d "public-api-$colour" caddy cloudflared')
+        start_api = script.index('compose up -d "$service"')
         smoke = script.index("/app/public_smoke.py")
-        promote = script.index('mv -f "$candidate_env" "$current_env"')
+        stage_env = script.index('mv -f "$candidate_env" "$colour_env"')
         self.assertLess(verify_data, load_data)
         self.assertLess(load_data, start_api)
-        self.assertLess(smoke, promote)
+        self.assertLess(smoke, stage_env)
         self.assertIn('--env-file "$candidate_env"', script)
         self.assertIn("/etc/project-snow/images.env", script)
         self.assertIn("/srv/project-snow/runtime/compose.env", script)
-        self.assertIn("Public API did not become ready within 60 seconds.", script)
+        self.assertIn("active-colour", script)
+        self.assertIn("Caddy and cloudflared keep serving", script)
+        self.assertNotIn("force-recreate caddy", script)
+
+    def test_promote_switches_only_after_candidate_smoke_and_can_restore(self) -> None:
+        script = self.read("ops/promote.sh")
+        candidate_smoke = script.index("public_smoke.py http://127.0.0.1:8000")
+        switch = script.index("switch_caddy \"$colour_env\" \"$colour\"")
+        post_switch_smoke = script.index("public_smoke.py http://caddy:8080")
+        marker = script.index('mv -f "$state_tmp" "$current_env"')
+        self.assertLess(candidate_smoke, switch)
+        self.assertLess(switch, post_switch_smoke)
+        self.assertLess(post_switch_smoke, marker)
+        self.assertIn("restoring the previous Caddy upstream", script)
+        self.assertIn("active-colour", script)
 
     def test_maintenance_commands_use_last_promoted_environment(self) -> None:
-        for relative in ("ops/backup.sh", "ops/restore-postgres.sh", "ops/rollback.sh"):
+        for relative in ("ops/backup.sh", "ops/restore-postgres.sh"):
             self.assertIn("--env-file", self.read(relative), relative)
+        self.assertIn("promote.sh", self.read("ops/rollback.sh"))
         cleanup = self.read("ops/project-snow-cleanup.service")
         self.assertIn("--env-file /srv/project-snow/runtime/compose.env", cleanup)
 
@@ -161,6 +176,7 @@ class DeploymentContractTests(TestCase):
         paths = (
             "App/ops/backup.sh",
             "App/ops/deploy.sh",
+            "App/ops/promote.sh",
             "App/ops/prepare_debian.sh",
             "App/ops/restore-postgres.sh",
             "App/ops/rollback.sh",
