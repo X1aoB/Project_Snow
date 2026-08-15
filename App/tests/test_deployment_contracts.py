@@ -129,6 +129,9 @@ class DeploymentContractTests(TestCase):
         self.assertIn("All selected risk-tier jobs passed", workflow)
         self.assertIn("github.head_ref == 'codex/ci-risk-tiering'", workflow)
         self.assertIn("Reuse previous verified embedding digest", release)
+        self.assertIn("fetch-depth: 0", release)
+        self.assertIn('git rev-list --first-parent "$PREVIOUS_SHA"', release)
+        self.assertIn("Tag reused embedding digest for the current main SHA", release)
         self.assertIn("release_manifest.py", release)
 
     def test_directly_invoked_operations_are_executable_in_git(self) -> None:
