@@ -16,6 +16,7 @@ case "$PUBLIC_API_IMAGE:$EMBEDDING_IMAGE" in *@sha256:*@sha256:*) ;; *) echo 'Im
 static_env="${PROJECT_SNOW_IMAGE_ENV:-/etc/project-snow/images.env}"
 current_env="${PROJECT_SNOW_COMPOSE_ENV:-/srv/project-snow/runtime/compose.env}"
 release_manifest="${PROJECT_SNOW_RELEASE_MANIFEST:-}"
+current_marker="/srv/project-snow/releases/current"
 current_manifest="/srv/project-snow/releases/current-manifest.json"
 active_file="/srv/project-snow/releases/active-colour"
 colour_env_root="/srv/project-snow/runtime/colours"
@@ -40,11 +41,40 @@ if [ "$active_colour" = "$colour" ]; then
 fi
 
 install -d -m 0700 "$colour_env_root" "$colour_release_root"
-# Bootstrap the active colour's durable environment before the first staged
-# release. This preserves a usable rollback target on older installations.
-if [ -n "$active_colour" ] && [ ! -r "/srv/project-snow/runtime/colours/$active_colour.compose.env" ] && [ -r "$current_env" ]; then
-  cp "$current_env" "/srv/project-snow/runtime/colours/$active_colour.compose.env"
-  chmod 0600 "/srv/project-snow/runtime/colours/$active_colour.compose.env"
+# Bootstrap every durable artifact for the active colour before the first
+# staged release. Older installations only have the promoted compose env,
+# marker, and manifest at their legacy current paths. A partial bootstrap
+# would make the old colour impossible to select through rollback.sh.
+if [ -n "$active_colour" ]; then
+  bootstrap_colour_env="$colour_env_root/$active_colour.compose.env"
+  bootstrap_colour_marker="$colour_release_root/$active_colour"
+  bootstrap_colour_manifest="$colour_release_root/$active_colour-manifest.json"
+
+  if [ ! -r "$bootstrap_colour_env" ]; then
+    [ -r "$current_env" ] || { echo "Cannot preserve rollback environment for active colour $active_colour." >&2; exit 68; }
+    cp "$current_env" "$bootstrap_colour_env"
+    chmod 0600 "$bootstrap_colour_env"
+  fi
+  if [ ! -r "$bootstrap_colour_marker" ]; then
+    [ -r "$current_marker" ] || { echo "Cannot preserve rollback marker for active colour $active_colour." >&2; exit 68; }
+    cp "$current_marker" "$bootstrap_colour_marker"
+    chmod 0600 "$bootstrap_colour_marker"
+  fi
+  if [ ! -r "$bootstrap_colour_manifest" ]; then
+    [ -r "$current_manifest" ] || { echo "Cannot preserve rollback manifest for active colour $active_colour." >&2; exit 68; }
+    cp "$current_manifest" "$bootstrap_colour_manifest"
+    chmod 0600 "$bootstrap_colour_manifest"
+  fi
+
+  read -r bootstrap_marker_colour bootstrap_marker_sha bootstrap_app_image bootstrap_embedding_image < "$bootstrap_colour_marker"
+  [ "$bootstrap_marker_colour" = "$active_colour" ] || { echo 'Bootstrap rollback marker colour mismatch.' >&2; exit 69; }
+  case "$bootstrap_marker_sha" in [0-9a-f][0-9a-f]*) ;; *) echo 'Bootstrap rollback marker has an invalid commit SHA.' >&2; exit 69 ;; esac
+  case "$bootstrap_app_image:$bootstrap_embedding_image" in *@sha256:*@sha256:*) ;; *) echo 'Bootstrap rollback marker images are not immutable digests.' >&2; exit 69 ;; esac
+  bootstrap_manifest_sha="$(jq -r '.commit_sha // empty' "$bootstrap_colour_manifest")"
+  if [ "$bootstrap_manifest_sha" != "$bootstrap_marker_sha" ]; then
+    echo 'Bootstrap rollback manifest is invalid.' >&2
+    exit 69
+  fi
 fi
 
 candidate_env="$(mktemp "$colour_env.candidate.XXXXXX")"
@@ -66,8 +96,8 @@ compose() {
 }
 
 embedding_changed=1
-if [ -r /srv/project-snow/releases/current ]; then
-  current_embedding="$(awk '{print $4}' /srv/project-snow/releases/current)"
+if [ -r "$current_marker" ]; then
+  current_embedding="$(awk '{print $4}' "$current_marker")"
   if [ "$current_embedding" = "$EMBEDDING_IMAGE" ]; then
     embedding_changed=0
   fi

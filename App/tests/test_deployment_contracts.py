@@ -80,6 +80,29 @@ class DeploymentContractTests(TestCase):
         self.assertIn("Caddy and cloudflared keep serving", script)
         self.assertNotIn("force-recreate caddy", script)
 
+    def test_deploy_bootstraps_complete_active_release_for_rollback(self) -> None:
+        script = self.read("ops/deploy.sh")
+        bootstrap_env = script.index('cp "$current_env" "$bootstrap_colour_env"')
+        bootstrap_marker = script.index('cp "$current_marker" "$bootstrap_colour_marker"')
+        bootstrap_manifest = script.index(
+            'cp "$current_manifest" "$bootstrap_colour_manifest"'
+        )
+        pull_candidate = script.index('compose pull "$service"')
+
+        self.assertLess(bootstrap_env, pull_candidate)
+        self.assertLess(bootstrap_marker, pull_candidate)
+        self.assertLess(bootstrap_manifest, pull_candidate)
+        self.assertIn('current_marker="/srv/project-snow/releases/current"', script)
+        self.assertIn("Cannot preserve rollback environment", script)
+        self.assertIn("Cannot preserve rollback marker", script)
+        self.assertIn("Cannot preserve rollback manifest", script)
+        self.assertIn("Bootstrap rollback marker colour mismatch.", script)
+        self.assertIn('bootstrap_manifest_sha="$(jq -r', script)
+        self.assertIn(
+            '"$bootstrap_manifest_sha" != "$bootstrap_marker_sha"', script
+        )
+        self.assertIn("Bootstrap rollback manifest is invalid.", script)
+
     def test_promote_switches_only_after_candidate_smoke_and_can_restore(self) -> None:
         script = self.read("ops/promote.sh")
         candidate_smoke = script.index("public_smoke.py http://127.0.0.1:8000")
