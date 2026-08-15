@@ -34,6 +34,12 @@ test "$character_count" -eq 22
 test "$(find "$staging/avatars" -maxdepth 1 -type f -name '*-96.webp' | wc -l)" -eq 22
 test "$(find "$staging/avatars" -maxdepth 1 -type f -name '*-200.webp' | wc -l)" -eq 22
 
+# mktemp creates the staging directory as 0700. The public API intentionally
+# runs as the unprivileged `snow` user, so normalize this verified public
+# media package before it is moved behind the read-only current symlink.
+find "$staging" -type d -exec chmod 0755 {} +
+find "$staging" -type f -exec chmod 0644 {} +
+
 if [ -e "$target" ]; then
   echo "Media release already exists: $target" >&2
   exit 65

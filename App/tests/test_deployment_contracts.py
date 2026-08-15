@@ -207,6 +207,16 @@ class DeploymentContractTests(TestCase):
         self.assertIn("verify_data_release.py", promote)
         self.assertIn('mv -Tf "$temporary_current" "$current_link"', promote)
 
+    def test_promoted_media_is_readable_by_the_unprivileged_api(self) -> None:
+        script = self.read("ops/fetch-promote-media.sh")
+        verify = script.index("sha256sum -c SHA256SUMS")
+        directories = script.index('find "$staging" -type d -exec chmod 0755')
+        files = script.index('find "$staging" -type f -exec chmod 0644')
+        promote = script.index('mv -- "$staging" "$target"')
+        self.assertLess(verify, directories)
+        self.assertLess(directories, files)
+        self.assertLess(files, promote)
+
     def test_production_examples_separate_public_settings_from_secrets(self) -> None:
         public_env = self.read("ops/public.env.example")
         images_env = self.read("ops/images.env.example")
