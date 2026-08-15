@@ -1,11 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
-  <rect width="1600" height="900" fill="#e9f1f5"/>
-  <rect x="120" y="95" width="1360" height="570" rx="34" fill="#dbe7ee" stroke="#afc4d0" stroke-width="6"/>
-  <rect x="210" y="150" width="520" height="250" rx="18" fill="#c8dce7"/>
-  <path d="M470 150v250M210 275h520" stroke="#f7fbfd" stroke-width="7"/>
-  <rect x="840" y="220" width="390" height="110" rx="45" fill="#f8fbfd" stroke="#b8ccd7" stroke-width="5"/>
-  <rect x="760" y="410" width="600" height="220" rx="54" fill="#c0d3de"/>
-  <rect x="860" y="500" width="400" height="74" rx="32" fill="#eaf1f5"/>
-  <ellipse cx="520" cy="650" rx="260" ry="72" fill="#b7ccd8"/>
-  <rect y="690" width="1600" height="210" fill="#cbd9e1"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><defs><linearGradient id="l" y2="1"><stop stop-color="#e4f2f6"/><stop offset="1" stop-color="#b4ccd6"/></linearGradient></defs><rect width="1600" height="900" fill="url(#l)"/><rect y="620" width="1600" height="280" fill="#a6bec9"/><rect x="180" y="140" width="520" height="320" rx="28" fill="#c0d8e0" stroke="#8caab7" stroke-width="10"/><path d="M225 410h430" stroke="#e6f3f6" stroke-width="14"/><rect x="1020" y="130" width="260" height="420" rx="34" fill="#91aebb"/><path d="M1060 170h180M1060 225h180M1060 280h180M1060 335h180" stroke="#d9eaf0" stroke-width="14"/><path d="M520 700h570v95H520z" fill="#d8e8ed" stroke="#839fab" stroke-width="9"/><path d="M570 795v65m470-65v65" stroke="#829eac" stroke-width="14"/></svg>

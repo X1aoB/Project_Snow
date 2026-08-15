@@ -97,6 +97,50 @@ class FeedbackRegressionTests(unittest.TestCase):
         )
         self.assertIn("（凯茜娅稍稍抬起眼。）", result["answer"])
 
+    def test_fenny_drink_reply_does_not_invent_an_analyst_action(self) -> None:
+        """A speech-only answer must stay speech-only in a face-to-face turn."""
+
+        service = self._service()
+        answer = "呵，一杯见底。看来你确实挺满意。"
+        payload = self._model_payload(answer, [{"type": "speech", "text": answer}])
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", return_value=(payload, {})
+        ):
+            result = service.chat(
+                "1b0a6b35719a",
+                "接过饮料一饮而尽，露出了满意的笑容。",
+                session_id="feedback-regression-fenny-drink",
+                mode="immersive",
+                communication_channel="in_person",
+            )
+
+        self.assertEqual(result["content_blocks"], [{"type": "speech", "text": answer}])
+        self.assertNotIn("in_person_presence_enriched", result["response_adjustments"])
+
+    def test_mixed_in_person_block_is_rejected_after_one_rewrite(self) -> None:
+        """A block that cannot be separated must never reach the public UI."""
+
+        service = self._service()
+        mixed = "我看着你的动作说道：你好。"
+        initial = self._model_payload(mixed, [{"type": "speech", "text": mixed}])
+        rewritten = self._model_payload(mixed, [{"type": "speech", "text": mixed}])
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", side_effect=[(initial, {}), (rewritten, {})]
+        ):
+            result = service.chat(
+                "1b0a6b35719a",
+                "说几句话",
+                session_id="feedback-regression-mixed-block",
+                mode="immersive",
+                communication_channel="in_person",
+            )
+
+        self.assertTrue(result["content_block_guard_rejected"])
+        self.assertIn("in_person_block_rewrite", result["response_adjustments"])
+        # The internal service may retain a diagnostic fallback for legacy
+        # callers; the public facade checks the rejection flag before exposing
+        # any block, so no assistant message is rendered on the web surface.
+
     def test_rendezvous_intent_exposes_character_location_but_greeting_does_not(self) -> None:
         """“去找你” is an intentional location request, unlike a greeting."""
 
@@ -215,8 +259,13 @@ class FeedbackRegressionTests(unittest.TestCase):
             )
 
         self.assertIn(expected, result["answer"])
-        self.assertEqual(result["content_blocks"][0]["type"], "action")
-        self.assertEqual(result["content_blocks"][1]["text"], expected)
+        self.assertEqual(result["content_blocks"][0]["type"], "speech")
+        # A single speech block is the canonical representation.  The old
+        # public path duplicated a valid reply while trying to enrich scenes;
+        # 0.8 keeps the model's dialogue unchanged and never adds a synthetic
+        # second block.
+        self.assertEqual(len(result["content_blocks"]), 1)
+        self.assertEqual(result["content_blocks"][0]["text"], expected)
         self.assertNotIn("剧情", result["answer"])
         self.assertGreaterEqual(len(result["answer"]), 18)
 
@@ -277,8 +326,8 @@ class FeedbackRegressionTests(unittest.TestCase):
                 "text",
             )
 
-    def test_in_person_fallback_actions_are_named_and_not_repeated(self) -> None:
-        """Fallback presence beats must not degrade into one fixed “她…” line."""
+    def test_in_person_speech_without_action_is_not_enriched(self) -> None:
+        """A model that returns only dialogue must remain dialogue-only."""
 
         service = self._service()
         first_payload = self._model_payload("我在听。", [{"type": "speech", "text": "我在听。"}])
@@ -301,13 +350,10 @@ class FeedbackRegressionTests(unittest.TestCase):
                 communication_channel="in_person",
             )
 
-        first_action = first["content_blocks"][0]["text"]
-        second_action = second["content_blocks"][0]["text"]
-        self.assertEqual(first["content_blocks"][0]["type"], "action")
-        self.assertEqual(second["content_blocks"][0]["type"], "action")
-        self.assertIn("凯茜娅", first_action)
-        self.assertIn("凯茜娅", second_action)
-        self.assertNotEqual(first_action, second_action)
+        self.assertEqual(first["content_blocks"], [{"type": "speech", "text": "我在听。"}])
+        self.assertEqual(second["content_blocks"], [{"type": "speech", "text": "我明白。"}])
+        self.assertNotIn("in_person_presence_enriched", first["response_adjustments"])
+        self.assertNotIn("in_person_presence_enriched", second["response_adjustments"])
 
     def test_in_person_actions_use_third_person_and_leave_speech_separate(self) -> None:
         service = self._service()

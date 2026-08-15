@@ -21,7 +21,7 @@ DOWN_REVISION_PATTERN = re.compile(
 )
 
 
-def read_public_versions(app_root: Path) -> tuple[str, str]:
+def read_public_versions(app_root: Path) -> tuple[str, str, str]:
     public_env = app_root / "ops" / "public.env.example"
     values: dict[str, str] = {}
     for raw_line in public_env.read_text(encoding="utf-8").splitlines():
@@ -31,15 +31,18 @@ def read_public_versions(app_root: Path) -> tuple[str, str]:
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip()
     app_version = values.get("PUBLIC_APP_VERSION", "")
+    media_version = values.get("PUBLIC_MEDIA_VERSION", "")
     data_pointer = json.loads(
         (app_root / "config" / "public_knowledge" / "data_release.json").read_text(
             encoding="utf-8"
         )
     )
     data_version = str(data_pointer.get("data_version") or "")
-    if not app_version or not data_version:
-        raise ValueError("public environment must define application and data versions")
-    return app_version, data_version
+    if not app_version or not data_version or not media_version:
+        raise ValueError(
+            "public environment must define application, data and media versions"
+        )
+    return app_version, data_version, media_version
 
 
 def migration_heads(versions_directory: Path) -> list[str]:
@@ -78,12 +81,13 @@ def create_manifest(
     for digest in (public_digest, embedding_digest):
         if not DIGEST_PATTERN.fullmatch(digest):
             raise ValueError("image digests must use sha256:<64 lowercase hexadecimal characters>")
-    app_version, data_version = read_public_versions(app_root)
+    app_version, data_version, media_version = read_public_versions(app_root)
     return {
         "schema_version": "project-snow-release-1",
         "commit_sha": commit_sha,
         "app_version": app_version,
         "data_version": data_version,
+        "media_version": media_version,
         "migration_heads": migration_heads(app_root / "migrations" / "versions"),
         "application": {"image": public_image, "digest": public_digest},
         "embedding": {"image": embedding_image, "digest": embedding_digest},

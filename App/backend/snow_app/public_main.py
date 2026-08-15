@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 import hashlib
@@ -28,7 +29,13 @@ from .public_contracts import (
     PresenceTransitionRequest,
     SummarizeRequest,
 )
-from .public_providers import PROVIDERS, ProviderRequestError, discover_models, provider_spec
+from .public_providers import (
+    PROVIDERS,
+    ProviderHTTPPool,
+    ProviderRequestError,
+    discover_models,
+    provider_spec,
+)
 from .public_security import (
     PublicSecurityError,
     daily_ip_fingerprint,
@@ -39,6 +46,7 @@ from .public_security import (
     new_anonymous_id,
     normalized_text,
     open_byok_credential,
+    redact_sensitive_text,
     subject_hash,
     verify_turnstile,
 )
@@ -81,6 +89,30 @@ def _request_hash(payload: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _feedback_blocks(blocks: list[Any], limit: int) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    remaining = limit
+    for block in blocks[:8]:
+        block_type = str(getattr(block, "type", "") or "")
+        text_value = redact_sensitive_text(str(getattr(block, "text", "") or ""), remaining)
+        if not block_type or not text_value:
+            continue
+        normalized.append({"type": block_type, "text": text_value})
+        remaining -= len(text_value)
+        if remaining <= 0:
+            break
+    return normalized
+
+
+def _spoken_feedback_text(blocks: list[dict[str, str]], fallback: str, limit: int) -> str:
+    spoken = "\n".join(
+        block["text"]
+        for block in blocks
+        if block["type"] in {"message", "speech"}
+    ).strip()
+    return redact_sensitive_text(spoken or fallback, limit)
+
+
 def create_app(
     public_settings: PublicSettings | None = None,
     internal_settings: Settings | None = None,
@@ -90,7 +122,14 @@ def create_app(
     public_settings = public_settings or PublicSettings.from_environment()
     internal_settings = internal_settings or Settings.from_environment()
     store = store or PublicStore(public_settings.database_url)
-    chat_service = chat_service or PublicChatService(internal_settings, public_settings)
+    provider_http = ProviderHTTPPool()
+    chat_service = chat_service or PublicChatService(
+        internal_settings,
+        public_settings,
+        provider_client=provider_http,
+    )
+    if chat_service is not None and getattr(chat_service, "provider_client", None) is None:
+        chat_service.provider_client = provider_http
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -101,6 +140,7 @@ def create_app(
             yield
         finally:
             chat_service.close()
+            await provider_http.close()
 
     app = FastAPI(
         title="Project Snow Public Immersive API",
@@ -113,6 +153,9 @@ def create_app(
     app.state.public_settings = public_settings
     app.state.public_store = store
     app.state.chat_service = chat_service
+    app.state.provider_http = provider_http
+    chat_jobs: dict[str, asyncio.Task[dict[str, Any]]] = {}
+    app.state.chat_jobs = chat_jobs
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(public_settings.allowed_origins),
@@ -202,6 +245,18 @@ def create_app(
             "history_policy": "browser_indexeddb_plaintext",
             "history_schema": "indexeddb-v2",
             "state_schema": "public-state-2",
+            "media_version": public_settings.media_version,
+            "media_manifest_url": (
+                f"/media/{public_settings.media_version}/manifest.json"
+            ),
+            "experience_notice_version": public_settings.experience_notice_version,
+            "arrival_reaction_probability": public_settings.arrival_probability,
+            "automatic_summary": {
+                "default_enabled": True,
+                "successful_round_interval": 12,
+                "counts_toward_daily_limit": True,
+                "counts_toward_hourly_limit": False,
+            },
             "communication_channels": ["text", "in_person"],
             "content_block_types": ["message", "speech", "action"],
             "source_links": {
@@ -265,7 +320,11 @@ def create_app(
         )
         store.consume_limits(request.state.subject_hash, [("model_discovery_hour", "hour", 20)])
         try:
-            discovered = await discover_models(spec, str(claims["api_key"]))
+            discovered = await discover_models(
+                spec,
+                str(claims["api_key"]),
+                client=provider_http,
+            )
         except ProviderRequestError as exc:
             raise _error(exc.code, exc.status_code) from exc
         return {"provider": spec.provider_id, "models": discovered, "manual_model_allowed": True}
@@ -368,6 +427,7 @@ def create_app(
     @app.post("/public/v1/chat/stream")
     async def chat_stream(request: Request, payload: ChatRequest):
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        chat_service.ensure_character_available(payload.character_id)
         claims = open_byok_credential(
             public_settings,
             anonymous_id=request.state.anonymous_id,
@@ -383,75 +443,168 @@ def create_app(
         )
         if claim_status == "conflict":
             raise _error("request_id_conflict", 409)
-        if claim_status == "processing":
-            raise _error("request_in_progress", 409)
+        idempotent_replay = claim_status in {"processing", "completed"}
+        result: dict[str, Any] | None = None
+        job: asyncio.Task[dict[str, Any]] | None = None
         if claim_status == "completed" and cached is not None:
             result = {**cached, "idempotent_replay": True}
+        elif claim_status == "processing":
+            job = chat_jobs.get(request_id)
+            if job is None:
+                # The original worker may be running in another process (or
+                # the process may have restarted).  The durable claim still
+                # prevents a second provider call; the client can retry the
+                # same UUID until the cached terminal result is available.
+                raise _error("request_in_progress", 409)
         else:
             try:
                 store.consume_limits(
                     request.state.subject_hash,
                     [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
                 )
-                unsafe_category = input_safety_category(payload.message)
-                if unsafe_category:
-                    # The rejection follows the same credential, idempotency,
-                    # and quota path, so blocked input cannot bypass controls.
-                    result = chat_service.policy_rejection(
-                        payload,
-                        request.state.subject_hash,
-                        spec,
-                        unsafe_category,
-                    )
-                else:
-                    result = await chat_service.chat(
-                        payload,
-                        request.state.subject_hash,
-                        spec,
-                        str(claims["api_key"]),
-                    )
-                store.complete_request(request_id, result)
             except Exception:
                 store.release_request(request_id)
                 raise
+
+            async def run_generation() -> dict[str, Any]:
+                try:
+                    unsafe_category = input_safety_category(payload.message)
+                    if unsafe_category:
+                        generated = chat_service.policy_rejection(
+                            payload,
+                            request.state.subject_hash,
+                            spec,
+                            unsafe_category,
+                        )
+                    else:
+                        generated = await chat_service.chat(
+                            payload,
+                            request.state.subject_hash,
+                            spec,
+                            str(claims["api_key"]),
+                        )
+                except GenerationBusy as exc:
+                    generated = {
+                        "request_id": request_id,
+                        "character_id": payload.character_id,
+                        "provider": spec.provider_id,
+                        "model": payload.model,
+                        "communication_channel": payload.communication_channel,
+                        "answer": "",
+                        "content_blocks": [],
+                        "state_package": payload.state_package,
+                        "terminal_error": str(exc),
+                        "diagnostics": {"error_stage": "generation_queue"},
+                    }
+                except CharacterUnavailable:
+                    generated = {
+                        "request_id": request_id,
+                        "character_id": payload.character_id,
+                        "provider": spec.provider_id,
+                        "model": payload.model,
+                        "communication_channel": payload.communication_channel,
+                        "answer": "",
+                        "content_blocks": [],
+                        "state_package": payload.state_package,
+                        "terminal_error": "character_unavailable",
+                        "diagnostics": {"error_stage": "character_data"},
+                    }
+                except Exception:
+                    generated = {
+                        "request_id": request_id,
+                        "character_id": payload.character_id,
+                        "provider": spec.provider_id,
+                        "model": payload.model,
+                        "communication_channel": payload.communication_channel,
+                        "answer": "",
+                        "content_blocks": [],
+                        "state_package": payload.state_package,
+                        "terminal_error": "generation_failed",
+                        "diagnostics": {"error_stage": "generation"},
+                    }
+                store.complete_request(request_id, generated)
+                return generated
+
+            job = asyncio.create_task(run_generation(), name=f"public-chat:{request_id}")
+            chat_jobs[request_id] = job
+
+            def forget_job(completed: asyncio.Task[dict[str, Any]]) -> None:
+                chat_jobs.pop(request_id, None)
+                # Retrieve a possible storage failure so a disconnected SSE
+                # client cannot leave an unobserved task exception behind.
+                if not completed.cancelled():
+                    completed.exception()
+
+            job.add_done_callback(forget_job)
 
         async def events():
             yield _sse(
                 "meta",
                 {
-                    "request_id": result["request_id"],
-                    "character_id": result["character_id"],
-                    "provider": result["provider"],
-                    "model": result["model"],
-                    "communication_channel": result.get("communication_channel", "text"),
+                    "request_id": request_id,
+                    "character_id": payload.character_id,
+                    "provider": spec.provider_id,
+                    "model": payload.model,
+                    "communication_channel": payload.communication_channel,
                     "data_version": public_settings.data_version,
-                    "idempotent_replay": bool(result.get("idempotent_replay")),
+                    "idempotent_replay": idempotent_replay,
                 },
             )
-            if result.get("terminal_error"):
+            resolved = result
+            while resolved is None and job is not None:
+                try:
+                    resolved = await asyncio.wait_for(asyncio.shield(job), timeout=4.0)
+                except TimeoutError:
+                    yield ": heartbeat\n\n"
+            if resolved is None:
+                yield _sse("error", {"code": "generation_failed", "retryable": True})
+                return
+            result_payload = resolved
+            if result_payload.get("terminal_error"):
                 yield _sse(
                     "error",
                     {
-                        "code": result["terminal_error"],
+                        "code": result_payload["terminal_error"],
                         "retryable": True,
-                        "idempotent_replay": bool(result.get("idempotent_replay")),
+                        "idempotent_replay": idempotent_replay,
                     },
                 )
                 return
-            answer = str(result.get("answer") or "")
-            for start in range(0, len(answer), 24):
-                yield _sse("delta", {"text": answer[start : start + 24]})
-            if result.get("state_package"):
-                yield _sse("state", {"state_package": result["state_package"]})
+            content_blocks = list(result_payload.get("content_blocks") or [])
+            if not content_blocks and str(result_payload.get("answer") or "").strip():
+                content_blocks = [
+                    {
+                        "type": (
+                            "message"
+                            if payload.communication_channel == "text"
+                            else "speech"
+                        ),
+                        "text": str(result_payload["answer"]),
+                    }
+                ]
+            for block_index, block in enumerate(content_blocks):
+                block_type = str(block.get("type") or "")
+                block_text = str(block.get("text") or "")
+                for start in range(0, len(block_text), 24):
+                    yield _sse(
+                        "delta",
+                        {
+                            "text": block_text[start : start + 24],
+                            "block_index": block_index,
+                            "block_type": block_type,
+                        },
+                    )
+            if result_payload.get("state_package"):
+                yield _sse("state", {"state_package": result_payload["state_package"]})
             yield _sse(
                 "done",
                 {
-                    "truncated": bool(result.get("truncated")),
-                    "degraded_services": result.get("degraded_services") or [],
-                    "usage": result.get("usage") or {},
-                    "safety_category": result.get("safety_category"),
-                    "communication_channel": result.get("communication_channel", "text"),
-                    "content_blocks": result.get("content_blocks") or [],
+                    "truncated": bool(result_payload.get("truncated")),
+                    "degraded_services": result_payload.get("degraded_services") or [],
+                    "usage": result_payload.get("usage") or {},
+                    "safety_category": result_payload.get("safety_category"),
+                    "communication_channel": result_payload.get("communication_channel", "text"),
+                    "content_blocks": content_blocks,
                 },
             )
 
@@ -470,15 +623,37 @@ def create_app(
             token=payload.credential,
             expected_provider=spec.provider_id,
         )
-        store.consume_limits(request.state.subject_hash, [("chat_summary_day", "day", 200)])
+        cache_id = "chat-summary:" + str(payload.request_id)
+        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        claim_status, cached = store.claim_request(
+            cache_id,
+            request.state.subject_hash,
+            _request_hash(request_body),
+        )
+        if claim_status == "conflict":
+            raise _error("request_id_conflict", 409)
+        if claim_status == "processing":
+            raise _error("request_in_progress", 409)
+        if claim_status == "completed" and cached is not None:
+            return {**cached, "idempotent_replay": True}
         try:
-            return await chat_service.summarize(payload, spec, str(claims["api_key"]))
+            # Summaries are extra model calls and therefore consume the same
+            # daily 200-call budget as chat, but deliberately do not touch the
+            # hourly 50-round bucket.
+            store.consume_limits(request.state.subject_hash, [("chat_day", "day", 200)])
+            result = await chat_service.summarize(payload, spec, str(claims["api_key"]))
+            store.complete_request(cache_id, result)
+            return {**result, "idempotent_replay": False}
         except ProviderRequestError as exc:
+            store.release_request(cache_id)
             raise _error(exc.code, exc.status_code) from exc
+        except Exception:
+            store.release_request(cache_id)
+            raise
 
     @app.post("/public/v1/feedback")
     async def feedback(request: Request, payload: FeedbackRequest) -> dict[str, Any]:
-        body = normalized_text(payload.body, 1000)
+        body = redact_sensitive_text(payload.body, 1000)
         if not body:
             raise _error("feedback_empty", 422)
         ip_fingerprint = daily_ip_fingerprint(public_settings, _client_ip(request))
@@ -502,6 +677,14 @@ def create_app(
             request.state.subject_hash,
             [("feedback_hour", "hour", 10), ("feedback_day", "day", 30)],
         )
+        user_blocks = _feedback_blocks(payload.user_content_blocks, 2000)
+        assistant_blocks = _feedback_blocks(payload.assistant_content_blocks, 1200)
+        user_message = redact_sensitive_text(payload.user_message, 2000)
+        if not user_message and user_blocks:
+            user_message = redact_sensitive_text(
+                "\n".join(block["text"] for block in user_blocks),
+                2000,
+            )
         context = {
             "request_id": str(payload.request_id),
             "character_id": payload.character_id,
@@ -509,12 +692,18 @@ def create_app(
             "model": payload.model,
             "app_version": public_settings.app_version,
             "data_version": public_settings.data_version,
-            "user_message": normalized_text(payload.user_message, 2000),
-            "assistant_answer": normalized_text(payload.assistant_answer, 1200),
-            "request_stage": payload.request_stage,
-            "error_code": payload.error_code,
-            "degraded_services": payload.degraded_services,
-            "ui_surface": payload.ui_surface,
+            "user_message": user_message,
+            "assistant_answer": _spoken_feedback_text(
+                assistant_blocks,
+                payload.assistant_answer,
+                1200,
+            ),
+            "user_content_blocks": user_blocks,
+            "assistant_content_blocks": assistant_blocks,
+            "request_stage": redact_sensitive_text(payload.request_stage, 80),
+            "error_code": redact_sensitive_text(payload.error_code, 80),
+            "degraded_services": [redact_sensitive_text(item, 80) for item in payload.degraded_services],
+            "ui_surface": redact_sensitive_text(payload.ui_surface, 80),
         }
         if payload.chat_request_id:
             chat_result = store.request_result(
@@ -594,7 +783,10 @@ def create_app(
     def full(response: Response) -> dict[str, Any]:
         dependencies = chat_service.repository.dependency_health()
         database_ok = store.health()
+        media = chat_service.media.verify()
         degraded = sorted(service for service, service_status in dependencies.items() if service_status != "ok")
+        if media.get("status") != "ok":
+            degraded.append("media")
         if not database_ok:
             response.status_code = 503
         return {
@@ -603,6 +795,8 @@ def create_app(
             "dependencies": dependencies,
             "degraded_services": degraded,
             "data_version": public_settings.data_version,
+            "media_version": public_settings.media_version,
+            "media": media,
         }
 
     @app.exception_handler(PublicSecurityError)
@@ -640,10 +834,31 @@ def create_app(
     async def mvp_provider_error(_request: Request, _exc: MVPProviderError):
         return JSONResponse(status_code=502, content={"detail": {"code": "provider_request_failed"}})
 
-    frontend_path = Path(__file__).resolve().parents[2] / "public_frontend"
+    app_root = Path(__file__).resolve().parents[2]
+    frontend_path = app_root / "public_frontend"
+    shared_design_path = app_root / "frontend" / "shared"
+    immersive_assets_path = app_root / "frontend" / "assets" / "immersive"
+    if public_settings.media_root.is_dir():
+        app.mount(
+            f"/media/{public_settings.media_version}",
+            StaticFiles(directory=public_settings.media_root, html=False),
+            name="public_media",
+        )
+    if shared_design_path.is_dir():
+        app.mount(
+            "/shared",
+            StaticFiles(directory=shared_design_path, html=False),
+            name="shared_immersive_design",
+        )
+    if immersive_assets_path.is_dir():
+        app.mount(
+            "/assets/immersive",
+            StaticFiles(directory=immersive_assets_path, html=False),
+            name="shared_immersive_assets",
+        )
     if frontend_path.is_dir():
-        # The public frontend contains no Wiki-derived image assets. Portraits
-        # fall back to text until each asset has a separately verified license.
+        # Wiki-derived portraits are never copied into this directory or the
+        # application image; the versioned media mount above remains separate.
         app.mount("/", StaticFiles(directory=frontend_path, html=True), name="public_frontend")
 
     return app

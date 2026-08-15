@@ -83,6 +83,10 @@ jobs:
           tests/test_change_classifier.py
           tests/test_release_manifest.py
           tests/test_prepare_ci_runtime.py -q
+      - name: Validate shared immersive design layer
+        run: |
+          python scripts/validate_shared_design.py
+          python -m pytest tests/test_shared_design.py -q
       - run: python -m compileall -q backend migrations scripts
       - uses: actions/setup-node@v5
         with:
@@ -327,6 +331,8 @@ jobs:
           python -m pytest tests
           -m "not runtime_data"
           --ignore=tests/test_public_frontend_e2e.py -q
+      - name: Validate shared immersive design layer
+        run: python scripts/validate_shared_design.py
       - name: Isolated public browser suite
         env:
           RUN_PUBLIC_E2E: "1"

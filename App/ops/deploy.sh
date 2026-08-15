@@ -44,6 +44,16 @@ candidate_data_version=""
 if [ -n "$release_manifest" ]; then
   candidate_data_version="$(jq -r '.data_version // empty' "$release_manifest")"
   case "$candidate_data_version" in '') echo 'Release manifest has no data version.' >&2; exit 67 ;; esac
+  candidate_media_version="$(jq -r '.media_version // empty' "$release_manifest")"
+  case "$candidate_media_version" in '') echo 'Release manifest has no media version.' >&2; exit 67 ;; esac
+  active_media_version=""
+  if [ -r /srv/project-snow/media/current/manifest.json ]; then
+    active_media_version="$(jq -r '.media_version // empty' /srv/project-snow/media/current/manifest.json)"
+  fi
+  if [ "$candidate_media_version" != "$active_media_version" ]; then
+    echo "Media $candidate_media_version must be downloaded, verified and promoted before application deployment (active: ${active_media_version:-none})." >&2
+    exit 68
+  fi
   current_data_version=""
   if [ -r "$current_manifest" ]; then
     current_data_version="$(jq -r '.data_version // empty' "$current_manifest")"

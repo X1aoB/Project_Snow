@@ -1018,6 +1018,99 @@ _TEXT_COMPLETED_PHYSICAL_TERMS = (
     "我碰到了你",
 )
 
+# High-confidence stage-direction predicates used only for face-to-face
+# content-block separation.  The list is deliberately concrete: a sentence is
+# reclassified as ``action`` only when it starts with the active character (or
+# an equivalent first/third-person subject) and contains one of these visible
+# predicates.  Ambiguous prose is left for the model rewrite instead of being
+# silently rewritten by the server.
+_IN_PERSON_ACTION_PREDICATES = (
+    "抬眼",
+    "抬眸",
+    "抬头",
+    "低头",
+    "偏头",
+    "侧过脸",
+    "转过身",
+    "转身",
+    "走近",
+    "走到",
+    "靠近",
+    "后退",
+    "坐下",
+    "起身",
+    "伸手",
+    "收回手",
+    "点头",
+    "摇头",
+    "眨眼",
+    "闭眼",
+    "睁眼",
+    "皱眉",
+    "挑眉",
+    "扬眉",
+    "微笑",
+    "笑了",
+    "轻笑",
+    "叹气",
+    "耸肩",
+    "挥手",
+    "抱臂",
+    "握住",
+    "牵起",
+    "抱住",
+    "松开",
+    "接过",
+    "递出",
+    "看向",
+    "看着",
+    "望着",
+    "凝视",
+    "盯着",
+    "望向",
+    "注视",
+    "目光",
+    "神情",
+    "表情",
+    "唇角",
+    "眉梢",
+)
+_IN_PERSON_SPOKEN_MARKERS = (
+    "说道",
+    "说着",
+    "说：",
+    "说:",
+    "说“",
+    "说「",
+    "开口",
+    "回答",
+    "问道",
+    "喊道",
+    "低声说",
+    "轻声说",
+    "告诉",
+    "解释",
+)
+_IN_PERSON_ANALYST_REACTION_PREDICATES = (
+    "感到",
+    "觉得",
+    "意识到",
+    "露出",
+    "笑了",
+    "哭了",
+    "脸红",
+    "害怕",
+    "紧张",
+    "满意",
+    "开心",
+    "难过",
+    "生气",
+    "点头",
+    "摇头",
+    "后退",
+    "靠近",
+)
+
 # A relationship with the analyst does not authorize the model to invent an
 # analyst personality.  These phrases are high-risk because they turn a
 # greeting into a claimed routine, shared memory, or exclusive convention.
@@ -1672,6 +1765,11 @@ class MVPService:
     def reset_generation_diagnostics(self) -> None:
         self._generation_diagnostics.value = {
             "provider_http_calls": 0,
+            # Number of model generations, including a guarded rewrite.  This
+            # is deliberately distinct from provider HTTP calls because a
+            # single generation may make more than one HTTP request (or a
+            # provider adapter may retry internally).
+            "model_calls": 0,
             "initial_model_ms": 0,
             "guard_rewrite_ms": 0,
         }
@@ -6527,6 +6625,9 @@ class MVPService:
         base_url, api_key, model = model_settings or self.provider_settings()
         if not base_url or not api_key or not model:
             raise MVPProviderError("MVP 对话模型未配置 base URL、API key 或 model。")
+        diagnostics = self.generation_diagnostics()
+        diagnostics["model_calls"] = int(diagnostics.get("model_calls", 0)) + 1
+        self._generation_diagnostics.value = diagnostics
         endpoint = base_url.rstrip("/") + "/chat/completions"
         model_lower = str(model).lower()
         try:
@@ -6848,14 +6949,15 @@ class MVPService:
         }
 
     @staticmethod
-    def _normalize_content_blocks(
+    def _normalize_content_blocks_with_diagnostics(
         generated: dict[str, Any],
         communication_channel: str,
         answer: str,
         character_name: str = "",
-    ) -> list[dict[str, str]]:
+    ) -> tuple[list[dict[str, str]], bool]:
         allowed = {"message"} if communication_channel == "text" else {"speech", "action"}
         blocks: list[dict[str, str]] = []
+        reclassified = False
         canonical_character = canonical_mvp_character(character_name)
         action_names = sorted(
             {
@@ -6908,7 +7010,32 @@ class MVPService:
                 remainder = remainder[match.end():].strip()
             return actions, remainder
 
+        def split_leading_action_sentences(value: str) -> tuple[list[str], str]:
+            actions: list[str] = []
+            remainder = value.strip()
+            subjects = tuple(action_names) + ("我", "她", "少女", "女孩", "角色")
+            for _ in range(2):
+                match = re.match(r"^([^。！？!?\r\n]{2,240}[。！？!?])\s*(.*)$", remainder, re.S)
+                if not match:
+                    break
+                sentence = match.group(1).strip()
+                if not sentence.startswith(subjects):
+                    break
+                if not any(predicate in sentence for predicate in _IN_PERSON_ACTION_PREDICATES):
+                    break
+                if any(marker in sentence for marker in _IN_PERSON_SPOKEN_MARKERS):
+                    break
+                if any(mark in sentence for mark in ('“', '”', '「', '」', '『', '』', '"')):
+                    break
+                action = normalize_action(sentence)
+                if not action:
+                    break
+                actions.append(action)
+                remainder = match.group(2).strip()
+            return actions, remainder
+
         def append_block(block_type: str, text: str) -> None:
+            nonlocal reclassified
             if communication_channel == "in_person" and block_type == "action":
                 normalized = normalize_action(text)
                 if normalized:
@@ -6916,6 +7043,10 @@ class MVPService:
                 return
             if communication_channel == "in_person" and block_type == "speech":
                 actions, speech = split_leading_actions(text)
+                sentence_actions, speech = split_leading_action_sentences(speech)
+                actions.extend(sentence_actions)
+                if actions:
+                    reclassified = True
                 blocks.extend({"type": "action", "text": action} for action in actions)
                 if speech:
                     blocks.append({"type": "speech", "text": speech})
@@ -6936,90 +7067,27 @@ class MVPService:
                 if block_type in allowed and text:
                     append_block(block_type, text)
         if blocks:
-            return blocks
+            return blocks, reclassified
         default_type = "message" if communication_channel == "text" else "speech"
         clean_answer = _clean_renderable_text(answer) if isinstance(answer, str) else ""
         if clean_answer:
             append_block(default_type, clean_answer)
-        return blocks
+        return blocks, reclassified
 
     @staticmethod
-    def _ensure_in_person_presence_block(
-        content_blocks: list[dict[str, str]],
-        *,
+    def _normalize_content_blocks(
+        generated: dict[str, Any],
         communication_channel: str,
-        mode: str,
-        context: dict[str, Any],
-    ) -> tuple[list[dict[str, str]], bool]:
-        """Restore a small visual beat for immersive face-to-face dialogue.
-
-        A controlled rewrite can legitimately replace a malformed model reply
-        with a deterministic spoken answer.  Previously that also erased all
-        sense of a shared physical scene.  This local addition is intentionally
-        character-owned and neutral: it never claims an analyst reaction,
-        touch, or unprovided environmental detail.
-        """
-
-        if communication_channel != "in_person" or mode != "immersive":
-            return content_blocks, False
-        if any(str(block.get("type") or "").casefold() == "action" for block in content_blocks):
-            return content_blocks, False
-        boundary = context.get("dialogue_boundary") or {}
-        if boundary.get("kind") == "meta_system":
-            return content_blocks, False
-        if not any(str(block.get("text") or "").strip() for block in content_blocks):
-            return content_blocks, False
-
-        analyst_actions = [
-            block
-            for block in (context.get("analyst_content_blocks") or [])
-            if isinstance(block, dict) and str(block.get("type") or "").casefold() == "action"
-        ]
-        character = context.get("character")
-        character_name = str(getattr(character, "display_name", "") or "她").strip()
-        message = _compact(str(context.get("user_message") or ""))
-        # These are deliberately small, character-owned beats.  They are only
-        # a last-mile safety net when a valid model reply omitted an action
-        # block, not a substitute for the character's source-backed voice.
-        # Choose a non-recent option so repeated guardrail rewrites do not make
-        # every face-to-face exchange start with the exact same stage direction.
-        if analyst_actions:
-            candidates = [
-                f"{character_name}看着你的动作，神情微微一动。",
-                f"{character_name}的目光在你身上停了一瞬，随后认真听你说下去。",
-                f"{character_name}像是被你的小动作逗得放松了些，抬眼望向你。",
-            ]
-        elif any(marker in message for marker in ("？", "?", "怎么", "为什么", "什么")):
-            candidates = [
-                f"{character_name}微微偏过头，像是在认真斟酌你的话。",
-                f"{character_name}抬起眼，安静等着你把话说完。",
-                f"{character_name}的眉梢轻轻动了动，注意力已经落在你的问题上。",
-            ]
-        elif any(marker in message for marker in ("早安", "晚安", "辛苦", "想你", "陪我", "一起")):
-            candidates = [
-                f"{character_name}抬眼看向你，神情不自觉地柔和下来。",
-                f"{character_name}的唇角松开一点，像是把你的话好好接住了。",
-                f"{character_name}望着你，眼里的情绪一点点缓下来。",
-            ]
-        else:
-            candidates = [
-                f"{character_name}的神情放松了些，安静地把注意力留在你身上。",
-                f"{character_name}略微侧过脸，示意自己正在听。",
-                f"{character_name}抬眸望向你，像是在等你继续说下去。",
-            ]
-        recent_actions = _compact(
-            "\n".join(
-                str(turn.get("assistant") or "")
-                for turn in (context.get("session_context") or {}).get("turns") or []
-            )
+        answer: str,
+        character_name: str = "",
+    ) -> list[dict[str, str]]:
+        blocks, _reclassified = MVPService._normalize_content_blocks_with_diagnostics(
+            generated,
+            communication_channel,
+            answer,
+            character_name,
         )
-        fresh = [candidate for candidate in candidates if _compact(candidate) not in recent_actions]
-        pool = fresh or candidates
-        seed = sha256(
-            f"{getattr(character, 'character_id', character_name)}|{message}|{len(recent_actions)}".encode("utf-8")
-        ).digest()[0]
-        action = pool[seed % len(pool)]
-        return [{"type": "action", "text": action}, *content_blocks], True
+        return blocks
 
     @staticmethod
     def _render_content_blocks(blocks: list[dict[str, str]]) -> str:
@@ -7047,6 +7115,7 @@ class MVPService:
     ) -> list[str]:
         violations: list[str] = []
         block_texts: list[str] = []
+        normalized_blocks: list[tuple[str, str]] = []
         if isinstance(content_blocks, list):
             allowed = {"message"} if communication_channel == "text" else {"speech", "action"}
             for item in content_blocks:
@@ -7057,8 +7126,54 @@ class MVPService:
                 block_text = str(item.get("text") or "").strip()
                 if block_text:
                     block_texts.append(block_text)
+                    normalized_blocks.append((block_type, block_text))
                 if block_type not in allowed:
                     violations.append(f"communication_block_type:{communication_channel}:{block_type or 'missing'}")
+        if communication_channel == "in_person":
+            known_names = sorted(
+                {
+                    character.display_name
+                    for character in MVP_CHARACTERS
+                }
+                | {
+                    alias
+                    for character in MVP_CHARACTERS
+                    for alias in character.aliases
+                },
+                key=len,
+                reverse=True,
+            )
+            stage_subjects = tuple(known_names) + ("我", "她", "少女", "女孩", "角色")
+            for block_type, block_text in normalized_blocks:
+                compact_block = _compact(block_text)
+                if block_type == "speech":
+                    if re.match(r"^[（(【\[]", block_text):
+                        violations.append("in_person_speech_contains_action")
+                        continue
+                    first_sentence = re.split(r"(?<=[。！？!?])", block_text, maxsplit=1)[0]
+                    if (
+                        first_sentence.startswith(stage_subjects)
+                        and any(predicate in first_sentence for predicate in _IN_PERSON_ACTION_PREDICATES)
+                    ):
+                        violations.append("in_person_speech_contains_action")
+                elif block_type == "action":
+                    has_quotation = any(
+                        mark in block_text for mark in ('“', '”', '「', '」', '『', '』', '"')
+                    )
+                    if has_quotation or any(
+                        marker in block_text for marker in _IN_PERSON_SPOKEN_MARKERS
+                    ):
+                        violations.append("in_person_action_contains_speech")
+                    for predicate in _IN_PERSON_ANALYST_REACTION_PREDICATES:
+                        analyst_claim = re.search(
+                            rf"(?:你|分析员)[^。！？!?\r\n]{{0,16}}{re.escape(predicate)}",
+                            compact_block,
+                        )
+                        if analyst_claim and not _contains_term(message, predicate):
+                            violations.append(
+                                f"in_person_action_invents_analyst_reaction:{predicate}"
+                            )
+            return list(dict.fromkeys(violations))
         if communication_channel != "text":
             return violations
         inspected_text = "\n".join([answer, *block_texts])
@@ -9073,6 +9188,9 @@ class MVPService:
         generated = _parse_model_json(raw_content)
         answer_text = self._generated_answer(generated, raw_content)
         empty_model_output_guard = False
+        in_person_blocks_reclassified = False
+        in_person_block_rewrite = False
+        content_block_guard_rejected = False
         if not answer_text.strip():
             answer_text = self._empty_model_output_fallback(context)
             generated = {
@@ -9091,10 +9209,23 @@ class MVPService:
                 "citation_notes": ["模型返回空内容，未将空响应展示给分析员。"],
             }
             empty_model_output_guard = True
+        normalized_initial_blocks, initial_reclassified = self._normalize_content_blocks_with_diagnostics(
+            generated,
+            active_channel,
+            answer_text,
+            character.display_name,
+        )
+        if normalized_initial_blocks:
+            generated["content_blocks"] = normalized_initial_blocks
+            answer_text = self._render_content_blocks(normalized_initial_blocks)
+        in_person_blocks_reclassified = active_channel == "in_person" and initial_reclassified
         raw_blocks = generated.get("content_blocks")
         guardrail_violations = self._answer_guardrail_violations(
             message.strip(), answer_text, context, mode, raw_blocks
         )
+        initial_in_person_block_violations = {
+            item for item in guardrail_violations if item.startswith("in_person_")
+        }
         guardrail_retried = False
         guardrail_fallback = False
         live_scene_guard = False
@@ -9155,6 +9286,21 @@ class MVPService:
                 usage = self._merge_usage(usage, retry_usage)
                 candidate = _parse_model_json(retry_content)
                 candidate_answer = self._generated_answer(candidate, retry_content)
+                normalized_candidate_blocks, candidate_reclassified = (
+                    self._normalize_content_blocks_with_diagnostics(
+                        candidate,
+                        active_channel,
+                        candidate_answer,
+                        character.display_name,
+                    )
+                )
+                if normalized_candidate_blocks:
+                    candidate["content_blocks"] = normalized_candidate_blocks
+                    candidate_answer = self._render_content_blocks(normalized_candidate_blocks)
+                in_person_blocks_reclassified = (
+                    in_person_blocks_reclassified
+                    or (active_channel == "in_person" and candidate_reclassified)
+                )
                 retry_violations = self._answer_guardrail_violations(
                     message.strip(),
                     candidate_answer,
@@ -9171,6 +9317,14 @@ class MVPService:
                 retry_generated = None
             if retry_generated is not None:
                 generated = retry_generated
+                if initial_in_person_block_violations:
+                    in_person_block_rewrite = True
+            elif any(item.startswith("in_person_") for item in retry_violations):
+                # The public facade turns this flag into role_guard_rejected.
+                # Keep the internal result inspectable without inventing a
+                # replacement action or presenting mixed blocks as valid.
+                in_person_block_rewrite = True
+                content_block_guard_rejected = True
             elif any(
                 item.startswith("direct_answer_focus:") for item in retry_violations
             ):
@@ -9780,12 +9934,6 @@ class MVPService:
                     }
                 ]
                 empty_model_output_guard = True
-        content_blocks, in_person_presence_enriched = self._ensure_in_person_presence_block(
-            content_blocks,
-            communication_channel=active_channel,
-            mode=mode,
-            context=context,
-        )
         answer_text = self._render_content_blocks(content_blocks)
         generated["content_blocks"] = content_blocks
         generated["answer"] = answer_text
@@ -9938,6 +10086,7 @@ class MVPService:
             "artifacts": [],
             "audio": {"status": "not_configured"} if voice_reply else None,
             "agent_run_id": None,
+            "content_block_guard_rejected": content_block_guard_rejected,
             "response_adjustments": [
                 adjustment
                 for adjustment, active in (
@@ -9971,7 +10120,8 @@ class MVPService:
                     ("logistics_evidence_fallback", logistics_guard),
                     ("relationship_roster_guard", relationship_roster_guard),
                     ("empty_model_output_guard", empty_model_output_guard),
-                    ("in_person_presence_enriched", in_person_presence_enriched),
+                    ("in_person_blocks_reclassified", in_person_blocks_reclassified),
+                    ("in_person_block_rewrite", in_person_block_rewrite),
                     ("presence_transition", bool(presence_transition)),
                     ("address_alias_normalized", address_alias_normalized),
                     ("relationship_address_normalized", relationship_address_normalized),

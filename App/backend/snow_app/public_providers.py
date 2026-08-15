@@ -2,10 +2,61 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+
+class ProviderHTTPPool:
+    """Reuse one bounded async HTTP pool per running public API process.
+
+    Test clients can create a fresh event loop for each request, so the pool
+    lazily replaces a client that belongs to an old loop.  Production uvicorn
+    workers normally keep one loop for their entire lifetime.
+    """
+
+    def __init__(self) -> None:
+        self._client: httpx.AsyncClient | None = None
+        self._loop: Any | None = None
+        self._lock = asyncio.Lock()
+
+    async def _for_current_loop(self) -> httpx.AsyncClient:
+        loop = asyncio.get_running_loop()
+        async with self._lock:
+            if self._client is None or self._loop is not loop:
+                previous = self._client
+                self._client = httpx.AsyncClient(
+                    timeout=None,
+                    follow_redirects=False,
+                    limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
+                )
+                self._loop = loop
+                if previous is not None:
+                    try:
+                        await previous.aclose()
+                    except Exception:
+                        # A client tied to a closed test loop cannot always be
+                        # awaited from the replacement loop; dropping it is
+                        # safe because no request is shared across loops.
+                        pass
+            return self._client
+
+    async def get(self, url: str, **kwargs: Any) -> httpx.Response:
+        client = await self._for_current_loop()
+        return await client.get(url, **kwargs)
+
+    async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        client = await self._for_current_loop()
+        return await client.post(url, **kwargs)
+
+    async def close(self) -> None:
+        async with self._lock:
+            client, self._client = self._client, None
+            self._loop = None
+            if client is not None:
+                await client.aclose()
 
 
 @dataclass(frozen=True)
@@ -50,13 +101,26 @@ def provider_spec(provider_id: str, enabled: tuple[str, ...]) -> ProviderSpec:
     return PROVIDERS[provider_id]
 
 
-async def discover_models(spec: ProviderSpec, api_key: str, timeout: float = 30) -> list[str]:
+async def discover_models(
+    spec: ProviderSpec,
+    api_key: str,
+    timeout: float = 30,
+    *,
+    client: ProviderHTTPPool | None = None,
+) -> list[str]:
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        if client is not None:
             response = await client.get(
                 _official_url(spec, "models"),
                 headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+                timeout=timeout,
             )
+        else:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as request_client:
+                response = await request_client.get(
+                    _official_url(spec, "models"),
+                    headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+                )
     except httpx.TimeoutException as exc:
         raise ProviderRequestError("provider_timeout", 504) from exc
     except httpx.HTTPError as exc:
@@ -92,6 +156,7 @@ async def simple_completion(
     user_prompt: str,
     max_tokens: int = 800,
     timeout: float = 120,
+    client: ProviderHTTPPool | None = None,
 ) -> tuple[str, dict[str, Any]]:
     body = {
         "model": model,
@@ -103,12 +168,20 @@ async def simple_completion(
         "max_tokens": max_tokens,
     }
     try:
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        if client is not None:
             response = await client.post(
                 _official_url(spec, "chat/completions"),
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=body,
+                timeout=timeout,
             )
+        else:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as request_client:
+                response = await request_client.post(
+                    _official_url(spec, "chat/completions"),
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json=body,
+                )
     except httpx.TimeoutException as exc:
         raise ProviderRequestError("provider_timeout", 504) from exc
     except httpx.HTTPError as exc:

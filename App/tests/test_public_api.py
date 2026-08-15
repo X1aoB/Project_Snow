@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from dataclasses import replace
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import time
 from unittest import TestCase
 from unittest.mock import patch
 from uuid import uuid4
@@ -219,6 +221,24 @@ class PublicAPITests(TestCase):
         self.assertTrue(duplicate.json()["suppressed"])
         self.assertEqual(len(self.store.feedback_rows()), 1)
 
+    def test_feedback_redacts_accidentally_pasted_provider_keys(self) -> None:
+        leaked = "sk-test-never-log-this"
+        response = self.client.post(
+            "/public/v1/feedback",
+            headers={"Origin": "http://testserver"},
+            json={
+                "request_id": str(uuid4()),
+                "body": f"页面显示了 {leaked}",
+                "user_message": f"api_key={leaked}",
+                "assistant_answer": leaked,
+                "turnstile_token": "development-bypass",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        stored = json.dumps(self.store.feedback_rows()[0], ensure_ascii=False)
+        self.assertNotIn(leaked, stored)
+        self.assertIn("[已隐藏]", stored)
+
     def test_request_body_larger_than_64kb_is_rejected(self) -> None:
         response = self.client.post(
             "/public/v1/feedback",
@@ -251,6 +271,54 @@ class PublicAPITests(TestCase):
         self.assertIn("event: done", first.text)
         self.assertIn('"safety_category":"illegal_instructions"', first.text)
         self.assertIn('"idempotent_replay":true', second.text)
+
+    def test_sse_emits_meta_and_heartbeat_while_model_is_slow(self) -> None:
+        credential, _ = self._byok()
+        payload = {
+            "request_id": str(uuid4()),
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": MVP_CHARACTERS[0].character_id,
+            "message": "你好",
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+
+        async def slow_chat(*_args, **_kwargs):
+            await asyncio.sleep(4.2)
+            return {
+                "answer": "慢速回复",
+                "content_blocks": [{"type": "speech", "text": "慢速回复"}],
+                "retrieval": {},
+                "usage": {},
+                "response_adjustments": [],
+            }
+
+        with patch.object(self.app.state.chat_service, "chat", side_effect=slow_chat):
+            started = time.monotonic()
+            with self.client.stream(
+                "POST",
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                chunks = response.iter_text()
+                first_chunk = next(chunks)
+                first_elapsed = time.monotonic() - started
+                remainder = "".join(chunks)
+
+        # Starlette's in-process TestClient buffers the body until the ASGI
+        # call completes, so it cannot measure network-level first-byte time.
+        # The route itself creates the StreamingResponse before awaiting the
+        # worker; this test locks in the observable heartbeat contract.
+        self.assertGreaterEqual(first_elapsed, 0)
+        stream = first_chunk + remainder
+        self.assertIn("event: meta", stream)
+        self.assertIn(": heartbeat", stream)
+        self.assertIn("event: done", stream)
 
     def test_public_rejects_whole_answer_fallback_and_replays_terminal_error(self) -> None:
         credential, _ = self._byok()
@@ -326,6 +394,7 @@ class PublicAPITests(TestCase):
         self.assertEqual(context["chat_request_id"], chat_request_id)
         self.assertEqual(context["generation_outcome"], "valid_initial")
         self.assertIn("total", context["generation_diagnostics"]["timings_ms"])
+        self.assertIn("model_calls", context["generation_diagnostics"]["timings_ms"])
         self.assertNotIn("sk-test-never-log-this", json.dumps(context, ensure_ascii=False))
 
     def test_all_public_characters_reach_the_immersive_engine(self) -> None:
@@ -502,6 +571,8 @@ class PublicAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('"communication_channel":"in_person"', response.text)
         self.assertIn('"type":"action"', response.text)
+        self.assertIn('"block_index":0', response.text)
+        self.assertIn('"block_type":"action"', response.text)
         self.assertEqual(chat.call_args.kwargs["communication_channel"], "in_person")
         self.assertEqual(
             chat.call_args.kwargs["analyst_content_blocks"],

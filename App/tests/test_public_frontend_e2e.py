@@ -18,6 +18,8 @@ else:
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOT = APP_ROOT / "public_frontend"
+SHARED_ROOT = APP_ROOT / "frontend" / "shared"
+IMMERSIVE_ROOT = APP_ROOT / "frontend" / "assets" / "immersive"
 
 
 class PublicFrontendHandler(BaseHTTPRequestHandler):
@@ -40,6 +42,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     "app_version": "e2e",
                     "data_version": "fixture",
                     "turnstile_site_key": "",
+                    "experience_notice_version": "0.8",
+                    "arrival_reaction_probability": 0.5,
+                    "automatic_summary": {"default_enabled": True},
                     "providers": [{"provider_id": "openai", "display_name": "OpenAI"}],
                     "source_links": {
                         "project_snow": "https://github.com/X1aoB/Project_Snow",
@@ -65,7 +70,27 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 }
             )
             return
-        assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css"}
+        assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
+        if path.startswith("/shared/"):
+            candidate = SHARED_ROOT / path.removeprefix("/shared/")
+            if candidate.is_file():
+                body = candidate.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/css; charset=utf-8" if candidate.suffix == ".css" else "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+        if path.startswith("/assets/immersive/"):
+            candidate = IMMERSIVE_ROOT / path.removeprefix("/assets/immersive/")
+            if candidate.is_file():
+                body = candidate.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/svg+xml")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
         filename = assets.get(path)
         if path.startswith("/assets/immersive/scenes/") and path.endswith(".svg"):
             candidate = PUBLIC_ROOT / path.lstrip("/")
@@ -218,10 +243,10 @@ class PublicFrontendE2ETests(TestCase):
             browser = playwright.chromium.launch()
             page = browser.new_page()
             page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator("#open-settings").click()
             self.assertEqual(page.locator("#provider-select option").count(), 1)
             page.locator("#api-key").fill("sk-e2e-only-not-real")
-            for checkbox in ("#notice-transit", "#notice-cost", "#notice-history"):
-                page.locator(checkbox).check()
             page.locator("#discover-models").click()
             page.locator("#discovered-models").wait_for(state="visible")
             page.locator("#discovered-models").select_option("gpt-e2e")
@@ -241,10 +266,10 @@ class PublicFrontendE2ETests(TestCase):
             browser = playwright.chromium.launch()
             page = browser.new_page()
             page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator("#open-settings").click()
             page.locator("#api-key").fill("sk-e2e-only-not-real")
             page.locator("#model-id").fill("gpt-e2e")
-            for checkbox in ("#notice-transit", "#notice-cost", "#notice-history"):
-                page.locator(checkbox).check()
             page.locator("#save-model").click()
             page.locator("#settings-dialog").wait_for(state="hidden")
             page.locator("#message-input").fill("晚上好")
@@ -252,8 +277,11 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
             page.locator("#go-in-person").click()
             page.locator("#confirm-presence-transition").click()
-            page.locator("#accept-arrival-notice").click()
             page.locator("#in-person-surface").wait_for(state="visible")
+            # Face-to-face dialogue intentionally renders at roughly 24 ms per
+            # character. Wait for the animated text rather than sampling the
+            # initial, intentionally empty typewriter frame.
+            page.locator("#stage-speech").get_by_text("你来了。").wait_for(state="visible")
             self.assertEqual(page.locator("#stage-speech").inner_text(), "你来了。")
             page.locator("#toggle-action").click()
             page.locator("#action-input").fill("向她挥了挥手")

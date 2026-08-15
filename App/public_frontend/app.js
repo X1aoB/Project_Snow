@@ -13,9 +13,15 @@ const state = {
   threads: new Map(),
   worldPackage: "",
   scene: null,
+  sceneByCharacter: new Map(),
   latest: new Map(),
   feedbackMessageId: "",
   arrivalPending: false,
+  autoSummaryEnabled: true,
+  selectionSequence: 0,
+  selectionController: null,
+  typewriter: { key: "", timer: 0, fullText: "", displayedText: "" },
+  summaryInFlight: new Set(),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -44,6 +50,7 @@ const errorMessages = {
   turnstile_unavailable: "人机验证组件加载失败，请刷新页面后重试。",
   chat_failed: "对话请求失败，请稍后重试。",
   request_failed: "请求失败，请稍后重试。",
+  experience_notice_required: "请先阅读并确认体验说明。",
 };
 
 function id() {
@@ -78,6 +85,8 @@ function formatBytes(bytes) {
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
+function delay(milliseconds) { return new Promise((resolve) => window.setTimeout(resolve, milliseconds)); }
+function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
@@ -177,6 +186,11 @@ function normalizeThread(record, characterId) {
     summary: plain(record?.summary),
     channel: record?.channel === "in_person" ? "in_person" : "text",
     turnCount: Number(record?.turnCount || 0),
+    summarizedThroughMessageId: plain(record?.summarizedThroughMessageId),
+    summarizedThroughTurnCount: Number(record?.summarizedThroughTurnCount || 0),
+    summaryRequestId: plain(record?.summaryRequestId),
+    summaryCheckpointMessageId: plain(record?.summaryCheckpointMessageId),
+    summaryUpdatedAt: Number(record?.summaryUpdatedAt || 0),
     legacyStatePackage: plain(record?.statePackage),
   };
 }
@@ -194,6 +208,11 @@ async function dbPutThread(thread) {
     summary: thread.summary,
     channel: thread.channel,
     turnCount: thread.turnCount,
+    summarizedThroughMessageId: thread.summarizedThroughMessageId,
+    summarizedThroughTurnCount: thread.summarizedThroughTurnCount,
+    summaryRequestId: thread.summaryRequestId,
+    summaryCheckpointMessageId: thread.summaryCheckpointMessageId,
+    summaryUpdatedAt: thread.summaryUpdatedAt,
   });
 }
 function decodeStatePackage(token) {
@@ -206,11 +225,19 @@ function decodeStatePackage(token) {
 }
 async function saveWorldPackage(token) {
   if (!token) return;
-  state.worldPackage = token;
   const decoded = decodeStatePackage(token);
+  const incomingRevision = Number(decoded.revision || 0);
+  const currentRevision = Number(decodeStatePackage(state.worldPackage || "").revision || 0);
+  // A slow response from a character the user has already left must not roll
+  // the shared world back over a newer signed package. Every server mutation
+  // increments revision, so equal revisions are safe to keep as-is.
+  if (state.worldPackage && incomingRevision < currentRevision) return;
+  state.worldPackage = token;
   await storePut("app_state", { key: "world", statePackage: token, revision: Number(decoded.revision || 0) });
 }
 async function migrateBrowserState() {
+  const preferences = await storeGet("app_state", "preferences");
+  state.autoSummaryEnabled = preferences?.autoSummaryEnabled !== false;
   const saved = await storeGet("app_state", "world");
   if (saved?.statePackage) {
     state.worldPackage = saved.statePackage;
@@ -295,14 +322,48 @@ function attachTurnstile() {
   document.head.append(script);
 }
 
+function experienceNoticeKey() {
+  return `project-snow-public:notice:${state.config?.experience_notice_version || "0.8"}`;
+}
+function experienceNoticeAccepted() { return localStorage.getItem(experienceNoticeKey()) === "accepted"; }
+async function showExperienceNoticeIfNeeded() {
+  if (experienceNoticeAccepted()) return;
+  const dialog = $("experience-notice-dialog");
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = async (accepted) => {
+      if (settled) return;
+      settled = true;
+      if (accepted) {
+        localStorage.setItem(experienceNoticeKey(), "accepted");
+        state.autoSummaryEnabled = $("notice-auto-summary").checked;
+        await storePut("app_state", { key: "preferences", autoSummaryEnabled: state.autoSummaryEnabled });
+      }
+      if (dialog.open) dialog.close();
+      resolve();
+    };
+    $("accept-experience-notice").onclick = () => finish(true);
+    // There is deliberately no silent-dismiss path: an Escape key press must
+    // not leave boot waiting forever or allow the user to enter without the
+    // one-time product notice. Keep the dialog open until it is acknowledged.
+    dialog.addEventListener("cancel", (event) => event.preventDefault());
+    dialog.showModal();
+  });
+}
+
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = `${state.config.app_version} · 数据 ${state.config.data_version}`;
+  $("version-badge").textContent = state.config.app_version || "0.8.0";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
-  $("provider-select").innerHTML = state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}">${escapeHtml(provider.display_name)}</option>`).join("");
-  if (!state.config.providers.length) showError("setup-error", "私有验收尚未启用模型厂商。");
+  $("provider-select").innerHTML = state.config.providers.length
+    ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}">${escapeHtml(provider.display_name)}</option>`).join("")
+    : '<option value="">暂未开放模型厂商</option>';
+  $("provider-empty").hidden = Boolean(state.config.providers.length);
+  $("discover-models").disabled = !state.config.providers.length;
+  $("save-model").disabled = !state.config.providers.length;
+  if (!state.config.providers.length) showError("setup-error", "当前暂未开放可用的模型厂商。");
   attachTurnstile();
   const stored = sessionStorage.getItem(sessionKey());
   if (stored) {
@@ -323,9 +384,15 @@ async function loadConfig() {
 }
 async function issueCredential() {
   const provider = $("provider-select").value;
+  if (!provider || !state.config?.providers?.some((item) => item.provider_id === provider)) {
+    throw new Error("provider_not_enabled");
+  }
   const apiKey = $("api-key").value;
   if (!apiKey) throw new Error("请先输入 API Key。");
-  if (!["notice-transit", "notice-cost", "notice-history"].every((item) => $(item).checked)) throw new Error("请先确认三项使用说明。");
+  if (!experienceNoticeAccepted()) {
+    await showExperienceNoticeIfNeeded();
+    if (!experienceNoticeAccepted()) throw new Error("experience_notice_required");
+  }
   const payload = await api("/byok/session", {
     method: "POST",
     body: JSON.stringify({
@@ -347,6 +414,7 @@ async function issueCredential() {
 async function discoverModels() {
   showError("setup-error", "");
   try {
+    if (!$("provider-select").value) throw new Error("provider_not_enabled");
     if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential();
     const payload = await api("/byok/models", { method: "POST", body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
     saveCredential();
@@ -358,9 +426,10 @@ async function discoverModels() {
 async function saveModelSession() {
   showError("setup-error", "");
   try {
-    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential();
     const model = $("model-id").value.trim();
     if (!model) throw new Error("请填写或选择模型 ID。");
+    if (!$("provider-select").value) throw new Error("provider_not_enabled");
+    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential();
     state.provider = $("provider-select").value;
     state.model = model;
     saveCredential();
@@ -373,43 +442,182 @@ async function saveModelSession() {
 
 function currentCharacter() { return state.characters.find((item) => item.character_id === state.selected) || null; }
 function currentThread() { return state.threads.get(state.selected) || null; }
+function avatarMarkup(character, { thumbnail = true, priority = false, className = "" } = {}) {
+  const avatar = character?.avatar || null;
+  const src = avatar ? (thumbnail ? avatar.thumbnail_src : avatar.src) : "";
+  const focus = avatar ? ` style="--portrait-focus-x:${Number(avatar.portrait_focus_x || 50)}%;--portrait-focus-y:${Number(avatar.portrait_focus_y || 50)}%;--portrait-scale:${Number(avatar.portrait_scale || 1)}"` : "";
+  const image = src ? `<img src="${escapeHtml(src)}" alt="" loading="${priority ? "eager" : "lazy"}" decoding="async"${priority ? " fetchpriority=\"high\"" : ""} />` : "";
+  return `<span class="portrait portrait-text ${className}${src ? " has-image" : ""}"${focus}><span class="portrait-fallback">${escapeHtml(character?.display_name?.slice(0, 1) || "?")}</span>${image}</span>`;
+}
+function bindAvatarImages(root = document) {
+  root.querySelectorAll(".portrait img, .stage-portrait img").forEach((image) => {
+    if (image.dataset.bound) return;
+    image.dataset.bound = "1";
+    image.addEventListener("error", () => {
+      image.closest(".portrait, .stage-portrait")?.classList.remove("has-image");
+      image.remove();
+    }, { once: true });
+    image.addEventListener("load", () => image.closest(".portrait, .stage-portrait")?.classList.add("has-image"), { once: true });
+  });
+}
 function renderCharacters() {
   const query = $("character-search").value.trim().toLocaleLowerCase("zh-CN");
   $("character-list").innerHTML = state.characters
     .filter((character) => !query || `${character.display_name} ${(character.aliases || []).join(" ")}`.toLocaleLowerCase("zh-CN").includes(query))
-    .map((character) => `<button class="character" role="option" aria-selected="${character.character_id === state.selected}" data-character="${escapeHtml(character.character_id)}"><span class="portrait portrait-text">${escapeHtml(character.display_name.slice(0, 1))}</span><span><strong>${escapeHtml(character.display_name)}</strong><small>沉浸式 · 文字头像</small></span></button>`).join("");
+    .map((character) => {
+      const thread = state.threads.get(character.character_id);
+      const last = [...(thread?.messages || [])].reverse().find((message) => message.status === "sent");
+      const summary = last?.content ? last.content.replace(/\s+/g, " ").slice(0, 28) : "尚未开始对话";
+      return `<button class="character" role="option" aria-selected="${character.character_id === state.selected}" data-character="${escapeHtml(character.character_id)}">${avatarMarkup(character, { thumbnail: true, priority: character.character_id === state.selected })}<span><strong>${escapeHtml(character.display_name)}</strong><small>${escapeHtml(summary)}</small></span></button>`;
+    }).join("");
+  bindAvatarImages($("character-list"));
   document.querySelectorAll("[data-character]").forEach((button) => { button.onclick = () => selectCharacter(button.dataset.character); });
 }
 async function loadCharacters() {
   const payload = await api("/characters", { headers: {} });
   state.characters = payload.characters || [];
+  await Promise.all(state.characters.map((character) => dbGetThread(character.character_id)));
   $("history-character").innerHTML = state.characters.map((character) => `<option value="${escapeHtml(character.character_id)}">${escapeHtml(character.display_name)}</option>`).join("");
   renderCharacters();
   if (!state.selected && state.characters[0]) await selectCharacter(state.characters[0].character_id);
 }
-async function resolvePresence() {
-  if (!state.selected) return null;
-  const result = await api("/presence/resolve", { method: "POST", body: JSON.stringify({ request_id: id(), character_id: state.selected, state_package: state.worldPackage || "" }) });
+function sceneKeyForLocation(location) {
+  const value = plain(location);
+  if (/档案|资料|图书/.test(value)) return "archive";
+  if (/食堂|餐厅|厨房/.test(value)) return "canteen";
+  if (/走廊|通道/.test(value)) return "corridor";
+  if (/休息|客厅|休憩/.test(value)) return "lounge";
+  if (/医务|医疗/.test(value)) return "medical";
+  if (/观景|观测|天台/.test(value)) return "observation";
+  if (/宿舍|房间|寝室/.test(value)) return "quarters";
+  if (/训练|演习/.test(value)) return "training";
+  return "generic";
+}
+function cachedSceneForCharacter(characterId) {
+  const decoded = decodeStatePackage(state.worldPackage || "");
+  const presence = decoded.presence || decoded.world?.presence || {};
+  const item = presence[characterId] || {};
+  const analystLocation = decoded.analyst_location || decoded.world?.analyst_location || null;
+  const location = item.location || null;
+  if (!location) return null;
+  return {
+    analyst_location: analystLocation,
+    character_location: location,
+    character_activity: item.activity || "正在这里",
+    visual_key: sceneKeyForLocation(location),
+    co_located: Boolean(analystLocation && analystLocation === location),
+    state_scope: item.state_scope || "session_simulation",
+  };
+}
+function fillAvatar(node, character, { thumbnail = true, priority = false } = {}) {
+  if (!node || !character) return;
+  const temporary = document.createElement("div");
+  temporary.innerHTML = avatarMarkup(character, { thumbnail, priority });
+  const source = temporary.firstElementChild;
+  node.className = `${source.className} ${node.id === "stage-header-avatar" ? "" : ""}`.trim();
+  node.style.cssText = source.getAttribute("style") || "";
+  node.innerHTML = source.innerHTML;
+  bindAvatarImages(node.parentElement || node);
+}
+async function resolvePresence(characterId = state.selected, signal = undefined) {
+  if (!characterId) return null;
+  const result = await api("/presence/resolve", { method: "POST", signal, body: JSON.stringify({ request_id: id(), character_id: characterId, state_package: state.worldPackage || "" }) });
   await saveWorldPackage(result.state_package);
-  state.scene = result.scene_state;
-  renderScene();
+  state.sceneByCharacter.set(characterId, result.scene_state || {});
+  if (characterId === state.selected) {
+    state.scene = result.scene_state;
+    renderScene();
+  }
   return result;
 }
+async function runSceneTransition(operation, title = "正在前往……", owner = 0) {
+  const layer = $("scene-transition-layer");
+  const started = performance.now();
+  layer.dataset.owner = String(owner);
+  layer.hidden = false;
+  layer.dataset.phase = "leaving";
+  $("transition-title").textContent = title;
+  $("transition-detail").textContent = "正在建立新的场景";
+  if (!reducedMotion()) await delay(180);
+  layer.dataset.phase = "arriving";
+  try {
+    const result = await operation;
+    const minimum = reducedMotion() ? 0 : 900;
+    const elapsed = performance.now() - started;
+    if (elapsed < minimum) await delay(minimum - elapsed);
+    // A newer selection may have taken ownership while the operation was
+    // awaiting the network. Never let an old transition hide or relabel it.
+    if (layer.dataset.owner !== String(owner)) return result;
+    layer.dataset.phase = "entering";
+    $("transition-detail").textContent = "场景已更新";
+    if (!reducedMotion()) await delay(180);
+    if (layer.dataset.owner === String(owner)) {
+      layer.dataset.phase = "idle";
+      layer.hidden = true;
+    }
+    return result;
+  } catch (error) {
+    if (layer.dataset.owner === String(owner)) {
+      layer.dataset.phase = "idle";
+      layer.hidden = true;
+    }
+    throw error;
+  }
+}
 async function selectCharacter(characterId) {
+  if (!characterId || characterId === state.selected && !state.selectionController) return;
+  const sequence = ++state.selectionSequence;
+  state.selectionController?.abort();
+  state.selectionController = new AbortController();
+  const controller = state.selectionController;
+  const previousId = state.selected;
+  const previousThread = currentThread();
+  const switchingFromStage = Boolean(previousId && previousId !== characterId && previousThread?.channel === "in_person");
+  const previousScene = state.scene;
   state.selected = characterId;
-  const thread = await dbGetThread(characterId);
-  renderCharacters();
-  const character = currentCharacter();
-  $("active-character").innerHTML = `<span class="portrait portrait-text large">${escapeHtml(character.display_name.slice(0, 1))}</span><div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯与面对面连续共享</p></div>`;
-  $("stage-header-avatar").textContent = character.display_name.slice(0, 1);
-  $("stage-portrait-avatar").textContent = character.display_name.slice(0, 1);
-  $("stage-character-name").textContent = character.display_name;
-  $("stage-speaker").textContent = character.display_name;
-  try { await resolvePresence(); } catch (error) { showBanner(displayError(error)); }
-  await setChannel(thread.channel || "text", false);
-  renderAll();
-  updateComposerAvailability();
-  $("contact-panel").classList.remove("open");
+  try {
+    const thread = await dbGetThread(characterId);
+    if (sequence !== state.selectionSequence) return;
+    const character = currentCharacter();
+    renderCharacters();
+    $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: false, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
+    fillAvatar($("stage-header-avatar"), character, { thumbnail: true, priority: true });
+    fillAvatar($("stage-portrait-avatar"), character, { thumbnail: false, priority: true });
+    $("stage-character-name").textContent = character.display_name;
+    $("stage-speaker").textContent = character.display_name;
+    const cached = state.sceneByCharacter.get(characterId) || cachedSceneForCharacter(characterId);
+    if (cached) {
+      state.scene = cached;
+      renderScene();
+    }
+    const resolving = resolvePresence(characterId, controller.signal);
+    if (switchingFromStage) {
+      await runSceneTransition(resolving, "正在前往……", sequence);
+    } else {
+      await resolving;
+    }
+    if (sequence !== state.selectionSequence) return;
+    const scene = state.scene || {};
+    if (switchingFromStage && !scene.co_located) {
+      await setChannel("in_person", false);
+      window.setTimeout(() => { if (sequence === state.selectionSequence) openPresenceDialog(); }, 0);
+    } else {
+      await setChannel(thread.channel || "text", false);
+    }
+    renderAll();
+    updateComposerAvailability();
+    $("contact-panel").classList.remove("open");
+  } catch (error) {
+    if (error?.name === "AbortError" || sequence !== state.selectionSequence) return;
+    state.selected = previousId;
+    state.scene = previousScene;
+    if (previousId) {
+      const oldThread = await dbGetThread(previousId);
+      await setChannel(oldThread.channel || "text", false);
+      renderAll();
+    }
+    showBanner(displayError(error));
+  }
 }
 
 function blockHtml(block) {
@@ -437,13 +645,48 @@ function renderTimeline() {
 function latestInPersonMessage(role = "") {
   return [...(currentThread()?.messages || [])].reverse().find((message) => message.communicationChannel === "in_person" && message.status !== "failed" && (!role || message.role === role)) || null;
 }
+function finishTypewriter() {
+  if (!state.typewriter.fullText) return;
+  window.clearInterval(state.typewriter.timer);
+  state.typewriter.timer = 0;
+  $("stage-speech").textContent = state.typewriter.fullText;
+  state.typewriter.displayedText = state.typewriter.fullText;
+  state.typewriter.fullText = "";
+}
+function renderTypewriter(text, key) {
+  const value = plain(text);
+  if (state.typewriter.key === key && (state.typewriter.fullText === value || state.typewriter.displayedText === value)) return;
+  window.clearInterval(state.typewriter.timer);
+  state.typewriter.key = key;
+  state.typewriter.fullText = value;
+  state.typewriter.displayedText = "";
+  if (!value || reducedMotion()) {
+    $("stage-speech").textContent = value;
+    state.typewriter.displayedText = value;
+    state.typewriter.fullText = "";
+    return;
+  }
+  let index = 0;
+  $("stage-speech").textContent = "";
+  state.typewriter.timer = window.setInterval(() => {
+    index += 1;
+    $("stage-speech").textContent = value.slice(0, index);
+    if (index >= value.length) {
+      window.clearInterval(state.typewriter.timer);
+      state.typewriter.timer = 0;
+      state.typewriter.displayedText = value;
+      state.typewriter.fullText = "";
+    }
+  }, 24);
+}
 function renderStage() {
   const assistantMessage = latestInPersonMessage("assistant");
   const latestMessage = latestInPersonMessage();
   const actions = (latestMessage?.contentBlocks || []).filter((block) => block.type === "action").map((block) => block.text);
   const speeches = (assistantMessage?.contentBlocks || []).filter((block) => block.type === "speech").map((block) => block.text);
   $("stage-narration").textContent = actions.join("\n") || plain(state.scene?.character_activity);
-  $("stage-speech").innerHTML = `<p>${escapeHtml(speeches.join("\n") || "场景已经建立。你可以说些什么，也可以只描述一个动作。")}</p>`;
+  const speech = speeches.join("\n") || "场景已经建立。你可以说些什么，也可以只描述一个动作。";
+  renderTypewriter(speech, assistantMessage?.id || `scene:${state.selected}:${state.scene?.visual_key || "generic"}`);
   $("stage-message-feedback").disabled = !assistantMessage;
   $("stage-message-feedback").dataset.messageId = assistantMessage?.id || "";
 }
@@ -454,16 +697,23 @@ function renderTranscript() {
 function renderInfo() {
   const character = currentCharacter();
   const scene = state.scene || {};
-  $("info-content").innerHTML = character ? `<article class="info-card"><strong>${escapeHtml(character.display_name)}</strong><p>兼容名称：${escapeHtml((character.aliases || []).join("、"))}</p><p>头像：版权审批前使用文字头像</p></article><article class="info-card"><strong>当前场景</strong><p>角色位置：${escapeHtml(scene.character_location || "未建立")}</p><p>当前活动：${escapeHtml(scene.character_activity || "未建立")}</p><p>分析员位置：${escapeHtml(scene.analyst_location || "未定位")}</p><p>${scene.co_located ? "双方目前同处一地。" : "双方目前不在同一地点。"}</p></article><article class="info-card"><strong>数据边界</strong><p>历史保存在浏览器；世界状态由服务端签名；API Key 不进入 IndexedDB。</p></article>` : "<p>请选择角色。</p>";
+  $("info-content").innerHTML = character ? `<article class="info-card"><strong>${escapeHtml(character.display_name)}</strong><p>也可用名称：${escapeHtml((character.aliases || []).join("、"))}</p></article><article class="info-card"><strong>当前场景</strong><p>角色位置：${escapeHtml(scene.character_location || "未建立")}</p><p>当前活动：${escapeHtml(scene.character_activity || "未建立")}</p><p>分析员位置：${escapeHtml(scene.analyst_location || "未定位")}</p><p>${scene.co_located ? "你们目前同处一地。" : "目前还不在同一地点。"}</p></article>` : "<p>请选择角色。</p>";
 }
 function renderScene() {
   const scene = state.scene || {};
   const visualKey = SCENE_KEYS.has(scene.visual_key) ? scene.visual_key : "generic";
   $("in-person-surface").dataset.scene = visualKey;
   $("scene-backdrop").src = `/assets/immersive/scenes/${visualKey}.svg`;
+  const preload = new Image();
+  preload.src = $("scene-backdrop").src;
   $("stage-location").textContent = scene.character_location || "场景尚未建立";
   $("stage-activity").textContent = scene.character_activity || "选择角色后读取当前位置";
   $("go-in-person-label").textContent = scene.character_location ? `去见她 · ${scene.character_location}` : "去见她";
+  const character = currentCharacter();
+  if (character?.avatar?.src) {
+    const image = new Image();
+    image.src = character.avatar.src;
+  }
   renderStage();
   renderInfo();
 }
@@ -511,13 +761,21 @@ function updateInputCount() {
 }
 async function runChat(thread, userMessage) {
   const requestId = id();
+  // Capture request ownership before any asynchronous work. The user can
+  // switch characters while a provider is still generating; the completed
+  // turn must be written to its original thread and never overwrite the new
+  // character's visible state.
+  const characterId = thread.characterId;
+  const provider = state.provider;
+  const credential = state.credential;
+  const model = state.model;
   userMessage.requestId = requestId;
   userMessage.status = "pending";
   userMessage.errorCode = "";
   await dbPutThread(thread);
   renderAll();
   $("send-message").disabled = true;
-  $("request-status").textContent = "正在检索资料并完成角色校验……";
+  $("request-status").textContent = "正在连接……";
   try {
     const response = await fetch(`${apiRoot}/chat/stream`, {
       method: "POST",
@@ -525,10 +783,10 @@ async function runChat(thread, userMessage) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         request_id: requestId,
-        provider: state.provider,
-        credential: state.credential,
-        model: state.model,
-        character_id: state.selected,
+        provider,
+        credential,
+        model,
+        character_id: characterId,
         message: userMessage.content,
         communication_channel: userMessage.communicationChannel,
         content_blocks: userMessage.contentBlocks,
@@ -544,10 +802,11 @@ async function runChat(thread, userMessage) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let answer = "";
+    const streamedBlocks = new Map();
     let contentBlocks = [];
     let degraded = [];
     let returnedChannel = userMessage.communicationChannel;
+    const isCurrentCharacter = () => state.selected === characterId;
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -559,36 +818,47 @@ async function runChat(thread, userMessage) {
         const data = (packet.match(/^data: (.+)$/m) || [])[1];
         if (!event || !data) continue;
         const payload = JSON.parse(data);
+        if (event === "meta") {
+          if (isCurrentCharacter()) $("request-status").textContent = "她正在回应……";
+        }
         if (event === "delta") {
-          answer += payload.text || "";
-          $("request-status").textContent = `已收到通过校验的回复 · ${answer.length} 字`;
+          const blockIndex = Number.isFinite(Number(payload.block_index)) ? Number(payload.block_index) : 0;
+          const current = streamedBlocks.get(blockIndex) || { type: payload.block_type || (returnedChannel === "text" ? "message" : "speech"), text: "" };
+          current.text += plain(payload.text);
+          if (payload.block_type) current.type = payload.block_type;
+          streamedBlocks.set(blockIndex, current);
+          if (isCurrentCharacter()) $("request-status").textContent = "她正在回应……";
         }
         if (event === "state") await saveWorldPackage(payload.state_package);
         if (event === "done") {
           degraded = payload.degraded_services || [];
           returnedChannel = payload.communication_channel || returnedChannel;
-          contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, answer);
+          contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
         }
         if (event === "error") throw new Error(payload.code || "chat_failed");
       }
     }
-    if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, answer);
+    if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, renderBlocksText([...streamedBlocks.values()]));
     if (!contentBlocks.length) throw new Error("upstream_invalid_response");
     userMessage.status = "sent";
     thread.messages.push(normalizeMessage({ id: id(), role: "assistant", contentBlocks, communicationChannel: returnedChannel, createdAt: Date.now(), requestId }));
     thread.turnCount += 1;
-    state.latest.set(state.selected, { requestId, errorCode: "", degraded });
+    state.latest.set(characterId, { requestId, errorCode: "", degraded });
     await dbPutThread(thread);
-    renderAll();
-    $("request-status").textContent = degraded.length ? `已完成，降级服务：${degraded.join("、")}` : "已完成";
-    if (thread.turnCount % 12 === 0) await offerSummary(thread);
+    if (state.selected === characterId) {
+      renderAll();
+      $("request-status").textContent = degraded.length ? `已完成，降级服务：${degraded.join("、")}` : "已完成";
+    }
+    scheduleAutoSummary(thread);
   } catch (error) {
     userMessage.status = "failed";
     userMessage.errorCode = error instanceof Error ? error.message : "chat_failed";
-    state.latest.set(state.selected, { requestId, errorCode: userMessage.errorCode, degraded: [] });
+    state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode, degraded: [] });
     await dbPutThread(thread);
-    renderAll();
-    $("request-status").textContent = displayError(error);
+    if (state.selected === characterId) {
+      renderAll();
+      $("request-status").textContent = displayError(error);
+    }
   } finally { updateComposerAvailability(); }
 }
 async function sendMessage(event) {
@@ -617,15 +887,51 @@ async function retryMessage(messageId) {
   if (!message || message.status !== "failed") return;
   await runChat(thread, message);
 }
-async function offerSummary(thread) {
-  if (!window.confirm("已新增 12 轮对话。现在调用当前模型生成本地摘要吗？这会计入每日额度。")) return;
+function successfulChatMessages(thread) {
+  return (thread.messages || []).filter((message) => message.role === "assistant" && message.status === "sent" && message.source !== "presence_arrival");
+}
+function scheduleAutoSummary(thread) {
+  if (!state.autoSummaryEnabled || !configured()) return;
+  const successful = successfulChatMessages(thread);
+  if (successful.length < 12 || successful.length < thread.summarizedThroughTurnCount + 12) return;
+  const checkpoint = successful[successful.length - 1];
+  if (!checkpoint) return;
+  if (!thread.summaryRequestId) {
+    thread.summaryRequestId = id();
+    thread.summaryCheckpointMessageId = checkpoint.id;
+  }
+  if (state.summaryInFlight.has(thread.characterId)) return;
+  void dbPutThread(thread).then(() => runAutoSummary(thread));
+}
+async function runAutoSummary(thread) {
+  if (!thread.summaryRequestId || !state.autoSummaryEnabled || !configured() || state.summaryInFlight.has(thread.characterId)) return;
+  state.summaryInFlight.add(thread.characterId);
+  const requestId = thread.summaryRequestId;
   try {
-    const turns = thread.messages.filter((message) => message.status === "sent").slice(-24).map((message) => ({ role: message.role, content: message.content, communication_channel: message.communicationChannel, content_blocks: message.contentBlocks }));
-    const payload = await api("/chat/summarize", { method: "POST", body: JSON.stringify({ request_id: id(), provider: state.provider, credential: state.credential, model: state.model, character_id: state.selected, turns, previous_summary: thread.summary || "" }) });
+    const turns = thread.messages.filter((message) => message.status === "sent").slice(-24).map((message) => ({
+      role: message.role,
+      content: message.content,
+      communication_channel: message.communicationChannel,
+      content_blocks: message.contentBlocks,
+    }));
+    const payload = await api("/chat/summarize", { method: "POST", body: JSON.stringify({ request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, character_id: thread.characterId, turns, previous_summary: thread.summary || "" }) });
     thread.summary = payload.summary || thread.summary;
+    thread.summarizedThroughMessageId = thread.summaryCheckpointMessageId;
+    thread.summarizedThroughTurnCount = successfulChatMessages(thread).length;
+    thread.summaryRequestId = "";
+    thread.summaryUpdatedAt = Date.now();
     await dbPutThread(thread);
-    toast("本地历史摘要已更新");
-  } catch (error) { showBanner(`摘要失败：${displayError(error)}`); }
+    if (thread.characterId === state.selected) {
+      $("summary-last-updated").textContent = `最近更新：${new Date(thread.summaryUpdatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}`;
+    }
+  } catch (error) {
+    // Summary failure never blocks or rewrites the conversation.  Keep the
+    // request UUID so the next suitable turn retries idempotently.
+    if (thread.characterId === state.selected) $("request-status").textContent = "对话已完成；连续性整理稍后重试。";
+    if (error?.message === "credential_invalid") clearCredential();
+  } finally {
+    state.summaryInFlight.delete(thread.characterId);
+  }
 }
 
 async function transitionPresence(targetChannel) {
@@ -636,39 +942,33 @@ async function transitionPresence(targetChannel) {
   renderScene();
   return result;
 }
-function arrivalNoticeAccepted() { return localStorage.getItem("project-snow-public:arrival-notice") === "accepted"; }
-function requestArrivalNotice() {
-  if (arrivalNoticeAccepted()) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    const dialog = $("arrival-notice-dialog");
-    const finish = (accepted) => { dialog.close(); resolve(accepted); };
-    $("accept-arrival-notice").onclick = () => { localStorage.setItem("project-snow-public:arrival-notice", "accepted"); finish(true); };
-    $("cancel-arrival-notice").onclick = () => finish(false);
-    dialog.showModal();
-  });
-}
 async function arriveInPerson() {
   if (!state.selected || state.arrivalPending) return;
-  if (configured() && !(await requestArrivalNotice())) return;
   state.arrivalPending = true;
+  const started = performance.now();
+  const characterId = state.selected;
   $("presence-arrival-loading").hidden = false;
+  $("stage-presence-status").hidden = false;
+  $("stage-presence-status").textContent = "正在前往……";
   updateComposerAvailability();
   const thread = currentThread();
   try {
     if (!configured()) {
       await transitionPresence("in_person");
-      showBanner("已进入面对面场景。配置模型后，后续到场可触发随机主动反应。");
+      showBanner("场景已更新。配置模型后可以开始对话。");
       return;
     }
     const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify({ arrival_id: id(), provider: state.provider, credential: state.credential, model: state.model, character_id: state.selected, recent_history: requestHistory(thread.messages), history_summary: thread.summary || "", state_package: state.worldPackage || "" }) });
     await saveWorldPackage(result.state_package);
     state.scene = result.scene_state;
-    await setChannel("in_person");
     if (result.reaction) {
       thread.messages.push(normalizeMessage({ id: result.reaction.message_id || id(), role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival" }));
-      thread.turnCount += 1;
       await dbPutThread(thread);
     }
+    // Populate the arrival turn before exposing the stage. Otherwise
+    // setChannel() can make the scene visible for one paint while the
+    // reaction is still being persisted, producing an empty dialogue box.
+    await setChannel("in_person");
     if (result.terminal_error) showBanner(displayError(new Error(result.terminal_error)));
     else if (result.decision === "unnoticed") showBanner("你来到她身边，她暂时没有注意到。位置切换已经完成。");
     else showBanner("她注意到了你的到来。");
@@ -680,9 +980,14 @@ async function arriveInPerson() {
       showBanner("模型凭证已过期，位置切换已完成；重新配置后才能生成到场反应。");
     } else showBanner(displayError(error));
   } finally {
+    const minimum = reducedMotion() ? 0 : 900;
+    const elapsed = performance.now() - started;
+    if (elapsed < minimum) await delay(minimum - elapsed);
     state.arrivalPending = false;
     $("presence-arrival-loading").hidden = true;
+    $("stage-presence-status").hidden = true;
     updateComposerAvailability();
+    if (characterId === state.selected) renderStage();
   }
 }
 async function openPresenceDialog() {
@@ -708,6 +1013,9 @@ function openSettings(tab = "models") {
   document.querySelectorAll("[data-settings-tab]").forEach((button) => button.classList.toggle("active", button.dataset.settingsTab === tab));
   document.querySelectorAll("[data-settings-panel]").forEach((panel) => { panel.hidden = panel.dataset.settingsPanel !== tab; });
   if (tab === "history") storageBytes().then((bytes) => { $("storage-usage").textContent = `当前浏览器记录约占 ${formatBytes(bytes)}。`; });
+  const activeThread = currentThread();
+  $("auto-summary-enabled").checked = state.autoSummaryEnabled;
+  $("summary-last-updated").textContent = activeThread?.summaryUpdatedAt ? `最近更新：${new Date(activeThread.summaryUpdatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}` : "尚未生成摘要";
   $("provider-select").value = state.provider || $("provider-select").value;
   $("model-id").value = state.model || $("model-id").value;
   refreshCredentialStatus();
@@ -728,8 +1036,11 @@ async function submitFeedback(event) {
   const userMessage = [...thread.messages.slice(0, targetIndex)].reverse().find((message) => message.role === "user") || [...thread.messages].reverse().find((message) => message.role === "user") || {};
   const latest = state.latest.get(state.selected) || {};
   const chatRequestId = target?.requestId || latest.requestId || userMessage.requestId || null;
+  const userBlocks = normalizeBlocks(userMessage.contentBlocks, userMessage.communicationChannel || thread.channel || "text", userMessage.content || "");
+  const assistantBlocks = normalizeBlocks(target?.contentBlocks, target?.communicationChannel || thread.channel || "text", target?.content || "");
+  const assistantSpeech = renderBlocksText(assistantBlocks.filter((block) => block.type !== "action"));
   try {
-    const payload = await api("/feedback", { method: "POST", body: JSON.stringify({ request_id: id(), chat_request_id: chatRequestId || null, body: $("feedback-body").value, qq: $("feedback-qq").value, turnstile_token: await tokenFor("feedback"), character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: target?.content || "", request_stage: target?.communicationChannel || currentThread()?.channel || "immersive-web", error_code: latest.errorCode || userMessage.errorCode || "", degraded_services: latest.degraded || [], ui_surface: "immersive-web" }) });
+    const payload = await api("/feedback", { method: "POST", body: JSON.stringify({ request_id: id(), chat_request_id: chatRequestId || null, body: $("feedback-body").value, qq: $("feedback-qq").value, turnstile_token: await tokenFor("feedback"), character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: assistantSpeech, user_content_blocks: userBlocks, assistant_content_blocks: assistantBlocks, request_stage: target?.communicationChannel || currentThread()?.channel || "immersive-web", error_code: latest.errorCode || userMessage.errorCode || "", degraded_services: latest.degraded || [], ui_surface: "immersive-web" }) });
     $("feedback-dialog").close();
     $("feedback-form").reset();
     toast(`反馈已提交，编号：${payload.feedback_code}`);
@@ -744,7 +1055,10 @@ $("message-input").onkeydown = (event) => { if (event.key === "Enter" && !event.
 $("toggle-action").onclick = () => { const hidden = !$("analyst-action-field").hidden; $("analyst-action-field").hidden = hidden; $("toggle-action").setAttribute("aria-expanded", String(!hidden)); if (hidden) $("action-input").value = ""; updateInputCount(); };
 $("go-in-person").onclick = openPresenceDialog;
 $("confirm-presence-transition").onclick = async () => { $("presence-dialog").close(); await arriveInPerson(); };
-$("stay-on-communicator").onclick = () => $("presence-dialog").close();
+$("stay-on-communicator").onclick = async () => {
+  $("presence-dialog").close();
+  try { await transitionPresence("text"); } catch (error) { showBanner(displayError(error)); }
+};
 $("open-communicator").onclick = async () => { try { await transitionPresence("text"); } catch (error) { showBanner(displayError(error)); } };
 $("open-contacts").onclick = $("open-stage-contacts").onclick = () => $("contact-panel").classList.add("open");
 $("close-contacts").onclick = () => $("contact-panel").classList.remove("open");
@@ -757,11 +1071,19 @@ $("stage-message-feedback").onclick = () => openFeedback($("stage-message-feedba
 $("open-global-feedback").onclick = $("floating-feedback").onclick = () => openFeedback();
 $("feedback-form").onsubmit = submitFeedback;
 $("open-settings").onclick = () => openSettings("models");
+$("header-config-model").onclick = () => openSettings("models");
+$("stage-open-settings").onclick = () => { $("stage-menu").open = false; openSettings("models"); };
+$("stage-open-feedback").onclick = () => { $("stage-menu").open = false; openFeedback(); };
 $("discover-models").onclick = discoverModels;
 $("save-model").onclick = saveModelSession;
 $("clear-credential").onclick = () => { clearCredential(); $("api-key").focus(); toast("当前标签页的模型凭证已清除"); };
 $("discovered-models").onchange = () => { if ($("discovered-models").value) { $("model-id").value = $("discovered-models").value; state.model = $("discovered-models").value; saveCredential(); } };
 $("provider-select").onchange = () => { if (state.provider && state.provider !== $("provider-select").value) clearCredential(); };
+$("auto-summary-enabled").onchange = async () => {
+  state.autoSummaryEnabled = $("auto-summary-enabled").checked;
+  await storePut("app_state", { key: "preferences", autoSummaryEnabled: state.autoSummaryEnabled });
+  if (state.autoSummaryEnabled) scheduleAutoSummary(currentThread() || { messages: [], summarizedThroughTurnCount: 0 });
+};
 document.querySelectorAll("[data-settings-tab]").forEach((button) => { button.onclick = () => openSettings(button.dataset.settingsTab); });
 $("delete-character-history").onclick = async () => { const characterId = $("history-character").value; await storeDelete("threads", characterId); state.threads.delete(characterId); if (characterId === state.selected) { await dbGetThread(characterId); renderAll(); } openSettings("history"); toast("该角色本地历史已删除"); };
 $("clear-all-history").onclick = async () => { if (!window.confirm("确定清空全部 Project Snow 本地历史与世界状态吗？")) return; await storeClear("threads"); await storeClear("app_state"); state.threads.clear(); state.worldPackage = ""; if (state.selected) { await dbGetThread(state.selected); await resolvePresence(); } renderAll(); openSettings("history"); toast("全部本地历史已清空"); };
@@ -771,16 +1093,22 @@ window.addEventListener("keydown", (event) => {
     const hidden = $("in-person-surface").classList.toggle("ui-hidden");
     $("restore-stage-ui").hidden = !hidden;
   }
+  if (event.code === "Space" && currentThread()?.channel === "in_person" && !["INPUT", "TEXTAREA", "BUTTON"].includes(document.activeElement?.tagName)) {
+    event.preventDefault();
+    finishTypewriter();
+  }
 });
+$("stage-dialogue").addEventListener("click", finishTypewriter);
 
 async function boot() {
   await openDB();
   await migrateBrowserState();
   await loadConfig();
+  await showExperienceNoticeIfNeeded();
   await loadCharacters();
   $("connection-status").textContent = "服务已连接";
+  $("auto-summary-enabled").checked = state.autoSummaryEnabled;
   updateComposerAvailability();
-  if (!configured()) openSettings("models");
 }
 boot().catch((error) => {
   $("connection-status").textContent = "连接失败";
