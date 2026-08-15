@@ -40,6 +40,8 @@ x-api: &api
   depends_on:
     postgres:
       condition: service_healthy
+    embedding:
+      condition: service_healthy
   networks: [app, data, outbound]
 
 services:
@@ -149,11 +151,19 @@ services:
     image: ${EMBEDDING_IMAGE:?Set immutable EMBEDDING_IMAGE digest}
     restart: unless-stopped
     environment:
-      EMBEDDING_MODEL: BAAI/bge-small-zh-v1.5
-    volumes: ["embedding_models:/models"]
+      EMBEDDING_MODEL: /models/bge-small-zh-v1.5
+      EMBEDDING_DIMENSION: "512"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
     cpus: 2
     mem_limit: 1536m
     logging: *bounded-logging
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json, urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5); payload = json.load(response); assert response.status == 200 and payload.get('status') == 'ok' and payload.get('dimension') == 512"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 60s
     networks: [data]
 
   egress-proxy:
@@ -172,7 +182,6 @@ volumes:
   postgres_data:
   qdrant_data:
   neo4j_data:
-  embedding_models:
 
 networks:
   edge:

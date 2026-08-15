@@ -1,7 +1,11 @@
 FROM python:3.12-slim AS builder
 
+ARG EMBEDDING_MODEL_ID=BAAI/bge-small-zh-v1.5
+ARG EMBEDDING_MODEL_REVISION=7999e1d3359715c523056ef9478215996d62a620
+
 RUN python -m venv /opt/venv
-ENV PATH=/opt/venv/bin:$PATH
+ENV PATH=/opt/venv/bin:$PATH \
+    HF_HOME=/tmp/huggingface
 RUN pip install --no-cache-dir --upgrade \
         pip==26.2.1 \
         setuptools==84.0.0 \
@@ -17,6 +21,11 @@ RUN pip install --no-cache-dir --upgrade \
         transformers==5.15.0 \
         msgpack==1.2.1 \
     && pip check \
+    && EMBEDDING_MODEL_ID="$EMBEDDING_MODEL_ID" \
+       EMBEDDING_MODEL_REVISION="$EMBEDDING_MODEL_REVISION" \
+       python -c "import os; from sentence_transformers import SentenceTransformer; model = SentenceTransformer(os.environ['EMBEDDING_MODEL_ID'], revision=os.environ['EMBEDDING_MODEL_REVISION']); vector = model.encode(['Project Snow 离线模型构建检查'], normalize_embeddings=True, show_progress_bar=False); assert vector.shape == (1, 512), vector.shape; model.save_pretrained('/models/bge-small-zh-v1.5')" \
+    && rm -rf /tmp/huggingface \
+    && mkdir -p /models/huggingface \
     && rm -rf \
         /opt/venv/bin/pip \
         /opt/venv/bin/pip3 \
@@ -34,10 +43,15 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/models/huggingface \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    EMBEDDING_MODEL=/models/bge-small-zh-v1.5 \
+    EMBEDDING_DIMENSION=512 \
     PATH=/opt/venv/bin:$PATH
 WORKDIR /app
 RUN useradd --create-home --uid 10001 embedding
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder --chown=10001:10001 /models /models
 COPY infra/embedding_service.py /app/embedding_service.py
 USER embedding
 CMD ["python", "-m", "uvicorn", "embedding_service:app", "--host", "0.0.0.0", "--port", "8000"]

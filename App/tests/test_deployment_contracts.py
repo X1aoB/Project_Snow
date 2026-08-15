@@ -116,6 +116,26 @@ class DeploymentContractTests(TestCase):
         self.assertIn("current-manifest.json", script)
         self.assertIn("jq -r '.data_version // empty'", script)
 
+    def test_embedding_image_is_offline_and_compose_waits_for_real_readiness(self) -> None:
+        compose = self.read("compose.prod.yml")
+        dockerfile = self.read("infra/embedding.Dockerfile")
+        service = self.read("infra/embedding_service.py")
+        workflow = (self.app_root.parent / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("EMBEDDING_MODEL_REVISION=7999e1d3359715c523056ef9478215996d62a620", dockerfile)
+        self.assertIn("model.save_pretrained('/models/bge-small-zh-v1.5')", dockerfile)
+        self.assertIn("COPY --from=builder --chown=10001:10001 /models /models", dockerfile)
+        self.assertIn("HF_HUB_OFFLINE=1", dockerfile)
+        self.assertIn("TRANSFORMERS_OFFLINE=1", dockerfile)
+        self.assertNotIn('volumes: ["embedding_models:/models"]', compose)
+        self.assertIn("embedding:\n      condition: service_healthy", compose)
+        self.assertIn("payload.get('dimension') == 512", compose)
+        self.assertIn("model()\n    yield", service)
+        self.assertIn('status_code=503', service)
+        self.assertIn("len(vectors[0]) == 512", workflow)
+
     def test_ci_uses_risk_tiers_and_a_stable_summary_gate(self) -> None:
         workflow = (self.app_root.parent / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
