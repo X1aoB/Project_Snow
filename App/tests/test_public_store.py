@@ -5,7 +5,12 @@ from unittest import TestCase
 
 from sqlalchemy import text
 
-from backend.snow_app.public_store import DuplicateFeedback, PublicStore, RateLimitExceeded
+from backend.snow_app.public_store import (
+    SCHEMA_SQL,
+    DuplicateFeedback,
+    PublicStore,
+    RateLimitExceeded,
+)
 
 
 class PublicStoreTests(TestCase):
@@ -23,6 +28,13 @@ class PublicStoreTests(TestCase):
                 text("SELECT count FROM public_rate_limit WHERE subject_hash = 'subject'")
             ).scalar_one()
         self.assertEqual(count, 1)
+
+    def test_request_cache_accepts_namespaced_idempotency_keys(self) -> None:
+        self.assertIn("request_id VARCHAR(128) PRIMARY KEY", SCHEMA_SQL)
+        request_id = "presence-transition:" + "a" * 36
+        status, cached = self.store.claim_request(request_id, "subject", "hash")
+        self.assertEqual(status, "claimed")
+        self.assertIsNone(cached)
 
     def test_feedback_dedupe_does_not_persist_ip_in_feedback_row(self) -> None:
         self.store.insert_feedback(
