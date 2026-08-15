@@ -12,6 +12,8 @@ case "$PUBLIC_API_IMAGE:$EMBEDDING_IMAGE" in *@sha256:*@sha256:*) ;; *) echo 'Im
 
 static_env="${PROJECT_SNOW_IMAGE_ENV:-/etc/project-snow/images.env}"
 current_env="${PROJECT_SNOW_COMPOSE_ENV:-/srv/project-snow/runtime/compose.env}"
+release_manifest="${PROJECT_SNOW_RELEASE_MANIFEST:-}"
+current_manifest="/srv/project-snow/releases/current-manifest.json"
 if [ ! -r "$static_env" ]; then
   echo "Missing readable static image environment: $static_env" >&2
   exit 66
@@ -29,12 +31,45 @@ compose() {
   docker compose --env-file "$candidate_env" -f compose.prod.yml --profile "$colour" "$@"
 }
 
-compose pull "public-api-$colour" embedding
+embedding_changed=1
+if [ -r /srv/project-snow/releases/current ]; then
+  current_embedding="$(awk '{print $4}' /srv/project-snow/releases/current)"
+  if [ "$current_embedding" = "$EMBEDDING_IMAGE" ]; then
+    embedding_changed=0
+  fi
+fi
+
+data_changed=1
+candidate_data_version=""
+if [ -n "$release_manifest" ]; then
+  candidate_data_version="$(jq -r '.data_version // empty' "$release_manifest")"
+  case "$candidate_data_version" in '') echo 'Release manifest has no data version.' >&2; exit 67 ;; esac
+  current_data_version=""
+  if [ -r "$current_manifest" ]; then
+    current_data_version="$(jq -r '.data_version // empty' "$current_manifest")"
+  elif [ -r /srv/project-snow/data/current/manifest.json ]; then
+    current_data_version="$(jq -r '.data_version // empty' /srv/project-snow/data/current/manifest.json)"
+  fi
+  if [ "$candidate_data_version" = "$current_data_version" ]; then
+    data_changed=0
+  fi
+fi
+
+compose pull "public-api-$colour"
+if [ "$embedding_changed" -eq 1 ]; then
+  compose pull embedding
+else
+  echo 'Embedding digest unchanged; skipping image pull.'
+fi
 compose run --rm --no-deps "public-api-$colour" \
   python -m backend.snow_app.data_loader --verify-only
 compose run --rm "public-api-$colour" alembic upgrade head
 compose up -d postgres qdrant neo4j embedding egress-proxy
-compose run --rm --no-deps "public-api-$colour" python -m backend.snow_app.data_loader
+if [ "$data_changed" -eq 1 ]; then
+  compose run --rm --no-deps "public-api-$colour" python -m backend.snow_app.data_loader
+else
+  echo "Data version $candidate_data_version unchanged; skipping Qdrant and Neo4j load."
+fi
 compose up -d "public-api-$colour" caddy cloudflared
 ready=0
 attempt=0
@@ -60,4 +95,8 @@ unset SNOW_UPSTREAM
 mv -f "$candidate_env" "$current_env"
 candidate_env=""
 printf '%s\n' "$colour $sha $PUBLIC_API_IMAGE $EMBEDDING_IMAGE" > /srv/project-snow/releases/current
+if [ -n "$release_manifest" ]; then
+  cp "$release_manifest" "$current_manifest"
+  chmod 0600 "$current_manifest"
+fi
 printf '%s\n' 'Private acceptance remains behind Cloudflare Access; this script never removes Access or changes MyWebsite.'

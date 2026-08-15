@@ -1,8 +1,14 @@
-name: publish-images
+name: release-images
 
 on:
-  push:
-    branches: [main]
+  workflow_call:
+    inputs:
+      embedding_changed:
+        required: true
+        type: boolean
+      previous_sha:
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -26,7 +32,9 @@ jobs:
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           echo "public=ghcr.io/$owner/project_snow-public" >> "$GITHUB_OUTPUT"
           echo "embedding=ghcr.io/$owner/project_snow-embedding" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - name: Build and push application image once
+        id: public
+        uses: docker/build-push-action@v6
         with:
           context: App
           file: App/infra/public-api.Dockerfile
@@ -35,7 +43,23 @@ jobs:
           tags: ${{ steps.images.outputs.public }}:${{ github.sha }}
           provenance: mode=max
           sbom: true
-      - uses: docker/build-push-action@v6
+          cache-from: type=gha,scope=public-api
+          cache-to: type=gha,mode=max,scope=public-api
+      - name: Scan published application image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.images.outputs.public }}@${{ steps.public.outputs.digest }}
+          format: json
+          output: trivy-application.json
+          exit-code: "0"
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - run: python App/scripts/report_trivy_findings.py trivy-application.json
+      - name: Build and push changed embedding image
+        if: inputs.embedding_changed
+        id: embedding-build
+        uses: docker/build-push-action@v6
         with:
           context: App
           file: App/infra/embedding.Dockerfile
@@ -44,3 +68,65 @@ jobs:
           tags: ${{ steps.images.outputs.embedding }}:${{ github.sha }}
           provenance: mode=max
           sbom: true
+          cache-from: type=gha,scope=embedding
+          cache-to: type=gha,mode=max,scope=embedding
+      - name: Reuse previous verified embedding digest
+        if: ${{ !inputs.embedding_changed }}
+        id: embedding-reuse
+        shell: bash
+        env:
+          IMAGE: ${{ steps.images.outputs.embedding }}
+          PREVIOUS_SHA: ${{ inputs.previous_sha }}
+        run: |
+          digest="$(docker buildx imagetools inspect "$IMAGE:$PREVIOUS_SHA" | awk '/^Digest:/ {print $2; exit}')"
+          test -n "$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Select embedding digest
+        id: embedding
+        shell: bash
+        env:
+          BUILT: ${{ steps.embedding-build.outputs.digest }}
+          REUSED: ${{ steps.embedding-reuse.outputs.digest }}
+        run: |
+          digest="${BUILT:-$REUSED}"
+          test -n "$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Scan embedding image when rebuilt
+        if: inputs.embedding_changed
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.images.outputs.embedding }}@${{ steps.embedding.outputs.digest }}
+          format: json
+          output: trivy-embedding.json
+          exit-code: "0"
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Enforce rebuilt embedding vulnerability gate
+        if: inputs.embedding_changed
+        run: python App/scripts/report_trivy_findings.py trivy-embedding.json
+      - name: Generate immutable release manifest
+        run: >-
+          python App/scripts/release_manifest.py
+          --sha "${{ github.sha }}"
+          --public-image "${{ steps.images.outputs.public }}"
+          --public-digest "${{ steps.public.outputs.digest }}"
+          --embedding-image "${{ steps.images.outputs.embedding }}"
+          --embedding-digest "${{ steps.embedding.outputs.digest }}"
+          --output release-manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: project-snow-release-${{ github.sha }}
+          path: release-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish release summary
+        shell: bash
+        run: |
+          {
+            echo '## Project Snow release manifest'
+            echo
+            echo '```json'
+            cat release-manifest.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
