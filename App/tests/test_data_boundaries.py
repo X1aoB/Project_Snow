@@ -16,7 +16,7 @@ from backend.snow_app.user_fact_store import UserFactStore
 EXPECTED_RELATIONSHIPS = {
     "ca0144ccd81b": ("里芙", "亲爱的"),
     "1b0a6b35719a": ("芬妮", "达令"),
-    "25b23cb64398": ("凯西娅", "亲爱的"),
+    "25b23cb64398": ("凯茜娅", "亲爱的"),
     "673ba6851b05": ("苔丝", "亲爱的"),
     "cf0569ac6de9": ("肴", "郎君"),
     "daab0f4cceb4": ("茉莉安", "亲爱的"),
