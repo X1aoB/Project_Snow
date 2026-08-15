@@ -132,5 +132,8 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator("#api-key").input_value(), "")
             page.locator("#byok-form button[type=submit]").click()
             page.locator("#chat-view").wait_for(state="visible")
+            page.locator("#character-list").get_by_text("凯茜娅").wait_for(
+                state="visible"
+            )
             self.assertIn("凯茜娅", page.locator("#character-list").inner_text())
             browser.close()
