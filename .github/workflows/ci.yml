@@ -277,12 +277,28 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
       - run: python App/scripts/report_trivy_findings.py trivy-embedding.json
-      - name: Embedding container live check
+      - name: Embedding container 512-dimension inference check
         run: |
+          cleanup() { docker rm -f snow-embedding >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
           docker run -d --name snow-embedding -p 18001:8000 project-snow-embedding:ci
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18001/health && exit 0; sleep 1; done
-          docker logs snow-embedding
-          exit 1
+          ready=false
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:18001/health >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            docker logs snow-embedding
+            exit 1
+          fi
+          curl -fsS \
+            -H 'Content-Type: application/json' \
+            -d '{"inputs":["Project Snow 向量契约检查"]}' \
+            http://127.0.0.1:18001/embed \
+            | python -c 'import json, math, sys; payload = json.load(sys.stdin); vectors = payload["vectors"]; assert len(vectors) == 1 and len(vectors[0]) == 512; assert all(math.isfinite(value) for value in vectors[0])'
 
   full-validation:
     if: >-
