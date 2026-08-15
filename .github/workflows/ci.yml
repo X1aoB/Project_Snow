@@ -81,7 +81,8 @@ jobs:
           tests/test_public_security.py
           tests/test_migration_secret_config.py
           tests/test_change_classifier.py
-          tests/test_release_manifest.py -q
+          tests/test_release_manifest.py
+          tests/test_prepare_ci_runtime.py -q
       - run: python -m compileall -q backend migrations scripts
       - uses: actions/setup-node@v5
         with:
@@ -104,6 +105,8 @@ jobs:
           cache-dependency-path: App/requirements.txt
       - run: pip install pytest playwright
       - run: python -m playwright install --with-deps chromium
+      - name: Prepare artwork-free UI contract fixture
+        run: python scripts/prepare_ci_runtime.py --avatars
       - name: Static and browser UI tests
         env:
           RUN_PUBLIC_E2E: "1"
@@ -132,7 +135,6 @@ jobs:
         run: >-
           python -m pytest
           tests/test_public_api.py
-          tests/test_feedback_regressions.py
           tests/test_deployment_contracts.py -q
       - name: Validate Alembic offline migration
         run: alembic upgrade head --sql > migration.sql
@@ -154,6 +156,8 @@ jobs:
           cache: pip
           cache-dependency-path: App/requirements.txt
       - run: pip install -r requirements.txt
+      - name: Prepare corpus-free data contract fixture
+        run: python scripts/prepare_ci_runtime.py --views
       - name: Validate data release and architecture contracts
         run: >-
           python -m pytest
@@ -298,6 +302,8 @@ jobs:
           cache-dependency-path: App/requirements.txt
       - run: pip install -r requirements.txt
       - run: python -m playwright install --with-deps chromium
+      - name: Prepare generated contract fixtures
+        run: python scripts/prepare_ci_runtime.py
       - name: Full Python and browser suite
         env:
           RUN_PUBLIC_E2E: "1"
