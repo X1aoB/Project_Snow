@@ -269,6 +269,33 @@ class PublicStore:
                 {"request_id": request_id},
             )
 
+    def request_result(self, request_id: str, subject_hash: str) -> dict[str, Any] | None:
+        """Return a still-live terminal result owned by this anonymous subject."""
+
+        if not request_id:
+            return None
+        now = _utcnow()
+        with self.begin() as connection:
+            row = connection.execute(
+                text(
+                    """
+                    SELECT response_json FROM public_request_cache
+                    WHERE request_id = :request_id
+                      AND subject_hash = :subject_hash
+                      AND status = 'completed'
+                      AND expires_at > :now
+                    """
+                ),
+                {"request_id": request_id, "subject_hash": subject_hash, "now": now},
+            ).mappings().first()
+        if not row or not row["response_json"]:
+            return None
+        try:
+            payload = json.loads(row["response_json"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
     def verification_required(self, subject_hash: str, purpose: str) -> bool:
         now = _utcnow()
         with self.begin() as connection:

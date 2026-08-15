@@ -4,7 +4,7 @@
   "characters": [
     {"character_id": "78aa7ab99154", "display_name": "伊切尔", "source_name": "伊切尔", "aliases": ["伊切尔"], "selector_enabled": true},
     {"character_id": "d5ecfceba959", "display_name": "克罗瑞娜", "source_name": "克罗瑞娜", "aliases": ["克罗瑞娜"], "selector_enabled": true},
-    {"character_id": "25b23cb64398", "display_name": "凯西娅", "source_name": "凯茜娅", "aliases": ["凯西娅", "凯茜娅"], "selector_enabled": true},
+    {"character_id": "25b23cb64398", "display_name": "凯茜娅", "source_name": "凯茜娅", "aliases": ["凯茜娅", "凯西娅"], "selector_enabled": true},
     {"character_id": "6455a5dcff6a", "display_name": "卜卜", "source_name": "卜卜", "aliases": ["卜卜"], "selector_enabled": true},
     {"character_id": "41b7444e39cc", "display_name": "奈莉德", "source_name": "奈莉德", "aliases": ["奈莉德"], "selector_enabled": true},
     {"character_id": "4370a74d6fda", "display_name": "妮塔", "source_name": "妮塔", "aliases": ["妮塔"], "selector_enabled": true},

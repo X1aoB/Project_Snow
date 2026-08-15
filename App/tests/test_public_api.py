@@ -101,6 +101,11 @@ class PublicAPITests(TestCase):
         response = self.client.get("/public/v1/characters")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["count"], 22)
+        character = next(
+            item for item in response.json()["characters"] if item["character_id"] == "25b23cb64398"
+        )
+        self.assertEqual(character["display_name"], "凯茜娅")
+        self.assertEqual(character["aliases"], ["凯茜娅", "凯西娅"])
 
     def test_production_readiness_requires_matching_data_release(self) -> None:
         production_settings = replace(
@@ -228,6 +233,82 @@ class PublicAPITests(TestCase):
         self.assertIn("event: done", first.text)
         self.assertIn('"safety_category":"illegal_instructions"', first.text)
         self.assertIn('"idempotent_replay":true', second.text)
+
+    def test_public_rejects_whole_answer_fallback_and_replays_terminal_error(self) -> None:
+        credential, _ = self._byok()
+        request_id = str(uuid4())
+        payload = {
+            "request_id": request_id,
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": "1b0a6b35719a",
+            "message": "今天有点累。",
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        result = {
+            "answer": "我还在接着你刚才的话题。",
+            "retrieval": {},
+            "usage": {"total_tokens": 10},
+            "response_adjustments": ["answer_guardrail_retry", "empty_model_output_guard"],
+        }
+        with patch.object(self.app.state.chat_service.mvp, "chat", return_value=result) as chat:
+            first = self.client.post(
+                "/public/v1/chat/stream", headers={"Origin": "http://testserver"}, json=payload
+            )
+            second = self.client.post(
+                "/public/v1/chat/stream", headers={"Origin": "http://testserver"}, json=payload
+            )
+        self.assertEqual(first.status_code, 200)
+        self.assertIn('event: error', first.text)
+        self.assertIn('"code":"upstream_invalid_response"', first.text)
+        self.assertNotIn('event: delta', first.text)
+        self.assertIn('"idempotent_replay":true', second.text)
+        self.assertEqual(chat.call_count, 1)
+
+    def test_feedback_attaches_server_side_chat_diagnostics(self) -> None:
+        credential, _ = self._byok()
+        chat_request_id = str(uuid4())
+        chat_payload = {
+            "request_id": chat_request_id,
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": "1b0a6b35719a",
+            "message": "你好",
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        with patch.object(
+            self.app.state.chat_service.mvp,
+            "chat",
+            return_value={"answer": "你好，达令。", "retrieval": {}, "usage": {}, "response_adjustments": []},
+        ):
+            chat_response = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json=chat_payload,
+            )
+        self.assertEqual(chat_response.status_code, 200)
+        feedback_response = self.client.post(
+            "/public/v1/feedback",
+            headers={"Origin": "http://testserver"},
+            json={
+                "request_id": str(uuid4()),
+                "chat_request_id": chat_request_id,
+                "body": "这是一条带诊断的反馈",
+                "turnstile_token": "development-bypass",
+            },
+        )
+        self.assertEqual(feedback_response.status_code, 200)
+        context = self.store.feedback_rows()[0]["context"]
+        self.assertEqual(context["chat_request_id"], chat_request_id)
+        self.assertEqual(context["generation_outcome"], "valid_initial")
+        self.assertIn("total", context["generation_diagnostics"]["timings_ms"])
+        self.assertNotIn("sk-test-never-log-this", json.dumps(context, ensure_ascii=False))
 
     def test_all_public_characters_reach_the_immersive_engine(self) -> None:
         credential, _ = self._byok()

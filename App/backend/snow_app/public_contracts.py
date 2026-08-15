@@ -63,6 +63,7 @@ class SummarizeRequest(StrictModel):
 
 class FeedbackRequest(StrictModel):
     request_id: UUID
+    chat_request_id: UUID | None = None
     body: str = Field(min_length=1, max_length=1000)
     turnstile_token: str = Field(default="", max_length=4096)
     qq: str = Field(default="", max_length=12, pattern=r"^$|^[0-9]{5,12}$")

@@ -1666,6 +1666,34 @@ class MVPService:
         # rewritten.
         self._runtime_logistics_cache: dict[str, dict[str, Any]] | None = None
         self._runtime_documents_cache: dict[str, dict[str, Any]] | None = None
+        self._model_http_client = httpx.Client(follow_redirects=False)
+        self._generation_diagnostics = threading.local()
+
+    def reset_generation_diagnostics(self) -> None:
+        self._generation_diagnostics.value = {
+            "provider_http_calls": 0,
+            "initial_model_ms": 0,
+            "guard_rewrite_ms": 0,
+        }
+
+    def generation_diagnostics(self) -> dict[str, int]:
+        return dict(getattr(self._generation_diagnostics, "value", {}) or {})
+
+    def _record_generation_duration(self, name: str, started_at: float) -> None:
+        diagnostics = self.generation_diagnostics()
+        diagnostics[name] = int(diagnostics.get(name, 0)) + max(
+            0, int((time.perf_counter() - started_at) * 1000)
+        )
+        self._generation_diagnostics.value = diagnostics
+
+    def _post_model(self, endpoint: str, **kwargs: Any) -> httpx.Response:
+        diagnostics = self.generation_diagnostics()
+        diagnostics["provider_http_calls"] = int(diagnostics.get("provider_http_calls", 0)) + 1
+        self._generation_diagnostics.value = diagnostics
+        return self._model_http_client.post(endpoint, **kwargs)
+
+    def close(self) -> None:
+        self._model_http_client.close()
 
     @staticmethod
     def _normalize_mode(value: str | None) -> str:
@@ -4463,8 +4491,8 @@ class MVPService:
             armor_by_key[(character_id, armor_id)] = record
             armor_by_id[armor_id] = record
 
-        # Include selector aliases (notably 凯茜娅/凯西娅) when matching old
-        # wiki text, but always write the canonical registry identity.
+        # Include every registry alias when matching old wiki text, but always
+        # write the canonical registry identity.
         character_aliases: dict[str, tuple[str, str]] = {}
         for item in MVP_CHARACTERS:
             names = {item.display_name, item.source_name, *item.aliases}
@@ -4479,11 +4507,6 @@ class MVPService:
                     record["character_id"],
                     record["character_name"],
                 )
-        # A frequent wiki spelling variant is not present in every registry
-        # export.  Keep it as an input-only alias.
-        if "凯茜娅" not in character_aliases and "凯西娅" in character_aliases:
-            character_aliases["凯茜娅"] = character_aliases["凯西娅"]
-
         grouped: dict[str, list[dict[str, Any]]] = {}
         for document in raw_documents:
             if str(document.get("source_type") or "") != "logistics_lore":
@@ -6561,12 +6584,12 @@ class MVPService:
         usage_total: dict[str, Any] = {}
         for attempt in range(1, max_attempts + 1):
             try:
-                response = httpx.post(endpoint, headers=headers, json=body, timeout=timeout)
+                response = self._post_model(endpoint, headers=headers, json=body, timeout=timeout)
                 if response.status_code >= 400 and "response_format" in body:
                     # Some compatible gateways reject JSON mode while still
                     # returning valid JSON in the message content.
                     body.pop("response_format", None)
-                    response = httpx.post(endpoint, headers=headers, json=body, timeout=timeout)
+                    response = self._post_model(endpoint, headers=headers, json=body, timeout=timeout)
                 if response.status_code >= 400 and any(
                     key in body for key in ("thinking", "enable_thinking", "reasoning_effort")
                 ):
@@ -6576,7 +6599,7 @@ class MVPService:
                     body.pop("thinking", None)
                     body.pop("enable_thinking", None)
                     body.pop("reasoning_effort", None)
-                    response = httpx.post(endpoint, headers=headers, json=body, timeout=timeout)
+                    response = self._post_model(endpoint, headers=headers, json=body, timeout=timeout)
                 response.raise_for_status()
                 payload = response.json()
                 content = _json_content(response)
@@ -6833,6 +6856,17 @@ class MVPService:
     ) -> list[dict[str, str]]:
         allowed = {"message"} if communication_channel == "text" else {"speech", "action"}
         blocks: list[dict[str, str]] = []
+        canonical_character = canonical_mvp_character(character_name)
+        action_names = sorted(
+            {
+                character_name,
+                *(canonical_character.aliases if canonical_character else ()),
+                canonical_character.source_name if canonical_character else "",
+            }
+            - {""},
+            key=len,
+            reverse=True,
+        )
 
         def normalize_action(value: str) -> str:
             action = value.strip()
@@ -6847,8 +6881,15 @@ class MVPService:
                     action = character_name + action[1:]
                 elif action.startswith(("少女", "女孩", "角色")):
                     action = re.sub(r"^(?:少女|女孩|角色)", character_name, action, count=1)
-                elif not action.startswith(character_name):
-                    action = character_name + action
+                else:
+                    matched_name = next(
+                        (candidate for candidate in action_names if action.startswith(candidate)),
+                        "",
+                    )
+                    if matched_name:
+                        action = character_name + action[len(matched_name) :]
+                    else:
+                        action = character_name + action
             return action
 
         def split_leading_actions(value: str) -> tuple[list[str], str]:
@@ -8643,7 +8684,7 @@ class MVPService:
 
     @staticmethod
     def _relationship_roster_fallback() -> str:
-        return "知道。现在和你立下恒约的，是里芙、芬妮、凯西娅、苔丝、肴、茉莉安、安卡希雅，还有辰星。"
+        return "知道。现在和你立下恒约的，是里芙、芬妮、凯茜娅、苔丝、肴、茉莉安、安卡希雅，还有辰星。"
 
     @classmethod
     def _repair_explicit_relationship_answer(
@@ -9021,7 +9062,11 @@ class MVPService:
                     {"type": "text", "text": user_prompt},
                     *image_inputs,
                 ]
-            raw_content, usage = self._call_model(system_prompt, user_prompt, **initial_kwargs)
+            initial_model_started = time.perf_counter()
+            try:
+                raw_content, usage = self._call_model(system_prompt, user_prompt, **initial_kwargs)
+            finally:
+                self._record_generation_duration("initial_model_ms", initial_model_started)
         except Exception:
             self.conversation_store.release_request(request_key)
             raise
@@ -9094,15 +9139,19 @@ class MVPService:
                     retry_kwargs["thinking_decision"] = thinking_decision
                 if max_tokens_override is not None:
                     retry_kwargs["max_tokens_override"] = max_tokens_override
-                retry_content, retry_usage = self._call_model(
-                    system_prompt,
-                    self._guarded_rewrite_prompt(
-                        user_prompt,
-                        answer_text,
-                        guardrail_violations,
-                    ),
-                    **retry_kwargs,
-                )
+                guard_rewrite_started = time.perf_counter()
+                try:
+                    retry_content, retry_usage = self._call_model(
+                        system_prompt,
+                        self._guarded_rewrite_prompt(
+                            user_prompt,
+                            answer_text,
+                            guardrail_violations,
+                        ),
+                        **retry_kwargs,
+                    )
+                finally:
+                    self._record_generation_duration("guard_rewrite_ms", guard_rewrite_started)
                 usage = self._merge_usage(usage, retry_usage)
                 candidate = _parse_model_json(retry_content)
                 candidate_answer = self._generated_answer(candidate, retry_content)

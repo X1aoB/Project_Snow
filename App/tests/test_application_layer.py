@@ -3100,7 +3100,7 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertIn("relationship_roster_missing", violations)
         self.assertIn("relationship_roster_excluded:\u6069\u96c5", violations)
         fallback = MVPService._relationship_roster_fallback()
-        for name in ("\u91cc\u8299", "\u82ac\u59ae", "\u51ef\u897f\u5a05", "\u82d4\u4e1d", "\u80b4", "\u8309\u8389\u5b89", "\u5b89\u5361\u5e0c\u96c5", "\u8fb0\u661f"):
+        for name in ("\u91cc\u8299", "\u82ac\u59ae", "\u51ef\u831c\u5a05", "\u82d4\u4e1d", "\u80b4", "\u8309\u8389\u5b89", "\u5b89\u5361\u5e0c\u96c5", "\u8fb0\u661f"):
             self.assertIn(name, fallback)
         self.assertNotIn("\u6069\u96c5", fallback)
 

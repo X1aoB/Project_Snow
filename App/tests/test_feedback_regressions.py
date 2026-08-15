@@ -91,11 +91,11 @@ class FeedbackRegressionTests(unittest.TestCase):
         self.assertEqual(
             result["content_blocks"],
             [
-                {"type": "action", "text": "凯西娅稍稍抬起眼。"},
+                {"type": "action", "text": "凯茜娅稍稍抬起眼。"},
                 {"type": "speech", "text": "我在听。"},
             ],
         )
-        self.assertIn("（凯西娅稍稍抬起眼。）", result["answer"])
+        self.assertIn("（凯茜娅稍稍抬起眼。）", result["answer"])
 
     def test_rendezvous_intent_exposes_character_location_but_greeting_does_not(self) -> None:
         """“去找你” is an intentional location request, unlike a greeting."""
@@ -305,8 +305,8 @@ class FeedbackRegressionTests(unittest.TestCase):
         second_action = second["content_blocks"][0]["text"]
         self.assertEqual(first["content_blocks"][0]["type"], "action")
         self.assertEqual(second["content_blocks"][0]["type"], "action")
-        self.assertIn("凯西娅", first_action)
-        self.assertIn("凯西娅", second_action)
+        self.assertIn("凯茜娅", first_action)
+        self.assertIn("凯茜娅", second_action)
         self.assertNotEqual(first_action, second_action)
 
     def test_in_person_actions_use_third_person_and_leave_speech_separate(self) -> None:

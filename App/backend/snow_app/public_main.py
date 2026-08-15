@@ -94,7 +94,10 @@ def create_app(
         if store.engine is not None and public_settings.auto_create_schema:
             store.create_schema()
             store.cleanup()
-        yield
+        try:
+            yield
+        finally:
+            chat_service.close()
 
     app = FastAPI(
         title="Project Snow Public Immersive API",
@@ -304,6 +307,13 @@ def create_app(
                         "retrieval": {},
                         "usage": {},
                         "safety_category": unsafe_category,
+                        "generation_outcome": "valid_initial",
+                        "response_adjustments": [],
+                        "terminal_error": "",
+                        "diagnostics": {
+                            "timings_ms": {"total": 0, "provider_http_calls": 0},
+                            "dependency_health": {},
+                        },
                     }
                 else:
                     result = await chat_service.chat(
@@ -329,6 +339,16 @@ def create_app(
                     "idempotent_replay": bool(result.get("idempotent_replay")),
                 },
             )
+            if result.get("terminal_error"):
+                yield _sse(
+                    "error",
+                    {
+                        "code": result["terminal_error"],
+                        "retryable": True,
+                        "idempotent_replay": bool(result.get("idempotent_replay")),
+                    },
+                )
+                return
             answer = str(result.get("answer") or "")
             for start in range(0, len(answer), 24):
                 yield _sse("delta", {"text": answer[start : start + 24]})
@@ -405,6 +425,16 @@ def create_app(
             "degraded_services": payload.degraded_services,
             "ui_surface": payload.ui_surface,
         }
+        if payload.chat_request_id:
+            chat_result = store.request_result(
+                str(payload.chat_request_id), request.state.subject_hash
+            )
+            context["chat_request_id"] = str(payload.chat_request_id)
+            if chat_result:
+                context["generation_diagnostics"] = chat_result.get("diagnostics") or {}
+                context["generation_outcome"] = chat_result.get("generation_outcome") or ""
+                context["response_adjustments"] = chat_result.get("response_adjustments") or []
+                context["chat_error_code"] = chat_result.get("terminal_error") or ""
         try:
             public_code = store.insert_feedback(
                 subject_hash=request.state.subject_hash,
