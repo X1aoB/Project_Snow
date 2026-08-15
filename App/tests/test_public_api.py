@@ -54,7 +54,24 @@ class PublicAPITests(TestCase):
         self.store.create_schema()
         self.internal_settings = Settings.from_environment()
         self.app = create_app(self.settings, self.internal_settings, self.store)
+        self._views_directory = TemporaryDirectory()
+        views_path = Path(self._views_directory.name) / "character_views.jsonl"
+        views_path.write_text(
+            "".join(
+                json.dumps({"character_id": character.character_id}) + "\n"
+                for character in MVP_CHARACTERS
+            ),
+            encoding="utf-8",
+        )
+        self.app.state.chat_service.mvp.views_path = views_path
+        self.app.state.chat_service.mvp._views_cache = None
+        self.app.state.chat_service.mvp._views_mtime = None
         self.client = TestClient(self.app)
+
+    def tearDown(self) -> None:
+        self.client.close()
+        self.app.state.chat_service.close()
+        self._views_directory.cleanup()
 
     def test_public_mvp_state_is_ephemeral_and_outside_read_only_runtime(self) -> None:
         path = self.app.state.chat_service.mvp.user_fact_store.database_path
