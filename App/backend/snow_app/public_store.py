@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS public_rate_limit (
 CREATE INDEX IF NOT EXISTS public_rate_limit_expiry_idx ON public_rate_limit (expires_at);
 
 CREATE TABLE IF NOT EXISTS public_request_cache (
-    request_id VARCHAR(36) PRIMARY KEY,
+    request_id VARCHAR(128) PRIMARY KEY,
     subject_hash VARCHAR(64) NOT NULL,
     request_hash VARCHAR(64) NOT NULL,
     status VARCHAR(16) NOT NULL CHECK (status IN ('processing', 'completed')),

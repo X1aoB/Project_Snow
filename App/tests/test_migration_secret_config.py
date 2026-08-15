@@ -92,3 +92,7 @@ class MigrationSecretConfigTests(TestCase):
                 text=True,
             )
             self.assertIn("CREATE TABLE IF NOT EXISTS public_feedback", result.stdout)
+            self.assertIn(
+                "ALTER TABLE public_request_cache ALTER COLUMN request_id TYPE VARCHAR(128)",
+                result.stdout,
+            )
