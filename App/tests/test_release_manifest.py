@@ -18,7 +18,7 @@ class ReleaseManifestTests(TestCase):
             app_root=app_root,
         )
         self.assertEqual(manifest["schema_version"], "project-snow-release-1")
-        self.assertEqual(manifest["app_version"], "0.6.3")
+        self.assertEqual(manifest["app_version"], "0.7.0")
         self.assertEqual(manifest["data_version"], "2026.08.15.1")
         self.assertEqual(manifest["migration_heads"], ["20260814_0001"])
         self.assertEqual(manifest["application"]["digest"], "sha256:" + "b" * 64)

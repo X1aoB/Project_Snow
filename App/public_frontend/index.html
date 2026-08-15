@@ -4,66 +4,136 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="same-origin" />
-    <title>Project Snow · 沉浸式</title>
-    <link rel="stylesheet" href="/app.css?v=0.6.3" />
+    <meta name="color-scheme" content="dark" />
+    <title>Project Snow · 沉浸式体验</title>
+    <link rel="stylesheet" href="/app.css?v=0.7.0" />
   </head>
   <body>
-    <main class="shell">
-      <header class="topbar">
-        <a class="brand" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">Project Snow</a>
-        <span class="badge">沉浸式体验 · 私有验收</span>
-        <span id="version-badge" class="badge">版本加载中</span>
-        <div class="top-actions">
-          <button id="history-settings" class="quiet-button" type="button">本地记录</button>
-          <button id="feedback-open" class="quiet-button" type="button">反馈</button>
-        </div>
-      </header>
+    <div id="chat-app" class="app-shell" data-channel="text">
+      <aside id="contact-panel" class="contact-panel" aria-label="角色会话">
+        <header class="product-header">
+          <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
+            <span class="brand-mark" aria-hidden="true">S</span>
+            <span><strong>Project Snow</strong><small id="version-badge">0.7.0 私有验收</small></span>
+          </a>
+          <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
+        </header>
+        <div class="contact-service"><span id="connection-status" class="connection-status">正在连接</span><span>本地历史</span></div>
+        <label class="contact-search"><span aria-hidden="true">⌕</span><input id="character-search" type="search" placeholder="搜索角色" autocomplete="off" /></label>
+        <div id="character-list" class="character-list" role="listbox" aria-label="选择角色"></div>
+        <footer class="contact-footer">
+          <button id="open-global-feedback" class="footer-command" type="button"><span>反馈</span></button>
+          <a class="footer-command" href="https://github.com/X1aoB/Project_Snow" rel="noreferrer"><span>GitHub</span></a>
+          <button id="open-settings" class="icon-button" type="button" aria-label="设置">⚙</button>
+        </footer>
+      </aside>
 
-      <section id="setup-view" class="setup-view">
-        <div class="setup-copy">
-          <p class="eyebrow">BYOK · 浏览器本地历史</p>
-          <h1>带上自己的模型，进入她们的故事。</h1>
-          <p>无需注册。你的完整聊天记录默认只保存在这台设备的浏览器里；模型 API Key 只会短暂经过服务器内存，用于转发本次请求。</p>
-        </div>
-        <form id="byok-form" class="card byok-form">
-          <h2>连接你的模型</h2>
-          <label>模型厂商<select id="provider-select" required></select></label>
-          <label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" minlength="8" /></label>
-          <p id="credential-status" class="form-hint" hidden></p>
-          <label>模型 ID<input id="model-id" type="text" autocomplete="off" placeholder="可手动填写；也可在连接后获取列表" maxlength="200" /></label>
-          <button id="discover-models" class="quiet-button" type="button">获取模型列表</button>
-          <select id="discovered-models" hidden aria-label="已发现的模型"></select>
-          <label class="check"><input id="notice-transit" type="checkbox" required />我知晓 Key 会短暂经过服务器内存，且不会存入数据库或日志。</label>
-          <label class="check"><input id="notice-cost" type="checkbox" required />我知晓模型调用费用由我的 API 账户承担。</label>
-          <label class="check"><input id="notice-history" type="checkbox" required />我知晓聊天记录主要明文存于本机浏览器，共用设备请自行清理。</label>
-          <input id="turnstile-token" type="hidden" />
-          <p id="setup-error" class="form-error" role="alert"></p>
-          <button class="primary-button" type="submit">开始体验</button>
-          <button id="clear-credential" class="quiet-button" type="button" hidden>清除 API 会话</button>
-        </form>
-      </section>
-
-      <section id="chat-view" class="chat-view" hidden>
-        <aside class="characters-panel">
-          <div class="panel-heading"><strong>角色</strong><button id="change-model" class="quiet-button" type="button">更换模型</button></div>
-          <label class="search"><span>搜索</span><input id="character-search" type="search" placeholder="输入角色名" /></label>
-          <div id="character-list" class="character-list" role="listbox"></div>
-          <footer><a href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">返回项目介绍</a><a id="github-link" href="https://github.com/X1aoB/Project_Snow" rel="noreferrer">Project Snow 源码</a><a id="website-github-link" href="https://github.com/X1aoB/MyWebsite" rel="noreferrer">MyWebsite 源码</a><a id="releases-link" href="https://github.com/X1aoB/Project_Snow/releases" rel="noreferrer">版本发布</a></footer>
-        </aside>
-        <section class="conversation-panel">
-          <header id="conversation-header" class="conversation-header"><div><h1>选择一位角色</h1><p>纯文本沉浸式对话</p></div><span id="service-state" class="state">准备中</span></header>
-          <div id="messages" class="messages" aria-live="polite"><p class="empty">选择左侧角色，开始一段新的对话。</p></div>
-          <p id="chat-error" class="form-error chat-error" role="alert"></p>
-          <form id="composer" class="composer">
-            <textarea id="message-input" maxlength="2000" placeholder="输入想说的话（最多 2,000 字）" disabled></textarea>
-            <div class="composer-footer"><span id="input-count">0 / 2000</span><button id="send-button" class="primary-button" type="submit" disabled>发送</button></div>
-          </form>
+      <main class="chat-panel">
+        <section id="text-surface" class="text-surface" aria-label="文字通讯">
+          <header class="chat-header">
+            <button id="open-contacts" class="icon-button mobile-only" type="button" aria-label="打开角色列表">☰</button>
+            <div id="active-character" class="active-character">
+              <span class="portrait portrait-text large">?</span><div><h1>选择角色</h1><p>从角色列表开始一段通讯</p></div>
+            </div>
+            <div class="chat-controls" aria-label="文字通讯控制">
+              <button id="go-in-person" class="presence-switch" type="button"><span id="go-in-person-label">去见她</span></button>
+              <button id="open-info" class="icon-button" type="button" aria-label="角色与场景">i</button>
+            </div>
+          </header>
+          <section id="timeline" class="timeline" aria-live="polite" aria-label="文字通讯记录">
+            <div class="empty-conversation"><p>选择一位角色开始通讯。</p></div>
+          </section>
         </section>
-      </section>
-    </main>
 
-    <dialog id="feedback-dialog" class="dialog"><form id="feedback-form" method="dialog" class="card"><header><h2>提交反馈</h2><button type="button" data-close="feedback-dialog" class="quiet-button">关闭</button></header><p>提交时会附带当前一问一答、角色、模型、版本和错误状态，方便定位问题。反馈保留 30 天。</p><label>反馈内容<textarea id="feedback-body" maxlength="1000" required placeholder="最多 1,000 字"></textarea></label><label>QQ（可选）<input id="feedback-qq" inputmode="numeric" pattern="[0-9]{5,12}" maxlength="12" placeholder="如愿意进一步交流，可留下 QQ" /></label><input id="feedback-turnstile" type="hidden" /><p id="feedback-error" class="form-error" role="alert"></p><button class="primary-button" type="submit">提交反馈</button></form></dialog>
-    <dialog id="history-dialog" class="dialog"><section class="card"><header><h2>本地聊天记录</h2><button type="button" data-close="history-dialog" class="quiet-button">关闭</button></header><p>完整记录只存于当前浏览器 IndexedDB，服务器不保存长期聊天历史。</p><p id="storage-usage">正在计算占用空间…</p><label>删除某个角色的历史<select id="history-character"></select></label><button id="delete-character-history" class="quiet-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部本地历史</button></section></dialog>
-    <script src="/app.js?v=0.6.3" type="module"></script>
+        <section id="in-person-surface" class="in-person-surface" data-scene="generic" aria-label="面对面场景" hidden>
+          <header class="scene-hud">
+            <button id="open-stage-contacts" class="scene-character-button" type="button" aria-label="切换角色">
+              <span id="stage-header-avatar" class="portrait portrait-text">?</span>
+              <span><strong id="stage-character-name">选择角色</strong><small>面对面</small></span><span>⌄</span>
+            </button>
+            <div class="scene-location" aria-live="polite">
+              <span aria-hidden="true">⌖</span><span><strong id="stage-location">场景尚未建立</strong><small id="stage-activity">选择角色后读取当前位置</small></span>
+            </div>
+            <div class="scene-hud-actions">
+              <button id="open-transcript" class="scene-tool-button" type="button">回看</button>
+              <button id="open-communicator" class="scene-tool-button primary" type="button">打开通讯器</button>
+              <button id="toggle-stage-ui" class="scene-tool-button icon-only" type="button" aria-label="隐藏界面" title="隐藏界面（H）">◫</button>
+              <button id="stage-message-feedback" class="scene-tool-button icon-only" type="button" aria-label="反馈本条回复" disabled>!</button>
+            </div>
+          </header>
+          <div id="scene-stage" class="scene-stage">
+            <img id="scene-backdrop" class="scene-backdrop" src="/assets/immersive/scenes/generic.svg" alt="" aria-hidden="true" />
+            <div class="scene-decoration scene-decoration-back" aria-hidden="true"></div>
+            <div class="scene-decoration scene-decoration-front" aria-hidden="true"></div>
+            <div class="snow-atmosphere" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <div id="presence-arrival-loading" class="presence-arrival-loading" role="status" aria-live="polite" hidden>
+              <div class="presence-arrival-loading-card"><strong>前往中……</strong><span>正在靠近她所在的场景</span><div class="presence-arrival-dots"><span></span><span></span><span></span></div></div>
+            </div>
+            <div id="stage-presence-status" class="stage-presence-status" role="status" hidden></div>
+            <div id="stage-narration" class="stage-narration" aria-live="polite"></div>
+            <button id="restore-stage-ui" class="restore-stage-ui" type="button" hidden>显示界面</button>
+          </div>
+          <section id="stage-dialogue" class="stage-dialogue" aria-live="polite" tabindex="0" aria-label="角色对白，单击或按空格显示完整对白">
+            <div id="stage-portrait" class="stage-portrait" aria-label="角色文字头像"><span id="stage-portrait-avatar" class="stage-portrait-avatar">?</span></div>
+            <div class="stage-dialogue-copy">
+              <div class="stage-speaker-line"><strong id="stage-speaker">Project Snow</strong><span>面对面</span></div>
+              <div id="stage-speech" class="stage-speech"><p>选择一位角色，开始一段面对面的对话。</p></div>
+              <div class="stage-dialogue-hint"><span>视觉小说模式</span><span>Space 快速显示 · H 隐藏界面</span></div>
+            </div>
+          </section>
+        </section>
+
+        <div id="system-banner" class="system-banner" role="status" hidden></div>
+        <form id="composer" class="composer" autocomplete="off">
+          <div id="request-status" class="request-status" aria-live="polite"></div>
+          <div id="analyst-action-field" class="action-composer" hidden>
+            <label for="action-input">你的动作或神态 <span>可选，也可单独发送</span></label>
+            <textarea id="action-input" rows="1" maxlength="1200" placeholder="描述动作或神态……"></textarea>
+          </div>
+          <div class="composer-row">
+            <button id="toggle-action" class="icon-button face-only" type="button" aria-expanded="false" aria-controls="analyst-action-field" title="添加动作或神态">动作</button>
+            <textarea id="message-input" rows="1" maxlength="2000" aria-label="输入对白或消息" placeholder="选择角色后输入消息……" disabled></textarea>
+            <button id="send-message" class="send-button" type="submit" aria-label="发送消息" disabled>发送</button>
+          </div>
+          <div class="composer-foot"><p>Enter 发送 · Shift+Enter 换行 · 单轮合计不超过 2,000 字</p><span id="input-count">0 / 2000</span></div>
+        </form>
+      </main>
+
+      <aside id="info-panel" class="info-panel" aria-label="角色与场景" aria-hidden="true">
+        <header><div><span class="panel-kicker">当前会话</span><h2>角色与场景</h2></div><button id="close-info" class="icon-button" type="button">×</button></header>
+        <div id="info-content" class="info-content"></div>
+      </aside>
+      <aside id="transcript-panel" class="transcript-panel" aria-label="完整对话记录" aria-hidden="true">
+        <header><div><span class="panel-kicker">浏览器本地记录</span><h2>回看对话</h2></div><button id="close-transcript" class="icon-button" type="button">×</button></header>
+        <div id="transcript-content" class="transcript-content"></div>
+      </aside>
+      <div id="drawer-scrim" class="drawer-scrim" hidden></div>
+    </div>
+
+    <dialog id="presence-dialog" class="modal">
+      <form method="dialog"><header><div><span class="panel-kicker">场景转换</span><h2>去见她</h2></div><button class="icon-button" type="button" data-close-dialog="presence-dialog">×</button></header><div class="presence-dialog-scene"><div><strong id="presence-dialog-location">正在读取地点</strong><p id="presence-dialog-activity">请稍候。</p></div></div><p class="modal-context">前往后将进入面对面场景，并可能触发一次主动到场反应。</p><div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="presence-dialog">取消</button><button id="stay-on-communicator" type="button" class="secondary-button">继续通讯</button><button id="confirm-presence-transition" type="button" class="primary-button">前往</button></div></form>
+    </dialog>
+
+    <dialog id="arrival-notice-dialog" class="modal">
+      <form method="dialog"><header><div><span class="panel-kicker">首次到场提示</span><h2>主动反应可能调用模型</h2></div></header><p>进入面对面场景时，角色有 50% 概率注意到你的到来。被注意到时会额外调用一次当前 BYOK 模型，并计入聊天额度；未被注意到时不会调用。</p><div class="modal-actions"><button id="cancel-arrival-notice" type="button" class="secondary-button">取消</button><button id="accept-arrival-notice" type="button" class="primary-button">理解并继续</button></div></form>
+    </dialog>
+
+    <button id="floating-feedback" class="floating-feedback" type="button">反馈</button>
+    <dialog id="feedback-dialog" class="modal">
+      <form id="feedback-form" method="dialog"><header><div><span class="panel-kicker">0.7.0 PRIVATE FEEDBACK</span><h2>告诉我们哪里需要改进</h2></div><button class="icon-button" type="button" data-close-dialog="feedback-dialog">×</button></header><p id="feedback-context" class="modal-context">提交时会附带当前一问一答和不含密钥的请求诊断。</p><label>具体说明<textarea id="feedback-body" rows="5" maxlength="1000" required placeholder="请描述问题、期望表现或复现步骤。"></textarea></label><label>QQ（可选）<input id="feedback-qq" inputmode="numeric" pattern="[0-9]{5,12}" maxlength="12" placeholder="如愿意进一步交流，可留下 QQ" /></label><p class="modal-context">QQ 将加密保存，并随反馈在 30 天后删除。</p><p id="feedback-error" class="form-error" role="alert"></p><div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="feedback-dialog">取消</button><button type="submit" class="primary-button">提交反馈</button></div></form>
+    </dialog>
+
+    <dialog id="settings-dialog" class="modal settings-modal">
+      <form method="dialog"><header><div><span class="panel-kicker">PROJECT SNOW 0.7.0</span><h2>体验设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog">×</button></header><nav class="settings-tabs"><button type="button" class="active" data-settings-tab="models">模型厂商</button><button type="button" data-settings-tab="history">本地记录</button><button type="button" data-settings-tab="about">关于</button></nav>
+        <section class="settings-section" data-settings-panel="models">
+          <p>API Key 只用于签发两小时加密凭证，不写入数据库、日志或浏览器长期存储。</p><div class="provider-form"><label>模型厂商<select id="provider-select"></select></label><label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" /></label><p id="credential-status" class="form-hint" hidden></p><label>模型 ID<input id="model-id" maxlength="200" placeholder="可手工填写，也可读取列表" /></label><div class="settings-actions"><button id="discover-models" class="secondary-button" type="button">获取模型列表</button><select id="discovered-models" hidden aria-label="已发现模型"></select></div><label class="check"><input id="notice-transit" type="checkbox" />我知道 Key 会短暂经过服务器内存。</label><label class="check"><input id="notice-cost" type="checkbox" />我知道模型费用由自己的 API 账户承担。</label><label class="check"><input id="notice-history" type="checkbox" />我知道聊天记录明文保存在当前浏览器。</label><p id="setup-error" class="form-error" role="alert"></p><div class="settings-actions"><button id="save-model" class="primary-button" type="button">保存本次模型会话</button><button id="clear-credential" class="danger-button" type="button">清除 API 会话</button></div></div>
+        </section>
+        <section class="settings-section" data-settings-panel="history" hidden><p>完整历史只在当前浏览器 IndexedDB 中保存。共享电脑请及时清理。</p><p id="storage-usage">正在计算占用空间……</p><label>选择角色<select id="history-character"></select></label><div class="settings-actions"><button id="delete-character-history" class="secondary-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部历史</button></div></section>
+        <section class="settings-section attribution" data-settings-panel="about" hidden><p>角色暂时使用文字头像；公网包只包含自有 UI 和场景 SVG。</p><p>聊天历史不会跨设备同步。共享世界状态由服务端签名，浏览器可以保存但不能伪造。</p><div class="source-links"><a id="github-link" href="https://github.com/X1aoB/Project_Snow" rel="noreferrer">Project Snow 源码</a><a id="website-github-link" href="https://github.com/X1aoB/MyWebsite" rel="noreferrer">MyWebsite 源码</a><a id="releases-link" href="https://github.com/X1aoB/Project_Snow/releases" rel="noreferrer">版本发布</a></div></section>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script type="module" src="/app.js?v=0.7.0"></script>
   </body>
 </html>
