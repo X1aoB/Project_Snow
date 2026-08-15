@@ -50,10 +50,17 @@ services:
   public-api-blue:
     <<: *api
     profiles: [blue]
+    # Loopback-only candidate port for private acceptance through an SSH tunnel.
+    # It is never exposed by the host firewall or Cloudflare Tunnel.
+    ports:
+      - "127.0.0.1:18081:8000"
 
   public-api-green:
     <<: *api
     profiles: [green]
+    # Keep the rollback colour independently reachable for diagnostics.
+    ports:
+      - "127.0.0.1:18082:8000"
 
   admin:
     <<: *api

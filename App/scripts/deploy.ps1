@@ -34,8 +34,8 @@ if ($AppDigest -notmatch $digestPattern -or $EmbeddingDigest -notmatch $digestPa
 if ($ManifestPath -and $MediaVersion -notmatch '^\S+$') { throw 'Release manifest media version is invalid.' }
 $appImage = "ghcr.io/x1aob/project_snow-public@$AppDigest"
 $embeddingImage = "ghcr.io/x1aob/project_snow-embedding@$EmbeddingDigest"
-Write-Host "Deploying main commit $Sha to private acceptance colour $Colour using immutable image digests and media $MediaVersion."
+Write-Host "Staging main commit $Sha in inactive private-acceptance colour $Colour using immutable image digests and media $MediaVersion."
 $manifestEnvironment = if ($manifestRemotePath) { "PROJECT_SNOW_RELEASE_MANIFEST='$manifestRemotePath' " } else { '' }
 $remoteCommand = "cd /srv/project-snow/repo && git fetch --quiet origin main && git cat-file -e '$Sha^{commit}' && git merge-base --is-ancestor '$Sha' origin/main && git checkout --quiet --detach '$Sha' && git rev-parse HEAD | grep -Fx '$Sha' && cd App && ${manifestEnvironment}PUBLIC_API_IMAGE='$appImage' EMBEDDING_IMAGE='$embeddingImage' ./ops/deploy.sh '$Colour' '$Sha'"
 ssh -i $IdentityFile -p $Port "deploy@$HostName" $remoteCommand
-if ($LASTEXITCODE -ne 0) { throw 'Remote deployment failed.' }
+if ($LASTEXITCODE -ne 0) { throw 'Remote staging failed; active traffic was not changed.' }
