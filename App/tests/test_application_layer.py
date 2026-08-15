@@ -10,6 +10,7 @@ from types import ModuleType
 from unittest.mock import patch
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 import backend.snow_app.repository as snow_repository
@@ -1087,6 +1088,7 @@ class ApplicationLayerTests(unittest.TestCase):
                 self.assertIsNone(candidate)
                 self.assertEqual(reason, expected_reason)
 
+    @pytest.mark.runtime_data
     def test_runtime_artifacts_are_available(self) -> None:
         status = self.repository.status()
         self.assertTrue(status["lakehouse"])
@@ -1174,6 +1176,7 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertFalse(repaired)
         self.assertEqual(answer, original)
 
+    @pytest.mark.runtime_data
     def test_persona_evidence_is_traceable(self) -> None:
         document_ids = set(self.repository.documents_by_id())
         authoritative_characters = dialogue_characters()
@@ -1185,6 +1188,7 @@ class ApplicationLayerTests(unittest.TestCase):
             self.assertEqual(profile["relationship_invariant"]["user_role"], "分析员")
             self.assertEqual(profile["character_name"], authoritative_characters[profile["character_id"]])
 
+    @pytest.mark.runtime_data
     def test_selectable_characters_are_canonical_dialogue_identities(self) -> None:
         selectable = self.repository.list_characters()
         names = {character["character_name"] for character in selectable}
@@ -1195,6 +1199,7 @@ class ApplicationLayerTests(unittest.TestCase):
         )
         self.assertTrue(NON_DIALOGUE_CHARACTER_IDS.isdisjoint({character["character_id"] for character in selectable}))
 
+    @pytest.mark.runtime_data
     def test_graph_edges_reference_known_nodes(self) -> None:
         nodes = self.repository.graph_nodes()
         edges = self.repository.graph_edges()
@@ -1417,6 +1422,7 @@ class ApplicationLayerTests(unittest.TestCase):
             stored = json.loads(candidate_path.read_text(encoding="utf-8"))
             self.assertEqual(stored["review_status"], "pending_review")
 
+    @pytest.mark.runtime_data
     def test_costume_and_armor_material_participate_without_manual_filters(self) -> None:
         costume_documents = [
             document for document in self.repository.documents() if document["metadata"].get("requires_costume_context")
@@ -1425,6 +1431,7 @@ class ApplicationLayerTests(unittest.TestCase):
         document = costume_documents[0]
         self.assertTrue(self.repository._is_allowed_context(document, None))
 
+    @pytest.mark.runtime_data
     def test_mvp_style_resolver_links_costume_to_armor_without_selecting_a_new_character(self) -> None:
         service = MVPService(self.settings, self.repository)
         character_id = "ca0144ccd81b"  # 里芙
@@ -1452,6 +1459,7 @@ class ApplicationLayerTests(unittest.TestCase):
             all(document["metadata"].get("costume_id") == costume["costume_id"] for document in allowed_costumes)
         )
 
+    @pytest.mark.runtime_data
     def test_mvp_exact_costume_retrieval_promotes_matching_armor(self) -> None:
         service = MVPService(self.settings, self.repository)
         character_id = "25b23cb64398"  # 凯西娅
@@ -1484,6 +1492,7 @@ class ApplicationLayerTests(unittest.TestCase):
             )
         )
 
+    @pytest.mark.runtime_data
     def test_mvp_current_condition_promotes_latest_pain_evidence(self) -> None:
         service = MVPService(self.settings, self.repository)
         context = service.retrieve(
@@ -1495,6 +1504,7 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertEqual(context["question_focus"], "current_condition")
         self.assertIn("doc_1eec692886123f76", selected_ids)
 
+    @pytest.mark.runtime_data
     def test_mvp_logistics_retrieval_is_scoped_to_character_and_armor(self) -> None:
         """A logistics question must not leak another character's squad."""
 
@@ -1571,6 +1581,7 @@ class ApplicationLayerTests(unittest.TestCase):
 
         self.assertTrue(any(item.startswith("unprompted_scene_disclosure:") for item in violations))
 
+    @pytest.mark.runtime_data
     def test_mvp_cross_character_main_story_promotes_futiya_armor_context(self) -> None:
         service = MVPService(self.settings, self.repository)
         context = service.retrieve(
@@ -1591,6 +1602,7 @@ class ApplicationLayerTests(unittest.TestCase):
             )
         )
 
+    @pytest.mark.runtime_data
     def test_mvp_futiya_body_teasing_hint_is_source_bound(self) -> None:
         service = MVPService(self.settings, self.repository)
         context = service.retrieve(
@@ -1705,6 +1717,7 @@ class ApplicationLayerTests(unittest.TestCase):
 
         self.assertIn("unprompted_logistics_plan", violations)
 
+    @pytest.mark.runtime_data
     def test_mvp_armor_context_does_not_leak_all_costumes(self) -> None:
         service = MVPService(self.settings, self.repository)
         character_id = "ca0144ccd81b"
@@ -1728,6 +1741,7 @@ class ApplicationLayerTests(unittest.TestCase):
             )
         )
 
+    @pytest.mark.runtime_data
     def test_mvp_armor_costume_question_promotes_only_matching_costumes(self) -> None:
         service = MVPService(self.settings, self.repository)
         character_id = "25b23cb64398"
@@ -1807,6 +1821,7 @@ class ApplicationLayerTests(unittest.TestCase):
             )
         )
 
+    @pytest.mark.runtime_data
     def test_mvp_two_costumes_in_one_message_are_not_guessed(self) -> None:
         service = MVPService(self.settings, self.repository)
         character_id = "ca0144ccd81b"
@@ -1818,6 +1833,7 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertEqual(context["status"], "ambiguous")
         self.assertEqual(context["resolution"], "ambiguous")
 
+    @pytest.mark.runtime_data
     def test_mvp_style_context_and_core_memory_survive_mode_switch(self) -> None:
         service = MVPService(self.settings, self.repository)
         character_id = "ca0144ccd81b"
@@ -2066,6 +2082,7 @@ class ApplicationLayerTests(unittest.TestCase):
             relationship,
         )
 
+    @pytest.mark.runtime_data
     def test_mvp_chat_falls_back_when_casual_greeting_invents_current_state(self) -> None:
         service = MVPService(self.settings, self.repository)
         answer = "早安，亲爱的。自从恒约之后，我就变得特别嗜睡，今天也是睡到自然醒。"
@@ -3111,6 +3128,7 @@ class ApplicationLayerTests(unittest.TestCase):
         )
         self.assertEqual(violations, ["unsupported_current_food_fact"])
 
+    @pytest.mark.runtime_data
     def test_mvp_runtime_logistics_projection_recovers_old_links(self) -> None:
         service = MVPService(self.settings, self.repository)
         documents = service._runtime_documents_by_id()
@@ -3358,6 +3376,7 @@ class ApplicationLayerTests(unittest.TestCase):
         )
         self.assertEqual(key, "client_input_state")
 
+    @pytest.mark.runtime_data
     def test_mvp_chat_normalizes_relationship_address_in_both_modes(self) -> None:
         service = MVPService(self.settings, self.repository)
         expected = {

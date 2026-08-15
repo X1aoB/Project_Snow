@@ -106,6 +106,7 @@ def prepare(
     registry_path: Path | None = None,
     views: bool = True,
     avatars: bool = True,
+    overwrite: bool = False,
 ) -> dict[str, str]:
     registry = load_registry(
         registry_path
@@ -113,16 +114,14 @@ def prepare(
     )
     outputs: dict[str, str] = {}
     if views:
-        path = write_character_views(
-            registry,
-            app_root / "runtime" / "mvp" / "character_views.jsonl",
-        )
+        path = app_root / "runtime" / "mvp" / "character_views.jsonl"
+        if overwrite or not path.exists():
+            write_character_views(registry, path)
         outputs["character_views"] = str(path)
     if avatars:
-        path = write_avatar_manifest(
-            registry,
-            app_root / "frontend" / "assets" / "characters" / "avatars.json",
-        )
+        path = app_root / "frontend" / "assets" / "characters" / "avatars.json"
+        if overwrite or not path.exists():
+            write_avatar_manifest(registry, path)
         outputs["avatar_manifest"] = str(path)
     return outputs
 

@@ -293,6 +293,8 @@ jobs:
     defaults:
       run:
         working-directory: App
+    env:
+      PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -304,10 +306,18 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - name: Prepare generated contract fixtures
         run: python scripts/prepare_ci_runtime.py
-      - name: Full Python and browser suite
+      - name: Full portable Python and browser suite
         env:
           RUN_PUBLIC_E2E: "1"
-        run: python -m pytest tests -q
+        run: python -m pytest tests -m "not runtime_data" -q
+      - name: Full private-runtime suite when a release is attached
+        if: hashFiles('App/runtime/manifest.json') != ''
+        run: python -m pytest tests -m runtime_data -q
+      - name: Explain omitted private-runtime suite
+        if: hashFiles('App/runtime/manifest.json') == ''
+        run: >-
+          echo "::notice::The private/generated runtime data release is intentionally outside Git;
+          runtime_data tests remain part of local validation and run here whenever a verified release is attached."
       - name: Full architecture validation when a release is attached
         run: |
           if [ -f runtime/manifest.json ]; then
