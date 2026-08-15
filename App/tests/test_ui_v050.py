@@ -143,7 +143,9 @@ class V050SurfaceTests(unittest.TestCase):
         ):
             asset = scene_root / f"{key}.svg"
             self.assertTrue(asset.exists(), key)
-            self.assertNotIn("gradient", asset.read_text(encoding="utf-8").casefold())
+            source = asset.read_text(encoding="utf-8").casefold()
+            self.assertIn("<defs>", source)
+            self.assertIn("stroke=", source)
 
     def test_workspace_marks_the_old_agent_as_legacy(self) -> None:
         html = (APP_ROOT / "frontend" / "workspace" / "index.html").read_text(

@@ -24,6 +24,33 @@ def _authorized(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
 
 
+def _conversation_parts(context: dict[str, Any]) -> dict[str, list[str]]:
+    def texts(name: str, kinds: set[str]) -> list[str]:
+        result = []
+        for item in context.get(name) or []:
+            if not isinstance(item, dict) or str(item.get("type") or "") not in kinds:
+                continue
+            value = str(item.get("text") or "").strip()
+            if value:
+                result.append(value)
+        return result
+
+    user_actions = texts("user_content_blocks", {"action"})
+    user_dialogue = texts("user_content_blocks", {"message", "speech"})
+    character_actions = texts("assistant_content_blocks", {"action"})
+    character_dialogue = texts("assistant_content_blocks", {"message", "speech"})
+    if not user_dialogue and str(context.get("user_message") or "").strip():
+        user_dialogue = [str(context["user_message"]).strip()]
+    if not character_dialogue and str(context.get("assistant_answer") or "").strip():
+        character_dialogue = [str(context["assistant_answer"]).strip()]
+    return {
+        "user_actions": user_actions,
+        "user_dialogue": user_dialogue,
+        "character_actions": character_actions,
+        "character_dialogue": character_dialogue,
+    }
+
+
 @app.get("/admin/v1/feedback")
 def feedback(request: Request, limit: int = 100) -> dict[str, Any]:
     _authorized(request)
@@ -31,6 +58,7 @@ def feedback(request: Request, limit: int = 100) -> dict[str, Any]:
     for row in rows:
         row["qq"] = "***" if row.pop("has_qq", False) else None
         row.pop("qq_cipher", None)
+        row["conversation_parts"] = _conversation_parts(row.get("context") or {})
     return {"feedback": rows}
 
 

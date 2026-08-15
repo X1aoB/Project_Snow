@@ -13,6 +13,8 @@ COPY config/public_knowledge ./config/public_knowledge
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
 COPY public_frontend ./public_frontend
+COPY frontend/shared ./frontend/shared
+COPY frontend/assets/immersive ./frontend/assets/immersive
 COPY infra/public_smoke.py ./public_smoke.py
 COPY infra/public-entrypoint.sh ./infra/public-entrypoint.sh
 RUN chmod 0755 ./infra/public-entrypoint.sh

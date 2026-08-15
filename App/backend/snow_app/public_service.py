@@ -27,7 +27,8 @@ from .public_contracts import (
     StatePayload,
     SummarizeRequest,
 )
-from .public_providers import ProviderSpec, simple_completion
+from .public_media import PublicMediaCatalog
+from .public_providers import ProviderHTTPPool, ProviderSpec, simple_completion
 from .public_repository import PublicRuntimeRepository
 from .public_security import PublicSecurityError, safe_output, sign_state, verify_state
 
@@ -90,6 +91,23 @@ _PUBLIC_WHOLE_ANSWER_FALLBACKS = frozenset(
         "empty_model_output_guard",
     }
 )
+
+# Diagnostics exposed through the public idempotency record describe the
+# answer actually shown to the user. State transitions, style-profile lookup,
+# and other bookkeeping adjustments must not make an otherwise untouched
+# provider response look "normalized".
+_PUBLIC_REWRITE_ADJUSTMENTS = frozenset({
+    "answer_guardrail_retry",
+    "in_person_block_rewrite",
+})
+_PUBLIC_NORMALIZATION_ADJUSTMENTS = frozenset({
+    "explicit_relationship_guard",
+    "latest_state_guard",
+    "in_person_blocks_reclassified",
+    "address_alias_normalized",
+    "relationship_address_normalized",
+    "unsupported_quote_sanitized",
+})
 
 
 class GenerationGate:
@@ -178,8 +196,15 @@ def _render_blocks(blocks: list[dict[str, str]]) -> str:
 
 
 class PublicChatService:
-    def __init__(self, settings: Settings, public_settings: PublicSettings):
+    def __init__(
+        self,
+        settings: Settings,
+        public_settings: PublicSettings,
+        *,
+        provider_client: ProviderHTTPPool | None = None,
+    ):
         self.public_settings = public_settings
+        self.provider_client = provider_client
         self.repository = PublicRuntimeRepository(settings, public_settings)
         # Pass the inert store at construction time: the public process never
         # opens, reads, or writes the internal SQLite conversation database.
@@ -198,27 +223,42 @@ class PublicChatService:
         )
         self.gate = GenerationGate()
         self._state_cleanup_lock = threading.RLock()
+        self.media = PublicMediaCatalog(
+            public_settings.media_root,
+            public_settings.media_version,
+            (character.character_id for character in MVP_CHARACTERS),
+        )
 
     def close(self) -> None:
         self.mvp.close()
         self.repository.close()
 
+    def ensure_character_available(self, character_id: str) -> None:
+        if character_id not in self.mvp._views():
+            raise CharacterUnavailable(character_id)
+
     def characters(self) -> list[dict[str, Any]]:
-        avatars = self.mvp._avatar_manifest()
         result = []
         for character in MVP_CHARACTERS:
-            avatar = avatars.get(character.character_id) or {}
+            avatar = self.media.avatar(character.character_id) or {
+                "src": f"/media/{self.public_settings.media_version}/avatars/{character.character_id}-200.webp",
+                "thumbnail_src": f"/media/{self.public_settings.media_version}/avatars/{character.character_id}-96.webp",
+                "portrait_kind": "headshot",
+                "portrait_scale": 1.0,
+                "portrait_focus_x": 50,
+                "portrait_focus_y": 50,
+                "source_page": "",
+                "license": "CC BY-NC-SA",
+                "license_version": "version unspecified by source",
+            }
             result.append(
                 {
                     "character_id": character.character_id,
                     "display_name": character.display_name,
                     "aliases": list(character.aliases),
-                    # Wiki-derived media never enters the GPL application
-                    # image. A separately licensed content package may add a
-                    # public_asset_path after its provenance checks pass.
-                    "avatar": avatar.get("public_asset_path") if avatar.get("public_asset_approved") else None,
-                    "source_page": avatar.get("source_page"),
-                    "license": "CC BY-NC-SA; version unspecified by source",
+                    # The package is mounted separately from the GPL image and
+                    # is verified before any URL is advertised to a client.
+                    "avatar": avatar,
                 }
             )
         return result
@@ -418,7 +458,11 @@ class PublicChatService:
         location = scene.get("character_location")
         if not location:
             raise ValueError("character scene has no location")
-        decision = "noticed" if secrets.randbelow(2) == 0 else "unnoticed"
+        if self.public_settings.arrival_probability == 0.5:
+            decision = "noticed" if secrets.randbelow(2) == 0 else "unnoticed"
+        else:
+            threshold = int(self.public_settings.arrival_probability * 10_000)
+            decision = "noticed" if secrets.randbelow(10_000) < threshold else "unnoticed"
         next_state = self._state_with_event(
             state,
             event=StateEvent(
@@ -551,6 +595,16 @@ class PublicChatService:
                 )
 
         adjustments = list(result.get("response_adjustments") or [])
+        if result.get("content_block_guard_rejected"):
+            diagnostics = self._diagnostics(total_started)
+            diagnostics["error_stage"] = "generation_validation"
+            diagnostics["guard_code"] = "in_person_block_semantics"
+            return self.failed_presence_arrival(
+                prepared,
+                "role_guard_rejected",
+                model_called=True,
+                diagnostics=diagnostics,
+            )
         rejected_adjustments = sorted(
             set(adjustments).intersection(_PUBLIC_WHOLE_ANSWER_FALLBACKS)
         )
@@ -771,6 +825,17 @@ class PublicChatService:
                     error_stage="provider",
                 )
             adjustments = list(result.get("response_adjustments") or [])
+            if result.get("content_block_guard_rejected"):
+                return self._terminal_result(
+                    request,
+                    provider,
+                    total_started,
+                    code="role_guard_rejected",
+                    error_stage="generation_validation",
+                    result=result,
+                    response_adjustments=adjustments,
+                    rejected_adjustments=["in_person_block_semantics"],
+                )
             rejected_adjustments = sorted(
                 set(adjustments).intersection(_PUBLIC_WHOLE_ANSWER_FALLBACKS)
             )
@@ -818,13 +883,12 @@ class PublicChatService:
             )
             request_health = self.repository.request_health()
             degraded = sorted(service for service, status in request_health.items() if status != "ok")
-            generation_outcome = (
-                "valid_rewrite"
-                if "answer_guardrail_retry" in adjustments
-                else "normalized"
-                if adjustments
-                else "valid_initial"
-            )
+            if set(adjustments).intersection(_PUBLIC_REWRITE_ADJUSTMENTS):
+                generation_outcome = "valid_rewrite"
+            elif set(adjustments).intersection(_PUBLIC_NORMALIZATION_ADJUSTMENTS):
+                generation_outcome = "normalized"
+            else:
+                generation_outcome = "valid_initial"
             return {
                 "request_id": str(request.request_id),
                 "character_id": request.character_id,
@@ -918,6 +982,11 @@ class PublicChatService:
         repository_diagnostics = self.repository.request_diagnostics()
         timings = dict(repository_diagnostics.get("timings_ms") or {})
         timings.update(self.mvp.generation_diagnostics())
+        # Keep the diagnostic contract stable for feedback and replay records,
+        # including policy rejections or failures that happen before a model
+        # generation starts.
+        for key in ("provider_http_calls", "model_calls", "initial_model_ms", "guard_rewrite_ms"):
+            timings.setdefault(key, 0)
         timings["total"] = max(0, int((time.perf_counter() - total_started) * 1000))
         return {
             "timings_ms": timings,
@@ -955,5 +1024,6 @@ class PublicChatService:
             system_prompt="你是会话压缩器。只总结明确内容，不推断隐私，不输出Markdown代码块。",
             user_prompt=prompt,
             max_tokens=1200,
+            client=self.provider_client,
         )
         return {"request_id": str(request.request_id), "summary": content[:6000], "usage": usage}

@@ -2208,7 +2208,8 @@ class ApplicationLayerTests(unittest.TestCase):
                 for block in result["content_blocks"]
             )
         )
-        self.assertEqual(result["content_blocks"][0]["type"], "action")
+        self.assertEqual(result["content_blocks"][0]["type"], "speech")
+        self.assertNotIn("in_person_presence_enriched", result["response_adjustments"])
 
     def test_mvp_explicit_relationship_address_changes_only_direct_vocatives(self) -> None:
         service = MVPService(self.settings, self.repository)
@@ -2678,13 +2679,13 @@ class ApplicationLayerTests(unittest.TestCase):
         ):
             result = service.chat("ca0144ccd81b", "你好", session_id="channel-default-test")
         self.assertEqual(result["communication_channel"], "in_person")
-        self.assertEqual(result["content_blocks"][0]["type"], "action")
+        self.assertEqual(result["content_blocks"][0]["type"], "speech")
         self.assertTrue(any(item["type"] == "speech" for item in result["content_blocks"]))
         self.assertEqual(result["scene_state"]["co_located"], True)
         snapshot = service._session_snapshot("channel-default-test", "ca0144ccd81b", "immersive")
         self.assertEqual(snapshot["communication_channel"], "in_person")
         self.assertEqual(snapshot["turns"][0]["communication_channel"], "in_person")
-        self.assertEqual(snapshot["turns"][0]["content_blocks"][0]["type"], "action")
+        self.assertEqual(snapshot["turns"][0]["content_blocks"][0]["type"], "speech")
 
     def test_mvp_text_channel_bypasses_location_and_accepts_message_blocks(self) -> None:
         service = MVPService(self.settings, self.repository)

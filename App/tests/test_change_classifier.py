@@ -18,6 +18,14 @@ class ChangeClassifierTests(TestCase):
         self.assertTrue(result["app_image"])
         self.assertFalse(result["embedding"])
 
+    def test_shared_immersive_assets_build_the_application_image(self) -> None:
+        result = classify([
+            "App/frontend/shared/immersive.css",
+            "App/frontend/assets/immersive/scenes/generic.svg",
+        ])
+        self.assertTrue(result["ui"])
+        self.assertTrue(result["app_image"])
+
     def test_embedding_isolated_from_application_image(self) -> None:
         result = classify(["App/infra/embedding_service.py"])
         self.assertTrue(result["embedding"])

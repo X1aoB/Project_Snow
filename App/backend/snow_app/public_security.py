@@ -53,6 +53,24 @@ def normalized_text(value: str, limit: int) -> str:
     return value.strip()[:limit]
 
 
+# Feedback and diagnostic text is user-controlled. Redact recognizable
+# provider credentials before it reaches PostgreSQL, dedupe hashes, or the
+# private admin view. The actual BYOK envelope is handled separately and is
+# never passed through this helper; this boundary is only for accidental key
+# pastes or model echoes in user-visible text.
+_SECRET_TEXT_PATTERNS = (
+    re.compile(r"(?i)\b(?:sk|pk|sess)-[A-Za-z0-9][A-Za-z0-9_\-]{11,}"),
+    re.compile(r"(?i)\b(?:api[_ -]?key|authorization|bearer|access[_ -]?token|secret)\s*[:=]\s*[^\s,;]+"),
+)
+
+
+def redact_sensitive_text(value: str, limit: int) -> str:
+    text = normalized_text(value, limit)
+    for pattern in _SECRET_TEXT_PATTERNS:
+        text = pattern.sub("[已隐藏]", text)
+    return text
+
+
 def issue_byok_credential(
     settings: PublicSettings,
     *,

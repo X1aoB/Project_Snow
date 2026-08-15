@@ -9,6 +9,8 @@
   header @frontend_assets Cache-Control "no-store, max-age=0"
   @scene_assets path /assets/immersive/scenes/*
   header @scene_assets Cache-Control "no-store, max-age=0"
+  @versioned_media path /media/*
+  header @versioned_media Cache-Control "public, max-age=31536000, immutable"
   header {
     X-Content-Type-Options nosniff
     Referrer-Policy same-origin

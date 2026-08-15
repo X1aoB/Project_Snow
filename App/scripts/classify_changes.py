@@ -77,7 +77,9 @@ DEPLOY_PATTERNS = (
     "App/scripts/deploy.ps1",
     "App/scripts/rollback.ps1",
     "App/scripts/release_manifest.py",
+    "App/scripts/validate_shared_design.py",
     "App/tests/test_deployment_contracts.py",
+    "App/tests/test_shared_design.py",
 )
 
 APP_IMAGE_PATTERNS = (
@@ -86,6 +88,10 @@ APP_IMAGE_PATTERNS = (
     "App/migrations/**",
     "App/alembic.ini",
     "App/public_frontend/**",
+    # The public image copies these shared immersive assets. A change here
+    # must build and smoke-test the image, not only run browser assertions.
+    "App/frontend/shared/**",
+    "App/frontend/assets/immersive/**",
     "App/requirements-public.txt",
     "App/infra/public-api.Dockerfile",
     "App/infra/public-entrypoint.sh",

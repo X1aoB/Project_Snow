@@ -1,10 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
-  <rect width="1600" height="900" fill="#e6eef3"/>
-  <path d="M0 170h1600M0 460h1600M180 0v690M1420 0v690" stroke="#b8cad5" stroke-width="7"/>
-  <rect x="260" y="140" width="1080" height="420" rx="22" fill="#d7e3ea" stroke="#a8bfcc" stroke-width="6"/>
-  <circle cx="800" cy="350" r="122" fill="#edf4f7" stroke="#88aabd" stroke-width="10"/>
-  <circle cx="800" cy="350" r="72" fill="none" stroke="#9eb7c7" stroke-width="8"/>
-  <path d="M800 210v280M660 350h280" stroke="#7899ad" stroke-width="8"/>
-  <path d="M0 690h1600v210H0z" fill="#c4d4dd"/>
-  <path d="M290 810h1020M420 730v160M1180 730v160" stroke="#f7fbfd" stroke-width="8" opacity=".72"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><defs><linearGradient id="t" y2="1"><stop stop-color="#dfeff4"/><stop offset="1" stop-color="#a3bdc9"/></linearGradient></defs><rect width="1600" height="900" fill="url(#t)"/><rect y="610" width="1600" height="290" fill="#8faab8"/><path d="M0 610h1600" stroke="#e1eff3" stroke-width="14"/><g fill="#c5dbe3" stroke="#7c9aa8" stroke-width="9"><circle cx="350" cy="330" r="150"/><circle cx="800" cy="330" r="150"/><circle cx="1250" cy="330" r="150"/></g><g fill="#eaf6f8"><path d="m350 220 28 78 82 0-66 48 25 80-69-48-69 48 25-80-66-48h82Z"/><circle cx="800" cy="330" r="74"/><path d="m1250 220 28 78 82 0-66 48 25 80-69-48-69 48 25-80-66-48h82Z"/></g><path d="M0 760h1600" stroke="#d8e9ee" stroke-width="10"/></svg>

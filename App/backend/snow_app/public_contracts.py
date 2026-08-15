@@ -124,10 +124,22 @@ class FeedbackRequest(StrictModel):
     model: str = Field(default="", max_length=200)
     user_message: str = Field(default="", max_length=2000)
     assistant_answer: str = Field(default="", max_length=1200)
+    user_content_blocks: list[ContentBlock] = Field(default_factory=list, max_length=8)
+    assistant_content_blocks: list[ContentBlock] = Field(default_factory=list, max_length=8)
     request_stage: str = Field(default="", max_length=80)
     error_code: str = Field(default="", max_length=80)
     degraded_services: list[str] = Field(default_factory=list, max_length=8)
     ui_surface: str = Field(default="immersive-web", max_length=80)
+
+    @model_validator(mode="after")
+    def bound_feedback_blocks(self) -> "FeedbackRequest":
+        user_length = sum(len(block.text) for block in self.user_content_blocks)
+        assistant_length = sum(len(block.text) for block in self.assistant_content_blocks)
+        if user_length > 2000:
+            raise ValueError("user_content_blocks may contain at most 2000 characters")
+        if assistant_length > 1200:
+            raise ValueError("assistant_content_blocks may contain at most 1200 characters")
+        return self
 
 
 class PresenceResolveRequest(StrictModel):

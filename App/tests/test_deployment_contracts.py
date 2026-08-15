@@ -108,6 +108,8 @@ class DeploymentContractTests(TestCase):
         self.assertIn("project-snow-release-1", script)
         self.assertIn("release-candidate.json", script)
         self.assertIn("PROJECT_SNOW_RELEASE_MANIFEST", script)
+        self.assertIn("media_version", script)
+        self.assertIn("Release manifest has no media version.", script)
 
     def test_fast_deploy_skips_unchanged_data_and_embedding_inputs(self) -> None:
         script = self.read("ops/deploy.sh")
@@ -165,6 +167,7 @@ class DeploymentContractTests(TestCase):
             "App/ops/promote-data.sh",
             "App/infra/public-entrypoint.sh",
             "App/infra/neo4j-entrypoint.sh",
+            "App/ops/fetch-promote-media.sh",
         )
         result = subprocess.run(
             ["git", "ls-files", "-s", "--", *paths],
@@ -237,6 +240,9 @@ class DeploymentContractTests(TestCase):
         self.assertIn('header @frontend_assets Cache-Control "no-store, max-age=0"', caddyfile)
         self.assertIn("@scene_assets path /assets/immersive/scenes/*", caddyfile)
         self.assertIn('header @scene_assets Cache-Control "no-store, max-age=0"', caddyfile)
-        self.assertIn('href="/app.css?v=0.7.0"', public_html)
-        self.assertIn('src="/app.js?v=0.7.0"', public_html)
-        self.assertIn("PUBLIC_APP_VERSION=0.7.0", public_env)
+        self.assertIn('href="/app.css?v=0.8.0"', public_html)
+        self.assertIn('src="/app.js?v=0.8.0"', public_html)
+        self.assertIn('href="/shared/immersive.css?v=0.8.0"', public_html)
+        self.assertIn("PUBLIC_APP_VERSION=0.8.0", public_env)
+        self.assertIn("PUBLIC_MEDIA_VERSION=2026.08.15.avatar.1", public_env)
+        self.assertIn("@versioned_media path /media/*", caddyfile)
