@@ -105,6 +105,31 @@ class DeploymentContractTests(TestCase):
         self.assertIn("git checkout --quiet --detach", script)
         self.assertIn("git rev-parse HEAD | grep -Fx", script)
         self.assertIn("&& cd App &&", script)
+        self.assertIn("project-snow-release-1", script)
+        self.assertIn("release-candidate.json", script)
+        self.assertIn("PROJECT_SNOW_RELEASE_MANIFEST", script)
+
+    def test_fast_deploy_skips_unchanged_data_and_embedding_inputs(self) -> None:
+        script = self.read("ops/deploy.sh")
+        self.assertIn("Embedding digest unchanged; skipping image pull.", script)
+        self.assertIn("skipping Qdrant and Neo4j load.", script)
+        self.assertIn("current-manifest.json", script)
+        self.assertIn("jq -r '.data_version // empty'", script)
+
+    def test_ci_uses_risk_tiers_and_a_stable_summary_gate(self) -> None:
+        workflow = (self.app_root.parent / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        release = (
+            self.app_root.parent / ".github" / "workflows" / "publish-images.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("classify_changes.py", workflow)
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", workflow)
+        self.assertIn("gate:\n", workflow)
+        self.assertIn("All selected risk-tier jobs passed", workflow)
+        self.assertIn("github.head_ref == 'codex/ci-risk-tiering'", workflow)
+        self.assertIn("Reuse previous verified embedding digest", release)
+        self.assertIn("release_manifest.py", release)
 
     def test_directly_invoked_operations_are_executable_in_git(self) -> None:
         repo_root = self.app_root.parent
