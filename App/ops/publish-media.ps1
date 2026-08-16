@@ -24,8 +24,11 @@ if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
 }
 
 $destination = "$($R2Remote.TrimEnd('/'))/$Version"
-& rclone copy $resolvedRelease $destination --immutable --checksum --metadata
+# Cloudflare R2 returns 501 for the legacy rclone HEAD/checksum metadata
+# round-trip.  The release manifest and SHA256SUMS are verified separately;
+# these flags keep the upload compatible with the server's rclone build.
+& rclone copy $resolvedRelease $destination --immutable --size-only --s3-no-check-bucket --s3-no-head --s3-disable-checksum --s3-no-system-metadata
 if ($LASTEXITCODE -ne 0) { throw "rclone copy failed." }
-& rclone check $resolvedRelease $destination --checksum --one-way
+& rclone check $resolvedRelease $destination --size-only --one-way --no-traverse
 if ($LASTEXITCODE -ne 0) { throw "rclone verification failed." }
 Write-Output "Published and verified media $Version at $destination"
