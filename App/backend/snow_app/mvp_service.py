@@ -3394,22 +3394,44 @@ class MVPService:
         if len(raw_blocks) > 8:
             raise ValueError("一次最多提交 8 个分析员内容块。")
 
-        allowed = {"message"} if channel == "text" else {"speech", "action"}
+        allowed = {"message", "sticker"} if channel == "text" else {"speech", "action"}
         blocks: list[dict[str, str]] = []
+        sticker_seen = False
         for item in raw_blocks:
             if isinstance(item, dict):
                 block_type = str(item.get("type") or "").strip().casefold()
                 raw_text = item.get("text")
+                raw_asset_id = item.get("asset_id")
+                raw_caption = item.get("caption")
             else:
                 block_type = str(getattr(item, "type", "") or "").strip().casefold()
                 raw_text = getattr(item, "text", None)
+                raw_asset_id = getattr(item, "asset_id", "")
+                raw_caption = getattr(item, "caption", "")
+            if block_type == "sticker" and channel == "text":
+                if sticker_seen:
+                    raise ValueError("一条文字通讯最多发送一个表情。")
+                asset_id = str(raw_asset_id or "").strip()
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{5,63}", asset_id):
+                    raise ValueError("分析员表情 asset_id 无效。")
+                sticker_seen = True
+                blocks.append(
+                    {
+                        "type": "sticker",
+                        "asset_id": asset_id,
+                        "caption": _clean_renderable_text(raw_caption)[:120],
+                    }
+                )
+                continue
+            if sticker_seen:
+                raise ValueError("表情必须发送在文字之后。")
             text = _clean_renderable_text(raw_text) if isinstance(raw_text, str) else ""
             if not text:
                 continue
             if len(text) > 1200:
                 raise ValueError("单个分析员内容块不能超过 1200 个字符。")
             if block_type not in {"speech", "action", "message"}:
-                raise ValueError("分析员内容块类型必须是 speech、action 或 message。")
+                raise ValueError("分析员内容块类型必须是 speech、action、message 或 sticker。")
             if block_type not in allowed:
                 if channel == "text" and block_type == "action":
                     raise ValueError("文字通讯不能提交已发生的面对面动作；请改用文字表达。")
@@ -3430,8 +3452,8 @@ class MVPService:
             return {
                 "channel": "text",
                 "label": "文字通讯",
-                "allowed_block_types": ["message"],
-                "capabilities": ["发送一条或多条文字消息", "表达想做但尚未发生的动作愿望"],
+                "allowed_block_types": ["message", "sticker"],
+                "capabilities": ["发送一条或多条文字消息", "发送一个表情", "表达想做但尚未发生的动作愿望"],
                 "forbidden": [
                     "把触碰、拥抱、靠近等物理动作写成已经发生",
                     "声称看见分析员未在消息中说明的表情、衣着或周围环境",
@@ -5166,13 +5188,16 @@ class MVPService:
         continuity_turns = turns
         recent_story_titles = list((session_context or {}).get("recent_story_titles") or [])
         shared_premises = list((session_context or {}).get("premises") or [])
+        day_decision = str((session_context or {}).get("continuity_decision") or "")
+        day_rule = str((session_context or {}).get("continuity_rule") or "").strip()
         if not continuity_turns:
             return {
                 "has_prior_turn": False,
                 "current_channel": active_channel,
                 "recent_story_titles": recent_story_titles,
                 "shared_premises": shared_premises,
-                "rule": "这是新会话；不要凭空补写刚刚发生的活动、地点或共同经历。",
+                "day_decision": day_decision,
+                "rule": day_rule or "这是新会话；不要凭空补写刚刚发生的活动、地点或共同经历。",
             }
         last_turn = continuity_turns[-1]
         previous_channel = str(last_turn.get("communication_channel") or "in_person")
@@ -5202,8 +5227,10 @@ class MVPService:
             "recent_turns": recent_turns,
             "recent_story_titles": recent_story_titles,
             "shared_premises": shared_premises,
+            "day_decision": day_decision,
             "rule": (
-                "交流媒介只改变说话方式，不重置正在进行的情节。承接上一轮已经确认的事实；"
+                (day_rule + " ")
+                + "交流媒介只改变说话方式，不重置正在进行的情节。承接上一轮已经确认的事实；"
                 "除非分析员追问，不能把刚说过的‘训练结束/刚回来/刚到达/刚完成任务’重新写成此刻新发生的事件。"
                 "最近几轮已经说过的活动、地点和状态都视为已说过；本轮应优先回答新问题或推进话题，"
                 "不要为了填充篇幅再次复述同一场景；最近已经引用过的故事标题或背景只在分析员追问时再次展开，"
@@ -6474,7 +6501,7 @@ class MVPService:
 {dual_persona_rule}
 
 仅返回 JSON 对象，不要输出 Markdown 代码围栏。answer 必须与 content_blocks 按顺序拼接后的可读文本一致；content_blocks 是本轮媒介的唯一渲染依据。助手模式必须返回 analysis_process，并可继续返回 work_summary/work_steps 供旧客户端兼容。analysis_process 只能记录可复核的分析说明，不能包含隐藏思维链：
-{{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message","text":"..."}}],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
+{{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message|sticker","text":"...","asset_id":"仅在 sticker 时填写","caption":"仅在 sticker 时填写"}}],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
 """
 
     def _prompt(self, character: Any, message: str, context: dict[str, Any]) -> str:
@@ -6955,7 +6982,7 @@ class MVPService:
         answer: str,
         character_name: str = "",
     ) -> tuple[list[dict[str, str]], bool]:
-        allowed = {"message"} if communication_channel == "text" else {"speech", "action"}
+        allowed = {"message", "sticker"} if communication_channel == "text" else {"speech", "action"}
         blocks: list[dict[str, str]] = []
         reclassified = False
         canonical_character = canonical_mvp_character(character_name)
@@ -7054,11 +7081,28 @@ class MVPService:
             blocks.append({"type": block_type, "text": text})
 
         raw_blocks = generated.get("content_blocks")
+        model_sticker_seen = False
         if isinstance(raw_blocks, list):
             for item in raw_blocks:
                 if not isinstance(item, dict):
                     continue
                 block_type = str(item.get("type") or "").strip().casefold()
+                if communication_channel == "text" and block_type == "sticker":
+                    # Sticker ids are opaque values.  The public facade
+                    # resolves them against its signed manifest; the MVP
+                    # layer only preserves the shape and never trusts a URL
+                    # or a client supplied filename.
+                    asset_id = str(item.get("asset_id") or "").strip()
+                    if not model_sticker_seen and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{5,63}", asset_id):
+                        model_sticker_seen = True
+                        blocks.append(
+                            {
+                                "type": "sticker",
+                                "asset_id": asset_id,
+                                "caption": _clean_renderable_text(item.get("caption"))[:120],
+                            }
+                        )
+                    continue
                 text = (
                     _clean_renderable_text(item.get("text"))
                     if isinstance(item.get("text"), str)
@@ -7117,13 +7161,20 @@ class MVPService:
         block_texts: list[str] = []
         normalized_blocks: list[tuple[str, str]] = []
         if isinstance(content_blocks, list):
-            allowed = {"message"} if communication_channel == "text" else {"speech", "action"}
+            allowed = {"message", "sticker"} if communication_channel == "text" else {"speech", "action"}
             for item in content_blocks:
                 if not isinstance(item, dict):
                     violations.append("communication_block_type:invalid")
                     continue
                 block_type = str(item.get("type") or "").strip().casefold()
                 block_text = str(item.get("text") or "").strip()
+                if block_type == "sticker":
+                    # A sticker is metadata, not spoken text.  It is checked
+                    # by the public manifest boundary and must not trigger
+                    # the physical-action checks below.
+                    if communication_channel != "text":
+                        violations.append("communication_block_type:in_person:sticker")
+                    continue
                 if block_text:
                     block_texts.append(block_text)
                     normalized_blocks.append((block_type, block_text))
@@ -8481,7 +8532,20 @@ class MVPService:
                 and not _contains_term(answer, activity)
                 and (not location or not _contains_term(answer, location))
             ):
-                violations.append(f"live_scene_mismatch:activity:{activity}")
+                # Ordinary status questions should not become a hard role
+                # rejection just because a provider paraphrases the shared
+                # activity instead of copying the internal scene label.  Keep
+                # the stricter check for answers that evade the question
+                # entirely; a first-person activity/status answer is a valid
+                # natural paraphrase and can still be safety-checked below.
+                opening = _compact(cls._first_verbal_response(answer, content_blocks))
+                natural_status_markers = (
+                    "我在", "正在", "这会儿", "现在", "刚刚", "刚才", "忙着",
+                    "有空", "没空", "休息", "训练", "整理", "准备", "处理",
+                    "看着", "读着", "等着", "吃", "喝",
+                )
+                if not any(marker in opening for marker in natural_status_markers):
+                    violations.append(f"live_scene_mismatch:activity:{activity}")
         elif live_scene.get("status") == "ambiguous":
             candidates = [str(item) for item in live_scene.get("candidates") or [] if item]
             asks_for_clarification = any(
@@ -8929,6 +8993,7 @@ class MVPService:
         remember_session: bool = True,
         presence_arrival: bool = False,
         max_tokens_override: int | None = None,
+        public_sticker_candidates: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if not self.chat_enabled():
             raise MVPChatDisabled("MVP 对话接口未开启。请设置 MVP_CHAT_ENABLED=true 后重启 API。")
@@ -9154,6 +9219,21 @@ class MVPService:
             + "\n\n"
             + _COMPANION_SOCIAL_GUIDANCE
         )
+        if active_channel == "text" and public_sticker_candidates:
+            # The public facade supplies a small, deterministic candidate set
+            # only on the 20% sticker branch.  The model may still decline to
+            # send one; it must never invent a path or filename.
+            candidate_lines = "\n".join(
+                f"- asset_id={item.get('asset_id')}; caption={item.get('caption')}; tags={','.join(item.get('tags') or [])}"
+                for item in public_sticker_candidates[:8]
+                if item.get("asset_id")
+            )
+            system_prompt += f"""
+
+【文字通讯可选表情】
+本轮最多发送一个表情，且只能从以下候选中选择；表情放在文字 message 之后。语境不合适时不要发送。不要输出文件名、URL 或路径，不要把 asset_id 写进可见文字；若发送，请返回 type=sticker、合法 asset_id 和简短 caption。
+{candidate_lines}
+"""
         user_prompt = self._prompt(character, message.strip(), context)
         if request_key and not self.conversation_store.claim_request(
             request_key, character.character_id
@@ -9187,11 +9267,15 @@ class MVPService:
             raise
         generated = _parse_model_json(raw_content)
         answer_text = self._generated_answer(generated, raw_content)
+        has_sticker_output = any(
+            isinstance(item, dict) and str(item.get("type") or "").casefold() == "sticker"
+            for item in (generated.get("content_blocks") or [])
+        )
         empty_model_output_guard = False
         in_person_blocks_reclassified = False
         in_person_block_rewrite = False
         content_block_guard_rejected = False
-        if not answer_text.strip():
+        if not answer_text.strip() and not has_sticker_output:
             answer_text = self._empty_model_output_fallback(context)
             generated = {
                 "answer": answer_text,
@@ -9912,7 +9996,11 @@ class MVPService:
         # valid ``content_blocks`` list.  Never persist/render an empty turn or
         # the envelope itself; use the same continuity-aware local fallback as
         # the initial empty-response path.
-        if not _clean_renderable_text(answer_text):
+        has_sticker_blocks = any(
+            isinstance(block, dict) and block.get("type") == "sticker"
+            for block in content_blocks
+        )
+        if not _clean_renderable_text(answer_text) and not has_sticker_blocks:
             answer_text = self._empty_model_output_fallback(context)
             content_blocks = [
                 {
@@ -9925,7 +10013,7 @@ class MVPService:
             # ``_render_content_blocks`` already sanitises each block, but run
             # one final pass over the joined string for defence in depth.
             answer_text = _clean_renderable_text(answer_text)
-            if not answer_text:
+            if not answer_text and not has_sticker_blocks:
                 answer_text = self._empty_model_output_fallback(context)
                 content_blocks = [
                     {
@@ -10087,6 +10175,8 @@ class MVPService:
             "audio": {"status": "not_configured"} if voice_reply else None,
             "agent_run_id": None,
             "content_block_guard_rejected": content_block_guard_rejected,
+            "guard_violation_count": len(guardrail_violations),
+            "guard_code": (guardrail_violations[0] if guardrail_violations else ""),
             "response_adjustments": [
                 adjustment
                 for adjustment, active in (

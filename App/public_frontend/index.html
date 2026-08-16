@@ -6,8 +6,8 @@
     <meta name="referrer" content="same-origin" />
     <meta name="color-scheme" content="light" />
     <title>Project Snow · 沉浸式体验</title>
-    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.0" />
-    <link rel="stylesheet" href="/app.css?v=0.8.0" />
+    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.1" />
+    <link rel="stylesheet" href="/app.css?v=0.8.1" />
   </head>
   <body>
     <div id="chat-app" class="app-shell" data-channel="text">
@@ -15,7 +15,7 @@
         <header class="product-header">
           <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
             <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="version-badge">0.8.0</small></span>
+            <span><strong>Project Snow</strong><small id="version-badge">0.8.1</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
         </header>
@@ -104,6 +104,7 @@
           </div>
           <div class="composer-row">
             <button id="toggle-action" class="icon-button face-only" type="button" aria-expanded="false" aria-controls="analyst-action-field" title="添加动作或神态">动作</button>
+            <button id="toggle-sticker" class="icon-button text-only" type="button" aria-expanded="false" aria-controls="sticker-picker" title="发送表情">☺</button>
             <textarea id="message-input" rows="1" maxlength="2000" aria-label="输入对白或消息" placeholder="选择角色后输入消息……" disabled></textarea>
             <button id="send-message" class="send-button" type="submit" aria-label="发送消息" disabled>发送</button>
           </div>
@@ -124,6 +125,22 @@
 
     <dialog id="presence-dialog" class="modal">
       <form method="dialog"><header><div><span class="panel-kicker">场景转换</span><h2>去见她</h2></div><button class="icon-button" type="button" data-close-dialog="presence-dialog">×</button></header><div class="presence-dialog-scene"><div><strong id="presence-dialog-location">正在读取地点</strong><p id="presence-dialog-activity">请稍候。</p></div></div><p class="modal-context">前往后将进入面对面场景，并可能触发一次主动到场反应。</p><div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="presence-dialog">取消</button><button id="stay-on-communicator" type="button" class="secondary-button">继续通讯</button><button id="confirm-presence-transition" type="button" class="primary-button">前往</button></div></form>
+    </dialog>
+
+    <dialog id="continuity-dialog" class="modal continuity-modal">
+      <form method="dialog">
+        <header><div><span class="panel-kicker">新的日期</span><h2>要接着昨天聊吗？</h2></div><button class="icon-button" type="button" data-close-dialog="continuity-dialog">×</button></header>
+        <p class="modal-context">你可以保留昨天的摘要和最近几轮，也可以从今天重新开始。稳定的关系和世界状态会保留。</p>
+        <div class="modal-actions"><button id="start-today" type="button" class="secondary-button">从今天开始</button><button id="continue-yesterday" type="button" class="primary-button">承接昨天</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="sticker-picker" class="modal sticker-modal">
+      <form method="dialog">
+        <header><div><span class="panel-kicker">表情</span><h2>选一个表情</h2></div><button class="icon-button" type="button" data-close-dialog="sticker-picker">×</button></header>
+        <div id="sticker-list" class="sticker-list" aria-label="表情列表"></div>
+        <p id="sticker-empty" class="modal-context" hidden>表情暂时不可用，可以稍后再试。</p>
+      </form>
     </dialog>
 
     <dialog id="experience-notice-dialog" class="modal notice-modal">
@@ -147,7 +164,7 @@
     <dialog id="settings-dialog" class="modal settings-modal">
       <form method="dialog"><header><div><span class="panel-kicker">Project Snow</span><h2>体验设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog">×</button></header><nav class="settings-tabs"><button type="button" class="active" data-settings-tab="models">模型</button><button type="button" data-settings-tab="history">记录</button><button type="button" data-settings-tab="about">关于</button></nav>
         <section class="settings-section" data-settings-panel="models">
-          <p>选择你已有的模型服务。Key 在当前标签页关闭或凭证过期后需要重新输入。</p><div class="provider-form"><label>模型厂商<select id="provider-select"><option value="">正在读取可用厂商</option></select></label><p id="provider-empty" class="form-hint" hidden>当前暂未开放可用的模型厂商，请稍后再试。</p><label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" /></label><p id="credential-status" class="form-hint" hidden></p><label>模型 ID<input id="model-id" maxlength="200" placeholder="可手工填写，也可读取列表" /></label><div class="settings-actions"><button id="discover-models" class="secondary-button" type="button">获取模型列表</button><select id="discovered-models" hidden aria-label="已发现模型"></select></div><p id="setup-error" class="form-error" role="alert"></p><div class="settings-actions"><button id="save-model" class="primary-button" type="button">保存本次模型会话</button><button id="clear-credential" class="danger-button" type="button">清除模型会话</button></div></div>
+          <p>选择你已有的模型服务。Key 只在当前标签页使用，获取模型列表后不会清除凭证。</p><div class="provider-form"><label>模型厂商<select id="provider-select"><option value="">正在读取可用厂商</option></select></label><p id="provider-empty" class="form-hint" hidden>当前暂未开放可用的模型厂商，请稍后再试。</p><label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" /></label><p id="credential-status" class="form-hint" hidden></p><div class="advanced-model-settings"><button id="toggle-advanced-model" class="secondary-button" type="button" aria-expanded="false">高级设置：手工填写模型 ID</button><div id="advanced-model-panel" hidden><label>模型 ID<input id="model-id" maxlength="200" placeholder="厂商未提供列表时填写" /></label></div></div><div class="settings-actions"><button id="discover-models" class="secondary-button" type="button">获取模型列表</button><select id="discovered-models" hidden aria-label="已发现模型"></select></div><p id="setup-error" class="form-error" role="alert"></p><div class="settings-actions"><button id="save-model" class="primary-button" type="button">保存本次模型会话</button><button id="clear-credential" class="danger-button" type="button">清除模型会话</button></div></div>
         </section>
         <section class="settings-section" data-settings-panel="history" hidden><p>完整历史只在当前浏览器保存。共享电脑请及时清理。</p><label class="setting-toggle"><span><strong>自动整理连续性</strong><small id="summary-last-updated">尚未生成摘要</small></span><input id="auto-summary-enabled" type="checkbox" checked /></label><p id="storage-usage">正在计算占用空间……</p><label>选择角色<select id="history-character"></select></label><div class="settings-actions"><button id="delete-character-history" class="secondary-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部历史</button></div></section>
         <section class="settings-section attribution" data-settings-panel="about" hidden><p>体验说明、反馈保留规则与头像来源统一放在“隐私与素材”页面。</p><div class="source-links"><a href="/privacy/">隐私与素材</a><a id="github-link" href="https://github.com/X1aoB/Project_Snow" rel="noreferrer">Project Snow 源码</a><a id="website-github-link" href="https://github.com/X1aoB/MyWebsite" rel="noreferrer">MyWebsite 源码</a><a id="releases-link" href="https://github.com/X1aoB/Project_Snow/releases" rel="noreferrer">版本发布</a></div></section>
@@ -155,6 +172,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=0.8.0"></script>
+    <script type="module" src="/app.js?v=0.8.1"></script>
   </body>
 </html>

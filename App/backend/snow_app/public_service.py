@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from hashlib import sha256
+import hmac
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import threading
 import tempfile
 import time
 from typing import Any, Iterator
+from zoneinfo import ZoneInfo
 
 from .config import PublicSettings, Settings
 from .mvp_policy import MVP_CHARACTERS, scene_visual_key
@@ -28,9 +32,16 @@ from .public_contracts import (
     SummarizeRequest,
 )
 from .public_media import PublicMediaCatalog
+from .public_stickers import PublicStickerCatalog
 from .public_providers import ProviderHTTPPool, ProviderSpec, simple_completion
 from .public_repository import PublicRuntimeRepository
-from .public_security import PublicSecurityError, safe_output, sign_state, verify_state
+from .public_security import (
+    PublicSecurityError,
+    redact_sensitive_text,
+    safe_output,
+    sign_state,
+    verify_state,
+)
 
 
 class StatelessConversationStore:
@@ -148,15 +159,28 @@ def _history_turns(history: list[HistoryTurn]) -> list[dict[str, Any]]:
         if item.role == "user":
             pending_user = item
         elif pending_user:
+            user_content = pending_user.content or "\n".join(
+                f"[发送表情：{block.caption or block.asset_id}]"
+                if block.type == "sticker"
+                else block.text
+                for block in pending_user.content_blocks
+            )
+            assistant_content = item.content or "\n".join(
+                f"[发送表情：{block.caption or block.asset_id}]"
+                if block.type == "sticker"
+                else block.text
+                for block in item.content_blocks
+            )
             turns.append(
                 {
-                    "user": pending_user.content,
-                    "assistant": item.content,
+                    "user": user_content,
+                    "assistant": assistant_content,
                     "communication_channel": item.communication_channel,
                     "analyst_content_blocks": [
                         block.model_dump() for block in pending_user.content_blocks
                     ],
                     "content_blocks": [block.model_dump() for block in item.content_blocks],
+                    "created_at": item.created_at,
                     "mode": "immersive",
                 }
             )
@@ -165,7 +189,7 @@ def _history_turns(history: list[HistoryTurn]) -> list[dict[str, Any]]:
 
 
 def _trim_content_blocks(
-    blocks: list[dict[str, str]],
+    blocks: list[dict[str, Any]],
     *,
     limit: int = 1200,
 ) -> tuple[list[dict[str, str]], bool]:
@@ -173,6 +197,17 @@ def _trim_content_blocks(
     trimmed: list[dict[str, str]] = []
     truncated = False
     for block in blocks:
+        if str(block.get("type") or "") == "sticker":
+            if not any(item.get("type") == "sticker" for item in trimmed):
+                trimmed.append({
+                    "type": "sticker",
+                    "asset_id": str(block.get("asset_id") or ""),
+                    "caption": str(block.get("caption") or ""),
+                    "src": str(block.get("src") or ""),
+                    "thumbnail_src": str(block.get("thumbnail_src") or ""),
+                    "animated": bool(block.get("animated")),
+                })
+            continue
         text = str(block.get("text") or "").strip()
         if not text:
             continue
@@ -192,7 +227,41 @@ def _trim_content_blocks(
 
 
 def _render_blocks(blocks: list[dict[str, str]]) -> str:
-    return "\n".join(str(block.get("text") or "").strip() for block in blocks).strip()
+    return "\n".join(
+        (
+            f"[表情：{block.get('caption') or block.get('asset_id')}]"
+            if block.get("type") == "sticker"
+            else str(block.get("text") or "").strip()
+        )
+        for block in blocks
+        if block.get("type") == "sticker" or str(block.get("text") or "").strip()
+    ).strip()
+
+
+def _model_input_from_blocks(blocks: list[dict[str, Any]], fallback: str = "") -> str:
+    rendered = []
+    for block in blocks:
+        if block.get("type") == "sticker":
+            rendered.append(f"[分析员发送了表情：{block.get('caption') or block.get('asset_id')}]")
+        elif str(block.get("text") or "").strip():
+            rendered.append(str(block["text"]).strip())
+    return "\n".join(rendered).strip() or fallback.strip()
+
+
+_STICKER_FILENAME_PATTERN = re.compile(
+    r"(?<![\w-])[^\s，。！？!?；;（）()\[\]【】]{1,80}\.(?:gif|png|jpe?g|webp)(?![\w-])",
+    re.IGNORECASE,
+)
+
+
+def _strip_sticker_filenames(value: str) -> str:
+    """Prevent a provider from leaking local media filenames into dialogue."""
+
+    return _STICKER_FILENAME_PATTERN.sub("", str(value or "")).strip()
+
+
+def _current_hong_kong_day() -> str:
+    return datetime.now(ZoneInfo("Asia/Hong_Kong")).date().isoformat()
 
 
 class PublicChatService:
@@ -228,6 +297,10 @@ class PublicChatService:
             public_settings.media_version,
             (character.character_id for character in MVP_CHARACTERS),
         )
+        self.stickers = PublicStickerCatalog(
+            public_settings.sticker_root,
+            public_settings.sticker_version,
+        )
 
     def close(self) -> None:
         self.mvp.close()
@@ -236,6 +309,70 @@ class PublicChatService:
     def ensure_character_available(self, character_id: str) -> None:
         if character_id not in self.mvp._views():
             raise CharacterUnavailable(character_id)
+
+    def validate_content_blocks(self, blocks: list[Any], channel: str) -> list[dict[str, Any]]:
+        """Resolve sticker ids and return canonical, manifest-backed blocks."""
+
+        canonical: list[dict[str, Any]] = []
+        sticker_count = 0
+        sticker_seen = False
+        for block in blocks:
+            item = block.model_dump() if hasattr(block, "model_dump") else dict(block)
+            block_type = str(item.get("type") or "")
+            if block_type == "sticker":
+                if channel != "text":
+                    raise ValueError("sticker blocks are only valid in text communication")
+                sticker_count += 1
+                if sticker_count > 1:
+                    raise ValueError("a message may contain at most one sticker")
+                sticker_seen = True
+                resolved = self.stickers.resolve(str(item.get("asset_id") or ""))
+                if not resolved:
+                    raise ValueError("sticker asset is unavailable")
+                canonical.append({"type": "sticker", **resolved})
+                continue
+            if sticker_seen:
+                raise ValueError("sticker must follow the message text")
+            canonical.append({
+                "type": block_type,
+                "text": str(item.get("text") or "").strip(),
+            })
+        return canonical
+
+    def sticker_candidates(
+        self,
+        *,
+        request_id: str,
+        character_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return a deterministic candidate set for the optional 20% branch.
+
+        The roll is derived from the request UUID, character and Hong Kong
+        date.  Retrying the same idempotency key therefore cannot cause the
+        character to alternate between sending and not sending a sticker.
+        A candidate set is only exposed to the model when the roll succeeds;
+        the model may still choose not to send one.
+        """
+
+        digest = sha256(
+            f"sticker\x1f{request_id}\x1f{character_id}\x1f{_current_hong_kong_day()}".encode()
+        ).digest()
+        if digest[0] >= 51:  # 51/256 ~= 19.9%
+            return []
+        catalog = self.stickers.list(limit=500).get("stickers") or []
+        if not catalog:
+            return []
+        start = int.from_bytes(digest[1:3], "big") % len(catalog)
+        ordered = (catalog[start:] + catalog[:start])[:8]
+        return [
+            {
+                "asset_id": str(item.get("asset_id") or ""),
+                "caption": str(item.get("caption") or "")[:120],
+                "tags": [str(item.get("section") or "未分类")],
+            }
+            for item in ordered
+            if item.get("asset_id")
+        ]
 
     def characters(self) -> list[dict[str, Any]]:
         result = []
@@ -264,15 +401,35 @@ class PublicChatService:
         return result
 
     def _default_state(self, subject_hash: str) -> dict[str, Any]:
-        world_id = "public_state_" + sha256(subject_hash.encode()).hexdigest()[:20]
+        # Presence is intentionally shared across anonymous users for one
+        # Hong Kong calendar day.  The analyst's location remains local to
+        # the signed browser state and is not part of this shared schedule.
+        hong_kong_now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
+        schedule_start = hong_kong_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        schedule_date = schedule_start.date().isoformat()
+        schedule_expires = schedule_start + timedelta(days=1)
+        schedule_key = self.public_settings.state_hmac_key or b"project-snow-public-schedule-dev"
+        daily_seed = hmac.new(schedule_key, schedule_date.encode("ascii"), sha256).hexdigest()
+        world_id = "public_shared_schedule_" + daily_seed[:32]
         world = self.mvp._world_snapshot(world_id)
+        presence = {
+            character_id: {
+                **dict(scene),
+                "state_scope": "shared_daily",
+            }
+            for character_id, scene in (world.get("presence") or {}).items()
+        }
         return StatePayload(
             data_version=self.public_settings.data_version,
-            revision=0,
+            revision=1,
             analyst_location=world.get("analyst_location"),
-            presence=dict(world.get("presence") or {}),
+            presence=presence,
             relationships={},
             recent_events=[],
+            schedule_date=schedule_date,
+            schedule_revision=1,
+            generated_at=schedule_start.isoformat(),
+            expires_at=schedule_expires.isoformat(),
         ).model_dump()
 
     def _normalized_state(self, token: str, subject_hash: str) -> dict[str, Any]:
@@ -284,15 +441,24 @@ class PublicChatService:
         schema_version = str(raw.get("schema_version") or "public-state-1")
         if schema_version not in {"public-state-1", "public-state-2"}:
             raise PublicSecurityError("Public state schema is not supported")
+        incoming_schedule_date = str(raw.get("schedule_date") or "")
         if schema_version == "public-state-1":
             old_world = raw.get("world") if isinstance(raw.get("world"), dict) else {}
             incoming_presence = old_world.get("presence") or {}
             analyst_location = old_world.get("analyst_location")
             recent_events: list[dict[str, Any]] = []
+            # Legacy state packages are user-authored conversation snapshots;
+            # preserve their known scene while upgrading the envelope.
+            incoming_schedule_date = str(defaults.get("schedule_date") or "")
         else:
             incoming_presence = raw.get("presence") or {}
             analyst_location = raw.get("analyst_location")
             recent_events = list(raw.get("recent_events") or [])[-4:]
+
+        # A stale browser package must not keep yesterday's global schedule
+        # alive.  Keep only the user's analyst location and relationship data.
+        if incoming_schedule_date != str(defaults.get("schedule_date") or ""):
+            incoming_presence = {}
 
         canonical = {character.character_id: character for character in MVP_CHARACTERS}
         presence: dict[str, dict[str, Any]] = {}
@@ -311,7 +477,9 @@ class PublicChatService:
                 "state_scope": (
                     "conversation_confirmed"
                     if candidate.get("state_scope") == "conversation_confirmed"
-                    else "session_simulation"
+                    else "shared_daily"
+                    if candidate.get("state_scope") == "shared_daily"
+                    else fallback.get("state_scope", "shared_daily")
                 ),
             }
 
@@ -328,6 +496,10 @@ class PublicChatService:
             presence=presence,
             relationships=dict(raw.get("relationships") or {}),
             recent_events=validated_events[-4:],
+            schedule_date=str(defaults.get("schedule_date") or ""),
+            schedule_revision=int(defaults.get("schedule_revision") or 1),
+            generated_at=str(defaults.get("generated_at") or ""),
+            expires_at=str(defaults.get("expires_at") or ""),
         ).model_dump()
 
     @staticmethod
@@ -379,6 +551,10 @@ class PublicChatService:
             presence=presence,
             relationships=dict(state.get("relationships") or {}),
             recent_events=events,
+            schedule_date=str(state.get("schedule_date") or ""),
+            schedule_revision=int(state.get("schedule_revision") or 1),
+            generated_at=str(state.get("generated_at") or ""),
+            expires_at=str(state.get("expires_at") or ""),
         ).model_dump()
 
     def resolve_presence(
@@ -591,14 +767,22 @@ class PublicChatService:
                     prepared,
                     "provider_request_failed",
                     model_called=True,
-                    diagnostics=self._diagnostics(total_started),
+                    diagnostics=self._diagnostics(
+                        total_started,
+                        generation_class="rejected",
+                        error_stage="provider",
+                    ),
                 )
 
         adjustments = list(result.get("response_adjustments") or [])
         if result.get("content_block_guard_rejected"):
-            diagnostics = self._diagnostics(total_started)
-            diagnostics["error_stage"] = "generation_validation"
-            diagnostics["guard_code"] = "in_person_block_semantics"
+            diagnostics = self._diagnostics(
+                total_started,
+                result,
+                generation_class="rejected",
+                guard_code="in_person_block_semantics",
+                error_stage="generation_validation",
+            )
             return self.failed_presence_arrival(
                 prepared,
                 "role_guard_rejected",
@@ -614,8 +798,13 @@ class PublicChatService:
                 if "empty_model_output_guard" in rejected_adjustments
                 else "role_guard_rejected"
             )
-            diagnostics = self._diagnostics(total_started)
-            diagnostics["error_stage"] = "generation_validation"
+            diagnostics = self._diagnostics(
+                total_started,
+                result,
+                generation_class="rejected",
+                guard_code=rejected_adjustments[0] if rejected_adjustments else "",
+                error_stage="generation_validation",
+            )
             diagnostics["rejected_adjustments"] = rejected_adjustments
             return self.failed_presence_arrival(
                 prepared,
@@ -632,7 +821,13 @@ class PublicChatService:
                 prepared,
                 "role_guard_rejected",
                 model_called=True,
-                diagnostics=self._diagnostics(total_started),
+                diagnostics=self._diagnostics(
+                    total_started,
+                    result,
+                    generation_class="rejected",
+                    guard_code="in_person_speech_missing",
+                    error_stage="generation_validation",
+                ),
             )
         reaction = {
             "message_id": "presence_message_" + sha256(
@@ -655,7 +850,17 @@ class PublicChatService:
                 "reaction": reaction,
                 "model_called": True,
                 "terminal_error": "",
-                "diagnostics": self._diagnostics(total_started),
+                "diagnostics": self._diagnostics(
+                    total_started,
+                    result,
+                    generation_class=(
+                        "valid_rewrite"
+                        if set(adjustments).intersection(_PUBLIC_REWRITE_ADJUSTMENTS)
+                        else "normalized"
+                        if set(adjustments).intersection(_PUBLIC_NORMALIZATION_ADJUSTMENTS)
+                        else "valid_initial"
+                    ),
+                ),
             }.items()
             if key != "state"
         }
@@ -673,16 +878,32 @@ class PublicChatService:
             f"{subject_hash}\x1f{request.request_id}\x1f{request.character_id}".encode()
         ).hexdigest()[:20]
         world_id = "public_world_" + sha256(f"{subject_hash}\x1f{request.request_id}".encode()).hexdigest()[:20]
-        turns = _history_turns(request.recent_history)
+        # A new local day is an explicit product choice.  “start_today” keeps
+        # stable relationship/world state but does not leak yesterday's
+        # transcript or summary into the prompt.  “continue_previous” keeps
+        # the bounded history supplied by the browser and is phrased as an
+        # optional topic, never as an obligation.
+        continuity_decision = str(request.continuity_decision or "").strip()
+        turns = [] if continuity_decision == "start_today" else _history_turns(request.recent_history)
+        history_summary = "" if continuity_decision == "start_today" else request.history_summary
         session_state = {
             "character_id": request.character_id,
             "mode": "immersive",
             "mode_turns": {"immersive": turns, "assistant": []},
             "turns": turns,
             "premises": (
-                [{"kind": "browser_history_summary", "value": request.history_summary[:6000]}]
-                if request.history_summary
+                [{"kind": "browser_history_summary", "value": history_summary[:6000]}]
+                if history_summary
                 else []
+            ),
+            "continuity_decision": continuity_decision,
+            "local_day_key": request.local_day_key,
+            "continuity_rule": (
+                "可选承接上次话题，不责备分析员未完成过去计划。"
+                if continuity_decision == "continue_previous"
+                else "从今天开始，不引用昨天未完成话题，不要求分析员兑现过去计划。"
+                if continuity_decision == "start_today"
+                else "仅使用本次请求提供的连续性内容，不把旧话题写成义务。"
             ),
             "style_context": None,
             "communication_channel": request.communication_channel,
@@ -748,7 +969,7 @@ class PublicChatService:
             "request_id": str(request.request_id),
             "character_id": request.character_id,
             "provider": provider.provider_id,
-            "model": request.model,
+            "model": redact_sensitive_text(request.model, 200),
             "answer": answer,
             "communication_channel": request.communication_channel,
             "content_blocks": [
@@ -769,6 +990,13 @@ class PublicChatService:
             "diagnostics": {
                 "timings_ms": {"total": 0, "provider_http_calls": 0},
                 "dependency_health": {},
+                "provider_latency_ms": 0,
+                "retrieval_latency_ms": 0,
+                "rewrite_latency_ms": 0,
+                "model_calls": 0,
+                "generation_class": "valid_initial",
+                "guard_code": "",
+                "guard_violation_count": 0,
             },
         }
 
@@ -784,17 +1012,37 @@ class PublicChatService:
         total_started = time.perf_counter()
         self.repository.reset_request_health()
         self.mvp.reset_generation_diagnostics()
+        try:
+            canonical_blocks = self.validate_content_blocks(
+                request.content_blocks,
+                request.communication_channel,
+            )
+        except ValueError:
+            return self._terminal_result(
+                request,
+                provider,
+                total_started,
+                code="sticker_unavailable",
+                error_stage="content_validation",
+            )
+        model_message = _model_input_from_blocks(canonical_blocks, request.message)
+        sticker_candidates = (
+            self.sticker_candidates(
+                request_id=str(request.request_id),
+                character_id=request.character_id,
+            )
+            if request.communication_channel == "text"
+            else []
+        )
         with self._request_state(request, subject_hash) as (session_id, world_id, prior_state):
             try:
                 result = self.mvp.chat(
                     request.character_id,
-                    request.message,
+                    model_message,
                     session_id=session_id,
                     world_session_id=world_id,
                     communication_channel=request.communication_channel,
-                    analyst_content_blocks=[
-                        block.model_dump() for block in request.content_blocks
-                    ],
+                    analyst_content_blocks=canonical_blocks,
                     client_message_id=None,
                     model_settings=(provider.base_url, api_key, request.model),
                     model_info={
@@ -811,6 +1059,7 @@ class PublicChatService:
                     max_tokens_override=1600,
                     persist_exchange=False,
                     remember_session=False,
+                    public_sticker_candidates=sticker_candidates,
                 )
             except Exception as exc:
                 from .mvp_service import MVPProviderError
@@ -859,7 +1108,9 @@ class PublicChatService:
                 result,
                 request.communication_channel,
             )
-            if not content_blocks or not answer:
+            if not content_blocks or (
+                not answer and not any(block.get("type") == "sticker" for block in content_blocks)
+            ):
                 return self._terminal_result(
                     request,
                     provider,
@@ -893,7 +1144,7 @@ class PublicChatService:
                 "request_id": str(request.request_id),
                 "character_id": request.character_id,
                 "provider": provider.provider_id,
-                "model": request.model,
+                "model": redact_sensitive_text(request.model, 200),
                 "answer": answer,
                 "communication_channel": request.communication_channel,
                 "content_blocks": content_blocks,
@@ -906,37 +1157,72 @@ class PublicChatService:
                 "generation_outcome": generation_outcome,
                 "response_adjustments": adjustments,
                 "terminal_error": "",
-                "diagnostics": self._diagnostics(total_started),
+                "diagnostics": self._diagnostics(
+                    total_started,
+                    result,
+                    generation_class=generation_outcome,
+                ),
             }
 
-    @staticmethod
     def _public_generation_content(
+        self,
         result: dict[str, Any],
         communication_channel: str,
     ) -> tuple[list[dict[str, str]], str, bool, str | None]:
-        allowed = {"message"} if communication_channel == "text" else {"speech", "action"}
-        raw_blocks: list[dict[str, str]] = []
+        allowed = {"message", "sticker"} if communication_channel == "text" else {"speech", "action"}
+        text_blocks: list[dict[str, str]] = []
+        sticker_block: dict[str, str] | None = None
         for item in result.get("content_blocks") or []:
             if not isinstance(item, dict):
                 continue
             block_type = str(item.get("type") or "").casefold()
-            text = str(item.get("text") or "").strip()
+            if block_type == "sticker":
+                asset_id = str(item.get("asset_id") or "")
+                resolved = self.stickers.resolve(asset_id)
+                if communication_channel == "text" and resolved and sticker_block is None:
+                    sticker_block = {
+                        "type": "sticker",
+                        "asset_id": str(resolved.get("asset_id") or asset_id),
+                        "caption": _strip_sticker_filenames(str(resolved.get("caption") or ""))[:120],
+                        "src": str(resolved.get("src") or ""),
+                        "thumbnail_src": str(resolved.get("thumbnail_src") or ""),
+                        "animated": bool(resolved.get("animated")),
+                    }
+                continue
+            text = _strip_sticker_filenames(str(item.get("text") or "").strip())
             if block_type in allowed and text:
-                raw_blocks.append({"type": block_type, "text": text})
-            if len(raw_blocks) >= 8:
+                text_blocks.append({"type": block_type, "text": text})
+            if len(text_blocks) >= 8:
                 break
-        if not raw_blocks:
-            answer = str(result.get("answer") or "").strip()
+        if not text_blocks:
+            answer = _strip_sticker_filenames(str(result.get("answer") or "").strip())
             default_type = "message" if communication_channel == "text" else "speech"
             if answer:
-                raw_blocks = [{"type": default_type, "text": answer}]
-        rendered = _render_blocks(raw_blocks)
+                text_blocks = [{"type": default_type, "text": answer}]
+        raw_blocks: list[dict[str, Any]] = [*text_blocks]
+        if sticker_block is not None and communication_channel == "text":
+            raw_blocks.append(sticker_block)
+        rendered = "\n".join(
+            str(block.get("text") or "").strip()
+            for block in raw_blocks
+            if str(block.get("text") or "").strip()
+        ).strip()
         safe_answer, safety_category = safe_output(rendered)
         if safety_category:
             default_type = "message" if communication_channel == "text" else "speech"
             raw_blocks = [{"type": default_type, "text": safe_answer}]
         trimmed, truncated = _trim_content_blocks(raw_blocks)
-        return trimmed, _render_blocks(trimmed), truncated, safety_category
+        # Enforce the product order even if a provider returned sticker first.
+        trimmed = [
+            *[block for block in trimmed if block.get("type") != "sticker"],
+            *[block for block in trimmed if block.get("type") == "sticker"][:1],
+        ]
+        answer = "\n".join(
+            str(block.get("text") or "").strip()
+            for block in trimmed
+            if str(block.get("text") or "").strip()
+        ).strip()
+        return trimmed, answer, truncated, safety_category
 
     def _terminal_result(
         self,
@@ -951,8 +1237,13 @@ class PublicChatService:
         rejected_adjustments: list[str] | None = None,
     ) -> dict[str, Any]:
         result = result or {}
-        diagnostics = self._diagnostics(total_started)
-        diagnostics["error_stage"] = error_stage
+        diagnostics = self._diagnostics(
+            total_started,
+            result,
+            generation_class="rejected",
+            guard_code=(rejected_adjustments[0] if rejected_adjustments else str(result.get("guard_code") or "")),
+            error_stage=error_stage,
+        )
         if rejected_adjustments:
             diagnostics["rejected_adjustments"] = rejected_adjustments
         request_health = self.repository.request_health()
@@ -960,7 +1251,7 @@ class PublicChatService:
             "request_id": str(request.request_id),
             "character_id": request.character_id,
             "provider": provider.provider_id,
-            "model": request.model,
+            "model": redact_sensitive_text(request.model, 200),
             "answer": "",
             "communication_channel": request.communication_channel,
             "content_blocks": [],
@@ -978,7 +1269,16 @@ class PublicChatService:
             "diagnostics": diagnostics,
         }
 
-    def _diagnostics(self, total_started: float) -> dict[str, Any]:
+    def _diagnostics(
+        self,
+        total_started: float,
+        result: dict[str, Any] | None = None,
+        *,
+        generation_class: str = "",
+        guard_code: str = "",
+        error_stage: str = "",
+    ) -> dict[str, Any]:
+        result = result or {}
         repository_diagnostics = self.repository.request_diagnostics()
         timings = dict(repository_diagnostics.get("timings_ms") or {})
         timings.update(self.mvp.generation_diagnostics())
@@ -988,10 +1288,28 @@ class PublicChatService:
         for key in ("provider_http_calls", "model_calls", "initial_model_ms", "guard_rewrite_ms"):
             timings.setdefault(key, 0)
         timings["total"] = max(0, int((time.perf_counter() - total_started) * 1000))
-        return {
+        # Keep both the historical timings map and the compact fields used by
+        # the feedback/admin surface.  These values are derived from the
+        # request-local collectors and never contain prompts, responses or
+        # provider credentials.
+        diagnostics = {
             "timings_ms": timings,
             "dependency_health": repository_diagnostics.get("dependency_health") or {},
+            "provider_latency_ms": int(timings.get("initial_model_ms") or 0),
+            "retrieval_latency_ms": int(
+                timings.get("hybrid_total")
+                or timings.get("fts5")
+                or 0
+            ),
+            "rewrite_latency_ms": int(timings.get("guard_rewrite_ms") or 0),
+            "model_calls": int(timings.get("model_calls") or 0),
+            "generation_class": generation_class or str(result.get("generation_class") or ""),
+            "guard_code": guard_code or str(result.get("guard_code") or ""),
+            "guard_violation_count": int(result.get("guard_violation_count") or 0),
         }
+        if error_stage:
+            diagnostics["error_stage"] = error_stage
+        return diagnostics
 
     async def summarize(
         self,
@@ -1001,7 +1319,12 @@ class PublicChatService:
     ) -> dict[str, Any]:
         transcript = "\n".join(
             f"{item.role}[{item.communication_channel}]: "
-            + " | ".join(f"{block.type}:{block.text}" for block in item.content_blocks)
+            + " | ".join(
+                f"sticker:{block.caption or block.asset_id}"
+                if block.type == "sticker"
+                else f"{block.type}:{block.text}"
+                for block in item.content_blocks
+            )
             for item in request.turns
         )
         prompt = json.dumps(
@@ -1021,9 +1344,38 @@ class PublicChatService:
             provider,
             api_key,
             request.model,
-            system_prompt="你是会话压缩器。只总结明确内容，不推断隐私，不输出Markdown代码块。",
+            system_prompt=(
+                "你是会话压缩器。只总结明确内容，不推断隐私，不输出Markdown代码块。"
+                "请只返回 JSON：{\"summary\":\"不超过1200字的中文摘要\","
+                "\"open_threads\":[\"仍待继续的话题，最多12条\"]}。"
+                "open_threads 只能记录可选话题，不能写成用户必须完成的承诺。"
+            ),
             user_prompt=prompt,
             max_tokens=1200,
             client=self.provider_client,
         )
-        return {"request_id": str(request.request_id), "summary": content[:6000], "usage": usage}
+        summary = str(content or "").strip()
+        pending_topics: list[str] = []
+        # Newer providers may follow the structured summary contract. Keep a
+        # plain-text fallback so older models remain compatible.
+        try:
+            parsed = json.loads(summary)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            candidate_summary = parsed.get("summary")
+            if isinstance(candidate_summary, str) and candidate_summary.strip():
+                summary = candidate_summary.strip()
+            candidate_topics = parsed.get("open_threads") or parsed.get("pending_topics")
+            if isinstance(candidate_topics, list):
+                pending_topics = [
+                    str(topic).strip()[:240]
+                    for topic in candidate_topics
+                    if str(topic).strip()
+                ][:12]
+        return {
+            "request_id": str(request.request_id),
+            "summary": summary[:6000],
+            "pending_topics": pending_topics,
+            "usage": usage,
+        }

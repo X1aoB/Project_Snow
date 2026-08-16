@@ -269,6 +269,7 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#accept-experience-notice").click()
             page.locator("#open-settings").click()
             page.locator("#api-key").fill("sk-e2e-only-not-real")
+            page.locator("#toggle-advanced-model").click()
             page.locator("#model-id").fill("gpt-e2e")
             page.locator("#save-model").click()
             page.locator("#settings-dialog").wait_for(state="hidden")

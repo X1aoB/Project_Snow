@@ -58,6 +58,7 @@ from .public_store import (
     PublicStoreUnavailable,
     RateLimitExceeded,
 )
+from .feedback_mailer import FeedbackMailer
 
 
 ANONYMOUS_COOKIE = "snow_anon"
@@ -94,6 +95,12 @@ def _feedback_blocks(blocks: list[Any], limit: int) -> list[dict[str, str]]:
     remaining = limit
     for block in blocks[:8]:
         block_type = str(getattr(block, "type", "") or "")
+        if block_type == "sticker":
+            asset_id = str(getattr(block, "asset_id", "") or "")
+            caption = redact_sensitive_text(str(getattr(block, "caption", "") or ""), 120)
+            if asset_id:
+                normalized.append({"type": "sticker", "asset_id": asset_id, "caption": caption})
+            continue
         text_value = redact_sensitive_text(str(getattr(block, "text", "") or ""), remaining)
         if not block_type or not text_value:
             continue
@@ -122,6 +129,7 @@ def create_app(
     public_settings = public_settings or PublicSettings.from_environment()
     internal_settings = internal_settings or Settings.from_environment()
     store = store or PublicStore(public_settings.database_url)
+    feedback_mailer = FeedbackMailer(public_settings, store)
     provider_http = ProviderHTTPPool()
     chat_service = chat_service or PublicChatService(
         internal_settings,
@@ -136,9 +144,32 @@ def create_app(
         if store.engine is not None and public_settings.auto_create_schema:
             store.create_schema()
             store.cleanup()
+        _app.state.feedback_mailer = feedback_mailer
+        stop_mailer = asyncio.Event()
+        mailer_task: asyncio.Task[None] | None = None
+
+        async def mailer_loop() -> None:
+            while not stop_mailer.is_set():
+                try:
+                    await asyncio.to_thread(feedback_mailer.run_once, limit=10)
+                except PublicStoreUnavailable:
+                    # A transient database restart must not permanently stop
+                    # the worker. The next interval will reclaim due rows.
+                    pass
+                try:
+                    await asyncio.wait_for(stop_mailer.wait(), timeout=30)
+                except TimeoutError:
+                    continue
+
+        if feedback_mailer.configured and store.engine is not None:
+            mailer_task = asyncio.create_task(mailer_loop(), name="public-feedback-mailer")
         try:
             yield
         finally:
+            stop_mailer.set()
+            if mailer_task is not None:
+                mailer_task.cancel()
+                await asyncio.gather(mailer_task, return_exceptions=True)
             chat_service.close()
             await provider_http.close()
 
@@ -243,13 +274,21 @@ def create_app(
                 "history_rounds_per_request": 12,
             },
             "history_policy": "browser_indexeddb_plaintext",
-            "history_schema": "indexeddb-v2",
+            "history_schema": "indexeddb-v3",
             "state_schema": "public-state-2",
             "media_version": public_settings.media_version,
             "media_manifest_url": (
                 f"/media/{public_settings.media_version}/manifest.json"
             ),
             "experience_notice_version": public_settings.experience_notice_version,
+            "sticker_version": public_settings.sticker_version,
+            "sticker_count": int(chat_service.stickers.verify().get("sticker_count") or 0),
+            "sticker_manifest_url": f"/media/{public_settings.sticker_version}/manifest.json",
+            "state_schedule": {
+                "scope": "shared_daily",
+                "timezone": "Asia/Hong_Kong",
+                "update": "00:00",
+            },
             "arrival_reaction_probability": public_settings.arrival_probability,
             "automatic_summary": {
                 "default_enabled": True,
@@ -258,7 +297,7 @@ def create_app(
                 "counts_toward_hourly_limit": False,
             },
             "communication_channels": ["text", "in_person"],
-            "content_block_types": ["message", "speech", "action"],
+            "content_block_types": ["message", "speech", "action", "sticker"],
             "source_links": {
                 "project_snow": "https://github.com/X1aoB/Project_Snow",
                 "mywebsite": "https://github.com/X1aoB/MyWebsite",
@@ -269,6 +308,10 @@ def create_app(
     @app.get("/public/v1/characters")
     def characters() -> dict[str, Any]:
         return {"characters": chat_service.characters(), "count": 22}
+
+    @app.get("/public/v1/stickers")
+    def stickers(section: str = "", cursor: int = 0, limit: int = 60) -> dict[str, Any]:
+        return chat_service.stickers.list(section=section, cursor=cursor, limit=limit)
 
     @app.post("/public/v1/byok/session")
     async def byok_session(request: Request, payload: ByokSessionRequest) -> dict[str, Any]:
@@ -427,7 +470,18 @@ def create_app(
     @app.post("/public/v1/chat/stream")
     async def chat_stream(request: Request, payload: ChatRequest):
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        public_model = redact_sensitive_text(payload.model, 200)
         chat_service.ensure_character_available(payload.character_id)
+        try:
+            canonical_blocks = chat_service.validate_content_blocks(
+                payload.content_blocks,
+                payload.communication_channel,
+            )
+        except ValueError as exc:
+            raise _error("sticker_unavailable", 422) from exc
+        for original, canonical in zip(payload.content_blocks, canonical_blocks):
+            if canonical.get("type") == "sticker":
+                original.caption = str(canonical.get("caption") or "")
         claims = open_byok_credential(
             public_settings,
             anonymous_id=request.state.anonymous_id,
@@ -488,7 +542,7 @@ def create_app(
                         "request_id": request_id,
                         "character_id": payload.character_id,
                         "provider": spec.provider_id,
-                        "model": payload.model,
+                        "model": public_model,
                         "communication_channel": payload.communication_channel,
                         "answer": "",
                         "content_blocks": [],
@@ -501,7 +555,7 @@ def create_app(
                         "request_id": request_id,
                         "character_id": payload.character_id,
                         "provider": spec.provider_id,
-                        "model": payload.model,
+                        "model": public_model,
                         "communication_channel": payload.communication_channel,
                         "answer": "",
                         "content_blocks": [],
@@ -514,7 +568,7 @@ def create_app(
                         "request_id": request_id,
                         "character_id": payload.character_id,
                         "provider": spec.provider_id,
-                        "model": payload.model,
+                        "model": public_model,
                         "communication_channel": payload.communication_channel,
                         "answer": "",
                         "content_blocks": [],
@@ -522,7 +576,19 @@ def create_app(
                         "terminal_error": "generation_failed",
                         "diagnostics": {"error_stage": "generation"},
                     }
-                store.complete_request(request_id, generated)
+                try:
+                    store.complete_request(request_id, generated)
+                except PublicStoreUnavailable:
+                    # Do not stream a successful answer when the durable
+                    # idempotency record cannot be written. Public chat is
+                    # intentionally fail-closed while PostgreSQL is down.
+                    generated = {
+                        **generated,
+                        "answer": "",
+                        "content_blocks": [],
+                        "terminal_error": "public_database_unavailable",
+                        "diagnostics": {"error_stage": "idempotency_store"},
+                    }
                 return generated
 
             job = asyncio.create_task(run_generation(), name=f"public-chat:{request_id}")
@@ -544,7 +610,7 @@ def create_app(
                     "request_id": request_id,
                     "character_id": payload.character_id,
                     "provider": spec.provider_id,
-                    "model": payload.model,
+                    "model": public_model,
                     "communication_channel": payload.communication_channel,
                     "data_version": public_settings.data_version,
                     "idempotent_replay": idempotent_replay,
@@ -585,6 +651,23 @@ def create_app(
             for block_index, block in enumerate(content_blocks):
                 block_type = str(block.get("type") or "")
                 block_text = str(block.get("text") or "")
+                if block_type == "sticker":
+                    # Metadata is sent in a delta so older clients can ignore
+                    # it while 0.8.1 clients render the asset after speech.
+                    yield _sse(
+                        "delta",
+                        {
+                            "text": "",
+                            "block_index": block_index,
+                            "block_type": "sticker",
+                            "asset_id": str(block.get("asset_id") or ""),
+                            "caption": str(block.get("caption") or ""),
+                            "src": str(block.get("src") or ""),
+                            "thumbnail_src": str(block.get("thumbnail_src") or ""),
+                            "animated": bool(block.get("animated")),
+                        },
+                    )
+                    continue
                 for start in range(0, len(block_text), 24):
                     yield _sse(
                         "delta",
@@ -687,9 +770,14 @@ def create_app(
             )
         context = {
             "request_id": str(payload.request_id),
-            "character_id": payload.character_id,
-            "provider": payload.provider,
-            "model": payload.model,
+            # These values normally come from our own controls, but the
+            # public request is still attacker-controlled.  Apply the same
+            # credential redaction boundary as feedback text so a pasted key
+            # cannot reach PostgreSQL, the admin view, or the mail outbox via
+            # a forged model/provider field.
+            "character_id": redact_sensitive_text(payload.character_id, 32),
+            "provider": redact_sensitive_text(payload.provider, 24),
+            "model": redact_sensitive_text(payload.model, 200),
             "app_version": public_settings.app_version,
             "data_version": public_settings.data_version,
             "user_message": user_message,
@@ -784,9 +872,12 @@ def create_app(
         dependencies = chat_service.repository.dependency_health()
         database_ok = store.health()
         media = chat_service.media.verify()
+        stickers_status = chat_service.stickers.verify()
         degraded = sorted(service for service, service_status in dependencies.items() if service_status != "ok")
         if media.get("status") != "ok":
             degraded.append("media")
+        if stickers_status.get("status") != "ok":
+            degraded.append("stickers")
         if not database_ok:
             response.status_code = 503
         return {
@@ -797,6 +888,9 @@ def create_app(
             "data_version": public_settings.data_version,
             "media_version": public_settings.media_version,
             "media": media,
+            "sticker_version": public_settings.sticker_version,
+            "stickers": stickers_status,
+            "feedback_email": store.feedback_email_status() if database_ok else {},
         }
 
     @app.exception_handler(PublicSecurityError)
@@ -843,6 +937,12 @@ def create_app(
             f"/media/{public_settings.media_version}",
             StaticFiles(directory=public_settings.media_root, html=False),
             name="public_media",
+        )
+    if public_settings.sticker_root.is_dir():
+        app.mount(
+            f"/media/{public_settings.sticker_version}",
+            StaticFiles(directory=public_settings.sticker_root, html=False),
+            name="public_sticker_media",
         )
     if shared_design_path.is_dir():
         app.mount(

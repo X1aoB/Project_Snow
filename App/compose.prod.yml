@@ -22,6 +22,7 @@ x-api: &api
     PUBLIC_ADMIN_TOKEN_FILE: /run/project-snow-secrets/public_admin_token
     NEO4J_PASSWORD_FILE: /run/project-snow-secrets/neo4j_password
     QDRANT_API_KEY_FILE: /run/project-snow-secrets/qdrant_api_key
+    PUBLIC_FEEDBACK_SMTP_PASSWORD_FILE: /run/project-snow-secrets/feedback_smtp_password
     HTTPS_PROXY: http://egress-proxy:3128
     NO_PROXY: postgres,qdrant,neo4j,embedding,localhost,127.0.0.1
     PUBLIC_TRUST_PROXY_HEADERS: "true"

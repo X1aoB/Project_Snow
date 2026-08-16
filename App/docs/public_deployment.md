@@ -2,13 +2,13 @@
 
 The public process exposes only `/public/v1` and the static immersive client. The existing internal `/api/v1`, attachments, voice, agents and workspace are not mounted by `public_main.py`.
 
-The 0.7 client keeps text and in-person messages in IndexedDB v2 and stores one shared signed `public-state-2` world package separately. A v1 package is accepted, completed with the current 22-character presence registry and re-signed as v2. Public presence endpoints are:
+The 0.8.1 client keeps text and in-person messages in IndexedDB v3 and stores one shared signed `public-state-2` world package separately. A v1 package is accepted, completed with the current 22-character presence registry and re-signed as v2. Text messages may contain one manifest-backed sticker after the message text; in-person messages continue to accept `speech` and `action`. Public presence endpoints are:
 
 - `POST /public/v1/presence/resolve`: read a character scene without changing revision.
 - `POST /public/v1/presence/transition`: move to the character or open the communicator without a model call.
 - `POST /public/v1/presence/arrival`: make one idempotent 50/50 arrival decision; only the noticed branch consumes chat quota and invokes the current BYOK model.
 
-Arrival generation failures keep the signed location transition but return no fabricated role dialogue. Text requests accept only `message` blocks; in-person requests accept `speech` and `action`, including action-only turns.
+Arrival generation failures keep the signed location transition but return no fabricated role dialogue. The daily character schedule is deterministic (HMAC-derived) and shared for all anonymous users in the Hong Kong calendar day; its signed package includes `schedule_date`, `generated_at`, and the next-midnight `expires_at`. A browser can explicitly continue yesterday's segment or start a new one without sending yesterday's transcript. Sticker media `2026.08.16.sticker.1` is a separate private candidate package with 363 resources (29 GIFs), verified by manifest and SHA256SUMS before promotion.
 
 ## Private acceptance gate
 
@@ -26,6 +26,7 @@ Keep Cloudflare Access enabled and do not add the MyWebsite play button until a 
 - `/srv/project-snow/runtime/colours/{blue,green}.compose.env`: the last staged environment for each colour; the inactive colour can be inspected and rolled back without overwriting the active colour's metadata.
 - `/srv/project-snow/releases/colours/`: per-colour release markers and manifests. `/srv/project-snow/releases/active-colour` is changed only by `ops/promote.sh`.
 - `/srv/project-snow/media/current`: the atomically promoted, independently verified avatar media package. It is mounted read-only into both API colours.
+- `/srv/project-snow/media/stickers/current`: the atomically promoted, independently verified sticker media package. It is mounted read-only into both API colours; `ops/fetch-promote-sticker-media.sh` verifies 363 resources and 363 thumbnails before switching the symlink.
 - `/etc/project-snow/secrets`: root-only secret files, mode `0700`; individual files mode `0600`. The public image starts with a minimal root entrypoint, copies only its approved secret files into a private container tmpfs with mode `0400`, and immediately drops to the unprivileged `snow` user before Alembic, Uvicorn or admin code runs. Secret values are never placed in Compose environment interpolation.
 - `/etc/project-snow/cloudflared`: root-only named-tunnel configuration and credentials. Ingress maps only `snow.xiaob.dev` to `http://caddy:8080`, followed by an explicit `http_status:404` catch-all.
 - Caddy port `8080` exists only on the private Docker `edge` network; it is not published on the host.
@@ -44,7 +45,7 @@ Private acceptance can use an SSH tunnel such as `ssh -p 43556 -L 18081:127.0.0.
 
 Store the Neo4j password alone in `secrets/neo4j_password` for the API. Store the Docker-image-compatible `neo4j/<password>` value separately in `secrets/neo4j_auth`; the Neo4j container reads it through `NEO4J_AUTH_FILE`, so the password is not placed in Compose interpolation or process arguments.
 
-Start from `ops/public.env.example` and `ops/images.env.example`. The first file must remain non-secret; all database URLs, API cryptographic keys, Turnstile secret, Qdrant key and the admin token are supplied through `/etc/project-snow/secrets` file mounts. The infrastructure image file contains only public image references and immutable digests.
+Start from `ops/public.env.example` and `ops/images.env.example`. The first file must remain non-secret; all database URLs, API cryptographic keys, Turnstile secret, Qdrant key, the admin token and the SMTP password are supplied through `/etc/project-snow/secrets` file mounts. The infrastructure image file contains only public image references and immutable digests. `PUBLIC_FEEDBACK_EMAIL_TO` defaults to `admin@xiaob.dev`; the worker sends QQ only after temporary decryption and never stores it in the outbox.
 
 The public API uses `HTTPS_PROXY=http://egress-proxy:3128`; Squid permits CONNECT only to the five official model API domains and Cloudflare Turnstile. This is an additional SSRF boundary on top of fixed adapter URLs and redirect rejection.
 

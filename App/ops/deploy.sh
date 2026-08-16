@@ -106,11 +106,14 @@ fi
 data_changed=1
 candidate_data_version=""
 candidate_media_version=""
+candidate_sticker_version=""
 if [ -n "$release_manifest" ]; then
   candidate_data_version="$(jq -r '.data_version // empty' "$release_manifest")"
   case "$candidate_data_version" in '') echo 'Release manifest has no data version.' >&2; exit 71 ;; esac
   candidate_media_version="$(jq -r '.media_version // empty' "$release_manifest")"
   case "$candidate_media_version" in '') echo 'Release manifest has no media version.' >&2; exit 71 ;; esac
+  candidate_sticker_version="$(jq -r '.sticker_version // empty' "$release_manifest")"
+  case "$candidate_sticker_version" in '') echo 'Release manifest has no sticker version.' >&2; exit 71 ;; esac
   active_media_version=""
   if [ -r /srv/project-snow/media/current/manifest.json ]; then
     active_media_version="$(jq -r '.media_version // empty' /srv/project-snow/media/current/manifest.json)"
@@ -118,6 +121,14 @@ if [ -n "$release_manifest" ]; then
   if [ "$candidate_media_version" != "$active_media_version" ]; then
     echo "Media $candidate_media_version must be downloaded, verified and promoted before application staging (active: ${active_media_version:-none})." >&2
     exit 72
+  fi
+  active_sticker_version=""
+  if [ -r /srv/project-snow/media/stickers/current/manifest.json ]; then
+    active_sticker_version="$(jq -r '.media_version // empty' /srv/project-snow/media/stickers/current/manifest.json)"
+  fi
+  if [ "$candidate_sticker_version" != "$active_sticker_version" ]; then
+    echo "Sticker media $candidate_sticker_version must be downloaded, verified and promoted before application staging (active: ${active_sticker_version:-none})." >&2
+    exit 73
   fi
   current_data_version=""
   if [ -r "$current_manifest" ]; then

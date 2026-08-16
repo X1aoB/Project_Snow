@@ -1,6 +1,6 @@
 const apiRoot = "/public/v1";
 const dbName = "project-snow-public";
-const dbVersion = 2;
+const dbVersion = 3;
 const SCENE_KEYS = new Set(["generic", "quarters", "lounge", "training", "archive", "canteen", "observation", "medical", "corridor"]);
 const state = {
   config: null,
@@ -9,6 +9,8 @@ const state = {
   provider: "",
   model: "",
   characters: [],
+  stickers: [],
+  selectedSticker: null,
   selected: "",
   threads: new Map(),
   worldPackage: "",
@@ -22,6 +24,7 @@ const state = {
   selectionController: null,
   typewriter: { key: "", timer: 0, fullText: "", displayedText: "" },
   summaryInFlight: new Set(),
+  continuityPrompt: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -50,7 +53,9 @@ const errorMessages = {
   turnstile_unavailable: "人机验证组件加载失败，请刷新页面后重试。",
   chat_failed: "对话请求失败，请稍后重试。",
   request_failed: "请求失败，请稍后重试。",
+  request_timeout: "提交超时，反馈未能确认是否送达；请稍后重试。",
   experience_notice_required: "请先阅读并确认体验说明。",
+  sticker_unavailable: "这个表情暂时不可用，请换一个或稍后再试。",
 };
 
 function id() {
@@ -87,14 +92,46 @@ function formatBytes(bytes) {
 }
 function delay(milliseconds) { return new Promise((resolve) => window.setTimeout(resolve, milliseconds)); }
 function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+function localDayKey(timestamp = Date.now()) {
+  const value = new Date(timestamp);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+function newConversationSegment() { return id(); }
 
 async function api(path, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (options.method && options.method !== "GET") headers["Content-Type"] = "application/json";
-  const response = await fetch(`${apiRoot}${path}`, { credentials: "same-origin", ...options, headers });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.detail?.code || "request_failed");
-  return payload;
+  const { timeoutMs = 0, signal: callerSignal, ...fetchOptions } = options;
+  const headers = { ...(fetchOptions.headers || {}) };
+  if (fetchOptions.method && fetchOptions.method !== "GET") headers["Content-Type"] = "application/json";
+  const controller = new AbortController();
+  let relayAbort = null;
+  if (callerSignal) {
+    relayAbort = () => controller.abort();
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener("abort", relayAbort, { once: true });
+  }
+  const timeout = timeoutMs > 0 ? window.setTimeout(() => controller.abort(), timeoutMs) : 0;
+  try {
+    const response = await fetch(`${apiRoot}${path}`, {
+      credentials: "same-origin",
+      ...fetchOptions,
+      headers,
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.detail?.code || "request_failed");
+    return payload;
+  } catch (error) {
+    if (error?.name === "AbortError" && timeoutMs > 0 && !callerSignal?.aborted) {
+      throw new Error("request_timeout");
+    }
+    throw error;
+  } finally {
+    if (timeout) window.clearTimeout(timeout);
+    if (callerSignal && relayAbort) callerSignal.removeEventListener("abort", relayAbort);
+  }
 }
 
 function openDB() {
@@ -154,35 +191,58 @@ async function storeClear(storeName) {
 }
 
 function normalizeBlocks(blocks, channel, fallback = "") {
-  const allowed = channel === "text" ? new Set(["message"]) : new Set(["speech", "action"]);
-  const normalized = Array.isArray(blocks) ? blocks
-    .filter((item) => item && allowed.has(item.type) && plain(item.text).trim())
+  const allowed = channel === "text" ? new Set(["message", "sticker"]) : new Set(["speech", "action"]);
+  let normalized = Array.isArray(blocks) ? blocks
+    .filter((item) => item && allowed.has(item.type) && (item.type === "sticker" || plain(item.text).trim()))
     .slice(0, 8)
-    .map((item) => ({ type: item.type, text: plain(item.text).trim() })) : [];
+    .map((item) => item.type === "sticker"
+      ? { type: "sticker", assetId: plain(item.assetId || item.asset_id), asset_id: plain(item.assetId || item.asset_id), caption: plain(item.caption).trim().slice(0, 120), src: plain(item.src), thumbnailSrc: plain(item.thumbnailSrc || item.thumbnail_src), animated: Boolean(item.animated) }
+      : { type: item.type, text: plain(item.text).trim() }) : [];
+  if (channel === "text" && normalized.length) {
+    normalized = [
+      ...normalized.filter((item) => item.type !== "sticker"),
+      ...normalized.filter((item) => item.type === "sticker").slice(0, 1),
+    ];
+  }
   if (!normalized.length && plain(fallback).trim()) normalized.push({ type: channel === "text" ? "message" : "speech", text: plain(fallback).trim() });
   return normalized;
 }
 function renderBlocksText(blocks) { return (blocks || []).map((block) => block.text).filter(Boolean).join("\n"); }
+function wireBlocks(blocks) {
+  return (blocks || []).map((block) => block.type === "sticker"
+    ? { type: "sticker", asset_id: plain(block.assetId || block.asset_id), caption: plain(block.caption).slice(0, 120) }
+    : { type: block.type, text: plain(block.text).trim() });
+}
 function normalizeMessage(message) {
   const channel = message.communicationChannel || message.communication_channel || "text";
   const blocks = normalizeBlocks(message.contentBlocks || message.content_blocks, channel, message.content || "");
+  const rawCreatedAt = message.createdAt ?? message.created_at;
+  const parsedCreatedAt = Number(rawCreatedAt);
+  const hasCreatedAt = Number.isFinite(parsedCreatedAt) && parsedCreatedAt > 0;
   return {
     id: message.id || id(),
     role: message.role === "assistant" ? "assistant" : "user",
     content: renderBlocksText(blocks),
     contentBlocks: blocks,
     communicationChannel: channel,
-    createdAt: Number(message.createdAt || Date.now()),
+    createdAt: hasCreatedAt ? parsedCreatedAt : Date.now(),
+    createdAtEstimated: Boolean(message.createdAtEstimated || message.created_at_estimated || !hasCreatedAt),
     status: message.status || "sent",
     requestId: message.requestId || "",
     errorCode: message.errorCode || "",
     source: message.source || "chat",
+    conversationSegmentId: plain(message.conversationSegmentId || message.conversation_segment_id),
   };
 }
 function normalizeThread(record, characterId) {
+  const segmentId = plain(record?.conversationSegmentId) || id();
+  const normalizedMessages = (record?.messages || []).map((message) => normalizeMessage({
+    ...message,
+    conversationSegmentId: message.conversationSegmentId || message.conversation_segment_id || segmentId,
+  }));
   return {
     characterId,
-    messages: (record?.messages || []).map(normalizeMessage),
+    messages: normalizedMessages,
     summary: plain(record?.summary),
     channel: record?.channel === "in_person" ? "in_person" : "text",
     turnCount: Number(record?.turnCount || 0),
@@ -191,6 +251,11 @@ function normalizeThread(record, characterId) {
     summaryRequestId: plain(record?.summaryRequestId),
     summaryCheckpointMessageId: plain(record?.summaryCheckpointMessageId),
     summaryUpdatedAt: Number(record?.summaryUpdatedAt || 0),
+    conversationSegmentId: segmentId,
+    localDayKey: plain(record?.localDayKey),
+    continuityDecision: ["continue_previous", "start_today"].includes(record?.continuityDecision) ? record.continuityDecision : "",
+    pendingTopics: Array.isArray(record?.pendingTopics) ? record.pendingTopics.map(plain).slice(0, 12) : [],
+    lastActiveAt: Number(record?.lastActiveAt || 0),
     legacyStatePackage: plain(record?.statePackage),
   };
 }
@@ -213,6 +278,11 @@ async function dbPutThread(thread) {
     summaryRequestId: thread.summaryRequestId,
     summaryCheckpointMessageId: thread.summaryCheckpointMessageId,
     summaryUpdatedAt: thread.summaryUpdatedAt,
+    conversationSegmentId: thread.conversationSegmentId,
+    localDayKey: thread.localDayKey,
+    continuityDecision: thread.continuityDecision,
+    pendingTopics: thread.pendingTopics,
+    lastActiveAt: thread.lastActiveAt,
   });
 }
 function decodeStatePackage(token) {
@@ -353,7 +423,7 @@ async function showExperienceNoticeIfNeeded() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.8.0";
+  $("version-badge").textContent = state.config.app_version || "0.8.1";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
@@ -381,6 +451,25 @@ async function loadConfig() {
     } catch { clearCredential(); }
   }
   refreshCredentialStatus();
+}
+async function loadStickers() {
+  try {
+    const values = [];
+    let cursor = 0;
+    for (let page = 0; page < 8; page += 1) {
+      const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+      const payload = await api(`/stickers?limit=100${suffix}`, { headers: {} });
+      if (Array.isArray(payload.stickers)) values.push(...payload.stickers);
+      if (payload.next_cursor === null || payload.next_cursor === undefined) break;
+      const next = Number(payload.next_cursor);
+      if (!Number.isInteger(next) || next <= cursor) break;
+      cursor = next;
+    }
+    const seen = new Set();
+    state.stickers = values.filter((item) => item?.asset_id && !seen.has(item.asset_id) && seen.add(item.asset_id));
+  } catch {
+    state.stickers = [];
+  }
 }
 async function issueCredential() {
   const provider = $("provider-select").value;
@@ -419,14 +508,14 @@ async function discoverModels() {
     const payload = await api("/byok/models", { method: "POST", body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
     saveCredential();
     const select = $("discovered-models");
-    select.innerHTML = `<option value="">选择已发现模型（也可手工填写）</option>${payload.models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")}`;
+    select.innerHTML = `<option value="">选择已发现模型</option>${payload.models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")}`;
     select.hidden = false;
   } catch (error) { showError("setup-error", error); }
 }
 async function saveModelSession() {
   showError("setup-error", "");
   try {
-    const model = $("model-id").value.trim();
+    const model = $("discovered-models").value.trim() || $("model-id").value.trim();
     if (!model) throw new Error("请填写或选择模型 ID。");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
     if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential();
@@ -442,6 +531,54 @@ async function saveModelSession() {
 
 function currentCharacter() { return state.characters.find((item) => item.character_id === state.selected) || null; }
 function currentThread() { return state.threads.get(state.selected) || null; }
+async function ensureContinuityDecision(thread) {
+  if (!thread) return true;
+  const today = localDayKey();
+  if (!thread.localDayKey) {
+    thread.localDayKey = today;
+    thread.lastActiveAt = Date.now();
+    await dbPutThread(thread);
+    return true;
+  }
+  if (thread.localDayKey === today) {
+    thread.lastActiveAt = Date.now();
+    await dbPutThread(thread);
+    return true;
+  }
+  const dialog = $("continuity-dialog");
+  if (!dialog.dataset.bound) {
+    dialog.dataset.bound = "1";
+    dialog.addEventListener("close", () => {
+      if (state.continuityPrompt) {
+        const pending = state.continuityPrompt;
+        state.continuityPrompt = null;
+        pending.resolve(false);
+      }
+    });
+  }
+  return new Promise((resolve) => {
+    state.continuityPrompt = { thread, today, resolve };
+    const finish = async (decision) => {
+      if (!state.continuityPrompt) return;
+      thread.continuityDecision = decision;
+      thread.localDayKey = today;
+      // Continuing yesterday keeps the prior segment available for the
+      // bounded recent-history window. Starting today deliberately receives a
+      // fresh segment so no previous transcript can leak into the request.
+      if (decision === "start_today") thread.conversationSegmentId = newConversationSegment();
+      thread.lastActiveAt = Date.now();
+      if (decision === "start_today") thread.pendingTopics = [];
+      await dbPutThread(thread);
+      const pending = state.continuityPrompt;
+      state.continuityPrompt = null;
+      if (dialog.open) dialog.close();
+      pending.resolve(true);
+    };
+    $("continue-yesterday").onclick = () => finish("continue_previous");
+    $("start-today").onclick = () => finish("start_today");
+    dialog.showModal();
+  });
+}
 function avatarMarkup(character, { thumbnail = true, priority = false, className = "" } = {}) {
   const avatar = character?.avatar || null;
   const src = avatar ? (thumbnail ? avatar.thumbnail_src : avatar.src) : "";
@@ -459,6 +596,49 @@ function bindAvatarImages(root = document) {
     }, { once: true });
     image.addEventListener("load", () => image.closest(".portrait, .stage-portrait")?.classList.add("has-image"), { once: true });
   });
+  root.querySelectorAll(".content-sticker img").forEach((image) => {
+    if (image.dataset.bound) return;
+    image.dataset.bound = "1";
+    image.addEventListener("error", () => image.remove(), { once: true });
+  });
+  bindStickerImages(root);
+}
+const activeStickerGifs = new Set();
+let stickerObserver = null;
+function bindStickerImages(root = document) {
+  const images = [...root.querySelectorAll('.content-sticker img[data-animated="true"]')];
+  for (const image of activeStickerGifs) {
+    if (!document.contains(image)) activeStickerGifs.delete(image);
+  }
+  if (!images.length || !("IntersectionObserver" in window)) return;
+  if (!stickerObserver) {
+    stickerObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const image = entry.target;
+        image.dataset.visible = entry.isIntersecting ? "true" : "false";
+        if (entry.isIntersecting && activeStickerGifs.size < 3) {
+          if (image.dataset.animatedSrc) image.src = image.dataset.animatedSrc;
+          activeStickerGifs.add(image);
+        } else if (!entry.isIntersecting) {
+          activeStickerGifs.delete(image);
+          if (image.dataset.staticSrc) image.src = image.dataset.staticSrc;
+        }
+      }
+      // An already-visible GIF may have been waiting behind the three-active
+      // cap. Fill any slot freed by an item leaving the viewport without
+      // enabling a fourth animation at the same time.
+      if (activeStickerGifs.size < 3) {
+        for (const image of document.querySelectorAll('.content-sticker img[data-animated="true"][data-visible="true"]')) {
+          if (activeStickerGifs.size >= 3) break;
+          if (!activeStickerGifs.has(image)) {
+            if (image.dataset.animatedSrc) image.src = image.dataset.animatedSrc;
+            activeStickerGifs.add(image);
+          }
+        }
+      }
+    }, { rootMargin: "120px 0px" });
+  }
+  images.forEach((image) => stickerObserver.observe(image));
 }
 function renderCharacters() {
   const query = $("character-search").value.trim().toLocaleLowerCase("zh-CN");
@@ -467,7 +647,11 @@ function renderCharacters() {
     .map((character) => {
       const thread = state.threads.get(character.character_id);
       const last = [...(thread?.messages || [])].reverse().find((message) => message.status === "sent");
-      const summary = last?.content ? last.content.replace(/\s+/g, " ").slice(0, 28) : "尚未开始对话";
+      const summary = last?.content
+        ? last.content.replace(/\s+/g, " ").slice(0, 28)
+        : last?.contentBlocks?.some((block) => block.type === "sticker")
+          ? `发送了表情：${last.contentBlocks.find((block) => block.type === "sticker")?.caption || "表情"}`
+          : "尚未开始对话";
       return `<button class="character" role="option" aria-selected="${character.character_id === state.selected}" data-character="${escapeHtml(character.character_id)}">${avatarMarkup(character, { thumbnail: true, priority: character.character_id === state.selected })}<span><strong>${escapeHtml(character.display_name)}</strong><small>${escapeHtml(summary)}</small></span></button>`;
     }).join("");
   bindAvatarImages($("character-list"));
@@ -578,6 +762,10 @@ async function selectCharacter(characterId) {
   try {
     const thread = await dbGetThread(characterId);
     if (sequence !== state.selectionSequence) return;
+    if (!(await ensureContinuityDecision(thread))) {
+      if (sequence === state.selectionSequence) state.selected = previousId;
+      return;
+    }
     const character = currentCharacter();
     renderCharacters();
     $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: false, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
@@ -621,8 +809,37 @@ async function selectCharacter(characterId) {
 }
 
 function blockHtml(block) {
+  if (block.type === "sticker") {
+    const fullSrc = block.src || block.thumbnailSrc || block.thumbnail_src || "";
+    const staticSrc = block.thumbnailSrc || block.thumbnail_src || fullSrc;
+    const animated = Boolean(block.animated);
+    const src = animated ? staticSrc : fullSrc;
+    const media = src
+      ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(block.caption || "表情")}" loading="lazy" decoding="async"${animated ? ` data-animated="true" data-animated-src="${escapeHtml(fullSrc)}" data-static-src="${escapeHtml(staticSrc)}"` : ""} />`
+      : "";
+    return `<div class="content-sticker"><span>${media}</span><small>${escapeHtml(block.caption || "表情")}</small></div>`;
+  }
   const className = block.type === "action" ? "content-action" : block.type === "speech" ? "content-speech" : "content-message";
   return `<div class="${className}">${escapeHtml(block.text)}</div>`;
+}
+function analystAvatarMarkup() {
+  return '<span class="portrait portrait-text analyst-portrait"><span class="portrait-fallback">你</span></span>';
+}
+function formatMessageTime(timestamp, previousTimestamp = 0, estimated = false) {
+  const value = new Date(Number(timestamp) || Date.now());
+  const previous = previousTimestamp ? new Date(Number(previousTimestamp)) : null;
+  if (previous && value.getTime() - previous.getTime() <= 5 * 60 * 1000 && localDayKey(value) === localDayKey(previous)) return "";
+  const now = new Date();
+  const dayDiff = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()) / 86400000);
+  const clock = value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  let label;
+  if (value.getFullYear() !== now.getFullYear()) label = `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")} ${clock}`;
+  else if (dayDiff === 0) label = clock;
+  else if (dayDiff === 1) label = `昨天 ${clock}`;
+  else if (dayDiff === 2) label = `前天 ${clock}`;
+  else if (dayDiff > 2 && dayDiff < 7) label = `星期${"日一二三四五六"[value.getDay()]} ${clock}`;
+  else label = `${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")} ${clock}`;
+  return estimated ? `${label}（估算）` : label;
 }
 function renderTimeline() {
   const thread = currentThread();
@@ -631,15 +848,18 @@ function renderTimeline() {
     $("timeline").innerHTML = '<div class="empty-conversation"><p>从一句问候开始吧。历史只保存在此浏览器。</p></div>';
     return;
   }
-  $("timeline").innerHTML = messages.map((message) => {
+  $("timeline").innerHTML = messages.map((message, index) => {
     const failed = message.status === "failed";
     const tools = failed
       ? `<button type="button" data-retry-message="${escapeHtml(message.id)}">重试</button>`
       : message.role === "assistant" ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
-    return `<article class="message ${message.role} ${message.status}"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span>${message.contentBlocks.map(blockHtml).join("")}<div class="message-tools">${tools}</div></article>`;
+    const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
+    const avatar = message.role === "user" ? analystAvatarMarkup() : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
+    return `${time ? `<div class="message-time" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span>${message.contentBlocks.map(blockHtml).join("")}<div class="message-tools">${tools}</div></div></article>`;
   }).join("");
   document.querySelectorAll("[data-retry-message]").forEach((button) => { button.onclick = () => retryMessage(button.dataset.retryMessage); });
   document.querySelectorAll("[data-feedback-message]").forEach((button) => { button.onclick = () => openFeedback(button.dataset.feedbackMessage); });
+  bindAvatarImages($("timeline"));
   $("timeline").scrollTop = $("timeline").scrollHeight;
 }
 function latestInPersonMessage(role = "") {
@@ -692,7 +912,7 @@ function renderStage() {
 }
 function renderTranscript() {
   const messages = currentThread()?.messages || [];
-  $("transcript-content").innerHTML = messages.length ? messages.map((message) => `<article class="transcript-entry"><strong>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")} · ${message.communicationChannel === "text" ? "文字通讯" : "面对面"}</strong><p>${message.contentBlocks.map((block) => `${block.type === "action" ? "〔动作〕" : ""}${block.text}`).join("\n")}</p></article>`).join("") : "<p>当前角色还没有本地记录。</p>";
+  $("transcript-content").innerHTML = messages.length ? messages.map((message) => `<article class="transcript-entry"><strong>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")} · ${message.communicationChannel === "text" ? "文字通讯" : "面对面"} · ${escapeHtml(new Date(message.createdAt || Date.now()).toLocaleString())}</strong><p>${message.contentBlocks.map((block) => block.type === "sticker" ? `〔表情〕${escapeHtml(block.caption || "表情")}` : `${block.type === "action" ? "〔动作〕" : ""}${escapeHtml(block.text)}`).join("\n")}</p></article>`).join("") : "<p>当前角色还没有本地记录。</p>";
 }
 function renderInfo() {
   const character = currentCharacter();
@@ -723,6 +943,8 @@ function updateComposerAvailability() {
   const selected = Boolean(state.selected);
   $("message-input").disabled = !selected;
   $("send-message").disabled = !selected || state.arrivalPending;
+  $("toggle-sticker").disabled = !selected || state.arrivalPending || currentThread()?.channel === "in_person";
+  $("toggle-action").disabled = !selected || state.arrivalPending || currentThread()?.channel !== "in_person";
   $("message-input").placeholder = !selected ? "选择角色后输入消息……" : configured() ? (currentThread()?.channel === "in_person" ? "说些什么，也可只填写动作……" : "输入文字通讯……") : "可浏览历史；发送前请在设置中配置模型";
 }
 async function setChannel(channel, persist = true) {
@@ -739,25 +961,49 @@ async function setChannel(channel, persist = true) {
   renderAll();
   updateComposerAvailability();
 }
-function requestHistory(messages, excludedId = "") {
-  return messages.filter((message) => message.id !== excludedId && !["failed", "pending"].includes(message.status)).slice(-24).map((message) => ({
+function requestHistory(messages, excludedId = "", segmentId = "") {
+  return messages.filter((message) => message.id !== excludedId && !["failed", "pending"].includes(message.status) && (!segmentId || message.conversationSegmentId === segmentId)).slice(-24).map((message) => ({
     role: message.role,
     content: message.content,
     communication_channel: message.communicationChannel,
-    content_blocks: message.contentBlocks,
+    content_blocks: wireBlocks(message.contentBlocks),
+    created_at: new Date(message.createdAt || Date.now()).toISOString(),
   }));
 }
 function inputBlocks() {
   const channel = currentThread()?.channel || "text";
   const speech = $("message-input").value.trim();
   const action = $("action-input").value.trim();
-  if (channel === "text") return speech ? [{ type: "message", text: speech }] : [];
+  if (channel === "text") {
+    const blocks = speech ? [{ type: "message", text: speech }] : [];
+    if (state.selectedSticker) blocks.push({ type: "sticker", assetId: state.selectedSticker.asset_id, caption: state.selectedSticker.caption, src: state.selectedSticker.src, thumbnailSrc: state.selectedSticker.thumbnail_src, animated: state.selectedSticker.animated });
+    return blocks;
+  }
   return [action ? { type: "action", text: action } : null, speech ? { type: "speech", text: speech } : null].filter(Boolean);
 }
 function updateInputCount() {
   const count = $("message-input").value.length + ($("action-input").value.length || 0);
   $("input-count").textContent = `${count} / 2000`;
   $("input-count").style.color = count > 2000 ? "#ff9dac" : "";
+}
+function renderStickerPicker() {
+  const list = $("sticker-list");
+  const values = state.stickers || [];
+  $("sticker-empty").hidden = values.length > 0;
+  list.innerHTML = values.map((sticker) => `<button type="button" class="sticker-choice" data-sticker-id="${escapeHtml(sticker.asset_id)}" title="${escapeHtml(sticker.caption || "表情")}"><img src="${escapeHtml(sticker.thumbnail_src || sticker.src || "")}" alt="${escapeHtml(sticker.caption || "表情")}" loading="lazy" decoding="async" /><span>${escapeHtml(sticker.caption || "表情")}</span></button>`).join("");
+  list.querySelectorAll("[data-sticker-id]").forEach((button) => {
+    button.onclick = () => {
+      state.selectedSticker = state.stickers.find((item) => item.asset_id === button.dataset.stickerId) || null;
+      $("sticker-picker").close();
+      $("toggle-sticker").setAttribute("aria-expanded", "true");
+      updateComposerAvailability();
+    };
+  });
+}
+async function openStickerPicker() {
+  if (!state.stickers.length) await loadStickers();
+  renderStickerPicker();
+  $("sticker-picker").showModal();
 }
 async function runChat(thread, userMessage) {
   const requestId = id();
@@ -770,6 +1016,7 @@ async function runChat(thread, userMessage) {
   const credential = state.credential;
   const model = state.model;
   userMessage.requestId = requestId;
+  userMessage.conversationSegmentId = thread.conversationSegmentId;
   userMessage.status = "pending";
   userMessage.errorCode = "";
   await dbPutThread(thread);
@@ -789,10 +1036,21 @@ async function runChat(thread, userMessage) {
         character_id: characterId,
         message: userMessage.content,
         communication_channel: userMessage.communicationChannel,
-        content_blocks: userMessage.contentBlocks,
-        recent_history: requestHistory(thread.messages, userMessage.id),
-        history_summary: thread.summary || "",
+        content_blocks: wireBlocks(userMessage.contentBlocks),
+        recent_history: requestHistory(
+          thread.messages,
+          userMessage.id,
+          thread.conversationSegmentId,
+        ),
+        history_summary: thread.continuityDecision === "start_today"
+          ? ""
+          : [
+            thread.summary || "",
+            thread.pendingTopics?.length ? `可能想继续的话题：${thread.pendingTopics.join("；")}` : "",
+          ].filter(Boolean).join("\n"),
         state_package: state.worldPackage || "",
+        continuity_decision: thread.continuityDecision || "",
+        local_day_key: thread.localDayKey || localDayKey(),
       }),
     });
     if (!response.ok) {
@@ -824,7 +1082,14 @@ async function runChat(thread, userMessage) {
         if (event === "delta") {
           const blockIndex = Number.isFinite(Number(payload.block_index)) ? Number(payload.block_index) : 0;
           const current = streamedBlocks.get(blockIndex) || { type: payload.block_type || (returnedChannel === "text" ? "message" : "speech"), text: "" };
-          current.text += plain(payload.text);
+          if (payload.block_type === "sticker") {
+            current.asset_id = plain(payload.asset_id);
+            current.assetId = current.asset_id;
+            current.caption = plain(payload.caption);
+            current.src = plain(payload.src);
+            current.thumbnailSrc = plain(payload.thumbnail_src);
+            current.animated = Boolean(payload.animated);
+          } else current.text += plain(payload.text);
           if (payload.block_type) current.type = payload.block_type;
           streamedBlocks.set(blockIndex, current);
           if (isCurrentCharacter()) $("request-status").textContent = "她正在回应……";
@@ -841,8 +1106,13 @@ async function runChat(thread, userMessage) {
     if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, renderBlocksText([...streamedBlocks.values()]));
     if (!contentBlocks.length) throw new Error("upstream_invalid_response");
     userMessage.status = "sent";
-    thread.messages.push(normalizeMessage({ id: id(), role: "assistant", contentBlocks, communicationChannel: returnedChannel, createdAt: Date.now(), requestId }));
+    thread.messages.push(normalizeMessage({ id: id(), role: "assistant", contentBlocks, communicationChannel: returnedChannel, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId }));
     thread.turnCount += 1;
+    // The explicit day choice only controls the first request of the new
+    // segment.  Subsequent turns naturally use the locally stored segment
+    // history without repeatedly suppressing it.
+    thread.continuityDecision = "";
+    thread.lastActiveAt = Date.now();
     state.latest.set(characterId, { requestId, errorCode: "", degraded });
     await dbPutThread(thread);
     if (state.selected === characterId) {
@@ -873,10 +1143,13 @@ async function sendMessage(event) {
     return showError("setup-error", "请先配置当前标签页使用的模型会话。");
   }
   const thread = await dbGetThread(state.selected);
-  const userMessage = normalizeMessage({ id: id(), role: "user", contentBlocks: blocks, communicationChannel: thread.channel, createdAt: Date.now(), status: "pending" });
+  if (!(await ensureContinuityDecision(thread))) return;
+  const userMessage = normalizeMessage({ id: id(), role: "user", contentBlocks: blocks, communicationChannel: thread.channel, createdAt: Date.now(), status: "pending", conversationSegmentId: thread.conversationSegmentId });
   thread.messages.push(userMessage);
   $("message-input").value = "";
   $("action-input").value = "";
+  state.selectedSticker = null;
+  $("toggle-sticker").setAttribute("aria-expanded", "false");
   updateInputCount();
   await runChat(thread, userMessage);
 }
@@ -912,10 +1185,13 @@ async function runAutoSummary(thread) {
       role: message.role,
       content: message.content,
       communication_channel: message.communicationChannel,
-      content_blocks: message.contentBlocks,
+      content_blocks: wireBlocks(message.contentBlocks),
     }));
     const payload = await api("/chat/summarize", { method: "POST", body: JSON.stringify({ request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, character_id: thread.characterId, turns, previous_summary: thread.summary || "" }) });
     thread.summary = payload.summary || thread.summary;
+    thread.pendingTopics = Array.isArray(payload.pending_topics)
+      ? payload.pending_topics.map(plain).filter(Boolean).slice(0, 12)
+      : thread.pendingTopics;
     thread.summarizedThroughMessageId = thread.summaryCheckpointMessageId;
     thread.summarizedThroughTurnCount = successfulChatMessages(thread).length;
     thread.summaryRequestId = "";
@@ -958,11 +1234,11 @@ async function arriveInPerson() {
       showBanner("场景已更新。配置模型后可以开始对话。");
       return;
     }
-    const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify({ arrival_id: id(), provider: state.provider, credential: state.credential, model: state.model, character_id: state.selected, recent_history: requestHistory(thread.messages), history_summary: thread.summary || "", state_package: state.worldPackage || "" }) });
+    const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify({ arrival_id: id(), provider: state.provider, credential: state.credential, model: state.model, character_id: state.selected, recent_history: requestHistory(thread.messages, "", thread.conversationSegmentId), history_summary: thread.continuityDecision === "start_today" ? "" : (thread.summary || ""), state_package: state.worldPackage || "" }) });
     await saveWorldPackage(result.state_package);
     state.scene = result.scene_state;
     if (result.reaction) {
-      thread.messages.push(normalizeMessage({ id: result.reaction.message_id || id(), role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival" }));
+      thread.messages.push(normalizeMessage({ id: result.reaction.message_id || id(), role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId }));
       await dbPutThread(thread);
     }
     // Populate the arrival turn before exposing the stage. Otherwise
@@ -1029,6 +1305,13 @@ function openFeedback(messageId = "") {
 }
 async function submitFeedback(event) {
   event.preventDefault();
+  const submitButton = $("feedback-form").querySelector("button[type=submit]");
+  if (submitButton?.disabled) return;
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.dataset.originalText = submitButton.textContent;
+    submitButton.textContent = "正在提交…";
+  }
   showError("feedback-error", "");
   const thread = currentThread() || { messages: [] };
   const target = thread.messages.find((message) => message.id === state.feedbackMessageId) || [...thread.messages].reverse().find((message) => message.role === "assistant") || null;
@@ -1036,15 +1319,22 @@ async function submitFeedback(event) {
   const userMessage = [...thread.messages.slice(0, targetIndex)].reverse().find((message) => message.role === "user") || [...thread.messages].reverse().find((message) => message.role === "user") || {};
   const latest = state.latest.get(state.selected) || {};
   const chatRequestId = target?.requestId || latest.requestId || userMessage.requestId || null;
-  const userBlocks = normalizeBlocks(userMessage.contentBlocks, userMessage.communicationChannel || thread.channel || "text", userMessage.content || "");
-  const assistantBlocks = normalizeBlocks(target?.contentBlocks, target?.communicationChannel || thread.channel || "text", target?.content || "");
+  const userBlocks = wireBlocks(normalizeBlocks(userMessage.contentBlocks, userMessage.communicationChannel || thread.channel || "text", userMessage.content || ""));
+  const assistantBlocks = wireBlocks(normalizeBlocks(target?.contentBlocks, target?.communicationChannel || thread.channel || "text", target?.content || ""));
   const assistantSpeech = renderBlocksText(assistantBlocks.filter((block) => block.type !== "action"));
   try {
-    const payload = await api("/feedback", { method: "POST", body: JSON.stringify({ request_id: id(), chat_request_id: chatRequestId || null, body: $("feedback-body").value, qq: $("feedback-qq").value, turnstile_token: await tokenFor("feedback"), character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: assistantSpeech, user_content_blocks: userBlocks, assistant_content_blocks: assistantBlocks, request_stage: target?.communicationChannel || currentThread()?.channel || "immersive-web", error_code: latest.errorCode || userMessage.errorCode || "", degraded_services: latest.degraded || [], ui_surface: "immersive-web" }) });
+    const payload = await api("/feedback", { method: "POST", timeoutMs: 20000, body: JSON.stringify({ request_id: id(), chat_request_id: chatRequestId || null, body: $("feedback-body").value, qq: $("feedback-qq").value, turnstile_token: await tokenFor("feedback"), character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: assistantSpeech, user_content_blocks: userBlocks, assistant_content_blocks: assistantBlocks, request_stage: target?.communicationChannel || currentThread()?.channel || "immersive-web", error_code: latest.errorCode || userMessage.errorCode || "", degraded_services: latest.degraded || [], ui_surface: "immersive-web" }) });
     $("feedback-dialog").close();
     $("feedback-form").reset();
     toast(`反馈已提交，编号：${payload.feedback_code}`);
-  } catch (error) { showError("feedback-error", error); }
+  } catch (error) {
+    showError("feedback-error", error);
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = submitButton.dataset.originalText || "提交反馈";
+    }
+  }
 }
 
 $("character-search").oninput = renderCharacters;
@@ -1053,6 +1343,7 @@ $("message-input").oninput = updateInputCount;
 $("action-input").oninput = updateInputCount;
 $("message-input").onkeydown = (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("composer").requestSubmit(); } };
 $("toggle-action").onclick = () => { const hidden = !$("analyst-action-field").hidden; $("analyst-action-field").hidden = hidden; $("toggle-action").setAttribute("aria-expanded", String(!hidden)); if (hidden) $("action-input").value = ""; updateInputCount(); };
+$("toggle-sticker").onclick = openStickerPicker;
 $("go-in-person").onclick = openPresenceDialog;
 $("confirm-presence-transition").onclick = async () => { $("presence-dialog").close(); await arriveInPerson(); };
 $("stay-on-communicator").onclick = async () => {
@@ -1078,6 +1369,12 @@ $("discover-models").onclick = discoverModels;
 $("save-model").onclick = saveModelSession;
 $("clear-credential").onclick = () => { clearCredential(); $("api-key").focus(); toast("当前标签页的模型凭证已清除"); };
 $("discovered-models").onchange = () => { if ($("discovered-models").value) { $("model-id").value = $("discovered-models").value; state.model = $("discovered-models").value; saveCredential(); } };
+$("toggle-advanced-model").onclick = () => {
+  const panel = $("advanced-model-panel");
+  const expanded = panel.hidden;
+  panel.hidden = !expanded;
+  $("toggle-advanced-model").setAttribute("aria-expanded", String(expanded));
+};
 $("provider-select").onchange = () => { if (state.provider && state.provider !== $("provider-select").value) clearCredential(); };
 $("auto-summary-enabled").onchange = async () => {
   state.autoSummaryEnabled = $("auto-summary-enabled").checked;
@@ -1104,6 +1401,7 @@ async function boot() {
   await openDB();
   await migrateBrowserState();
   await loadConfig();
+  void loadStickers();
   await showExperienceNoticeIfNeeded();
   await loadCharacters();
   $("connection-status").textContent = "服务已连接";
