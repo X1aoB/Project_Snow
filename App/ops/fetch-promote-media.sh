@@ -20,7 +20,17 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-rclone copy "$R2_MEDIA_REMOTE/$version" "$staging" --checksum --immutable
+# Cloudflare R2 with the server's rclone 1.60 build does not implement the
+# post-upload HEAD/checksum metadata requests.  The release SHA256SUMS file
+# remains the authoritative integrity check after the copy, so use the R2
+# compatible read path and verify every file locally below.
+rclone copy "$R2_MEDIA_REMOTE/$version" "$staging" \
+  --size-only \
+  --immutable \
+  --s3-no-check-bucket \
+  --s3-no-head \
+  --s3-disable-checksum \
+  --s3-no-system-metadata
 test -r "$staging/manifest.json"
 test -r "$staging/SHA256SUMS"
 manifest_version="$(jq -r '.media_version // empty' "$staging/manifest.json")"
