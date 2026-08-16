@@ -113,6 +113,29 @@ CREATE INDEX IF NOT EXISTS public_feedback_dedupe_subject_idx
     ON public_feedback_dedupe (subject_hash, content_hash, expires_at);
 CREATE INDEX IF NOT EXISTS public_feedback_dedupe_ip_idx
     ON public_feedback_dedupe (ip_fingerprint, content_hash, expires_at);
+
+"""
+
+# This table is deliberately kept out of ``SCHEMA_SQL``.  The initial
+# Alembic revision imports that constant; putting a later revision's table in
+# it would make a fresh database create the outbox in 0001 and then fail when
+# 0003 attempted to create it again.  Local auto-create still installs the
+# current table by executing this additive fragment after the base schema.
+OUTBOX_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS public_feedback_email_outbox (
+    outbox_id VARCHAR(36) PRIMARY KEY,
+    feedback_id VARCHAR(36) NOT NULL UNIQUE REFERENCES public_feedback(feedback_id) ON DELETE CASCADE,
+    status VARCHAR(16) NOT NULL CHECK (status IN ('pending', 'sending', 'retry', 'sent')),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    locked_until TIMESTAMP WITH TIME ZONE,
+    last_error_code VARCHAR(120),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    sent_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE INDEX IF NOT EXISTS public_feedback_email_outbox_due_idx
+    ON public_feedback_email_outbox (status, next_attempt_at);
 """
 
 
@@ -148,7 +171,7 @@ class PublicStore:
 
     def create_schema(self) -> None:
         with self.begin() as connection:
-            for statement in SCHEMA_SQL.split(";"):
+            for statement in (SCHEMA_SQL + OUTBOX_SCHEMA_SQL).split(";"):
                 if statement.strip():
                     connection.execute(text(statement))
 
@@ -445,6 +468,26 @@ class PublicStore:
                 connection.execute(
                     text(
                         """
+                        INSERT INTO public_feedback_email_outbox
+                            (outbox_id, feedback_id, status, attempt_count,
+                             next_attempt_at, created_at, expires_at)
+                        VALUES
+                            (:outbox_id, :feedback_id, 'pending', 0,
+                             :next_attempt_at, :created_at, :expires_at)
+                        ON CONFLICT (feedback_id) DO NOTHING
+                        """
+                    ),
+                    {
+                        "outbox_id": secrets.token_hex(18),
+                        "feedback_id": feedback_id,
+                        "next_attempt_at": now,
+                        "created_at": now,
+                        "expires_at": now + timedelta(days=30),
+                    },
+                )
+                connection.execute(
+                    text(
+                        """
                         INSERT INTO public_feedback_dedupe
                             (dedupe_id, subject_hash, ip_fingerprint, content_hash, created_at, expires_at)
                         VALUES
@@ -468,6 +511,104 @@ class PublicStore:
                     raise DuplicateFeedback("duplicate feedback") from exc
                 raise
         return public_code
+
+    def claim_feedback_email(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Claim due mail rows without exposing their values to callers that do not need them."""
+
+        now = _utcnow()
+        locked_until = now + timedelta(minutes=10)
+        with self.begin() as connection:
+            rows = connection.execute(
+                text(
+                    """
+                    SELECT o.outbox_id, o.feedback_id, o.attempt_count,
+                           f.public_code, f.body_text, f.context_json,
+                           f.qq_cipher, f.created_at, f.expires_at
+                    FROM public_feedback_email_outbox o
+                    JOIN public_feedback f ON f.feedback_id = o.feedback_id
+                    WHERE f.expires_at > :now
+                      AND (
+                        (o.status IN ('pending', 'retry') AND o.next_attempt_at <= :now)
+                        OR (o.status = 'sending' AND o.locked_until <= :now)
+                      )
+                    ORDER BY o.next_attempt_at ASC
+                    LIMIT :limit
+                    """
+                ),
+                {"now": now, "limit": max(1, min(int(limit), 50))},
+            ).mappings().all()
+            claimed: list[dict[str, Any]] = []
+            for row in rows:
+                updated = connection.execute(
+                    text(
+                        """
+                        UPDATE public_feedback_email_outbox
+                        SET status = 'sending', attempt_count = attempt_count + 1,
+                            locked_until = :locked_until
+                        WHERE outbox_id = :outbox_id
+                          AND (
+                            (status IN ('pending', 'retry') AND next_attempt_at <= :now)
+                            OR (status = 'sending' AND locked_until <= :now)
+                          )
+                        """
+                    ),
+                    {"outbox_id": row["outbox_id"], "now": now, "locked_until": locked_until},
+                )
+                if int(updated.rowcount or 0) != 1:
+                    continue
+                item = dict(row)
+                item["attempt_count"] = int(row["attempt_count"] or 0) + 1
+                item["context"] = json.loads(row["context_json"] or "{}")
+                item["context_json"] = None
+                claimed.append(item)
+            return claimed
+
+    def mark_feedback_email_sent(self, outbox_id: str) -> None:
+        now = _utcnow()
+        with self.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    UPDATE public_feedback_email_outbox
+                    SET status = 'sent', sent_at = :sent_at, locked_until = NULL,
+                        last_error_code = NULL
+                    WHERE outbox_id = :outbox_id
+                    """
+                ),
+                {"outbox_id": outbox_id, "sent_at": now},
+            )
+
+    def mark_feedback_email_retry(
+        self,
+        outbox_id: str,
+        error_code: str,
+        *,
+        delay_seconds: int,
+    ) -> None:
+        now = _utcnow()
+        with self.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    UPDATE public_feedback_email_outbox
+                    SET status = 'retry', next_attempt_at = :next_attempt_at,
+                        locked_until = NULL, last_error_code = :last_error_code
+                    WHERE outbox_id = :outbox_id
+                    """
+                ),
+                {
+                    "outbox_id": outbox_id,
+                    "next_attempt_at": now + timedelta(seconds=max(30, min(delay_seconds, 86400))),
+                    "last_error_code": str(error_code or "mail_send_failed")[:120],
+                },
+            )
+
+    def feedback_email_status(self) -> dict[str, int]:
+        with self.begin() as connection:
+            rows = connection.execute(
+                text("SELECT status, count(*) AS count FROM public_feedback_email_outbox GROUP BY status")
+            ).mappings().all()
+        return {str(row["status"]): int(row["count"] or 0) for row in rows}
 
     def feedback_rows(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.begin() as connection:
@@ -501,6 +642,7 @@ class PublicStore:
                 ("public_rate_limit", "expires_at"),
                 ("public_verification", "expires_at"),
                 ("public_feedback_dedupe", "expires_at"),
+                ("public_feedback_email_outbox", "expires_at"),
             ):
                 result = connection.execute(text(f"DELETE FROM {table} WHERE {column} <= :now"), {"now": now})
                 deleted[table] = max(0, int(result.rowcount or 0))

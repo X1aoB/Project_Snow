@@ -142,6 +142,14 @@ class PublicSettings:
     media_root: Path = Path("/srv/project-snow/media/current")
     experience_notice_version: str = "0.8"
     arrival_probability: float = 0.5
+    sticker_version: str = "2026.08.16.sticker.1"
+    sticker_root: Path = Path("/srv/project-snow/media/stickers/current")
+    feedback_email_to: str = "admin@xiaob.dev"
+    feedback_email_from: str = ""
+    feedback_smtp_host: str = ""
+    feedback_smtp_port: int = 465
+    feedback_smtp_username: str = ""
+    feedback_smtp_password: str = ""
 
     @classmethod
     def from_environment(cls) -> "PublicSettings":
@@ -166,8 +174,12 @@ class PublicSettings:
             arrival_probability = float(os.getenv("PUBLIC_ARRIVAL_PROBABILITY", "0.5"))
         except (TypeError, ValueError):
             arrival_probability = 0.5
+        try:
+            feedback_smtp_port = int(os.getenv("PUBLIC_FEEDBACK_SMTP_PORT", "465"))
+        except (TypeError, ValueError):
+            feedback_smtp_port = 465
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "0.8.0"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "0.8.1"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_secret_value("PUBLIC_DATABASE_URL"),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),
@@ -198,6 +210,16 @@ class PublicSettings:
                 "PUBLIC_EXPERIENCE_NOTICE_VERSION", "0.8"
             ).strip(),
             arrival_probability=max(0.0, min(1.0, arrival_probability)),
+            sticker_version=os.getenv("PUBLIC_STICKER_VERSION", "2026.08.16.sticker.1").strip(),
+            sticker_root=Path(
+                os.getenv("PUBLIC_STICKER_ROOT", "/srv/project-snow/media/stickers/current")
+            ).resolve(),
+            feedback_email_to=os.getenv("PUBLIC_FEEDBACK_EMAIL_TO", "admin@xiaob.dev").strip(),
+            feedback_email_from=os.getenv("PUBLIC_FEEDBACK_EMAIL_FROM", "").strip(),
+            feedback_smtp_host=os.getenv("PUBLIC_FEEDBACK_SMTP_HOST", "").strip(),
+            feedback_smtp_port=feedback_smtp_port,
+            feedback_smtp_username=os.getenv("PUBLIC_FEEDBACK_SMTP_USERNAME", "").strip(),
+            feedback_smtp_password=_secret_value("PUBLIC_FEEDBACK_SMTP_PASSWORD"),
         )
 
     @property

@@ -12,6 +12,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from backend.snow_app.config import PublicSettings, Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
@@ -86,6 +87,8 @@ class PublicAPITests(TestCase):
         config = self.client.get("/public/v1/config")
         self.assertEqual(config.status_code, 200)
         self.assertEqual(config.json()["limits"]["input_characters"], 2000)
+        self.assertEqual(config.json()["history_schema"], "indexeddb-v3")
+        self.assertEqual(config.json()["sticker_version"], "2026.08.16.sticker.1")
         self.assertIn("Project Snow", self.client.get("/").text)
 
     def test_validation_errors_use_standard_code(self) -> None:
@@ -231,6 +234,24 @@ class PublicAPITests(TestCase):
                 "body": f"页面显示了 {leaked}",
                 "user_message": f"api_key={leaked}",
                 "assistant_answer": leaked,
+                "turnstile_token": "development-bypass",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        stored = json.dumps(self.store.feedback_rows()[0], ensure_ascii=False)
+        self.assertNotIn(leaked, stored)
+        self.assertIn("[已隐藏]", stored)
+
+    def test_feedback_redacts_keys_in_forged_model_metadata(self) -> None:
+        leaked = "sk-test-model-field-never-log-this"
+        response = self.client.post(
+            "/public/v1/feedback",
+            headers={"Origin": "http://testserver"},
+            json={
+                "request_id": str(uuid4()),
+                "body": "模型字段脱敏测试",
+                "provider": "openai",
+                "model": leaked,
                 "turnstile_token": "development-bypass",
             },
         )
@@ -397,6 +418,42 @@ class PublicAPITests(TestCase):
         self.assertIn("model_calls", context["generation_diagnostics"]["timings_ms"])
         self.assertNotIn("sk-test-never-log-this", json.dumps(context, ensure_ascii=False))
 
+    def test_chat_idempotency_record_redacts_forged_model_metadata(self) -> None:
+        credential, _ = self._byok()
+        leaked = "sk-test-model-cache-never-log-this"
+        request_id = str(uuid4())
+        payload = {
+            "request_id": request_id,
+            "provider": "openai",
+            "credential": credential,
+            "model": leaked,
+            "character_id": MVP_CHARACTERS[0].character_id,
+            "message": "你好",
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        with patch.object(
+            self.app.state.chat_service.mvp,
+            "chat",
+            return_value={"answer": "你好", "retrieval": {}, "usage": {}, "response_adjustments": []},
+        ):
+            response = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 200)
+        # Inspect the raw cache row without weakening the public ownership
+        # contract of request_result (which expects a subject hash).
+        with self.store.begin() as connection:
+            raw = connection.execute(
+                text("SELECT response_json FROM public_request_cache WHERE request_id = :request_id"),
+                {"request_id": request_id},
+            ).scalar_one()
+        self.assertNotIn(leaked, raw)
+        self.assertIn("[已隐藏]", raw)
+
     def test_all_public_characters_reach_the_immersive_engine(self) -> None:
         credential, _ = self._byok()
         service = self.app.state.chat_service
@@ -506,6 +563,21 @@ class PublicAPITests(TestCase):
         self.assertEqual(upgraded["presence"][character.character_id]["location"], "观景区")
         self.assertEqual(upgraded["relationships"][character.character_id]["address"], "分析员")
 
+    def test_shared_daily_state_has_hong_kong_schedule_window(self) -> None:
+        character = MVP_CHARACTERS[0]
+        first = self.client.post(
+            "/public/v1/presence/resolve",
+            headers={"Origin": "http://testserver"},
+            json={"request_id": str(uuid4()), "character_id": character.character_id, "state_package": ""},
+        )
+        self.assertEqual(first.status_code, 200)
+        state = verify_state(self.settings, first.json()["state_package"])
+        self.assertEqual(state["revision"], 1)
+        self.assertEqual(state["schedule_revision"], 1)
+        self.assertTrue(state["schedule_date"])
+        self.assertTrue(state["generated_at"] < state["expires_at"])
+        self.assertEqual(state["presence"][character.character_id]["state_scope"], "shared_daily")
+
     def test_text_channel_rejects_action_blocks(self) -> None:
         response = self.client.post(
             "/public/v1/chat/stream",
@@ -611,7 +683,9 @@ class PublicAPITests(TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertTrue(first.json()["scene_state"]["co_located"])
         transitioned = verify_state(self.settings, first.json()["state_package"])
-        self.assertEqual(transitioned["revision"], 1)
+        # The shared daily schedule starts at revision 1; a transition adds
+        # one user-state revision on top of that immutable daily snapshot.
+        self.assertEqual(transitioned["revision"], 2)
         self.assertEqual(transitioned["recent_events"][-1]["event_type"], "presence_transition")
         self.assertTrue(second.json()["idempotent_replay"])
 

@@ -20,9 +20,11 @@ if ($ManifestPath) {
     $AppDigest = [string]$manifest.application.digest
     $EmbeddingDigest = [string]$manifest.embedding.digest
     $MediaVersion = [string]$manifest.media_version
+    $StickerVersion = [string]$manifest.sticker_version
     if ([string]$manifest.application.image -ne 'ghcr.io/x1aob/project_snow-public') { throw 'Unexpected public image repository.' }
     if ([string]$manifest.embedding.image -ne 'ghcr.io/x1aob/project_snow-embedding') { throw 'Unexpected embedding image repository.' }
     if ([string]::IsNullOrWhiteSpace($MediaVersion)) { throw 'Release manifest has no media version.' }
+    if ([string]::IsNullOrWhiteSpace($StickerVersion)) { throw 'Release manifest has no sticker version.' }
     $manifestRemotePath = '/srv/project-snow/runtime/release-candidate.json'
     scp -q -i $IdentityFile -P $Port $resolvedManifest "deploy@${HostName}:$manifestRemotePath"
     if ($LASTEXITCODE -ne 0) { throw 'Release manifest upload failed.' }
@@ -31,10 +33,10 @@ $shaPattern = '^[0-9a-f]{40}$'
 $digestPattern = '^sha256:[0-9a-f]{64}$'
 if ($Sha -notmatch $shaPattern) { throw 'A verified 40-character main SHA is required.' }
 if ($AppDigest -notmatch $digestPattern -or $EmbeddingDigest -notmatch $digestPattern) { throw 'Both image digests must use sha256:<64 hex>.' }
-if ($ManifestPath -and $MediaVersion -notmatch '^\S+$') { throw 'Release manifest media version is invalid.' }
+if ($ManifestPath -and ($MediaVersion -notmatch '^\S+$' -or $StickerVersion -notmatch '^\S+$')) { throw 'Release manifest media version is invalid.' }
 $appImage = "ghcr.io/x1aob/project_snow-public@$AppDigest"
 $embeddingImage = "ghcr.io/x1aob/project_snow-embedding@$EmbeddingDigest"
-Write-Host "Staging main commit $Sha in inactive private-acceptance colour $Colour using immutable image digests and media $MediaVersion."
+Write-Host "Staging main commit $Sha in inactive private-acceptance colour $Colour using immutable image digests, avatar media $MediaVersion and stickers $StickerVersion."
 $manifestEnvironment = if ($manifestRemotePath) { "PROJECT_SNOW_RELEASE_MANIFEST='$manifestRemotePath' " } else { '' }
 $remoteCommand = "cd /srv/project-snow/repo && git fetch --quiet origin main && git cat-file -e '$Sha^{commit}' && git merge-base --is-ancestor '$Sha' origin/main && git checkout --quiet --detach '$Sha' && git rev-parse HEAD | grep -Fx '$Sha' && cd App && ${manifestEnvironment}PUBLIC_API_IMAGE='$appImage' EMBEDDING_IMAGE='$embeddingImage' ./ops/deploy.sh '$Colour' '$Sha'"
 ssh -i $IdentityFile -p $Port "deploy@$HostName" $remoteCommand

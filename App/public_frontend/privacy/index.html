@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
     <title>隐私与素材 · Project Snow</title>
-    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.0" />
-    <link rel="stylesheet" href="/app.css?v=0.8.0" />
+    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.1" />
+    <link rel="stylesheet" href="/app.css?v=0.8.1" />
   </head>
   <body class="privacy-page">
     <header class="privacy-header">
@@ -14,16 +14,17 @@
       <a class="secondary-button link-button" href="/">返回体验</a>
     </header>
     <main class="privacy-main">
-      <section class="privacy-hero"><span class="panel-kicker">使用说明</span><h1>隐私、模型调用与素材来源</h1><p>这里集中说明沉浸式体验会处理哪些数据，以及当前私有候选所使用的角色头像来源。</p></section>
+      <section class="privacy-hero"><span class="panel-kicker">0.8.1 使用说明</span><h1>隐私、模型调用与素材来源</h1><p>这里集中说明沉浸式体验会处理哪些数据，以及当前私有候选所使用的角色头像和表情来源。</p></section>
       <div class="privacy-grid">
         <article><h2>API Key</h2><p>Key 会短暂经过 Project Snow 服务器内存，用于向你选择的官方模型服务发起请求。Key 不写入数据库、磁盘、反馈、IndexedDB 或应用日志；浏览器只在当前标签页保存两小时加密凭证。</p></article>
         <article><h2>本地历史</h2><p>完整聊天记录和自动摘要以明文保存在当前浏览器 IndexedDB，不会跨设备同步。共享电脑使用后可在设置中删除单个角色记录或清空全部记录。</p></article>
         <article><h2>额外模型调用</h2><p>进入面对面场景时有 50% 概率触发一次主动到场反应。每新增 12 个成功对话轮次，默认会在后台调用当前模型更新本地连续性摘要；可在设置中关闭。</p></article>
-        <article><h2>反馈与 QQ</h2><p>反馈会附带当前一问一答、结构化动作/对白和不含密钥的阶段诊断。可选 QQ 使用独立密钥加密，所有反馈在 30 天后硬删除；原始 IP 不入库。</p></article>
+        <article><h2>反馈与 QQ</h2><p>反馈会附带当前一问一答、结构化动作/对白和不含密钥的阶段诊断。可选 QQ 在数据库中加密保存，并会临时解密后发送到 admin@xiaob.dev 的通知邮件；邮件和数据库记录均在 30 天后清理。原始 IP 不入库。</p></article>
       </div>
       <section class="privacy-section"><h2>角色头像来源与许可</h2><p>头像作为独立媒体包部署，不进入 GPL 应用镜像或 Git 历史。当前私有候选依据用户批准启用；移除 Cloudflare Access 前仍需重新进行公开发布与许可审查。</p><div id="avatar-attribution" class="attribution-list"><p>正在读取媒体清单……</p></div></section>
+      <section class="privacy-section"><h2>表情资源</h2><p>0.8.1 私有候选包含 363 个懒加载表情资源（其中 29 个 GIF），通过独立版本媒体包提供。每个资源保留来源页、文件哈希和当前已知许可声明；公开访问前会再次进行来源与许可审查。</p></section>
       <section class="privacy-section"><h2>项目与联系</h2><div class="source-links"><a id="privacy-project-link" href="https://github.com/X1aoB/Project_Snow">Project Snow 源码</a><a id="privacy-website-link" href="https://github.com/X1aoB/MyWebsite">MyWebsite 源码</a><a id="privacy-release-link" href="https://github.com/X1aoB/Project_Snow/releases">版本发布</a><a href="mailto:admin@xiaob.dev">版权问题联系</a></div><p>第三方内容的许可说明不构成对 Wiki 或游戏权利归属的法律保证；页面或文件的特殊声明优先。</p></section>
     </main>
-    <script type="module" src="/privacy/privacy.js?v=0.8.0"></script>
+    <script type="module" src="/privacy/privacy.js?v=0.8.1"></script>
   </body>
 </html>

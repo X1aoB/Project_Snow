@@ -15,6 +15,7 @@ for name in \
   public_ip_hmac_key \
   public_qq_key \
   public_admin_token \
+  feedback_smtp_password \
   neo4j_password \
   qdrant_api_key
 do
