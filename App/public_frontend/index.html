@@ -6,8 +6,8 @@
     <meta name="referrer" content="same-origin" />
     <meta name="color-scheme" content="light" />
     <title>Project Snow · 沉浸式体验</title>
-    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.1" />
-    <link rel="stylesheet" href="/app.css?v=0.8.1" />
+    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.2" />
+    <link rel="stylesheet" href="/app.css?v=0.8.2" />
   </head>
   <body>
     <div id="chat-app" class="app-shell" data-channel="text">
@@ -15,7 +15,7 @@
         <header class="product-header">
           <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
             <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="version-badge">0.8.1</small></span>
+            <span><strong>Project Snow</strong><small id="version-badge">0.8.2</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
         </header>
@@ -102,9 +102,14 @@
             <label for="action-input">你的动作或神态 <span>可选，也可单独发送</span></label>
             <textarea id="action-input" rows="1" maxlength="1200" placeholder="描述动作或神态……"></textarea>
           </div>
+          <div id="selected-sticker" class="selected-sticker" role="status" aria-live="polite" hidden>
+            <span class="selected-sticker-preview"><img id="selected-sticker-image" alt="" /></span>
+            <span class="selected-sticker-copy"><strong>已选择表情</strong><small id="selected-sticker-caption"></small><span>发送时会单独作为一条消息</span></span>
+            <button id="clear-sticker" class="icon-button" type="button" aria-label="清除已选择表情" title="清除已选择表情">×</button>
+          </div>
           <div class="composer-row">
-            <button id="toggle-action" class="icon-button face-only" type="button" aria-expanded="false" aria-controls="analyst-action-field" title="添加动作或神态">动作</button>
             <button id="toggle-sticker" class="icon-button text-only" type="button" aria-expanded="false" aria-controls="sticker-picker" title="发送表情">☺</button>
+            <button id="toggle-action" class="icon-button face-only" type="button" aria-expanded="false" aria-controls="analyst-action-field" title="添加动作或神态">动作</button>
             <textarea id="message-input" rows="1" maxlength="2000" aria-label="输入对白或消息" placeholder="选择角色后输入消息……" disabled></textarea>
             <button id="send-message" class="send-button" type="submit" aria-label="发送消息" disabled>发送</button>
           </div>
@@ -172,6 +177,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=0.8.1"></script>
+    <script type="module" src="/app.js?v=0.8.2"></script>
   </body>
 </html>

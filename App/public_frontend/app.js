@@ -11,6 +11,7 @@ const state = {
   characters: [],
   stickers: [],
   selectedSticker: null,
+  actionComposerOpen: false,
   selected: "",
   threads: new Map(),
   worldPackage: "",
@@ -423,7 +424,7 @@ async function showExperienceNoticeIfNeeded() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.8.1";
+  $("version-badge").textContent = state.config.app_version || "0.8.2";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
@@ -759,6 +760,10 @@ async function selectCharacter(characterId) {
   const switchingFromStage = Boolean(previousId && previousId !== characterId && previousThread?.channel === "in_person");
   const previousScene = state.scene;
   state.selected = characterId;
+  if (previousId !== characterId) {
+    state.selectedSticker = null;
+    state.actionComposerOpen = false;
+  }
   try {
     const thread = await dbGetThread(characterId);
     if (sequence !== state.selectionSequence) return;
@@ -823,7 +828,7 @@ function blockHtml(block) {
   return `<div class="${className}">${escapeHtml(block.text)}</div>`;
 }
 function analystAvatarMarkup() {
-  return '<span class="portrait portrait-text analyst-portrait"><span class="portrait-fallback">你</span></span>';
+  return '<span class="portrait analyst-portrait" aria-label="分析员头像"><span class="analyst-avatar-glyph" aria-hidden="true"></span></span>';
 }
 function formatMessageTime(timestamp, previousTimestamp = 0, estimated = false) {
   const value = new Date(Number(timestamp) || Date.now());
@@ -941,11 +946,17 @@ function renderAll() { renderTimeline(); renderStage(); renderTranscript(); rend
 
 function updateComposerAvailability() {
   const selected = Boolean(state.selected);
+  const inPerson = currentThread()?.channel === "in_person";
   $("message-input").disabled = !selected;
   $("send-message").disabled = !selected || state.arrivalPending;
-  $("toggle-sticker").disabled = !selected || state.arrivalPending || currentThread()?.channel === "in_person";
-  $("toggle-action").disabled = !selected || state.arrivalPending || currentThread()?.channel !== "in_person";
-  $("message-input").placeholder = !selected ? "选择角色后输入消息……" : configured() ? (currentThread()?.channel === "in_person" ? "说些什么，也可只填写动作……" : "输入文字通讯……") : "可浏览历史；发送前请在设置中配置模型";
+  $("toggle-sticker").hidden = inPerson;
+  $("toggle-action").hidden = !inPerson;
+  $("toggle-sticker").disabled = !selected || state.arrivalPending || inPerson;
+  $("toggle-action").disabled = !selected || state.arrivalPending || !inPerson;
+  $("analyst-action-field").hidden = !inPerson || !state.actionComposerOpen;
+  $("toggle-action").setAttribute("aria-expanded", String(inPerson && state.actionComposerOpen));
+  $("message-input").placeholder = !selected ? "选择角色后输入消息……" : configured() ? (inPerson ? "说些什么，也可只填写动作……" : "输入文字通讯……") : "可浏览历史；发送前请在设置中配置模型";
+  renderSelectedSticker();
 }
 async function setChannel(channel, persist = true) {
   const thread = currentThread();
@@ -953,11 +964,11 @@ async function setChannel(channel, persist = true) {
     thread.channel = channel === "in_person" ? "in_person" : "text";
     if (persist) await dbPutThread(thread);
   }
+  state.actionComposerOpen = false;
+  if (channel === "in_person") state.selectedSticker = null;
   $("chat-app").dataset.channel = channel;
   $("text-surface").hidden = channel === "in_person";
   $("in-person-surface").hidden = channel !== "in_person";
-  $("analyst-action-field").hidden = true;
-  $("toggle-action").setAttribute("aria-expanded", "false");
   renderAll();
   updateComposerAvailability();
 }
@@ -986,6 +997,23 @@ function updateInputCount() {
   $("input-count").textContent = `${count} / 2000`;
   $("input-count").style.color = count > 2000 ? "#ff9dac" : "";
 }
+function renderSelectedSticker() {
+  const root = $("selected-sticker");
+  const sticker = state.selectedSticker;
+  if (!root) return;
+  root.hidden = !sticker || currentThread()?.channel === "in_person";
+  if (!sticker || root.hidden) return;
+  const image = $("selected-sticker-image");
+  image.src = sticker.thumbnail_src || sticker.src || "";
+  image.alt = sticker.caption || "已选择表情";
+  $("selected-sticker-caption").textContent = sticker.caption || "发送时会单独作为一条消息";
+}
+function clearSelectedSticker() {
+  state.selectedSticker = null;
+  renderSelectedSticker();
+  $("toggle-sticker").setAttribute("aria-expanded", "false");
+  updateInputCount();
+}
 function renderStickerPicker() {
   const list = $("sticker-list");
   const values = state.stickers || [];
@@ -997,6 +1025,10 @@ function renderStickerPicker() {
       $("sticker-picker").close();
       $("toggle-sticker").setAttribute("aria-expanded", "true");
       updateComposerAvailability();
+      if (state.selectedSticker) {
+        toast(`已选择“${state.selectedSticker.caption || "表情"}”，发送时会单独作为一条消息。`);
+        $("message-input").focus();
+      }
     };
   });
 }
@@ -1148,7 +1180,8 @@ async function sendMessage(event) {
   thread.messages.push(userMessage);
   $("message-input").value = "";
   $("action-input").value = "";
-  state.selectedSticker = null;
+  clearSelectedSticker();
+  state.actionComposerOpen = false;
   $("toggle-sticker").setAttribute("aria-expanded", "false");
   updateInputCount();
   await runChat(thread, userMessage);
@@ -1342,8 +1375,16 @@ $("composer").onsubmit = sendMessage;
 $("message-input").oninput = updateInputCount;
 $("action-input").oninput = updateInputCount;
 $("message-input").onkeydown = (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("composer").requestSubmit(); } };
-$("toggle-action").onclick = () => { const hidden = !$("analyst-action-field").hidden; $("analyst-action-field").hidden = hidden; $("toggle-action").setAttribute("aria-expanded", String(!hidden)); if (hidden) $("action-input").value = ""; updateInputCount(); };
+$("toggle-action").onclick = () => {
+  if (currentThread()?.channel !== "in_person") return;
+  state.actionComposerOpen = !state.actionComposerOpen;
+  if (!state.actionComposerOpen) $("action-input").value = "";
+  updateComposerAvailability();
+  if (state.actionComposerOpen) $("action-input").focus();
+  updateInputCount();
+};
 $("toggle-sticker").onclick = openStickerPicker;
+$("clear-sticker").onclick = clearSelectedSticker;
 $("go-in-person").onclick = openPresenceDialog;
 $("confirm-presence-transition").onclick = async () => { $("presence-dialog").close(); await arriveInPerson(); };
 $("stay-on-communicator").onclick = async () => {

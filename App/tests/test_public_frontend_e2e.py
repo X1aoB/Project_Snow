@@ -259,6 +259,8 @@ class PublicFrontendE2ETests(TestCase):
             )
             self.assertIn("凯茜娅", page.locator("#character-list").inner_text())
             self.assertEqual(page.locator("#stage-location").inner_text(), "观景区")
+            self.assertIsNotNone(page.locator("#toggle-action").get_attribute("hidden"))
+            self.assertIsNone(page.locator("#toggle-sticker").get_attribute("hidden"))
             browser.close()
 
     def test_text_and_in_person_surfaces_share_local_continuity(self) -> None:
@@ -276,9 +278,19 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#message-input").fill("晚上好")
             page.locator("#send-message").click()
             page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
+            self.assertEqual(page.locator(".message-avatar .portrait").count(), 2)
+            self.assertEqual(page.locator(".analyst-portrait").count(), 1)
+            self.assertEqual(
+                page.locator(".content-message").first.evaluate(
+                    "(element) => getComputedStyle(element).borderRadius"
+                ),
+                "16px",
+            )
             page.locator("#go-in-person").click()
             page.locator("#confirm-presence-transition").click()
             page.locator("#in-person-surface").wait_for(state="visible")
+            self.assertIsNone(page.locator("#toggle-action").get_attribute("hidden"))
+            self.assertIsNotNone(page.locator("#toggle-sticker").get_attribute("hidden"))
             # Face-to-face dialogue intentionally renders at roughly 24 ms per
             # character. Wait for the animated text rather than sampling the
             # initial, intentionally empty typewriter frame.
@@ -292,4 +304,69 @@ class PublicFrontendE2ETests(TestCase):
             transcript = page.locator("#transcript-content").inner_text()
             self.assertIn("晚上好", transcript)
             self.assertIn("向她挥了挥手", transcript)
+            browser.close()
+
+    def test_mobile_contacts_scroll_and_text_sticker_selection(self) -> None:
+        characters = [
+            {
+                "character_id": f"fixture-{index:02d}",
+                "display_name": f"角色{index:02d}",
+                "aliases": [],
+                "avatar": None,
+                "license": "fixture",
+            }
+            for index in range(22)
+        ]
+        sticker = {
+            "asset_id": "fixture-sticker",
+            "caption": "收到",
+            "category": "reaction",
+            "thumbnail_src": "/media/fixture-sticker-96.webp",
+            "src": "/media/fixture-sticker.webp",
+            "animated": False,
+        }
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page(viewport={"width": 390, "height": 844})
+
+            def fulfill_characters(route) -> None:
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {"count": len(characters), "characters": characters},
+                        ensure_ascii=False,
+                    ),
+                )
+
+            def fulfill_stickers(route) -> None:
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"count": 1, "stickers": [sticker]}, ensure_ascii=False),
+                )
+
+            page.route("**/public/v1/characters", fulfill_characters)
+            page.route("**/public/v1/stickers**", fulfill_stickers)
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator("#open-contacts").click()
+            contacts = page.locator("#character-list")
+            contacts.wait_for(state="visible")
+            before = contacts.evaluate(
+                "(element) => ({scrollHeight: element.scrollHeight, clientHeight: element.clientHeight})"
+            )
+            contacts.hover()
+            page.mouse.wheel(0, 1600)
+            page.wait_for_timeout(100)
+            after = contacts.evaluate("(element) => element.scrollTop")
+            self.assertGreater(before["scrollHeight"], before["clientHeight"])
+            self.assertGreater(after, 0)
+            page.locator('[data-character="fixture-21"]').click()
+            self.assertIsNotNone(page.locator("#toggle-action").get_attribute("hidden"))
+            self.assertIsNone(page.locator("#toggle-sticker").get_attribute("hidden"))
+            page.locator("#toggle-sticker").click()
+            page.locator('[data-sticker-id="fixture-sticker"]').click()
+            self.assertTrue(page.locator("#selected-sticker").is_visible())
+            self.assertIn("发送时会单独作为一条消息", page.locator("#selected-sticker").inner_text())
             browser.close()

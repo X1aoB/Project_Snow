@@ -653,7 +653,7 @@ def create_app(
                 block_text = str(block.get("text") or "")
                 if block_type == "sticker":
                     # Metadata is sent in a delta so older clients can ignore
-                    # it while 0.8.1 clients render the asset after speech.
+                    # it while 0.8.2 clients render the asset after speech.
                     yield _sse(
                         "delta",
                         {

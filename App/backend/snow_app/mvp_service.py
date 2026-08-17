@@ -8542,9 +8542,19 @@ class MVPService:
                 natural_status_markers = (
                     "我在", "正在", "这会儿", "现在", "刚刚", "刚才", "忙着",
                     "有空", "没空", "休息", "训练", "整理", "准备", "处理",
-                    "看着", "读着", "等着", "吃", "喝",
+                    "看着", "读着", "等着", "吃", "喝", "正忙", "正准备",
                 )
-                if not any(marker in opening for marker in natural_status_markers):
+                # Providers often paraphrase a verified activity as “在整理”
+                # or “正处理”，without copying the internal scene label.  A
+                # first-person/current-status opening is still a natural answer
+                # to this low-risk question and does not assert an analyst fact.
+                natural_status_opening = bool(
+                    re.search(
+                        r"^(?:我|现在|目前|这会儿|刚才|刚刚)?(?:在|正|正在|忙着|有空|没空|休息|训练|整理|准备|处理|看|读|等|吃|喝)",
+                        opening,
+                    )
+                )
+                if not any(marker in opening for marker in natural_status_markers) and not natural_status_opening:
                     violations.append(f"live_scene_mismatch:activity:{activity}")
         elif live_scene.get("status") == "ambiguous":
             candidates = [str(item) for item in live_scene.get("candidates") or [] if item]
@@ -10119,6 +10129,7 @@ class MVPService:
             "coverage": (context.get("view") or {}).get("coverage", {}),
             "mode": mode,
             "communication_channel": active_channel,
+            "question_focus": str(context.get("question_focus") or ""),
             "analyst_content_blocks": normalized_analyst_blocks,
             "content_blocks": content_blocks,
             "channel_transition": channel_transition,

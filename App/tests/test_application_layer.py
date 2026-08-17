@@ -3082,6 +3082,40 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertIn("刚完成例行检查", answer)
         self.assertNotIn("医务室", answer)
 
+    def test_mvp_current_activity_accepts_a_natural_paraphrase(self) -> None:
+        """A status answer need not repeat the internal scene label verbatim."""
+        service = MVPService(self.settings, self.repository)
+        context = {
+            "question_focus": "current_activity",
+            "live_scene": {
+                "status": "active",
+                "subject_role": "self",
+                "location": "观测区",
+                "activity": "正在查看记录",
+            },
+            "raw_scene_state": {
+                "character_location": "观测区",
+                "character_activity": "正在查看记录",
+            },
+            "hits": [],
+            "relationship_background": {},
+            "dialogue_profile": None,
+            "mentioned_characters": [],
+            "companion_social_context": {},
+            "communication_context": {"channel": "text"},
+            "dialogue_boundary": {"kind": "standard"},
+        }
+        violations = service._answer_guardrail_violations(
+            "你在干什么？",
+            "在整理手边的资料。",
+            context,
+            "immersive",
+            [{"type": "message", "text": "在整理手边的资料。"}],
+        )
+        self.assertFalse(
+            any(item.startswith("live_scene_mismatch:activity:") for item in violations)
+        )
+
     def test_mvp_text_channel_rejects_unseen_audio_claim(self) -> None:
         violations = MVPService._communication_block_violations(
             "\u6211\u6b63\u5728\u53d1\u6587\u5b57\u6d88\u606f",

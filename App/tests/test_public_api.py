@@ -375,6 +375,41 @@ class PublicAPITests(TestCase):
         self.assertIn('"idempotent_replay":true', second.text)
         self.assertEqual(chat.call_count, 1)
 
+    def test_public_renders_safe_current_activity_fallback(self) -> None:
+        credential, _ = self._byok()
+        payload = {
+            "request_id": str(uuid4()),
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": "1b0a6b35719a",
+            "message": "你在干什么？",
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        result = {
+            "answer": "我在整理手边的资料，现在可以陪你聊会儿。",
+            "content_blocks": [
+                {"type": "message", "text": "我在整理手边的资料，现在可以陪你聊会儿。"}
+            ],
+            "question_focus": "current_activity",
+            "retrieval": {},
+            "usage": {"total_tokens": 10},
+            "response_adjustments": ["live_scene_guard"],
+        }
+        with patch.object(self.app.state.chat_service.mvp, "chat", return_value=result) as chat:
+            response = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('"code":"role_guard_rejected"', response.text)
+        self.assertIn("整理手边的资料", response.text)
+        self.assertIn("event: done", response.text)
+        self.assertEqual(chat.call_count, 1)
+
     def test_feedback_attaches_server_side_chat_diagnostics(self) -> None:
         credential, _ = self._byok()
         chat_request_id = str(uuid4())
