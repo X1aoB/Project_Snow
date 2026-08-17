@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
 import threading
+from datetime import UTC, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from unittest import TestCase, skipUnless
 from urllib.parse import urlparse
 
@@ -23,6 +23,11 @@ IMMERSIVE_ROOT = APP_ROOT / "frontend" / "assets" / "immersive"
 
 
 class PublicFrontendHandler(BaseHTTPRequestHandler):
+    chat_stream_started: threading.Event | None = None
+    chat_stream_release: threading.Event | None = None
+    arrival_started: threading.Event | None = None
+    arrival_release: threading.Event | None = None
+
     def log_message(self, _format: str, *_args: object) -> None:
         return
 
@@ -43,6 +48,17 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     "data_version": "fixture",
                     "turnstile_site_key": "",
                     "experience_notice_version": "0.8",
+                    "analyst_avatar": {
+                        "asset_id": "analyst-default",
+                        "thumbnail_src": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+                        "src": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+                        "portrait_focus_x": 50,
+                        "portrait_focus_y": 50,
+                        "portrait_scale": 1,
+                        "source_page": "https://wiki.biligame.com/sonw/%E6%96%87%E4%BB%B6:%E5%88%86%E6%9E%90%E5%91%98%E5%A4%B4%E5%83%8F.png",
+                        "license": "fixture",
+                        "license_version": "fixture",
+                    },
                     "arrival_reaction_probability": 0.5,
                     "automatic_summary": {"default_enabled": True},
                     "providers": [{"provider_id": "openai", "display_name": "OpenAI"}],
@@ -172,6 +188,10 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             )
             return
         if self.path == "/public/v1/presence/arrival":
+            if self.arrival_started is not None:
+                self.arrival_started.set()
+            if self.arrival_release is not None:
+                self.arrival_release.wait(timeout=5)
             self._json(
                 {
                     "arrival_id": payload.get("arrival_id"),
@@ -203,9 +223,11 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
         if self.path == "/public/v1/chat/stream":
             channel = payload.get("communication_channel") or "text"
             block_type = "message" if channel == "text" else "speech"
-            packets = "".join(
+            meta_packet = (
+                f'event: meta\ndata: {json.dumps({"request_id": payload.get("request_id"), "character_id": payload.get("character_id"), "provider": "openai", "model": "gpt-e2e", "communication_channel": channel}, ensure_ascii=False)}\n\n'
+            ).encode()
+            remaining_packets = "".join(
                 (
-                    f'event: meta\ndata: {json.dumps({"request_id": payload.get("request_id"), "character_id": payload.get("character_id"), "provider": "openai", "model": "gpt-e2e", "communication_channel": channel}, ensure_ascii=False)}\n\n',
                     'event: delta\ndata: {"text":"晚上好，分析员。"}\n\n',
                     'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
                     f'event: done\ndata: {json.dumps({"truncated": False, "degraded_services": [], "communication_channel": channel, "content_blocks": [{"type": block_type, "text": "晚上好，分析员。"}]}, ensure_ascii=False)}\n\n',
@@ -213,9 +235,16 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Content-Length", str(len(packets)))
+            self.send_header("Content-Length", str(len(meta_packet) + len(remaining_packets)))
             self.end_headers()
-            self.wfile.write(packets)
+            self.wfile.write(meta_packet)
+            self.wfile.flush()
+            if self.chat_stream_started is not None:
+                self.chat_stream_started.set()
+            if self.chat_stream_release is not None:
+                self.chat_stream_release.wait(timeout=5)
+            self.wfile.write(remaining_packets)
+            self.wfile.flush()
             return
         if self.path == "/public/v1/feedback":
             self._json({"feedback_code": "SNOW-E2E", "suppressed": False})
@@ -238,6 +267,63 @@ class PublicFrontendE2ETests(TestCase):
         cls.server.server_close()
         cls.thread.join(timeout=5)
 
+    def setUp(self) -> None:
+        PublicFrontendHandler.chat_stream_started = None
+        PublicFrontendHandler.chat_stream_release = None
+        PublicFrontendHandler.arrival_started = None
+        PublicFrontendHandler.arrival_release = None
+
+    def tearDown(self) -> None:
+        for gate in (
+            PublicFrontendHandler.chat_stream_release,
+            PublicFrontendHandler.arrival_release,
+        ):
+            if gate is not None:
+                gate.set()
+        self.setUp()
+
+    @staticmethod
+    def _configure_model(page) -> None:
+        page.locator("#open-settings").click()
+        page.locator("#api-key").fill("sk-e2e-only-not-real")
+        page.locator("#toggle-advanced-model").click()
+        page.locator("#model-id").fill("gpt-e2e")
+        page.locator("#save-model").click()
+        page.locator("#settings-dialog").wait_for(state="hidden")
+
+    def _assert_no_horizontal_overflow(self, page) -> None:
+        metrics = page.evaluate(
+            """() => ({
+                documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+                bodyOverflow: document.body.scrollWidth - document.body.clientWidth,
+            })"""
+        )
+        self.assertLessEqual(metrics["documentOverflow"], 1)
+        self.assertLessEqual(metrics["bodyOverflow"], 1)
+
+    def _assert_visible_controls_do_not_overlap(self, page, selector: str) -> None:
+        boxes = page.locator(selector).evaluate_all(
+            """elements => elements
+                .filter(element => {
+                    const style = getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    return style.display !== "none" && style.visibility !== "hidden" && rect.width && rect.height;
+                })
+                .map(element => {
+                    const rect = element.getBoundingClientRect();
+                    return {left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom};
+                })"""
+        )
+        for index, first in enumerate(boxes):
+            for second in boxes[index + 1 :]:
+                overlaps = not (
+                    first["right"] <= second["left"]
+                    or second["right"] <= first["left"]
+                    or first["bottom"] <= second["top"]
+                    or second["bottom"] <= first["top"]
+                )
+                self.assertFalse(overlaps, f"visible controls overlap: {first} and {second}")
+
     def test_model_discovery_keeps_the_issued_credential(self) -> None:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
@@ -259,6 +345,7 @@ class PublicFrontendE2ETests(TestCase):
             )
             self.assertIn("凯茜娅", page.locator("#character-list").inner_text())
             self.assertEqual(page.locator("#stage-location").inner_text(), "观景区")
+            self.assertEqual(page.locator(".analyst-portrait img").count(), 0)
             self.assertIsNotNone(page.locator("#toggle-action").get_attribute("hidden"))
             self.assertIsNone(page.locator("#toggle-sticker").get_attribute("hidden"))
             browser.close()
@@ -278,7 +365,9 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#message-input").fill("晚上好")
             page.locator("#send-message").click()
             page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
+            self.assertEqual(page.locator("#request-status .typing-indicator").count(), 0)
             self.assertEqual(page.locator(".message-avatar .portrait").count(), 2)
+            self.assertEqual(page.locator(".analyst-portrait img").count(), 1)
             self.assertEqual(page.locator(".analyst-portrait").count(), 1)
             self.assertEqual(
                 page.locator(".content-message").first.evaluate(
@@ -296,6 +385,7 @@ class PublicFrontendE2ETests(TestCase):
             # initial, intentionally empty typewriter frame.
             page.locator("#stage-speech").get_by_text("你来了。").wait_for(state="visible")
             self.assertEqual(page.locator("#stage-speech").inner_text(), "你来了。")
+            self.assertEqual(page.locator("#stage-speech .typing-indicator").count(), 0)
             page.locator("#toggle-action").click()
             page.locator("#action-input").fill("向她挥了挥手")
             page.locator("#send-message").click()
@@ -304,6 +394,95 @@ class PublicFrontendE2ETests(TestCase):
             transcript = page.locator("#transcript-content").inner_text()
             self.assertIn("晚上好", transcript)
             self.assertIn("向她挥了挥手", transcript)
+            browser.close()
+
+    def test_waiting_indicators_arrival_dedup_and_reduced_motion(self) -> None:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page(reduced_motion="reduce")
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+
+            PublicFrontendHandler.chat_stream_started = threading.Event()
+            PublicFrontendHandler.chat_stream_release = threading.Event()
+            page.locator("#message-input").fill("晚上好")
+            page.locator("#send-message").click()
+            self.assertTrue(PublicFrontendHandler.chat_stream_started.wait(timeout=5))
+            text_indicator = page.locator("#request-status .typing-indicator")
+            text_indicator.wait_for(state="visible")
+            self.assertEqual(text_indicator.count(), 1)
+            self.assertEqual(text_indicator.get_attribute("aria-label"), "角色正在输入")
+            self.assertEqual(page.locator("#request-status").get_attribute("aria-busy"), "true")
+            self.assertTrue(page.locator("#go-in-person").is_disabled())
+            self.assertEqual(
+                page.locator("#request-status .typing-dot").first.evaluate(
+                    "element => getComputedStyle(element).animationName"
+                ),
+                "none",
+            )
+            PublicFrontendHandler.chat_stream_release.set()
+            page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
+            self.assertEqual(page.locator("#request-status .typing-indicator").count(), 0)
+
+            PublicFrontendHandler.arrival_started = threading.Event()
+            PublicFrontendHandler.arrival_release = threading.Event()
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            self.assertTrue(PublicFrontendHandler.arrival_started.wait(timeout=5))
+            page.locator("#presence-arrival-loading").wait_for(state="visible")
+            stage_indicator = page.locator("#stage-speech .typing-indicator")
+            stage_indicator.wait_for(state="visible")
+            self.assertEqual(stage_indicator.count(), 1)
+            self.assertNotIn("你来了。", page.locator("#stage-speech").inner_text())
+            self.assertTrue(page.locator("#open-communicator").is_disabled())
+            PublicFrontendHandler.arrival_release.set()
+            page.locator("#presence-arrival-loading").wait_for(state="hidden")
+            page.locator("#stage-speech").get_by_text("你来了。").wait_for(state="visible")
+            self.assertEqual(page.locator("#stage-speech .typing-indicator").count(), 0)
+            self.assertEqual(page.locator("#stage-speech").inner_text(), "你来了。")
+            self.assertEqual(page.locator("#stage-narration").inner_text(), "凯茜娅转过身看向你。")
+
+            page.locator("#open-transcript").click()
+            transcript = page.locator("#transcript-content").inner_text()
+            self.assertEqual(transcript.count("你来了。"), 1)
+            page.locator("#close-transcript").click()
+
+            PublicFrontendHandler.chat_stream_started = threading.Event()
+            PublicFrontendHandler.chat_stream_release = threading.Event()
+            page.locator("#message-input").fill("再说一句")
+            page.locator("#send-message").click()
+            self.assertTrue(PublicFrontendHandler.chat_stream_started.wait(timeout=5))
+            page.locator("#stage-speech .typing-indicator").wait_for(state="visible")
+            self.assertEqual(page.locator("#stage-speech .typing-indicator").count(), 1)
+            PublicFrontendHandler.chat_stream_release.set()
+            page.locator("#stage-speech").get_by_text("晚上好，分析员。").wait_for(state="visible")
+            self.assertEqual(page.locator("#stage-speech .typing-indicator").count(), 0)
+            browser.close()
+
+    def test_desktop_mobile_and_narrow_layouts_do_not_overflow(self) -> None:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            for width, height in ((1280, 800), (390, 844), (320, 720)):
+                page = browser.new_page(viewport={"width": width, "height": height})
+                page.goto(self.base_url, wait_until="networkidle")
+                page.locator("#accept-experience-notice").click()
+                self._assert_no_horizontal_overflow(page)
+                self._assert_visible_controls_do_not_overlap(
+                    page,
+                    ".chat-header button:not([hidden])",
+                )
+                if width <= 820:
+                    page.locator("#open-contacts").click()
+                    page.locator("#contact-panel").wait_for(state="visible")
+                    self._assert_no_horizontal_overflow(page)
+                    self._assert_visible_controls_do_not_overlap(
+                        page,
+                        ".contact-footer > :not([hidden])",
+                    )
+                page.goto(f"{self.base_url}/privacy/", wait_until="networkidle")
+                self._assert_no_horizontal_overflow(page)
+                page.close()
             browser.close()
 
     def test_mobile_contacts_scroll_and_text_sticker_selection(self) -> None:

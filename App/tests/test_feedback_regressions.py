@@ -380,6 +380,101 @@ class FeedbackRegressionTests(unittest.TestCase):
         )
         self.assertFalse(blocks[0]["text"].startswith(("我", "她")))
 
+    def test_narrative_action_repetition_is_scoped_to_actions(self) -> None:
+        service = self._service()
+        context = {
+            "session_context": {
+                "turns": [
+                    {
+                        "assistant": "上一句对白提到微微一怔，但不是动作块。",
+                        "content_blocks": [{"type": "speech", "text": "微微一怔只是对白内容。"}],
+                    },
+                    {
+                        "assistant": "（凯茜娅微微一怔。）\n嗯。",
+                        "content_blocks": [
+                            {"type": "action", "text": "凯茜娅微微一怔。"},
+                            {"type": "speech", "text": "嗯。"},
+                        ],
+                    },
+                ]
+            }
+        }
+        repeated = service._narrative_action_repetition_violations(
+            "（凯茜娅微微一怔。）\n我在听。",
+            context,
+            [
+                {"type": "action", "text": "凯茜娅微微一怔。"},
+                {"type": "speech", "text": "我在听。"},
+            ],
+        )
+        self.assertTrue(any(item.startswith("narrative_action_repetition:exact:") for item in repeated))
+
+        speech_only = service._narrative_action_repetition_violations(
+            "微微一怔只是这句对白。",
+            context,
+            [{"type": "speech", "text": "微微一怔只是这句对白。"}],
+        )
+        self.assertEqual(speech_only, [])
+
+        family_context = {
+            "session_context": {
+                "turns": [
+                    {"content_blocks": [{"type": "action", "text": "凯茜娅轻轻一笑。"}]},
+                    {"content_blocks": [{"type": "action", "text": "凯茜娅嘴角扬起。"}]},
+                ]
+            }
+        }
+        family = service._narrative_action_repetition_violations(
+            "（凯茜娅微微一笑。）\n好。",
+            family_context,
+            [{"type": "action", "text": "凯茜娅微微一笑。"}, {"type": "speech", "text": "好。"}],
+        )
+        self.assertIn("narrative_action_repetition:family:smile_expression", family)
+
+    def test_narrative_action_rewrite_failure_preserves_original(self) -> None:
+        service = self._service()
+        session_id = "feedback-regression-action-rewrite-fallback"
+        service._remember_session(
+            session_id,
+            "25b23cb64398",
+            "你还在吗？",
+            "（凯茜娅微微一怔。）\n嗯。",
+            mode="immersive",
+            communication_channel="in_person",
+            content_blocks=[
+                {"type": "action", "text": "凯茜娅微微一怔。"},
+                {"type": "speech", "text": "嗯。"},
+            ],
+        )
+        answer = "（凯茜娅微微一怔。）\n我在听，你继续说。"
+        payload = self._model_payload(
+            answer,
+            [
+                {"type": "action", "text": "凯茜娅微微一怔。"},
+                {"type": "speech", "text": "我在听，你继续说。"},
+            ],
+        )
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", side_effect=[(payload, {}), (payload, {})]
+        ):
+            result = service.chat(
+                "25b23cb64398",
+                "你还在吗？",
+                session_id=session_id,
+                mode="immersive",
+                communication_channel="in_person",
+            )
+
+        self.assertEqual(
+            result["content_blocks"],
+            [
+                {"type": "action", "text": "凯茜娅微微一怔。"},
+                {"type": "speech", "text": "我在听，你继续说。"},
+            ],
+        )
+        self.assertIn("narrative_action_repetition", result["response_adjustments"])
+        self.assertTrue(result["guard_code"].startswith("narrative_action_repetition:"))
+
     def test_shared_meal_keeps_food_supplied_in_the_current_turn(self) -> None:
         service = self._service()
         message = "我拿了些西餐过来，今天先吃点工作餐，下次再带你出去吃好吗？"

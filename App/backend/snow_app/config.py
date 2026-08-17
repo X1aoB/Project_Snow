@@ -138,7 +138,7 @@ class PublicSettings:
     neo4j_password: str
     auto_create_schema: bool = False
     trust_proxy_headers: bool = False
-    media_version: str = "2026.08.15.avatar.1"
+    media_version: str = "2026.08.17.avatar.2"
     media_root: Path = Path("/srv/project-snow/media/current")
     experience_notice_version: str = "0.8"
     arrival_probability: float = 0.5
@@ -179,7 +179,7 @@ class PublicSettings:
         except (TypeError, ValueError):
             feedback_smtp_port = 465
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "0.8.2"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "0.8.3"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_secret_value("PUBLIC_DATABASE_URL"),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),
@@ -202,7 +202,7 @@ class PublicSettings:
             neo4j_password=_secret_value("NEO4J_PASSWORD"),
             auto_create_schema=os.getenv("PUBLIC_AUTO_CREATE_SCHEMA", "false").casefold() == "true",
             trust_proxy_headers=os.getenv("PUBLIC_TRUST_PROXY_HEADERS", "false").casefold() == "true",
-            media_version=os.getenv("PUBLIC_MEDIA_VERSION", "2026.08.15.avatar.1").strip(),
+            media_version=os.getenv("PUBLIC_MEDIA_VERSION", "2026.08.17.avatar.2").strip(),
             media_root=Path(
                 os.getenv("PUBLIC_MEDIA_ROOT", "/srv/project-snow/media/current")
             ).resolve(),

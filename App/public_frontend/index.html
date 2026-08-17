@@ -6,8 +6,8 @@
     <meta name="referrer" content="same-origin" />
     <meta name="color-scheme" content="light" />
     <title>Project Snow · 沉浸式体验</title>
-    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.2" />
-    <link rel="stylesheet" href="/app.css?v=0.8.2" />
+    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.3" />
+    <link rel="stylesheet" href="/app.css?v=0.8.3" />
   </head>
   <body>
     <div id="chat-app" class="app-shell" data-channel="text">
@@ -15,7 +15,7 @@
         <header class="product-header">
           <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
             <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="version-badge">0.8.2</small></span>
+            <span><strong>Project Snow</strong><small id="version-badge">0.8.3</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
         </header>
@@ -78,7 +78,7 @@
             <div class="scene-decoration scene-decoration-front" aria-hidden="true"></div>
             <div class="snow-atmosphere" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
             <div id="presence-arrival-loading" class="presence-arrival-loading" role="status" aria-live="polite" hidden>
-              <div class="presence-arrival-loading-card"><div class="transition-footsteps" aria-hidden="true"></div><strong>正在前往……</strong><span>场景加载完成后会自动进入</span><div class="transition-dots"><span></span><span></span><span></span></div></div>
+              <div class="presence-arrival-loading-card"><div class="transition-footsteps" aria-hidden="true"></div><strong>正在靠近……</strong><span>她会在场景准备好后回应</span><div class="transition-dots" aria-hidden="true"><span></span><span></span><span></span></div></div>
             </div>
             <div id="scene-transition-layer" class="scene-transition-layer" data-phase="idle" hidden aria-live="polite"><div class="transition-card"><div class="transition-footsteps" aria-hidden="true"></div><strong id="transition-title">正在前往……</strong><span id="transition-detail">正在建立新的场景</span><div class="transition-dots"><span></span><span></span><span></span></div></div></div>
             <div id="stage-presence-status" class="stage-presence-status" role="status" hidden></div>
@@ -89,7 +89,7 @@
             <div id="stage-portrait" class="stage-portrait" aria-label="角色头像"><span id="stage-portrait-avatar" class="stage-portrait-avatar">?</span></div>
             <div class="stage-dialogue-copy">
               <div class="stage-speaker-line"><strong id="stage-speaker">Project Snow</strong><span>面对面</span></div>
-              <div id="stage-speech" class="stage-speech"><p>选择一位角色，开始一段面对面的对话。</p></div>
+              <div id="stage-speech" class="stage-speech" role="status" aria-live="polite" aria-atomic="true"><p>选择一位角色，开始一段面对面的对话。</p></div>
               <div class="stage-dialogue-hint"><span>单击对白框或按 Space 显示完整对白</span><span>H 隐藏界面</span></div>
             </div>
           </section>
@@ -97,7 +97,7 @@
 
         <div id="system-banner" class="system-banner" role="status" hidden></div>
         <form id="composer" class="composer" autocomplete="off">
-          <div id="request-status" class="request-status" aria-live="polite"></div>
+          <div id="request-status" class="request-status" role="status" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
           <div id="analyst-action-field" class="action-composer" hidden>
             <label for="action-input">你的动作或神态 <span>可选，也可单独发送</span></label>
             <textarea id="action-input" rows="1" maxlength="1200" placeholder="描述动作或神态……"></textarea>
@@ -177,6 +177,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=0.8.2"></script>
+    <script type="module" src="/app.js?v=0.8.3"></script>
   </body>
 </html>

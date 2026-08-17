@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "2026.08.15.avatar.1",
+    [string]$Version = "2026.08.17.avatar.2",
     [string]$ReleaseRoot = "",
     [Parameter(Mandatory = $true)][string]$R2Remote
 )
@@ -15,9 +15,21 @@ $checksums = Join-Path $resolvedRelease "SHA256SUMS"
 if (-not (Test-Path -LiteralPath $manifest -PathType Leaf) -or -not (Test-Path -LiteralPath $checksums -PathType Leaf)) {
     throw "The media release is incomplete: $resolvedRelease"
 }
-$manifestVersion = (Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json).media_version
+$manifestObject = Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
+$manifestVersion = $manifestObject.media_version
 if ($manifestVersion -ne $Version) {
     throw "Media manifest version '$manifestVersion' does not match '$Version'."
+}
+$analyst = $manifestObject.analyst
+if (-not $analyst -or $analyst.asset_id -ne "analyst-default") {
+    throw "The media manifest must contain the analyst-default asset."
+}
+if ($analyst.license_status -notin @("verified", "verified_explicit", "verified_site_policy_no_page_exception") -or
+    $analyst.license -ne "CC BY-NC-SA 4.0" -or $analyst.license_version -ne "4.0" -or
+    [string]::IsNullOrWhiteSpace([string]$analyst.license_source_page) -or
+    [string]::IsNullOrWhiteSpace([string]$analyst.license_source_url) -or
+    [string]::IsNullOrWhiteSpace([string]$analyst.license_source_revision_id)) {
+    throw "Analyst avatar license evidence is incomplete."
 }
 if (-not (Get-Command rclone -ErrorAction SilentlyContinue)) {
     throw "rclone is required to publish the media release."

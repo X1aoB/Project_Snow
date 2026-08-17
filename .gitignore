@@ -230,6 +230,8 @@ __marimo__/
 # the GPL source repository until their licence compatibility is confirmed.
 /App/frontend/assets/characters/*.png
 /App/frontend/assets/characters/avatars.json
+/App/frontend/assets/analyst/*.png
+/App/frontend/assets/analyst/analyst.json
 /App/media/releases/
 
 # Local model/API configuration.  Keep safe, documented templates tracked.

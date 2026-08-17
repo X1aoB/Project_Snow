@@ -1,15 +1,25 @@
 :root {
   color-scheme: light;
-  --snow-design-version: "0.8.0";
-  --sidebar-width: 286px;
-  --topbar-height: 76px;
-  --character-row-height: 64px;
-  --list-avatar-size: 44px;
-  --active-avatar-size: 48px;
+  --snow-design-version: "0.8.3";
+  --sidebar-width: 304px;
+  --topbar-height: 80px;
+  --character-row-height: 72px;
+  --list-avatar-size: 52px;
+  --active-avatar-size: 56px;
+  --message-avatar-size: 44px;
+  --mobile-message-avatar-size: 40px;
   --dialogue-max-width: 980px;
-  --dialogue-avatar-size: 108px;
-  --mobile-dialogue-avatar-size: 76px;
-  --mobile-sidebar-width: min(315px, 88vw);
+  --dialogue-avatar-size: 124px;
+  --mobile-dialogue-avatar-size: 88px;
+  --mobile-list-avatar-size: 48px;
+  --mobile-active-avatar-size: 52px;
+  --mobile-sidebar-width: min(336px, 90vw);
+  --control-min-size: 44px;
+  --control-icon-size: 20px;
+  --ui-body-size: 16px;
+  --ui-mobile-body-size: 15px;
+  --ui-small-size: 14px;
+  --ui-caption-size: 13px;
   --snow-bg: #eaf2f7;
   --snow-panel: #f8fbfd;
   --snow-panel-strong: #ffffff;
@@ -24,14 +34,19 @@
   --snow-danger: #a34e5e;
   --snow-shadow: 0 18px 50px rgba(48, 75, 93, 0.16);
   --snow-radius: 14px;
-  font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: "Noto Sans SC", "Source Han Sans SC", "Noto Sans CJK SC",
+    "Microsoft YaHei", "SimHei", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei",
+    "PingFang SC", "Hiragino Sans GB", -apple-system, BlinkMacSystemFont,
+    "Helvetica Neue", "Segoe UI", Oxygen, Ubuntu, Cantarell, "Open Sans",
+    "文泉驛正黑", "儷黑 Pro", "LiHei Pro", "微軟正黑體",
+    "Microsoft JhengHei", "標楷體", "DFKai-SB", sans-serif;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
 button, input, textarea, select { font: inherit; }
 button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
-button { min-height: 40px; }
+button { min-height: var(--control-min-size); }
 input, textarea, select { min-height: 44px; }
 :focus-visible { outline: 3px solid color-mix(in srgb, var(--snow-focus) 72%, transparent); outline-offset: 2px; }
 
@@ -57,7 +72,7 @@ input, textarea, select { min-height: 44px; }
   object-position: var(--portrait-focus-x, 50%) var(--portrait-focus-y, 50%);
   transform: scale(var(--portrait-scale, 1));
 }
-.portrait-fallback { font-weight: 760; letter-spacing: .03em; }
+.portrait-fallback { font-weight: 760; }
 .portrait.has-image .portrait-fallback, .stage-portrait.has-image .portrait-fallback { display: none; }
 .stage-portrait > .portrait { width: 100%; height: 100%; flex: none; border: 0; border-radius: inherit; box-shadow: none; font-size: 1.8rem; }
 
@@ -111,7 +126,13 @@ input, textarea, select { min-height: 44px; }
 @keyframes snow-scene-enter { from { opacity: 0; transform: scale(1.012); } to { opacity: 1; transform: scale(1); } }
 
 @media (max-width: 720px) {
-  :root { --dialogue-avatar-size: var(--mobile-dialogue-avatar-size); }
+  :root {
+    --list-avatar-size: var(--mobile-list-avatar-size);
+    --active-avatar-size: var(--mobile-active-avatar-size);
+    --message-avatar-size: var(--mobile-message-avatar-size);
+    --dialogue-avatar-size: var(--mobile-dialogue-avatar-size);
+    --ui-body-size: var(--ui-mobile-body-size);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
