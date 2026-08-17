@@ -79,6 +79,27 @@ class DeploymentContractTests(TestCase):
         self.assertIn("active-colour", script)
         self.assertIn("Caddy and cloudflared keep serving", script)
         self.assertNotIn("force-recreate caddy", script)
+        self.assertIn(
+            'candidate_media_root="/srv/project-snow/media/releases/$candidate_media_version"',
+            script,
+        )
+        self.assertIn("PUBLIC_MEDIA_ROOT=%s", script)
+        self.assertIn("must be downloaded, verified and staged", script)
+
+    def test_compose_allows_a_colour_to_pin_verified_media(self) -> None:
+        compose = self.read("compose.prod.yml")
+        self.assertIn(
+            "PUBLIC_MEDIA_ROOT: ${PUBLIC_MEDIA_ROOT:-/srv/project-snow/media/current}",
+            compose,
+        )
+
+    def test_media_stage_only_does_not_switch_current(self) -> None:
+        script = self.read("ops/fetch-promote-media.sh")
+        stage = script.index('if [ "$mode" = "stage-only" ]; then')
+        promote = script.index('ln -s "$target" "$media_root/current.next"')
+        self.assertLess(stage, promote)
+        self.assertIn('mode="${2:-promote}"', script)
+        self.assertIn("promote|stage-only", script)
 
     def test_deploy_bootstraps_complete_active_release_for_rollback(self) -> None:
         script = self.read("ops/deploy.sh")

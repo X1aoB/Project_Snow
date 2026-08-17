@@ -4,6 +4,12 @@ umask 027
 
 version="${1:?media version required}"
 : "${R2_MEDIA_REMOTE:?rclone remote path required, for example r2:bucket/public-content/project-snow/media}"
+mode="${2:-promote}"
+
+case "$mode" in
+  promote|stage-only) ;;
+  *) echo 'Media mode must be promote or stage-only.' >&2; exit 64 ;;
+esac
 
 case "$version" in
   *[!0-9A-Za-z._-]*|'') echo 'Unsafe media version.' >&2; exit 64 ;;
@@ -60,7 +66,7 @@ test "$(find "$staging/analyst" -maxdepth 1 -type f -name '*-200.webp' | wc -l)"
 
 # mktemp creates the staging directory as 0700. The public API intentionally
 # runs as the unprivileged `snow` user, so normalize this verified public
-# media package before it is moved behind the read-only current symlink.
+# media package before it is moved behind a read-only release path.
 find "$staging" -type d -exec chmod 0755 {} +
 find "$staging" -type f -exec chmod 0644 {} +
 
@@ -70,6 +76,12 @@ if [ -e "$target" ]; then
 fi
 mv -- "$staging" "$target"
 staging=""
+
+if [ "$mode" = "stage-only" ]; then
+  echo "Staged media $version without changing the current symlink."
+  exit 0
+fi
+
 previous=""
 if [ -L "$media_root/current" ]; then
   previous="$(readlink "$media_root/current")"
