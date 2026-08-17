@@ -15,7 +15,7 @@ class SharedDesignContractTests(TestCase):
     def test_local_and_public_surfaces_use_one_design_and_scene_root(self) -> None:
         result = validate(self.app_root)
         self.assertEqual(result["status"], "ok", result)
-        self.assertEqual(result["design_version"], "0.8.0")
+        self.assertEqual(result["design_version"], "0.8.3")
         self.assertEqual(result["shared_references"], {"local": True, "public": True})
         self.assertEqual(result["missing_scenes"], [])
         self.assertEqual(result["duplicate_public_scene_assets"], [])
@@ -33,15 +33,15 @@ class SharedDesignContractTests(TestCase):
             (root / "public_frontend" / "assets" / "immersive" / "scenes").mkdir(parents=True)
             (root / "frontend" / "shared" / "immersive.css").write_text("", encoding="utf-8")
             (root / "frontend" / "shared" / "design-version.json").write_text(
-                '{"design_version":"0.8.0","canonical_stylesheet":"/shared/immersive.css","canonical_scene_root":"/assets/immersive/scenes"}',
+                '{"design_version":"0.8.3","canonical_stylesheet":"/shared/immersive.css","canonical_scene_root":"/assets/immersive/scenes"}',
                 encoding="utf-8",
             )
             (root / "frontend" / "index.html").write_text(
-                '<link rel="stylesheet" href="/shared/immersive.css?v=0.8.0">',
+                '<link rel="stylesheet" href="/shared/immersive.css?v=0.8.3">',
                 encoding="utf-8",
             )
             (root / "public_frontend" / "index.html").write_text(
-                '<link rel="stylesheet" href="/shared/immersive.css?v=0.8.0">',
+                '<link rel="stylesheet" href="/shared/immersive.css?v=0.8.3">',
                 encoding="utf-8",
             )
             for scene in REQUIRED_SCENES:

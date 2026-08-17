@@ -400,6 +400,11 @@ class PublicChatService:
             )
         return result
 
+    def analyst_avatar(self) -> dict[str, Any] | None:
+        """Return the separately packaged default analyst portrait, if verified."""
+
+        return self.media.analyst_avatar()
+
     def _default_state(self, subject_hash: str) -> dict[str, Any]:
         # Presence is intentionally shared across anonymous users for one
         # Hong Kong calendar day.  The analyst's location remains local to

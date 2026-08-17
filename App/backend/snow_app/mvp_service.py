@@ -9,6 +9,7 @@ completion endpoint and is only called when ``MVP_CHAT_ENABLED=true``.
 from __future__ import annotations
 
 import ast
+import copy
 import html
 import ipaddress
 import json
@@ -31,7 +32,6 @@ import httpx
 
 from .chat_store import ConversationStore
 from .config import Settings
-from .public_knowledge import PublicKnowledge
 from .mvp_policy import (
     FEEDBACK_CATEGORIES,
     FEEDBACK_OPTIONS,
@@ -42,13 +42,13 @@ from .mvp_policy import (
     feedback_category_ids,
     feedback_option_ids,
     layer_policy,
-    scene_visual_key,
     scene_templates_for,
+    scene_visual_key,
     source_layer,
 )
+from .public_knowledge import PublicKnowledge
 from .repository import RuntimeRepository
 from .user_fact_store import UserFactStore
-
 
 _FEEDBACK_LOCK = threading.RLock()
 _FEEDBACK_RESOLUTION_STATUSES = {
@@ -106,6 +106,10 @@ _FEEDBACK_DEFAULT_RESOLUTION: dict[str, str] = {
 # generated status events; they prevent a broad historical label from silently
 # becoming a new implementation task.
 _FEEDBACK_VERIFICATION_TESTS: dict[str, tuple[str, ...]] = {
+    "narrative_continuity": (
+        "test_feedback_regressions.test_narrative_action_repetition_is_scoped_to_actions",
+        "test_feedback_regressions.test_narrative_action_rewrite_failure_preserves_original",
+    ),
     "current_activity_choice": (
         "test_feedback_regressions.test_routine_choice_rejects_rest_training_contradiction",
     ),
@@ -8423,6 +8427,82 @@ class MVPService:
         return []
 
     @classmethod
+    def _narrative_action_repetition_violations(
+        cls,
+        answer: str,
+        context: dict[str, Any],
+        content_blocks: Any = None,
+    ) -> list[str]:
+        """Detect repeated stage directions without policing ordinary speech.
+
+        Action blocks are authoritative when present. Parenthetical segments
+        are included for legacy model envelopes that have not yet been
+        separated into ``action`` and ``speech`` blocks.
+        """
+
+        parenthetical = re.compile(r"[（(]([^（）()]{1,180})[）)]")
+        current_segments: list[str] = []
+        for block in content_blocks or []:
+            if isinstance(block, dict) and str(block.get("type") or "").casefold() == "action":
+                value = str(block.get("text") or "").strip()
+                if value:
+                    current_segments.append(value)
+        current_segments.extend(match.group(1).strip() for match in parenthetical.finditer(answer))
+        current_norms = {_compact(value) for value in current_segments if len(_compact(value)) >= 4}
+        if not current_norms:
+            return []
+
+        families = {
+            "surprise_hesitation": ("微微一怔", "怔了怔", "一怔", "愣了愣", "愣住", "怔住"),
+            "eye_expression": ("眯起眼睛", "眯了眯眼", "抬起眼", "垂下眼", "移开视线", "眸光"),
+            "small_movement": ("轻轻点头", "稍稍点头", "微微点头", "轻轻摇头", "微微摇头"),
+            "smile_expression": ("轻轻一笑", "微微一笑", "嘴角扬起", "露出笑意", "笑了笑"),
+        }
+        normalized_families = {
+            family: {_compact(term) for term in terms}
+            for family, terms in families.items()
+        }
+
+        def phrase_keys(norms: set[str]) -> set[str]:
+            keys = set(norms)
+            for norm in norms:
+                for terms in normalized_families.values():
+                    keys.update(term for term in terms if term in norm)
+            return keys
+
+        recent_turns = list((context.get("session_context") or {}).get("turns") or [])
+        recent_action_norms: list[set[str]] = []
+        recent_family_counts: dict[str, int] = {}
+        for turn in recent_turns[-8:]:
+            if not isinstance(turn, dict):
+                continue
+            turn_segments: list[str] = []
+            for block in turn.get("content_blocks") or []:
+                if isinstance(block, dict) and str(block.get("type") or "").casefold() == "action":
+                    value = str(block.get("text") or "").strip()
+                    if value:
+                        turn_segments.append(value)
+            turn_segments.extend(match.group(1).strip() for match in parenthetical.finditer(str(turn.get("assistant") or "")))
+            turn_norms = {_compact(value) for value in turn_segments if len(_compact(value)) >= 4}
+            recent_action_norms.append(turn_norms)
+            for family, terms in normalized_families.items():
+                if any(any(term in norm for term in terms) for norm in turn_norms):
+                    recent_family_counts[family] = recent_family_counts.get(family, 0) + 1
+
+        violations: list[str] = []
+        current_phrase_keys = phrase_keys(current_norms)
+        for current in sorted(current_phrase_keys):
+            if any(current in phrase_keys(previous) for previous in recent_action_norms[-4:]):
+                violations.append(f"narrative_action_repetition:exact:{current}")
+                break
+        for family, terms in normalized_families.items():
+            if recent_family_counts.get(family, 0) + int(
+                any(any(term in current for term in terms) for current in current_norms)
+            ) >= 3:
+                violations.append(f"narrative_action_repetition:family:{family}")
+        return list(dict.fromkeys(violations))
+
+    @classmethod
     def _answer_guardrail_violations(
         cls,
         message: str,
@@ -8496,6 +8576,13 @@ class MVPService:
         context_for_style = {**context, "content_blocks": content_blocks}
         violations.extend(cls._mechanical_dialogue_violations(answer, context_for_style))
         violations.extend(cls._repeated_response_violations(answer, context))
+        violations.extend(
+            cls._narrative_action_repetition_violations(
+                answer,
+                context,
+                content_blocks,
+            )
+        )
         violations.extend(
             cls._direct_answer_focus_violations(answer, context, content_blocks)
         )
@@ -8634,6 +8721,7 @@ class MVPService:
                     "先自然回应邀约或关心，再用一句温暖的追问延续话题，不要为了显得了解角色而强行带剧情。"
                      "若包含 repeated_recent_event_after_channel_switch，承接上一轮已经发生的事实，不得把训练结束、刚回来、刚到达或刚完成任务重新写成此刻的新事件。"
                      "若包含 repeated_response，不能复制上一轮固定句式；从本轮问题的另一个具体角度回答，必要时只保留一句新的简短回应。"
+                    "若包含 narrative_action_repetition，保持动作与对白分离，使用角色名第三人称并改换自然的动作或神态；不要机械替换词语，也不要为了制造变化强行添加动作。"
                     "若包含 visit_location_repeated，位置已经在最近对话中说过；只自然确认分析员可以过来并表示等待，"
                     "不要再次报地点、改换地点或补写刚结束的活动。"
                     "若包含 interaction_opening_required:干什么！，首个 speech/message 必须以‘干什么！’自然承接，再回答分析员当下的玩笑；"
@@ -9221,6 +9309,8 @@ class MVPService:
             + _NATURAL_DIALOGUE_GUIDANCE
             + "\n\n【自然陪伴的温度】\n"
             + "对邀约、关心、分享和轻松玩笑，先直接回应分析员，再自然表达自己的当下态度，必要时用一个贴合话题的小问题接住对话。不要只剩生硬的一句确认，也不要为了显得熟悉而硬塞主线章节、旧任务或固定剧情。事实仍需有证据；温度、关心和自然延展不等于编造共同经历。"
+            + "\n\n【动作描写多样性】\n"
+            + "面对面回复中的动作是可选的。需要动作时使用角色名第三人称，并在连续回合中轮换视线、姿态、手部动作与停顿等自然表达；不要反复使用同一个神态短语，也不要为了变化强行插入动作。动作必须放在独立 action block，speech block 只保留对白。"
             + (
                 "\n\n" + _RELATIONSHIP_GUIDANCE
                 if context.get("relationship_background_for_prompt")
@@ -9344,6 +9434,11 @@ class MVPService:
         mechanical_dialogue_guard = False
         visit_location_guard = False
         repetition_guard = False
+        narrative_action_guard = any(
+            item.startswith("narrative_action_repetition:")
+            for item in guardrail_violations
+        )
+        narrative_action_fallback = False
         logistics_guard = False
         fenny_voice_guard = False
         relationship_roster_guard = False
@@ -9352,10 +9447,12 @@ class MVPService:
         unsupported_quote_sanitized = False
         if guardrail_violations:
             guardrail_retried = True
+            original_guard_answer = answer_text
+            original_guard_generated = copy.deepcopy(generated)
             retry_generated: dict[str, Any] | None = None
             retry_violations = list(guardrail_violations)
             fallback_answer = answer_text
-            fallback_generated = generated
+            fallback_generated = copy.deepcopy(generated)
             try:
                 retry_kwargs: dict[str, Any] = {"mode": mode}
                 if model_settings is not None:
@@ -9413,6 +9510,8 @@ class MVPService:
                 generated = retry_generated
                 if initial_in_person_block_violations:
                     in_person_block_rewrite = True
+                if any(item.startswith("narrative_action_repetition:") for item in guardrail_violations):
+                    narrative_action_guard = True
             elif any(item.startswith("in_person_") for item in retry_violations):
                 # The public facade turns this flag into role_guard_rejected.
                 # Keep the internal result inspectable without inventing a
@@ -9731,6 +9830,16 @@ class MVPService:
                 generated["answer"] = answer_text
                 generated.pop("content_blocks", None)
                 repetition_guard = True
+            elif any(item.startswith("narrative_action_repetition:") for item in retry_violations):
+                # Preserve a valid original answer if the controlled rewrite
+                # still repeats the same stage direction. The caller receives
+                # the diagnostic and the next turn gets a fresh diversity
+                # window instead of a fabricated replacement line.
+                answer_text = original_guard_answer
+                generated = original_guard_generated
+                generated["answer"] = answer_text
+                narrative_action_guard = True
+                narrative_action_fallback = True
             elif any(
                 item.startswith("interaction_opening_required:")
                 for item in retry_violations
@@ -9929,6 +10038,7 @@ class MVPService:
             or mechanical_dialogue_guard
             or visit_location_guard
             or repetition_guard
+            or narrative_action_fallback
             or logistics_guard
             or relationship_roster_guard
             or empty_model_output_guard
@@ -10047,6 +10157,9 @@ class MVPService:
         if guardrail_retried and not deterministic_fallback:
             generated["citation_notes"] = list(generated.get("citation_notes") or [])
             generated["citation_notes"].append("回答触发生成边界校验，已进行一次受控重写。")
+        if narrative_action_guard:
+            generated["citation_notes"] = list(generated.get("citation_notes") or [])
+            generated["citation_notes"].append("动作描写已进行重复频率校验，优先保持角色名第三人称与对白分离。")
         if unsupported_quote_sanitized:
             generated["citation_notes"] = list(generated.get("citation_notes") or [])
             generated["citation_notes"].append("无法逐字核验的引号已降级为非逐字转述。")
@@ -10218,6 +10331,7 @@ class MVPService:
                     ("mechanical_dialogue_guard", mechanical_dialogue_guard),
                     ("visit_location_guard", visit_location_guard),
                     ("repetition_guard", repetition_guard),
+                    ("narrative_action_repetition", narrative_action_guard),
                     ("logistics_evidence_fallback", logistics_guard),
                     ("relationship_roster_guard", relationship_roster_guard),
                     ("empty_model_output_guard", empty_model_output_guard),

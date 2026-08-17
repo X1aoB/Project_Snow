@@ -1,6 +1,6 @@
 {
   "schema_version": "project-snow-immersive-design-1",
-  "design_version": "0.8.0",
+  "design_version": "0.8.3",
   "canonical_stylesheet": "/shared/immersive.css",
   "canonical_scene_root": "/assets/immersive/scenes"
 }

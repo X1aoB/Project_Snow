@@ -37,12 +37,26 @@ manifest_version="$(jq -r '.media_version // empty' "$staging/manifest.json")"
 character_count="$(jq -r '.character_count // 0' "$staging/manifest.json")"
 test "$manifest_version" = "$version"
 test "$character_count" -eq 22
+analyst_asset="$(jq -r '.analyst.asset_id // empty' "$staging/manifest.json")"
+test "$analyst_asset" = "analyst-default"
+analyst_license_status="$(jq -r '.analyst.license_status // empty' "$staging/manifest.json")"
+test "$analyst_license_status" = "verified_site_policy_no_page_exception" \
+  || test "$analyst_license_status" = "verified_explicit" \
+  || test "$analyst_license_status" = "verified" \
+  || { echo 'Analyst avatar license review is incomplete.' >&2; exit 66; }
+test "$(jq -r '.analyst.license // empty' "$staging/manifest.json")" = "CC BY-NC-SA 4.0"
+test "$(jq -r '.analyst.license_version // empty' "$staging/manifest.json")" = "4.0"
+test -n "$(jq -r '.analyst.license_source_page // empty' "$staging/manifest.json")"
+test -n "$(jq -r '.analyst.license_source_url // empty' "$staging/manifest.json")"
+test -n "$(jq -r '.analyst.license_source_revision_id // empty' "$staging/manifest.json")"
 (
   cd "$staging"
   sha256sum -c SHA256SUMS
 )
 test "$(find "$staging/avatars" -maxdepth 1 -type f -name '*-96.webp' | wc -l)" -eq 22
 test "$(find "$staging/avatars" -maxdepth 1 -type f -name '*-200.webp' | wc -l)" -eq 22
+test "$(find "$staging/analyst" -maxdepth 1 -type f -name '*-96.webp' | wc -l)" -eq 1
+test "$(find "$staging/analyst" -maxdepth 1 -type f -name '*-200.webp' | wc -l)" -eq 1
 
 # mktemp creates the staging directory as 0700. The public API intentionally
 # runs as the unprivileged `snow` user, so normalize this verified public

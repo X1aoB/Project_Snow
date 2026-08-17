@@ -280,6 +280,7 @@ def create_app(
             "media_manifest_url": (
                 f"/media/{public_settings.media_version}/manifest.json"
             ),
+            "analyst_avatar": chat_service.analyst_avatar(),
             "experience_notice_version": public_settings.experience_notice_version,
             "sticker_version": public_settings.sticker_version,
             "sticker_count": int(chat_service.stickers.verify().get("sticker_count") or 0),
@@ -653,7 +654,7 @@ def create_app(
                 block_text = str(block.get("text") or "")
                 if block_type == "sticker":
                     # Metadata is sent in a delta so older clients can ignore
-                    # it while 0.8.2 clients render the asset after speech.
+                    # it while 0.8.3 clients render the asset after speech.
                     yield _sse(
                         "delta",
                         {

@@ -18,6 +18,8 @@ const state = {
   scene: null,
   sceneByCharacter: new Map(),
   latest: new Map(),
+  typingByCharacter: new Map(),
+  requestStatusByCharacter: new Map(),
   feedbackMessageId: "",
   arrivalPending: false,
   autoSummaryEnabled: true,
@@ -27,6 +29,16 @@ const state = {
   summaryInFlight: new Set(),
   continuityPrompt: null,
 };
+
+// A request may outlive the character currently visible in the UI.  Keeping
+// the owner fields together makes every render/cleanup decision explicit and
+// prevents a late response from borrowing another character's stage.
+function TypingIndicatorState({ channel, characterId, requestId, phase = "typing" }) {
+  this.channel = channel === "in_person" ? "in_person" : "text";
+  this.characterId = plain(characterId);
+  this.requestId = plain(requestId);
+  this.phase = plain(phase || "typing");
+}
 
 const $ = (id) => document.getElementById(id);
 const errorMessages = {
@@ -424,7 +436,7 @@ async function showExperienceNoticeIfNeeded() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.8.2";
+  $("version-badge").textContent = state.config.app_version || "0.8.3";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
@@ -586,6 +598,80 @@ function avatarMarkup(character, { thumbnail = true, priority = false, className
   const focus = avatar ? ` style="--portrait-focus-x:${Number(avatar.portrait_focus_x || 50)}%;--portrait-focus-y:${Number(avatar.portrait_focus_y || 50)}%;--portrait-scale:${Number(avatar.portrait_scale || 1)}"` : "";
   const image = src ? `<img src="${escapeHtml(src)}" alt="" loading="${priority ? "eager" : "lazy"}" decoding="async"${priority ? " fetchpriority=\"high\"" : ""} />` : "";
   return `<span class="portrait portrait-text ${className}${src ? " has-image" : ""}"${focus}><span class="portrait-fallback">${escapeHtml(character?.display_name?.slice(0, 1) || "?")}</span>${image}</span>`;
+}
+function analystAvatarMarkup({ thumbnail = true, priority = false, className = "" } = {}) {
+  const avatar = state.config?.analyst_avatar || null;
+  const src = avatar ? (thumbnail ? avatar.thumbnail_src : avatar.src) : "";
+  const focus = avatar ? ` style="--portrait-focus-x:${Number(avatar.portrait_focus_x || 50)}%;--portrait-focus-y:${Number(avatar.portrait_focus_y || 50)}%;--portrait-scale:${Number(avatar.portrait_scale || 1)}"` : "";
+  const image = src ? `<img src="${escapeHtml(src)}" alt="" loading="${priority ? "eager" : "lazy"}" decoding="async"${priority ? " fetchpriority=\"high\"" : ""} />` : "";
+  return `<span class="portrait analyst-portrait ${className}${src ? " has-image" : ""}" aria-label="分析员头像"${focus}>${image}</span>`;
+}
+function characterById(characterId) {
+  return state.characters.find((item) => item.character_id === characterId) || null;
+}
+function typingStateFor(characterId = state.selected) {
+  return characterId ? state.typingByCharacter.get(characterId) || null : null;
+}
+function ownsTypingState(characterId, requestId) {
+  const pending = typingStateFor(characterId);
+  return Boolean(pending && pending.requestId === requestId);
+}
+function typingIndicatorMarkup(character, { includeAvatar = true } = {}) {
+  const avatar = includeAvatar ? `<span class="typing-indicator-avatar">${avatarMarkup(character, { thumbnail: true, priority: true })}</span>` : "";
+  return `<span class="typing-indicator" aria-label="角色正在输入">${avatar}<span class="typing-indicator-bubble" aria-hidden="true"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></span><span class="sr-only">角色正在输入</span></span>`;
+}
+function renderRequestStatus() {
+  const target = $("request-status");
+  if (!target) return;
+  const pending = typingStateFor();
+  if (pending?.channel === "text" && pending.phase === "typing") {
+    target.className = "request-status has-typing";
+    target.setAttribute("aria-busy", "true");
+    target.innerHTML = typingIndicatorMarkup(characterById(pending.characterId));
+    bindAvatarImages(target);
+    return;
+  }
+  target.className = "request-status";
+  target.setAttribute("aria-busy", pending ? "true" : "false");
+  target.textContent = state.requestStatusByCharacter.get(state.selected) || "";
+}
+function setRequestStatus(characterId, message) {
+  if (!characterId) return;
+  if (message) state.requestStatusByCharacter.set(characterId, plain(message));
+  else state.requestStatusByCharacter.delete(characterId);
+  if (characterId === state.selected) renderRequestStatus();
+}
+function setTypingState({ characterId, requestId, channel, phase = "typing" }) {
+  if (!characterId || !requestId) return;
+  state.typingByCharacter.set(
+    characterId,
+    new TypingIndicatorState({ characterId, requestId, channel, phase }),
+  );
+  if (characterId === state.selected) {
+    renderRequestStatus();
+    if (channel === "in_person") renderStage();
+  }
+  updateComposerAvailability();
+}
+function updateTypingPhase(characterId, requestId, phase) {
+  const current = typingStateFor(characterId);
+  if (!current || current.requestId !== requestId) return;
+  current.phase = phase;
+  state.typingByCharacter.set(characterId, current);
+  if (characterId === state.selected) {
+    renderRequestStatus();
+    if (current.channel === "in_person") renderStage();
+  }
+}
+function clearTypingState(characterId, requestId) {
+  const current = typingStateFor(characterId);
+  if (!current || (requestId && current.requestId !== requestId)) return;
+  state.typingByCharacter.delete(characterId);
+  if (characterId === state.selected) {
+    renderRequestStatus();
+    if (current.channel === "in_person") renderStage();
+  }
+  updateComposerAvailability();
 }
 function bindAvatarImages(root = document) {
   root.querySelectorAll(".portrait img, .stage-portrait img").forEach((image) => {
@@ -760,6 +846,8 @@ async function selectCharacter(characterId) {
   const switchingFromStage = Boolean(previousId && previousId !== characterId && previousThread?.channel === "in_person");
   const previousScene = state.scene;
   state.selected = characterId;
+  window.clearInterval(state.typewriter.timer);
+  state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
   if (previousId !== characterId) {
     state.selectedSticker = null;
     state.actionComposerOpen = false;
@@ -827,9 +915,6 @@ function blockHtml(block) {
   const className = block.type === "action" ? "content-action" : block.type === "speech" ? "content-speech" : "content-message";
   return `<div class="${className}">${escapeHtml(block.text)}</div>`;
 }
-function analystAvatarMarkup() {
-  return '<span class="portrait analyst-portrait" aria-label="分析员头像"><span class="analyst-avatar-glyph" aria-hidden="true"></span></span>';
-}
 function formatMessageTime(timestamp, previousTimestamp = 0, estimated = false) {
   const value = new Date(Number(timestamp) || Date.now());
   const previous = previousTimestamp ? new Date(Number(previousTimestamp)) : null;
@@ -859,7 +944,7 @@ function renderTimeline() {
       ? `<button type="button" data-retry-message="${escapeHtml(message.id)}">重试</button>`
       : message.role === "assistant" ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
     const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
-    const avatar = message.role === "user" ? analystAvatarMarkup() : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
+    const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
     return `${time ? `<div class="message-time" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span>${message.contentBlocks.map(blockHtml).join("")}<div class="message-tools">${tools}</div></div></article>`;
   }).join("");
   document.querySelectorAll("[data-retry-message]").forEach((button) => { button.onclick = () => retryMessage(button.dataset.retryMessage); });
@@ -871,6 +956,7 @@ function latestInPersonMessage(role = "") {
   return [...(currentThread()?.messages || [])].reverse().find((message) => message.communicationChannel === "in_person" && message.status !== "failed" && (!role || message.role === role)) || null;
 }
 function finishTypewriter() {
+  if (typingStateFor()?.channel === "in_person") return;
   if (!state.typewriter.fullText) return;
   window.clearInterval(state.typewriter.timer);
   state.typewriter.timer = 0;
@@ -905,6 +991,23 @@ function renderTypewriter(text, key) {
   }, 24);
 }
 function renderStage() {
+  const pending = typingStateFor();
+  const speechNode = $("stage-speech");
+  if (pending?.channel === "in_person" && ["connecting", "typing", "arrival"].includes(pending.phase)) {
+    window.clearInterval(state.typewriter.timer);
+    state.typewriter.timer = 0;
+    state.typewriter.key = "";
+    state.typewriter.fullText = "";
+    state.typewriter.displayedText = "";
+    speechNode.classList.add("is-typing");
+    speechNode.setAttribute("aria-busy", "true");
+    speechNode.innerHTML = typingIndicatorMarkup(characterById(pending.characterId), { includeAvatar: false });
+    $("stage-message-feedback").disabled = true;
+    $("stage-message-feedback").dataset.messageId = "";
+    return;
+  }
+  speechNode.classList.remove("is-typing");
+  speechNode.setAttribute("aria-busy", "false");
   const assistantMessage = latestInPersonMessage("assistant");
   const latestMessage = latestInPersonMessage();
   const actions = (latestMessage?.contentBlocks || []).filter((block) => block.type === "action").map((block) => block.text);
@@ -942,28 +1045,35 @@ function renderScene() {
   renderStage();
   renderInfo();
 }
-function renderAll() { renderTimeline(); renderStage(); renderTranscript(); renderInfo(); }
+function renderAll() { renderTimeline(); renderStage(); renderTranscript(); renderInfo(); renderRequestStatus(); }
 
 function updateComposerAvailability() {
   const selected = Boolean(state.selected);
   const inPerson = currentThread()?.channel === "in_person";
+  const chatPending = Boolean(typingStateFor());
+  const transitionPending = state.arrivalPending || chatPending;
   $("message-input").disabled = !selected;
-  $("send-message").disabled = !selected || state.arrivalPending;
+  $("send-message").disabled = !selected || state.arrivalPending || chatPending;
+  $("go-in-person").disabled = !selected || transitionPending;
+  $("open-communicator").disabled = !selected || transitionPending;
   $("toggle-sticker").hidden = inPerson;
   $("toggle-action").hidden = !inPerson;
-  $("toggle-sticker").disabled = !selected || state.arrivalPending || inPerson;
-  $("toggle-action").disabled = !selected || state.arrivalPending || !inPerson;
+  $("toggle-sticker").disabled = !selected || state.arrivalPending || chatPending || inPerson;
+  $("toggle-action").disabled = !selected || state.arrivalPending || chatPending || !inPerson;
   $("analyst-action-field").hidden = !inPerson || !state.actionComposerOpen;
   $("toggle-action").setAttribute("aria-expanded", String(inPerson && state.actionComposerOpen));
   $("message-input").placeholder = !selected ? "选择角色后输入消息……" : configured() ? (inPerson ? "说些什么，也可只填写动作……" : "输入文字通讯……") : "可浏览历史；发送前请在设置中配置模型";
   renderSelectedSticker();
 }
-async function setChannel(channel, persist = true) {
-  const thread = currentThread();
+async function setChannel(channel, persist = true, targetThread = null) {
+  const thread = targetThread || currentThread();
   if (thread) {
     thread.channel = channel === "in_person" ? "in_person" : "text";
     if (persist) await dbPutThread(thread);
   }
+  // A character switch may happen while the persistence write is pending.
+  // Only the selected thread owns the visible surface and composer controls.
+  if (thread && thread.characterId !== state.selected) return;
   state.actionComposerOpen = false;
   if (channel === "in_person") state.selectedSticker = null;
   $("chat-app").dataset.channel = channel;
@@ -1053,8 +1163,15 @@ async function runChat(thread, userMessage) {
   userMessage.errorCode = "";
   await dbPutThread(thread);
   renderAll();
+  setTypingState({
+    characterId,
+    requestId,
+    channel: userMessage.communicationChannel,
+    phase: userMessage.communicationChannel === "in_person" ? "typing" : "connecting",
+  });
+  if (userMessage.communicationChannel === "text") setRequestStatus(characterId, "正在连接……");
+  else setRequestStatus(characterId, "");
   $("send-message").disabled = true;
-  $("request-status").textContent = "正在连接……";
   try {
     const response = await fetch(`${apiRoot}/chat/stream`, {
       method: "POST",
@@ -1096,7 +1213,6 @@ async function runChat(thread, userMessage) {
     let contentBlocks = [];
     let degraded = [];
     let returnedChannel = userMessage.communicationChannel;
-    const isCurrentCharacter = () => state.selected === characterId;
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -1109,7 +1225,7 @@ async function runChat(thread, userMessage) {
         if (!event || !data) continue;
         const payload = JSON.parse(data);
         if (event === "meta") {
-          if (isCurrentCharacter()) $("request-status").textContent = "她正在回应……";
+          updateTypingPhase(characterId, requestId, "typing");
         }
         if (event === "delta") {
           const blockIndex = Number.isFinite(Number(payload.block_index)) ? Number(payload.block_index) : 0;
@@ -1124,7 +1240,7 @@ async function runChat(thread, userMessage) {
           } else current.text += plain(payload.text);
           if (payload.block_type) current.type = payload.block_type;
           streamedBlocks.set(blockIndex, current);
-          if (isCurrentCharacter()) $("request-status").textContent = "她正在回应……";
+          updateTypingPhase(characterId, requestId, "typing");
         }
         if (event === "state") await saveWorldPackage(payload.state_package);
         if (event === "done") {
@@ -1149,8 +1265,9 @@ async function runChat(thread, userMessage) {
     await dbPutThread(thread);
     if (state.selected === characterId) {
       renderAll();
-      $("request-status").textContent = degraded.length ? `已完成，降级服务：${degraded.join("、")}` : "已完成";
     }
+    clearTypingState(characterId, requestId);
+    setRequestStatus(characterId, degraded.length ? `已完成，降级服务：${degraded.join("、")}` : "已完成");
     scheduleAutoSummary(thread);
   } catch (error) {
     userMessage.status = "failed";
@@ -1159,9 +1276,13 @@ async function runChat(thread, userMessage) {
     await dbPutThread(thread);
     if (state.selected === characterId) {
       renderAll();
-      $("request-status").textContent = displayError(error);
     }
-  } finally { updateComposerAvailability(); }
+    clearTypingState(characterId, requestId);
+    setRequestStatus(characterId, displayError(error));
+  } finally {
+    clearTypingState(characterId, requestId);
+    updateComposerAvailability();
+  }
 }
 async function sendMessage(event) {
   event.preventDefault();
@@ -1236,71 +1357,95 @@ async function runAutoSummary(thread) {
   } catch (error) {
     // Summary failure never blocks or rewrites the conversation.  Keep the
     // request UUID so the next suitable turn retries idempotently.
-    if (thread.characterId === state.selected) $("request-status").textContent = "对话已完成；连续性整理稍后重试。";
+    if (thread.characterId === state.selected) setRequestStatus(thread.characterId, "对话已完成；连续性整理稍后重试。");
     if (error?.message === "credential_invalid") clearCredential();
   } finally {
     state.summaryInFlight.delete(thread.characterId);
   }
 }
 
-async function transitionPresence(targetChannel) {
-  const result = await api("/presence/transition", { method: "POST", body: JSON.stringify({ request_id: id(), character_id: state.selected, target_channel: targetChannel, action: targetChannel === "in_person" ? "join_character" : "open_communicator", state_package: state.worldPackage || "" }) });
+async function transitionPresence(targetChannel, characterId = state.selected, targetThread = null) {
+  const thread = targetThread || state.threads.get(characterId) || currentThread();
+  const result = await api("/presence/transition", { method: "POST", body: JSON.stringify({ request_id: id(), character_id: characterId, target_channel: targetChannel, action: targetChannel === "in_person" ? "join_character" : "open_communicator", state_package: state.worldPackage || "" }) });
   await saveWorldPackage(result.state_package);
-  state.scene = result.scene_state;
-  await setChannel(targetChannel);
-  renderScene();
+  state.sceneByCharacter.set(characterId, result.scene_state || {});
+  if (state.selected === characterId) state.scene = result.scene_state;
+  await setChannel(targetChannel, true, thread);
+  if (state.selected === characterId) renderScene();
   return result;
 }
 async function arriveInPerson() {
-  if (!state.selected || state.arrivalPending) return;
+  if (!state.selected || state.arrivalPending || typingStateFor()) return;
   state.arrivalPending = true;
   const started = performance.now();
   const characterId = state.selected;
+  const arrivalId = id();
+  const thread = currentThread();
+  const previousChannel = thread?.channel || "text";
+  const ownsArrival = () => ownsTypingState(characterId, arrivalId);
+  const ownsVisibleArrival = () => ownsArrival() && state.selected === characterId;
+  setTypingState({ characterId, requestId: arrivalId, channel: "in_person", phase: "arrival" });
+  await setChannel("in_person", false, thread);
   $("presence-arrival-loading").hidden = false;
   $("stage-presence-status").hidden = false;
-  $("stage-presence-status").textContent = "正在前往……";
+  $("stage-presence-status").textContent = "正在靠近……";
   updateComposerAvailability();
-  const thread = currentThread();
   try {
     if (!configured()) {
-      await transitionPresence("in_person");
-      showBanner("场景已更新。配置模型后可以开始对话。");
+      await transitionPresence("in_person", characterId, thread);
+      if (ownsVisibleArrival()) showBanner("场景已更新。配置模型后可以开始对话。");
       return;
     }
-    const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify({ arrival_id: id(), provider: state.provider, credential: state.credential, model: state.model, character_id: state.selected, recent_history: requestHistory(thread.messages, "", thread.conversationSegmentId), history_summary: thread.continuityDecision === "start_today" ? "" : (thread.summary || ""), state_package: state.worldPackage || "" }) });
+    const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify({ arrival_id: arrivalId, provider: state.provider, credential: state.credential, model: state.model, character_id: characterId, recent_history: requestHistory(thread?.messages || [], "", thread?.conversationSegmentId || ""), history_summary: thread?.continuityDecision === "start_today" ? "" : (thread?.summary || ""), state_package: state.worldPackage || "" }) });
     await saveWorldPackage(result.state_package);
-    state.scene = result.scene_state;
-    if (result.reaction) {
+    state.sceneByCharacter.set(characterId, result.scene_state || {});
+    if (ownsVisibleArrival()) state.scene = result.scene_state;
+    if (thread) thread.channel = "in_person";
+    if (thread && result.reaction) {
       thread.messages.push(normalizeMessage({ id: result.reaction.message_id || id(), role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId }));
-      await dbPutThread(thread);
     }
+    if (thread) await dbPutThread(thread);
     // Populate the arrival turn before exposing the stage. Otherwise
     // setChannel() can make the scene visible for one paint while the
     // reaction is still being persisted, producing an empty dialogue box.
-    await setChannel("in_person");
-    if (result.terminal_error) showBanner(displayError(new Error(result.terminal_error)));
-    else if (result.decision === "unnoticed") showBanner("你来到她身边，她暂时没有注意到。位置切换已经完成。");
-    else showBanner("她注意到了你的到来。");
-    renderAll();
+    if (ownsVisibleArrival()) {
+      await setChannel("in_person");
+      if (result.terminal_error) showBanner(displayError(new Error(result.terminal_error)));
+      else if (result.decision === "unnoticed") showBanner("你来到她身边，她暂时没有注意到。位置切换已经完成。");
+      else showBanner("她注意到了你的到来。");
+      renderAll();
+    }
   } catch (error) {
     if ((error instanceof Error ? error.message : "") === "credential_invalid") {
       clearCredential();
-      await transitionPresence("in_person");
-      showBanner("模型凭证已过期，位置切换已完成；重新配置后才能生成到场反应。");
-    } else showBanner(displayError(error));
+      if (ownsVisibleArrival()) {
+        await transitionPresence("in_person", characterId, thread);
+        showBanner("模型凭证已过期，位置切换已完成；重新配置后才能生成到场反应。");
+      }
+    } else {
+      if (thread) {
+        thread.channel = previousChannel;
+        await dbPutThread(thread);
+      }
+      if (ownsVisibleArrival()) {
+        await setChannel(previousChannel, false);
+        showBanner(displayError(error));
+      }
+    }
   } finally {
     const minimum = reducedMotion() ? 0 : 900;
     const elapsed = performance.now() - started;
     if (elapsed < minimum) await delay(minimum - elapsed);
-    state.arrivalPending = false;
+    if (ownsArrival()) state.arrivalPending = false;
     $("presence-arrival-loading").hidden = true;
     $("stage-presence-status").hidden = true;
+    clearTypingState(characterId, arrivalId);
     updateComposerAvailability();
     if (characterId === state.selected) renderStage();
   }
 }
 async function openPresenceDialog() {
-  if (!state.selected) return;
+  if (!state.selected || state.arrivalPending || typingStateFor()) return;
   try { await resolvePresence(); } catch (error) { return showBanner(displayError(error)); }
   $("presence-dialog-location").textContent = state.scene?.character_location || "当前位置尚未建立";
   $("presence-dialog-activity").textContent = state.scene?.character_activity || "场景建立后即可前往。";
@@ -1391,7 +1536,10 @@ $("stay-on-communicator").onclick = async () => {
   $("presence-dialog").close();
   try { await transitionPresence("text"); } catch (error) { showBanner(displayError(error)); }
 };
-$("open-communicator").onclick = async () => { try { await transitionPresence("text"); } catch (error) { showBanner(displayError(error)); } };
+$("open-communicator").onclick = async () => {
+  if (state.arrivalPending || typingStateFor()) return;
+  try { await transitionPresence("text"); } catch (error) { showBanner(displayError(error)); }
+};
 $("open-contacts").onclick = $("open-stage-contacts").onclick = () => $("contact-panel").classList.add("open");
 $("close-contacts").onclick = () => $("contact-panel").classList.remove("open");
 $("open-info").onclick = () => openDrawer("info-panel");
