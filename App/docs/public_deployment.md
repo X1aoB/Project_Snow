@@ -20,6 +20,7 @@ Keep Cloudflare Access enabled and do not add the MyWebsite play button until a 
 - `/srv/project-snow/app`: symlink to `/srv/project-snow/repo/App`, so operations always run from the selected repository commit's application tree.
 - `/srv/project-snow/data`: current and previous immutable data releases.
 - `/srv/project-snow/runtime`: read-only serving runtime and release metadata.
+- `/srv/project-snow/runtime/public-<main-sha>.env`: versioned non-secret public settings generated from the release manifest for a staged colour; the promoted colour keeps this path in its colour compose environment.
 - `/etc/project-snow/public.env`: non-secret production settings, mode `0640` and group `deploy`, so Compose can read the service environment without placing secrets there.
 - `/etc/project-snow/images.env`: deploy-readable fixed infrastructure image digests, mode `0640` and group `deploy`.
 - `/srv/project-snow/runtime/compose.env`: the last promoted application, embedding and infrastructure image set, written atomically by `ops/promote.sh`.

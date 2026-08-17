@@ -5,12 +5,19 @@ param(
     [string]$AppDigest = '',
     [string]$EmbeddingDigest = '',
     [string]$MediaVersion = '',
-    [string]$HostName = '45.207.211.216',
+    [string]$HostName = 'project-snow-prod',
     [int]$Port = 43556,
-    [string]$IdentityFile = "$env:USERPROFILE\.ssh\project_snow_prod_ed25519"
+    [string]$IdentityFile = "$env:USERPROFILE\.ssh\project_snow_prod_ed25519",
+    [string]$SshConfig = ''
 )
 
 $ErrorActionPreference = 'Stop'
+$resolvedIdentity = (Resolve-Path -LiteralPath $IdentityFile).Path
+$configPath = if ($SshConfig) {
+    (Resolve-Path -LiteralPath $SshConfig).Path
+} else {
+    (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\runtime\project-snow-ssh-config')).Path
+}
 $manifestRemotePath = ''
 if ($ManifestPath) {
     $resolvedManifest = (Resolve-Path -LiteralPath $ManifestPath).Path
@@ -26,7 +33,8 @@ if ($ManifestPath) {
     if ([string]::IsNullOrWhiteSpace($MediaVersion)) { throw 'Release manifest has no media version.' }
     if ([string]::IsNullOrWhiteSpace($StickerVersion)) { throw 'Release manifest has no sticker version.' }
     $manifestRemotePath = '/srv/project-snow/runtime/release-candidate.json'
-    scp -q -i $IdentityFile -P $Port $resolvedManifest "deploy@${HostName}:$manifestRemotePath"
+    $scpArgs = @('-q', '-F', $configPath, '-i', $resolvedIdentity, '-P', [string]$Port, $resolvedManifest, "deploy@${HostName}:$manifestRemotePath")
+    & scp @scpArgs
     if ($LASTEXITCODE -ne 0) { throw 'Release manifest upload failed.' }
 }
 $shaPattern = '^[0-9a-f]{40}$'
@@ -39,5 +47,6 @@ $embeddingImage = "ghcr.io/x1aob/project_snow-embedding@$EmbeddingDigest"
 Write-Host "Staging main commit $Sha in inactive private-acceptance colour $Colour using immutable image digests, avatar media $MediaVersion and stickers $StickerVersion."
 $manifestEnvironment = if ($manifestRemotePath) { "PROJECT_SNOW_RELEASE_MANIFEST='$manifestRemotePath' " } else { '' }
 $remoteCommand = "cd /srv/project-snow/repo && git fetch --quiet origin main && git cat-file -e '$Sha^{commit}' && git merge-base --is-ancestor '$Sha' origin/main && git checkout --quiet --detach '$Sha' && git rev-parse HEAD | grep -Fx '$Sha' && cd App && ${manifestEnvironment}PUBLIC_API_IMAGE='$appImage' EMBEDDING_IMAGE='$embeddingImage' ./ops/deploy.sh '$Colour' '$Sha'"
-ssh -i $IdentityFile -p $Port "deploy@$HostName" $remoteCommand
+$sshArgs = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName", $remoteCommand)
+& ssh @sshArgs
 if ($LASTEXITCODE -ne 0) { throw 'Remote staging failed; active traffic was not changed.' }

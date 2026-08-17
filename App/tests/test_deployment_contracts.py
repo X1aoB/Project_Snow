@@ -171,6 +171,28 @@ class DeploymentContractTests(TestCase):
         self.assertIn("Release manifest has no media version.", script)
         self.assertIn("sticker_version", script)
         self.assertIn("stickers", script)
+        self.assertIn("'-F', $configPath", script)
+        self.assertIn("project-snow-ssh-config", script)
+
+    def test_staged_colour_pins_manifest_versions_in_a_private_env(self) -> None:
+        script = self.read("ops/deploy.sh")
+        self.assertIn(
+            'public_env_source="${PROJECT_SNOW_PUBLIC_ENV:-/etc/project-snow/public.env}"',
+            script,
+        )
+        self.assertIn('public_env_path="$public_env_root/public-$sha.env"', script)
+        self.assertIn("PUBLIC_APP_VERSION=%s", script)
+        self.assertIn("PUBLIC_DATA_VERSION=%s", script)
+        self.assertIn("PUBLIC_MEDIA_VERSION=%s", script)
+        self.assertIn("PUBLIC_STICKER_VERSION=%s", script)
+        self.assertIn("PUBLIC_ENV_FILE=$public_env_path", script)
+        self.assertIn('mv -f "$candidate_public_env" "$public_env_path"', script)
+
+    def test_promotion_and_rollback_use_the_workspace_ssh_config(self) -> None:
+        for relative in ("scripts/promote.ps1", "scripts/rollback.ps1"):
+            script = self.read(relative)
+            self.assertIn("'-F', $configPath", script, relative)
+            self.assertIn("project-snow-ssh-config", script, relative)
 
     def test_fast_deploy_skips_unchanged_data_and_embedding_inputs(self) -> None:
         script = self.read("ops/deploy.sh")

@@ -14,6 +14,8 @@ case "$colour" in blue|green) ;; *) exit 64 ;; esac
 case "$PUBLIC_API_IMAGE:$EMBEDDING_IMAGE" in *@sha256:*@sha256:*) ;; *) echo 'Immutable image digests are required.' >&2; exit 65 ;; esac
 
 static_env="${PROJECT_SNOW_IMAGE_ENV:-/etc/project-snow/images.env}"
+public_env_source="${PROJECT_SNOW_PUBLIC_ENV:-/etc/project-snow/public.env}"
+public_env_root="/srv/project-snow/runtime"
 current_env="${PROJECT_SNOW_COMPOSE_ENV:-/srv/project-snow/runtime/compose.env}"
 release_manifest="${PROJECT_SNOW_RELEASE_MANIFEST:-}"
 current_marker="/srv/project-snow/releases/current"
@@ -29,6 +31,14 @@ if [ ! -r "$static_env" ]; then
   echo "Missing readable static image environment: $static_env" >&2
   exit 66
 fi
+if [ ! -r "$public_env_source" ]; then
+  echo "Missing readable public environment: $public_env_source" >&2
+  exit 66
+fi
+if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+  echo 'Release commit SHA must be 40 lowercase hexadecimal characters.' >&2
+  exit 65
+fi
 
 active_colour=""
 if [ -r "$active_file" ]; then
@@ -41,6 +51,7 @@ if [ "$active_colour" = "$colour" ]; then
 fi
 
 install -d -m 0700 "$colour_env_root" "$colour_release_root"
+install -d -m 0750 "$public_env_root"
 # Bootstrap every durable artifact for the active colour before the first
 # staged release. Older installations only have the promoted compose env,
 # marker, and manifest at their legacy current paths. A partial bootstrap
@@ -80,10 +91,13 @@ fi
 candidate_env="$(mktemp "$colour_env.candidate.XXXXXX")"
 candidate_manifest="$(mktemp "$colour_manifest.candidate.XXXXXX")"
 candidate_marker="$(mktemp "$colour_marker.candidate.XXXXXX")"
+candidate_public_env=""
+public_env_path="$public_env_root/public-$sha.env"
 cleanup() {
   [ -z "${candidate_env:-}" ] || rm -f "$candidate_env"
   [ -z "${candidate_manifest:-}" ] || rm -f "$candidate_manifest"
   [ -z "${candidate_marker:-}" ] || rm -f "$candidate_marker"
+  [ -z "${candidate_public_env:-}" ] || rm -f "$candidate_public_env"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -105,12 +119,19 @@ fi
 
 data_changed=1
 candidate_data_version=""
+candidate_app_version=""
 candidate_media_version=""
 candidate_media_root=""
 candidate_sticker_version=""
 if [ -n "$release_manifest" ]; then
+  candidate_app_version="$(jq -r '.app_version // empty' "$release_manifest")"
+  case "$candidate_app_version" in
+    *[!0-9A-Za-z._-]*|'') echo 'Release manifest has an unsafe or missing application version.' >&2; exit 71 ;;
+  esac
   candidate_data_version="$(jq -r '.data_version // empty' "$release_manifest")"
-  case "$candidate_data_version" in '') echo 'Release manifest has no data version.' >&2; exit 71 ;; esac
+  case "$candidate_data_version" in
+    *[!0-9A-Za-z._-]*|'') echo 'Release manifest has an unsafe or missing data version.' >&2; exit 71 ;;
+  esac
   candidate_media_version="$(jq -r '.media_version // empty' "$release_manifest")"
   case "$candidate_media_version" in
     *[!0-9A-Za-z._-]*|'') echo 'Release manifest has an unsafe or missing media version.' >&2; exit 71 ;;
@@ -144,6 +165,15 @@ if [ -n "$release_manifest" ]; then
 fi
 
 if [ -n "$candidate_media_root" ]; then
+  candidate_public_env="$(mktemp "$public_env_root/public-$sha.candidate.XXXXXX")"
+  cp "$public_env_source" "$candidate_public_env"
+  sed -i -E '/^(PUBLIC_APP_VERSION|PUBLIC_DATA_VERSION|PUBLIC_MEDIA_VERSION|PUBLIC_MEDIA_ROOT|PUBLIC_STICKER_VERSION|PUBLIC_STICKER_ROOT)=/d' "$candidate_public_env"
+  printf 'PUBLIC_APP_VERSION=%s\nPUBLIC_DATA_VERSION=%s\nPUBLIC_MEDIA_VERSION=%s\nPUBLIC_MEDIA_ROOT=%s\nPUBLIC_STICKER_VERSION=%s\nPUBLIC_STICKER_ROOT=/srv/project-snow/media/stickers/current\n' \
+    "$candidate_app_version" "$candidate_data_version" "$candidate_media_version" \
+    "$candidate_media_root" "$candidate_sticker_version" >> "$candidate_public_env"
+  chmod 0640 "$candidate_public_env"
+  sed -i '/^PUBLIC_ENV_FILE=/d' "$candidate_env"
+  printf 'PUBLIC_ENV_FILE=%s\n' "$candidate_public_env" >> "$candidate_env"
   printf 'PUBLIC_MEDIA_VERSION=%s\nPUBLIC_MEDIA_ROOT=%s\n' \
     "$candidate_media_version" "$candidate_media_root" >> "$candidate_env"
   chmod 0600 "$candidate_env"
@@ -185,6 +215,11 @@ if [ "$ready" -ne 1 ]; then
 fi
 compose exec -T "$service" python /app/public_smoke.py http://127.0.0.1:8000
 
+if [ -n "$candidate_public_env" ]; then
+  sed -i "s|^PUBLIC_ENV_FILE=.*|PUBLIC_ENV_FILE=$public_env_path|" "$candidate_env"
+  mv -f "$candidate_public_env" "$public_env_path"
+  candidate_public_env=""
+fi
 printf '%s\n' "$colour $sha $PUBLIC_API_IMAGE $EMBEDDING_IMAGE" > "$candidate_marker"
 chmod 0600 "$candidate_marker"
 if [ -n "$release_manifest" ]; then
