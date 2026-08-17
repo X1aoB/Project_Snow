@@ -26,7 +26,9 @@ x-api: &api
     HTTPS_PROXY: http://egress-proxy:3128
     NO_PROXY: postgres,qdrant,neo4j,embedding,localhost,127.0.0.1
     PUBLIC_TRUST_PROXY_HEADERS: "true"
-    PUBLIC_MEDIA_ROOT: /srv/project-snow/media/current
+    # A staged colour may pin a verified immutable release directory. The
+    # legacy current symlink remains the fallback for unpinned services.
+    PUBLIC_MEDIA_ROOT: ${PUBLIC_MEDIA_ROOT:-/srv/project-snow/media/current}
   volumes:
     - /srv/project-snow/data:/srv/project-snow/data:ro
     - /srv/project-snow/media:/srv/project-snow/media:ro
