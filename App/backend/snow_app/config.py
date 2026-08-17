@@ -179,7 +179,7 @@ class PublicSettings:
         except (TypeError, ValueError):
             feedback_smtp_port = 465
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "0.8.1"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "0.8.2"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_secret_value("PUBLIC_DATABASE_URL"),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),

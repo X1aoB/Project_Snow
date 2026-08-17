@@ -2,7 +2,7 @@
 
 The public process exposes only `/public/v1` and the static immersive client. The existing internal `/api/v1`, attachments, voice, agents and workspace are not mounted by `public_main.py`.
 
-The 0.8.1 client keeps text and in-person messages in IndexedDB v3 and stores one shared signed `public-state-2` world package separately. A v1 package is accepted, completed with the current 22-character presence registry and re-signed as v2. Text messages may contain one manifest-backed sticker after the message text; in-person messages continue to accept `speech` and `action`. Public presence endpoints are:
+The 0.8.2 client keeps text and in-person messages in IndexedDB v3 and stores one shared signed `public-state-2` world package separately. A v1 package is accepted, completed with the current 22-character presence registry and re-signed as v2. Text messages may contain one manifest-backed sticker after the message text; in-person messages continue to accept `speech` and `action`. Public presence endpoints are:
 
 - `POST /public/v1/presence/resolve`: read a character scene without changing revision.
 - `POST /public/v1/presence/transition`: move to the character or open the communicator without a model call.

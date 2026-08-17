@@ -1088,22 +1088,28 @@ class PublicChatService:
             rejected_adjustments = sorted(
                 set(adjustments).intersection(_PUBLIC_WHOLE_ANSWER_FALLBACKS)
             )
+            activity_fallback = self._allows_public_activity_fallback(
+                request,
+                result,
+                rejected_adjustments,
+            )
             if rejected_adjustments:
-                terminal_error = (
-                    "upstream_invalid_response"
-                    if "empty_model_output_guard" in rejected_adjustments
-                    else "role_guard_rejected"
-                )
-                return self._terminal_result(
-                    request,
-                    provider,
-                    total_started,
-                    code=terminal_error,
-                    error_stage="generation_validation",
-                    result=result,
-                    response_adjustments=adjustments,
-                    rejected_adjustments=rejected_adjustments,
-                )
+                if not activity_fallback:
+                    terminal_error = (
+                        "upstream_invalid_response"
+                        if "empty_model_output_guard" in rejected_adjustments
+                        else "role_guard_rejected"
+                    )
+                    return self._terminal_result(
+                        request,
+                        provider,
+                        total_started,
+                        code=terminal_error,
+                        error_stage="generation_validation",
+                        result=result,
+                        response_adjustments=adjustments,
+                        rejected_adjustments=rejected_adjustments,
+                    )
             content_blocks, answer, truncated, safety_category = self._public_generation_content(
                 result,
                 request.communication_channel,
@@ -1134,7 +1140,7 @@ class PublicChatService:
             )
             request_health = self.repository.request_health()
             degraded = sorted(service for service, status in request_health.items() if status != "ok")
-            if set(adjustments).intersection(_PUBLIC_REWRITE_ADJUSTMENTS):
+            if activity_fallback or set(adjustments).intersection(_PUBLIC_REWRITE_ADJUSTMENTS):
                 generation_outcome = "valid_rewrite"
             elif set(adjustments).intersection(_PUBLIC_NORMALIZATION_ADJUSTMENTS):
                 generation_outcome = "normalized"
@@ -1163,6 +1169,45 @@ class PublicChatService:
                     generation_class=generation_outcome,
                 ),
             }
+
+    def _allows_public_activity_fallback(
+        self,
+        request: ChatRequest,
+        result: dict[str, Any],
+        rejected_adjustments: list[str],
+    ) -> bool:
+        """Allow the safe current-activity answer to reach the public UI.
+
+        The dialogue engine may replace a provider answer with a deterministic
+        activity-only response when a provider paraphrases the shared scene
+        label.  That response contains no private location or analyst claim,
+        so treating it as a role rejection made ordinary questions such as
+        ``你在干什么`` unusable.  Keep every other whole-answer fallback on
+        the existing rejection path.
+        """
+        if not rejected_adjustments:
+            return False
+        focus = str(result.get("question_focus") or "")
+        if not focus:
+            try:
+                focus = self.mvp._question_focus(
+                    str(request.message or ""),
+                    self.mvp._query_intents(str(request.message or "")),
+                )
+            except Exception:
+                focus = ""
+        if focus != "current_activity":
+            return False
+        return set(rejected_adjustments).issubset(
+            {
+                "live_scene_guard",
+                "scene_privacy_guard",
+                "mechanical_dialogue_guard",
+                "natural_dialogue_guard",
+                "repetition_guard",
+                "direct_answer_guard",
+            }
+        )
 
     def _public_generation_content(
         self,
