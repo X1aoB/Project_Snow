@@ -24,6 +24,7 @@ jobs:
       data: ${{ steps.classify.outputs.data }}
       embedding: ${{ steps.classify.outputs.embedding }}
       deploy: ${{ steps.classify.outputs.deploy }}
+      plugin: ${{ steps.classify.outputs.plugin }}
       app_image: ${{ steps.classify.outputs.app_image }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       full: ${{ steps.classify.outputs.full }}
@@ -144,6 +145,30 @@ jobs:
         run: alembic upgrade head --sql > migration.sql
         env:
           PUBLIC_DATABASE_URL: postgresql+psycopg://project_snow:ci@postgres/project_snow
+
+  plugin:
+    if: github.event_name == 'pull_request' && needs.changes.outputs.plugin == 'true'
+    needs: changes
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: App
+    env:
+      PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: App/requirements-public.txt
+      - run: pip install -r requirements-public.txt pytest uv
+      - name: Validate Codex plugin and Persona Gateway contracts
+        run: python -m pytest tests/test_codex_plugin.py tests/test_persona_gateway.py -q
+      - name: Launch the configured MCP server through uv
+        run: python scripts/validate_codex_plugin.py --mode portable
+      - run: python -m compileall -q ../plugins/snow-role-assistant
 
   data:
     if: github.event_name == 'pull_request' && needs.changes.outputs.data == 'true'
@@ -322,7 +347,7 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: App/requirements.txt
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt uv
       - run: python -m playwright install --with-deps chromium
       - name: Prepare generated contract fixtures
         run: python scripts/prepare_ci_runtime.py
@@ -376,6 +401,7 @@ jobs:
       - contracts
       - ui
       - api
+      - plugin
       - data
       - deploy
       - app-image

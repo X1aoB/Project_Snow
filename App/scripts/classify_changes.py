@@ -7,15 +7,14 @@ before installing the application environment.
 from __future__ import annotations
 
 import argparse
-from fnmatch import fnmatch
 import json
 import os
-from pathlib import Path
 import subprocess
-from typing import Iterable
+from collections.abc import Iterable
+from fnmatch import fnmatch
+from pathlib import Path
 
-
-CATEGORIES = ("ui", "api", "data", "embedding", "deploy")
+CATEGORIES = ("ui", "api", "data", "embedding", "deploy", "plugin")
 
 DOC_PATTERNS = (
     "*.md",
@@ -30,6 +29,15 @@ UI_PATTERNS = (
     "App/frontend/**",
     "App/tests/test_ui_*.py",
     "App/tests/test_public_frontend_e2e.py",
+)
+
+PLUGIN_PATTERNS = (
+    ".agents/plugins/**",
+    "plugins/**",
+    "App/scripts/validate_codex_plugin.py",
+    "App/tests/test_codex_plugin.py",
+    "App/tests/test_persona_gateway.py",
+    "App/backend/snow_app/persona_gateway.py",
 )
 
 API_PATTERNS = (
@@ -105,7 +113,13 @@ def _matches(path: str, patterns: Iterable[str]) -> bool:
 
 
 def classify(paths: Iterable[str], *, force_full: bool = False) -> dict[str, bool]:
-    normalized = sorted({str(path).replace("\\", "/").lstrip("./") for path in paths if path})
+    normalized = sorted(
+        {
+            str(path).replace("\\", "/").removeprefix("./")
+            for path in paths
+            if path
+        }
+    )
     result = {category: False for category in CATEGORIES}
     result.update({"docs_only": False, "app_image": False, "full": force_full})
     if not normalized:
@@ -121,6 +135,7 @@ def classify(paths: Iterable[str], *, force_full: bool = False) -> dict[str, boo
         result["data"] |= _matches(path, DATA_PATTERNS)
         result["embedding"] |= _matches(path, EMBEDDING_PATTERNS)
         result["deploy"] |= _matches(path, DEPLOY_PATTERNS)
+        result["plugin"] |= _matches(path, PLUGIN_PATTERNS)
         result["app_image"] |= _matches(path, APP_IMAGE_PATTERNS)
 
         known = result["docs_only"] or any(
@@ -131,6 +146,7 @@ def classify(paths: Iterable[str], *, force_full: bool = False) -> dict[str, boo
                 DATA_PATTERNS,
                 EMBEDDING_PATTERNS,
                 DEPLOY_PATTERNS,
+                PLUGIN_PATTERNS,
             )
         )
         if not known:

@@ -36,10 +36,30 @@ class ChangeClassifierTests(TestCase):
         self.assertTrue(result["deploy"])
         self.assertFalse(result["app_image"])
 
+    def test_workflow_change_preserves_dot_directory_and_runs_deploy(self) -> None:
+        result = classify([".github/workflows/ci.yml"])
+        self.assertTrue(result["deploy"])
+        self.assertFalse(result["app_image"])
+
     def test_promotion_script_is_a_deployment_change(self) -> None:
         result = classify(["App/scripts/promote.ps1"])
         self.assertTrue(result["deploy"])
         self.assertFalse(result["app_image"])
+
+    def test_plugin_changes_run_only_the_plugin_risk_tier(self) -> None:
+        result = classify([
+            "plugins/snow-role-assistant/.mcp.json",
+            "App/scripts/validate_codex_plugin.py",
+        ])
+        self.assertTrue(result["plugin"])
+        self.assertFalse(result["api"])
+        self.assertFalse(result["app_image"])
+
+    def test_persona_gateway_changes_run_api_and_plugin_tiers(self) -> None:
+        result = classify(["App/backend/snow_app/persona_gateway.py"])
+        self.assertTrue(result["plugin"])
+        self.assertTrue(result["api"])
+        self.assertTrue(result["app_image"])
 
     def test_unknown_source_change_is_conservative(self) -> None:
         result = classify(["App/new_runtime_component.py"])
