@@ -21,6 +21,16 @@ SERVER_NAME = "snow-persona"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 KEYRING_SERVICE = "ProjectSnow"
 TOKEN_REFERENCE = "persona-codex-current-token"
+SNAPSHOT_TARGET_BYTES = 32_000
+SNAPSHOT_LIST_LIMITS = {
+    "evidence": 2,
+    "evidence_document_ids": 4,
+    "analyst_interaction": 3,
+    "current": 3,
+    "latest_state_evidence": 3,
+    "past": 3,
+    "transitions": 3,
+}
 SERVER_INSTRUCTIONS = (
     "Read-only Project Snow persona server for Codex. At the start of an @Snow task, call "
     "snow_get_configuration once, select the requested or default character, then call "
@@ -49,7 +59,7 @@ def _plugin_version() -> str:
             return version
     except (OSError, json.JSONDecodeError):
         pass
-    return "0.5.0"
+    return "0.5.1"
 
 
 SERVER_VERSION = _plugin_version()
@@ -233,6 +243,92 @@ def _knowledge_limit(arguments: dict[str, Any]) -> int:
     return value
 
 
+def _compact_public_value(
+    value: Any,
+    *,
+    key: str,
+    default_list_limit: int,
+    text_limit: int,
+    stats: dict[str, int],
+) -> Any:
+    if isinstance(value, dict):
+        items = list(value.items())
+        if len(items) > 40:
+            stats["objects"] += 1
+            items = items[:40]
+        return {
+            str(nested_key): _compact_public_value(
+                nested_value,
+                key=str(nested_key),
+                default_list_limit=default_list_limit,
+                text_limit=text_limit,
+                stats=stats,
+            )
+            for nested_key, nested_value in items
+        }
+    if isinstance(value, list):
+        limit = min(SNAPSHOT_LIST_LIMITS.get(key, default_list_limit), default_list_limit)
+        if len(value) > limit:
+            stats["lists"] += 1
+        return [
+            _compact_public_value(
+                item,
+                key=key,
+                default_list_limit=default_list_limit,
+                text_limit=text_limit,
+                stats=stats,
+            )
+            for item in value[:limit]
+        ]
+    if isinstance(value, str) and len(value) > text_limit:
+        stats["strings"] += 1
+        return value[: text_limit - 1] + "…"
+    return value
+
+
+def _project_persona_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    persona = payload.get("persona")
+    if not isinstance(persona, dict):
+        return payload
+    for default_list_limit, text_limit in ((4, 400), (2, 240), (1, 160)):
+        stats = {"lists": 0, "objects": 0, "strings": 0}
+        projected = dict(payload)
+        projected["persona"] = _compact_public_value(
+            persona,
+            key="persona",
+            default_list_limit=default_list_limit,
+            text_limit=text_limit,
+            stats=stats,
+        )
+        projected["projection"] = {
+            "kind": "codex_compact",
+            "truncated": any(stats.values()),
+            "truncated_lists": stats["lists"],
+            "truncated_objects": stats["objects"],
+            "truncated_strings": stats["strings"],
+        }
+        encoded = json.dumps(projected, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        if len(encoded) <= SNAPSHOT_TARGET_BYTES:
+            return projected
+    raise SnowMCPError(
+        "gateway_invalid_response",
+        "Project Snow 人格快照超过 Codex 的安全上下文预算；请更新本地知识投影后重试。",
+    )
+
+
+def _tool_content_text(name: str, payload: dict[str, Any]) -> str:
+    if name != "snow_get_persona_snapshot":
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    summary = {
+        "character": payload.get("character"),
+        "profile_version": payload.get("profile_version"),
+        "projection": payload.get("projection"),
+        "relationship": payload.get("relationship"),
+        "structured_content": "Complete compact persona projection is available in structuredContent.",
+    }
+    return json.dumps(summary, ensure_ascii=False, sort_keys=True)
+
+
 def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "snow_get_configuration":
         _validate_keys(arguments, set())
@@ -240,7 +336,9 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     elif name == "snow_get_persona_snapshot":
         _validate_keys(arguments, {"character_id"})
         character_id = _required_text(arguments, "character_id", 200)
-        payload = _get("/api/v1/persona/snapshot/" + quote(character_id, safe=""))
+        payload = _project_persona_snapshot(
+            _get("/api/v1/persona/snapshot/" + quote(character_id, safe=""))
+        )
     elif name == "snow_search_knowledge":
         _validate_keys(arguments, {"character_id", "query", "limit"})
         payload = _get(
@@ -261,7 +359,7 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         "content": [
             {
                 "type": "text",
-                "text": json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                "text": _tool_content_text(name, payload),
             }
         ],
         "structuredContent": payload,

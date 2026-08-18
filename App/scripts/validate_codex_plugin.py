@@ -32,6 +32,7 @@ PRIVATE_KEYS = {
     "tool_logs",
     "attachments",
 }
+MAX_SNAPSHOT_BYTES = 32_000
 
 
 class ValidationFailure(RuntimeError):
@@ -189,6 +190,16 @@ def _process_environment(server: dict[str, Any]) -> dict[str, str]:
     return environment
 
 
+def _server_cwd(plugin_root: Path, server: dict[str, Any]) -> Path:
+    configured = server.get("cwd")
+    if not isinstance(configured, str) or not configured.strip():
+        raise ValidationFailure("snow-persona cwd 必须指向插件根目录。")
+    resolved = (plugin_root / configured).resolve()
+    if resolved != plugin_root.resolve():
+        raise ValidationFailure("snow-persona cwd 必须解析为插件根目录。")
+    return resolved
+
+
 def _tool_payload(result: dict[str, Any], tool_name: str) -> dict[str, Any]:
     if result.get("isError"):
         error = (result.get("structuredContent") or {}).get("error") or {}
@@ -225,7 +236,8 @@ def validate(
         raise ValidationFailure("snow-persona args 必须是字符串数组。")
     command = [str(server["command"]), *args]
     started = time.perf_counter()
-    with MCPClient(command, plugin_root, _process_environment(server), timeout) as client:
+    server_cwd = _server_cwd(plugin_root, server)
+    with MCPClient(command, server_cwd, _process_environment(server), timeout) as client:
         initialization = client.request(
             "initialize",
             {
@@ -270,16 +282,14 @@ def validate(
             ).strip()
             if not selected_character:
                 raise ValidationFailure("配对没有默认角色；请传入 --character-id。")
-            snapshot = _tool_payload(
-                client.request(
-                    "tools/call",
-                    {
-                        "name": "snow_get_persona_snapshot",
-                        "arguments": {"character_id": selected_character},
-                    },
-                ),
-                "snow_get_persona_snapshot",
+            snapshot_result = client.request(
+                "tools/call",
+                {
+                    "name": "snow_get_persona_snapshot",
+                    "arguments": {"character_id": selected_character},
+                },
             )
+            snapshot = _tool_payload(snapshot_result, "snow_get_persona_snapshot")
             relationship = _tool_payload(
                 client.request(
                     "tools/call",
@@ -307,6 +317,20 @@ def validate(
             leaked_keys = sorted(PRIVATE_KEYS.intersection(_walk_keys(snapshot)))
             if leaked_keys:
                 raise ValidationFailure("人格快照包含私有字段：" + ", ".join(leaked_keys))
+            snapshot_bytes = len(
+                json.dumps(snapshot, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            )
+            if snapshot_bytes > MAX_SNAPSHOT_BYTES:
+                raise ValidationFailure(
+                    f"人格快照为 {snapshot_bytes} bytes，超过 {MAX_SNAPSHOT_BYTES} bytes 门槛。"
+                )
+            if (snapshot.get("projection") or {}).get("kind") != "codex_compact":
+                raise ValidationFailure("人格快照缺少 codex_compact 投影标记。")
+            content = snapshot_result.get("content") or []
+            snapshot_text = content[0].get("text") if content and isinstance(content[0], dict) else ""
+            snapshot_text_bytes = len(str(snapshot_text).encode("utf-8"))
+            if snapshot_text_bytes > 2_048:
+                raise ValidationFailure("人格快照文本重复了完整 structuredContent。")
             snapshot_character = str((snapshot.get("character") or {}).get("character_id") or "")
             relationship_character = str(
                 (relationship.get("character") or {}).get("character_id") or ""
@@ -319,6 +343,8 @@ def validate(
                     "profile_version": snapshot.get("profile_version"),
                     "knowledge_results": len(knowledge.get("results") or []),
                     "private_key_count": 0,
+                    "snapshot_bytes": snapshot_bytes,
+                    "snapshot_text_bytes": snapshot_text_bytes,
                 }
             )
     summary["elapsed_ms"] = round((time.perf_counter() - started) * 1000)

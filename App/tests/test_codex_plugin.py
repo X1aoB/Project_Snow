@@ -55,7 +55,26 @@ class CodexPluginTests(unittest.TestCase):
                                 "preferred_address": "分析员",
                                 "write_back_allowed": False,
                             },
-                            "persona": {"sentence_style": ["concise"]},
+                            "persona": {
+                                "sentence_style": [
+                                    {
+                                        "rule": f"style-{index}",
+                                        "description": "克制而精确" * 400,
+                                        "evidence": [
+                                            {
+                                                "document_id": f"doc-{index}-{evidence}",
+                                                "quote": "公开角色证据" * 200,
+                                            }
+                                            for evidence in range(12)
+                                        ],
+                                    }
+                                    for index in range(20)
+                                ],
+                                "analyst_interaction": [
+                                    {"document_id": f"interaction-{index}", "quote": "分析员" * 500}
+                                    for index in range(20)
+                                ],
+                            },
                         },
                     )
                     return
@@ -118,7 +137,7 @@ class CodexPluginTests(unittest.TestCase):
         process_environment.update(environment or {})
         completed = subprocess.run(
             [server["command"], *server["args"]],
-            cwd=PLUGIN_ROOT,
+            cwd=(PLUGIN_ROOT / server["cwd"]).resolve(),
             env=process_environment,
             input="".join(json.dumps(item) + "\n" for item in messages),
             text=True,
@@ -147,9 +166,10 @@ class CodexPluginTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "snow-role-assistant")
         self.assertRegex(
             manifest["version"],
-            re.compile(r"^0\.5\.0\+codex\.\d{14}$"),
+            re.compile(r"^0\.5\.1(?:\+codex\.\d{14})?$"),
         )
         self.assertEqual(manifest["mcpServers"], "./.mcp.json")
+        self.assertEqual(server["cwd"], ".")
         self.assertEqual(server["command"], "uv")
         self.assertEqual(
             server["args"],
@@ -299,6 +319,8 @@ class CodexPluginTests(unittest.TestCase):
             self.assertEqual(summary["profile_version"], "fixture-v1")
             self.assertEqual(summary["knowledge_results"], 1)
             self.assertEqual(summary["private_key_count"], 0)
+            self.assertLessEqual(summary["snapshot_bytes"], 32_000)
+            self.assertLessEqual(summary["snapshot_text_bytes"], 2_048)
             self.assertEqual(
                 server.seen_paths,
                 [

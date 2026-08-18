@@ -1,6 +1,7 @@
 {
   "mcpServers": {
     "snow-persona": {
+      "cwd": ".",
       "command": "uv",
       "args": [
         "run",
