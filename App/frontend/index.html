@@ -95,12 +95,15 @@
         <article class="plugin-card">
           <header><span class="step-number">02</span><div><h2>安装 Codex 插件</h2><p>首次开发安装使用仓库内本地 marketplace；更新后请新建任务加载。</p></div></header>
           <ol class="plugin-steps">
-            <li>保持 Project Snow API 运行。</li>
+            <li>确认终端可直接运行 Codex CLI 与 <strong>uv</strong>，并保持 Project Snow API 运行。</li>
             <li>在终端将本仓库 marketplace 加入 Codex。</li>
-            <li>安装 <strong>snow-role-assistant</strong>，然后新建任务并输入 <strong>@Snow</strong>。</li>
+            <li>安装并验收 <strong>snow-role-assistant 0.5.1</strong>，然后新建任务并输入 <strong>@Snow</strong>。</li>
           </ol>
-          <pre class="plugin-command"><code>codex plugin marketplace add .
-codex plugin add snow-role-assistant@personal</code></pre>
+          <pre class="plugin-command"><code>uv --version
+codex plugin marketplace add .
+codex plugin add snow-role-assistant@personal
+codex plugin list
+App\.venv\Scripts\python.exe App\scripts\validate_codex_plugin.py --mode live</code></pre>
           <p>插件不会扩大 Codex 权限；文件、Shell、网络和外部写入仍由 Codex 的审批策略控制。</p>
         </article>
 

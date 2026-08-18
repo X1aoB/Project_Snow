@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import unittest
-
+from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 
@@ -59,7 +58,10 @@ class V050SurfaceTests(unittest.TestCase):
         self.assertIn('id="pair-codex"', html)
         self.assertIn('id="revoke-codex"', html)
         self.assertIn('id="test-persona-snapshot"', html)
+        self.assertIn("uv --version", html)
         self.assertIn("codex plugin add snow-role-assistant@personal", html)
+        self.assertIn("codex plugin list", html)
+        self.assertIn("validate_codex_plugin.py --mode live", html)
         self.assertIn('byId("chat-app").hidden = state.surface !== "immersive"', application)
         self.assertIn('byId("plugin-center").hidden = state.surface !== "assistant"', application)
         self.assertIn("/api/v1/persona/pairings", application)
@@ -90,8 +92,15 @@ class V050SurfaceTests(unittest.TestCase):
         self.assertIn('/api/v1/mvp/presence/arrival', application)
         self.assertIn('Math.max(0, 1000 - elapsed)', application)
         self.assertIn('window.requestAnimationFrame(() => resolve())', application)
-        arrival_flow = application[application.index("async function arriveInPerson"):application.index("async function resolveScene")]
-        self.assertLess(arrival_flow.index("state.arrivalPending = null"), arrival_flow.index("arrivalMessage(result, thread)"))
+        arrival_flow = application[
+            application.index("async function arriveInPerson") : application.index(
+                "async function resolveScene"
+            )
+        ]
+        self.assertLess(
+            arrival_flow.index("state.arrivalPending = null"),
+            arrival_flow.index("arrivalMessage(result, thread)"),
+        )
         self.assertIn('function renderStage()', application)
         self.assertIn('function renderTranscript()', application)
         self.assertIn('.in-person-surface', styles)
@@ -125,7 +134,12 @@ class V050SurfaceTests(unittest.TestCase):
         self.assertIn('"schema_version": "project-snow-avatar-1.2"', builder)
         self.assertIn('"stage_focus_x": 50', builder)
         self.assertEqual(manifest["schema_version"], "project-snow-avatar-1.2")
-        self.assertTrue(all(item["portrait_kind"] in {"headshot", "full_body"} for item in manifest["characters"]))
+        self.assertTrue(
+            all(
+                item["portrait_kind"] in {"headshot", "full_body"}
+                for item in manifest["characters"]
+            )
+        )
         self.assertTrue(any(item["portrait_kind"] == "full_body" for item in manifest["characters"]))
 
     def test_immersive_visual_novel_assets_cover_all_scene_keys(self) -> None:
@@ -187,7 +201,19 @@ class V050SurfaceTests(unittest.TestCase):
             for path in ("styles.css", "workspace/styles.css")
         )
         self.assertNotIn("gradient(", styles)
-        for color in ("#ffffff", "#eaf4ff", "#0a5cff", "#062b73", "#24c7ff", "#08234a", "#fbfdff", "#f2f7fb", "#e4edf4", "#b7cad8", "#20384a"):
+        for color in (
+            "#ffffff",
+            "#eaf4ff",
+            "#0a5cff",
+            "#062b73",
+            "#24c7ff",
+            "#08234a",
+            "#fbfdff",
+            "#f2f7fb",
+            "#e4edf4",
+            "#b7cad8",
+            "#20384a",
+        ):
             self.assertIn(color, styles.lower())
 
     def test_electron_is_v050_and_starts_at_selector(self) -> None:

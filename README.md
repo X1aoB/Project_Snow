@@ -374,16 +374,37 @@ Electron 只是沙箱化的浏览器薄壳，不包含 Python、`Data/`、API Ke
 
 先启动 API 和 Web，然后打开 `http://127.0.0.1:8080/assistant/`，选择默认角色并点击“配对 Codex”。
 配对令牌只在数据库中保存 SHA-256 哈希；当前 Codex 凭据由 Windows Credential Manager 保存。
+仓库内插件当前版本为 `0.5.1`，Windows 本机需能直接运行 `codex` 与 `uv`。
 
 首次开发安装在仓库根目录执行：
 
 ```powershell
+uv --version
+codex --version
 codex plugin marketplace add .
+codex plugin add snow-role-assistant@personal
+codex plugin list
+```
+
+安装后先执行可移植验收；API 已运行且完成配对时，再执行四工具 live 验收：
+
+```powershell
+& .\App\.venv\Scripts\python.exe App\scripts\validate_codex_plugin.py --mode portable
+& .\App\.venv\Scripts\python.exe App\scripts\validate_codex_plugin.py --mode live
+```
+
+两个命令均成功后，新建 Codex 任务并输入 `@Snow`。在输入框使用 `/mcp` 可确认 `snow-persona` 已连接。
+若修改了插件，使用 `plugin-creator` 的更新脚本替换 cachebuster，再重新安装并新建任务：
+
+```powershell
+$pluginCreator = Join-Path $env:USERPROFILE ".codex\skills\.system\plugin-creator"
+& .\App\.venv\Scripts\python.exe "$pluginCreator\scripts\update_plugin_cachebuster.py" ".\plugins\snow-role-assistant"
 codex plugin add snow-role-assistant@personal
 ```
 
-之后新建 Codex 任务并输入 `@Snow`。若修改了插件，先运行 `plugin-creator` 提供的 cachebuster 更新脚本，
-重新安装插件并新建任务，使 Codex 加载新的 Skill 与 MCP。撤销配对可在 `/assistant/` 完成。
+`pairing_missing` 表示需要在 `/assistant/` 重新配对；`gateway_unavailable` 表示本地 API 未运行；
+`invalid_configuration` 表示 Gateway 地址不是带显式端口的 HTTP loopback。撤销配对同样在 `/assistant/` 完成，
+撤销后的下一次 MCP 调用会立即失败。
 
 ## API 与本地持久化
 
@@ -416,6 +437,13 @@ cd Project_Snow\App
 python -m unittest discover -s tests -p "test_*.py"
 python scripts/validate_architecture.py
 node --check frontend/app.js
+```
+
+Codex 插件的确定性门禁为：
+
+```powershell
+python -m unittest tests.test_codex_plugin tests.test_persona_gateway
+python scripts/validate_codex_plugin.py --mode portable
 ```
 
 桌面端还可在 API 与 Web 运行时执行：
