@@ -55,6 +55,13 @@ def _plugin_version() -> str:
 SERVER_VERSION = _plugin_version()
 
 
+def _configure_stdio() -> None:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="strict")
+
+
 TOOLS = [
     {
         "name": "snow_get_configuration",
@@ -279,6 +286,11 @@ def _tool_error(exc: Exception) -> dict[str, Any]:
     else:
         code = "internal_error"
         message = "Snow Persona MCP 遇到未预期错误；请查看本地服务状态后重试。"
+        if str(os.getenv("SNOW_PERSONA_DEBUG") or "").strip() == "1":
+            exception_name = type(exc).__name__
+            message += f"（异常类型：{exception_name}）"
+            sys.stderr.write(f"snow-persona internal_error: {exception_name}\n")
+            sys.stderr.flush()
     return {
         "content": [{"type": "text", "text": f"{code}: {message}"}],
         "structuredContent": {"error": {"code": code, "message": message}},
@@ -329,6 +341,7 @@ def _handle(message: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    _configure_stdio()
     for line in sys.stdin:
         try:
             message = json.loads(line)
