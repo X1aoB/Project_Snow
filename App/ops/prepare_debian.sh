@@ -20,7 +20,15 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
 
 id deploy >/dev/null 2>&1 || useradd --create-home --shell /bin/bash deploy
 usermod -aG docker deploy
-install -o deploy -g deploy -m 0750 -d /srv/project-snow/repo /srv/project-snow/runtime /srv/project-snow/releases /srv/project-snow/backups/staging /srv/project-snow/media/releases /srv/project-snow/media/staging
+install -o deploy -g deploy -m 0750 -d \
+  /srv/project-snow/repo \
+  /srv/project-snow/runtime \
+  /srv/project-snow/releases \
+  /srv/project-snow/backups/staging \
+  /srv/project-snow/media/releases \
+  /srv/project-snow/media/staging \
+  /srv/project-snow/media/stickers/releases \
+  /srv/project-snow/media/stickers/staging
 install -o deploy -g deploy -m 0755 -d /srv/project-snow/data
 if [ -d /srv/project-snow/app ] && [ ! -L /srv/project-snow/app ] && [ -z "$(find /srv/project-snow/app -mindepth 1 -maxdepth 1 -print -quit)" ]; then
   rmdir /srv/project-snow/app

@@ -153,6 +153,8 @@ class DeploymentContractTests(TestCase):
         self.assertIn("PasswordAuthentication no", script)
         self.assertIn("ufw allow 43556/tcp", script)
         self.assertIn("-m 0755 -d /srv/project-snow/data", script)
+        self.assertIn("/srv/project-snow/media/stickers/releases", script)
+        self.assertIn("/srv/project-snow/media/stickers/staging", script)
         self.assertIn("-g deploy -m 0750 -d /etc/project-snow", script)
         self.assertIn('"userland-proxy": true', daemon)
 
