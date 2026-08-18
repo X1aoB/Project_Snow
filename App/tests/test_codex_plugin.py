@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import subprocess
-import sys
 import unittest
 
 
@@ -24,10 +24,27 @@ class CodexPluginTests(unittest.TestCase):
         skill = (
             PLUGIN_ROOT / "skills" / "snow-role-assistant" / "SKILL.md"
         ).read_text(encoding="utf-8")
+        mcp_config = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
 
         self.assertEqual(manifest["name"], "snow-role-assistant")
-        self.assertEqual(manifest["version"], "0.5.0")
+        self.assertRegex(
+            manifest["version"],
+            re.compile(r"^0\.5\.0\+codex\.\d{14}$"),
+        )
         self.assertEqual(manifest["mcpServers"], "./.mcp.json")
+        server = mcp_config["mcpServers"]["snow-persona"]
+        self.assertEqual(server["command"], "uv")
+        self.assertEqual(
+            server["args"],
+            [
+                "run",
+                "--with",
+                "keyring>=25.5,<26",
+                "--",
+                "python",
+                "mcp/snow_persona_server/server.py",
+            ],
+        )
         self.assertEqual(marketplace["plugins"][0]["name"], manifest["name"])
         self.assertEqual(
             marketplace["plugins"][0]["source"]["path"],
@@ -39,6 +56,8 @@ class CodexPluginTests(unittest.TestCase):
         self.assertIn("Never write", skill)
 
     def test_mcp_server_lists_read_only_tools_over_stdio(self) -> None:
+        mcp_config = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
+        server = mcp_config["mcpServers"]["snow-persona"]
         messages = [
             {
                 "jsonrpc": "2.0",
@@ -54,12 +73,12 @@ class CodexPluginTests(unittest.TestCase):
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         ]
         completed = subprocess.run(
-            [sys.executable, "mcp/snow_persona_server/server.py"],
+            [server["command"], *server["args"]],
             cwd=PLUGIN_ROOT,
             input="".join(json.dumps(item) + "\n" for item in messages),
             text=True,
             capture_output=True,
-            timeout=15,
+            timeout=30,
             check=True,
         )
         responses = [json.loads(line) for line in completed.stdout.splitlines()]

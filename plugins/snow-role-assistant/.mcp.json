@@ -1,8 +1,15 @@
 {
   "mcpServers": {
     "snow-persona": {
-      "command": "python",
-      "args": ["mcp/snow_persona_server/server.py"],
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "keyring>=25.5,<26",
+        "--",
+        "python",
+        "mcp/snow_persona_server/server.py"
+      ],
       "env": {
         "SNOW_PERSONA_BASE_URL": "http://127.0.0.1:8000"
       }
