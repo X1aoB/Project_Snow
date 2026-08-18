@@ -123,6 +123,7 @@ candidate_app_version=""
 candidate_media_version=""
 candidate_media_root=""
 candidate_sticker_version=""
+candidate_sticker_root=""
 if [ -n "$release_manifest" ]; then
   candidate_app_version="$(jq -r '.app_version // empty' "$release_manifest")"
   case "$candidate_app_version" in
@@ -145,12 +146,11 @@ if [ -n "$release_manifest" ]; then
   fi
   candidate_sticker_version="$(jq -r '.sticker_version // empty' "$release_manifest")"
   case "$candidate_sticker_version" in '') echo 'Release manifest has no sticker version.' >&2; exit 71 ;; esac
-  active_sticker_version=""
-  if [ -r /srv/project-snow/media/stickers/current/manifest.json ]; then
-    active_sticker_version="$(jq -r '.media_version // empty' /srv/project-snow/media/stickers/current/manifest.json)"
-  fi
-  if [ "$candidate_sticker_version" != "$active_sticker_version" ]; then
-    echo "Sticker media $candidate_sticker_version must be downloaded, verified and promoted before application staging (active: ${active_sticker_version:-none})." >&2
+  candidate_sticker_root="/srv/project-snow/media/stickers/releases/$candidate_sticker_version"
+  candidate_sticker_manifest="$candidate_sticker_root/manifest.json"
+  if [ ! -r "$candidate_sticker_manifest" ] ||
+     [ "$(jq -r '.media_version // empty' "$candidate_sticker_manifest")" != "$candidate_sticker_version" ]; then
+    echo "Sticker media $candidate_sticker_version must be downloaded, verified and staged before application staging." >&2
     exit 73
   fi
   current_data_version=""
@@ -168,9 +168,9 @@ if [ -n "$candidate_media_root" ]; then
   candidate_public_env="$(mktemp "$public_env_root/public-$sha.candidate.XXXXXX")"
   cp "$public_env_source" "$candidate_public_env"
   sed -i -E '/^(PUBLIC_APP_VERSION|PUBLIC_DATA_VERSION|PUBLIC_MEDIA_VERSION|PUBLIC_MEDIA_ROOT|PUBLIC_STICKER_VERSION|PUBLIC_STICKER_ROOT)=/d' "$candidate_public_env"
-  printf 'PUBLIC_APP_VERSION=%s\nPUBLIC_DATA_VERSION=%s\nPUBLIC_MEDIA_VERSION=%s\nPUBLIC_MEDIA_ROOT=%s\nPUBLIC_STICKER_VERSION=%s\nPUBLIC_STICKER_ROOT=/srv/project-snow/media/stickers/current\n' \
+  printf 'PUBLIC_APP_VERSION=%s\nPUBLIC_DATA_VERSION=%s\nPUBLIC_MEDIA_VERSION=%s\nPUBLIC_MEDIA_ROOT=%s\nPUBLIC_STICKER_VERSION=%s\nPUBLIC_STICKER_ROOT=%s\n' \
     "$candidate_app_version" "$candidate_data_version" "$candidate_media_version" \
-    "$candidate_media_root" "$candidate_sticker_version" >> "$candidate_public_env"
+    "$candidate_media_root" "$candidate_sticker_version" "$candidate_sticker_root" >> "$candidate_public_env"
   chmod 0640 "$candidate_public_env"
   sed -i '/^PUBLIC_ENV_FILE=/d' "$candidate_env"
   printf 'PUBLIC_ENV_FILE=%s\n' "$candidate_public_env" >> "$candidate_env"

@@ -4,6 +4,12 @@ umask 027
 
 version="${1:?sticker media version required}"
 : "${R2_STICKER_REMOTE:?rclone remote path required, for example r2:bucket/private-content/project-snow/stickers}"
+mode="${2:-promote}"
+
+case "$mode" in
+  promote|stage-only) ;;
+  *) echo 'Sticker media mode must be promote or stage-only.' >&2; exit 64 ;;
+esac
 
 case "$version" in
   *[!0-9A-Za-z._-]*|'') echo 'Unsafe sticker media version.' >&2; exit 64 ;;
@@ -77,6 +83,12 @@ if [ -e "$target" ]; then
 fi
 mv -- "$staging" "$target"
 staging=""
+
+if [ "$mode" = "stage-only" ]; then
+  echo "Staged sticker media $version without changing the current symlink."
+  exit 0
+fi
+
 previous=""
 if [ -L "$media_root/current" ]; then
   previous="$(readlink "$media_root/current")"

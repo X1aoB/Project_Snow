@@ -185,6 +185,9 @@ class DeploymentContractTests(TestCase):
         self.assertIn("PUBLIC_DATA_VERSION=%s", script)
         self.assertIn("PUBLIC_MEDIA_VERSION=%s", script)
         self.assertIn("PUBLIC_STICKER_VERSION=%s", script)
+        self.assertIn('candidate_sticker_root="/srv/project-snow/media/stickers/releases/', script)
+        self.assertIn("PUBLIC_STICKER_ROOT=%s", script)
+        self.assertNotIn("active_sticker_version", script)
         self.assertIn("PUBLIC_ENV_FILE=$public_env_path", script)
         self.assertIn('mv -f "$candidate_public_env" "$public_env_path"', script)
 
@@ -199,6 +202,9 @@ class DeploymentContractTests(TestCase):
             'content_hash == .sha256',
         ):
             self.assertIn(required, script)
+        self.assertIn('mode="${2:-promote}"', script)
+        self.assertIn('if [ "$mode" = "stage-only" ]', script)
+        self.assertIn("without changing the current symlink", script)
 
     def test_promotion_and_rollback_use_the_workspace_ssh_config(self) -> None:
         for relative in ("scripts/promote.ps1", "scripts/rollback.ps1"):
