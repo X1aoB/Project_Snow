@@ -2,13 +2,13 @@
 
 The public process exposes only `/public/v1` and the static immersive client. The existing internal `/api/v1`, attachments, voice, agents and workspace are not mounted by `public_main.py`.
 
-The 0.8.3 client keeps text and in-person messages in IndexedDB v3 and stores one shared signed `public-state-2` world package separately. A v1 package is accepted, completed with the current 22-character presence registry and re-signed as v2. Text messages may contain one manifest-backed sticker after the message text; in-person messages continue to accept `speech` and `action`. Public presence endpoints are:
+The 0.8.4 client keeps text and in-person messages in IndexedDB v3 and stores one shared signed `public-state-2` world package separately. A v1 package is accepted, completed with the current 22-character presence registry and re-signed as v2. Text messages may contain one manifest-backed sticker after the message text; in-person messages continue to accept `speech` and `action`. Public presence endpoints are:
 
 - `POST /public/v1/presence/resolve`: read a character scene without changing revision.
 - `POST /public/v1/presence/transition`: move to the character or open the communicator without a model call.
 - `POST /public/v1/presence/arrival`: make one idempotent 50/50 arrival decision; only the noticed branch consumes chat quota and invokes the current BYOK model.
 
-Arrival generation failures keep the signed location transition but return no fabricated role dialogue. The daily character schedule is deterministic (HMAC-derived) and shared for all anonymous users in the Hong Kong calendar day; its signed package includes `schedule_date`, `generated_at`, and the next-midnight `expires_at`. A browser can explicitly continue yesterday's segment or start a new one without sending yesterday's transcript. Sticker media `2026.08.16.sticker.1` is a separate private candidate package with 363 resources (29 GIFs), verified by manifest and SHA256SUMS before promotion.
+Arrival generation failures keep the signed location transition but return no fabricated role dialogue. The daily character schedule is deterministic (HMAC-derived) and shared for all anonymous users in the Hong Kong calendar day; its signed package includes `schedule_date`, `generated_at`, and the next-midnight `expires_at`. A browser can explicitly continue yesterday's segment or start a new one without sending yesterday's transcript. Sticker media `2026.08.18.sticker.1` is a separate independently verified public package with 363 resources (29 GIFs), role/emotion metadata, CC BY-NC-SA 4.0 attribution evidence, and manifest/SHA256SUMS verification before promotion.
 
 ## Private acceptance gate
 

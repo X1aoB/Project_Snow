@@ -142,7 +142,7 @@ class PublicSettings:
     media_root: Path = Path("/srv/project-snow/media/current")
     experience_notice_version: str = "0.8"
     arrival_probability: float = 0.5
-    sticker_version: str = "2026.08.16.sticker.1"
+    sticker_version: str = "2026.08.18.sticker.1"
     sticker_root: Path = Path("/srv/project-snow/media/stickers/current")
     feedback_email_to: str = "admin@xiaob.dev"
     feedback_email_from: str = ""
@@ -179,7 +179,7 @@ class PublicSettings:
         except (TypeError, ValueError):
             feedback_smtp_port = 465
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "0.8.3"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "0.8.4"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_secret_value("PUBLIC_DATABASE_URL"),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),
@@ -210,7 +210,7 @@ class PublicSettings:
                 "PUBLIC_EXPERIENCE_NOTICE_VERSION", "0.8"
             ).strip(),
             arrival_probability=max(0.0, min(1.0, arrival_probability)),
-            sticker_version=os.getenv("PUBLIC_STICKER_VERSION", "2026.08.16.sticker.1").strip(),
+            sticker_version=os.getenv("PUBLIC_STICKER_VERSION", "2026.08.18.sticker.1").strip(),
             sticker_root=Path(
                 os.getenv("PUBLIC_STICKER_ROOT", "/srv/project-snow/media/stickers/current")
             ).resolve(),

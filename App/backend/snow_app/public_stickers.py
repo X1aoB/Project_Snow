@@ -14,6 +14,14 @@ from typing import Any
 _ASSET_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{5,63}\Z")
 
 
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 class PublicStickerCatalog:
     """Validate a sticker release and expose only manifest-backed URLs."""
 
@@ -61,6 +69,14 @@ class PublicStickerCatalog:
 
             if manifest and str(manifest.get("media_version") or "") != self.version:
                 errors.append("media_version_mismatch")
+            if manifest and str(manifest.get("schema_version") or "") != "project-snow-sticker-1":
+                errors.append("schema_version_mismatch")
+            if manifest and manifest.get("private_candidate") is not False:
+                errors.append("license_review_incomplete")
+            if manifest and str(manifest.get("license_review_status") or "") != "verified_public_release":
+                errors.append("license_review_status_invalid")
+            if manifest and not str(manifest.get("license_policy") or "").strip():
+                errors.append("license_policy_missing")
             checksum_entries: dict[str, str] = {}
             try:
                 lines = self.checksums_path.read_text(encoding="utf-8").splitlines()
@@ -104,6 +120,37 @@ class PublicStickerCatalog:
                     errors.append(f"sticker_asset_id_invalid:{asset_id[:24]}")
                     continue
                 indexed[asset_id] = item
+                owners = item.get("character_ids")
+                tags = item.get("emotion_tags")
+                scope = str(item.get("candidate_scope") or "")
+                if not isinstance(owners, list) or any(
+                    not re.fullmatch(r"[0-9a-f]{12}", str(value)) for value in owners
+                ):
+                    errors.append(f"sticker_character_scope_invalid:{asset_id}")
+                    continue
+                if not isinstance(tags, list) or not tags or any(
+                    not str(value).strip() for value in tags
+                ):
+                    errors.append(f"sticker_emotion_tags_invalid:{asset_id}")
+                    continue
+                if scope not in {"character", "generic"} or (scope == "character") != bool(owners):
+                    errors.append(f"sticker_candidate_scope_invalid:{asset_id}")
+                    continue
+                source_fields = ("file_page_url", "source_page_url", "source_image_url")
+                if any(
+                    not str(item.get(field) or "").startswith("https://")
+                    for field in source_fields
+                ):
+                    errors.append(f"sticker_source_invalid:{asset_id}")
+                    continue
+                if (
+                    "CC BY-NC-SA 4.0" not in str(item.get("license") or "")
+                    or str(item.get("license_version") or "") != "4.0"
+                    or str(item.get("license_status") or "") != "verified"
+                    or not str(item.get("attribution") or "").strip()
+                ):
+                    errors.append(f"sticker_license_invalid:{asset_id}")
+                    continue
                 relative = str(item.get("path") or "").replace("\\", "/")
                 relative_path = Path(relative)
                 if not relative or relative_path.is_absolute() or ".." in relative_path.parts:
@@ -118,6 +165,9 @@ class PublicStickerCatalog:
                     errors.append(f"unsafe_sticker_path:{asset_id}")
                     continue
                 expected = str(item.get("sha256") or "").lower()
+                if str(item.get("content_hash") or "").lower() != expected:
+                    errors.append(f"sticker_content_hash_mismatch:{asset_id}")
+                    continue
                 if not candidate.is_file():
                     errors.append(f"sticker_file_missing:{asset_id}")
                     continue
@@ -167,7 +217,8 @@ class PublicStickerCatalog:
                 "media_version": self.version,
                 "manifest": "ok" if manifest else "unavailable",
                 "checksums": "ok" if "checksums_missing" not in errors and "manifest_checksum_mismatch" not in errors else "unavailable",
-                "sticker_count": len(indexed),
+                # Never advertise a partial or unreviewed package as usable.
+                "sticker_count": verified if not errors else 0,
                 "expected_sticker_count": expected_count,
                 "verified_file_count": verified,
                 "errors": errors[:24],
@@ -199,6 +250,9 @@ class PublicStickerCatalog:
                 "animated": bool(item.get("animated")),
                 "width": int(item.get("width") or 0),
                 "height": int(item.get("height") or 0),
+                "character_ids": _string_list(item.get("character_ids") or item.get("character_scope")),
+                "emotion_tags": _string_list(item.get("emotion_tags") or item.get("tags")),
+                "candidate_scope": str(item.get("candidate_scope") or ("character" if item.get("character_ids") else "generic")),
             })
         next_cursor = start + len(page) if start + len(page) < len(values) else None
         return {"stickers": output, "next_cursor": next_cursor, "status": status["status"]}
@@ -219,4 +273,7 @@ class PublicStickerCatalog:
             "thumbnail_src": prefix + str(item.get("thumbnail_path") or item.get("path") or "").lstrip("/"),
             "mime_type": str(item.get("mime_type") or "image/png"),
             "animated": bool(item.get("animated")),
+            "character_ids": _string_list(item.get("character_ids") or item.get("character_scope")),
+            "emotion_tags": _string_list(item.get("emotion_tags") or item.get("tags")),
+            "candidate_scope": str(item.get("candidate_scope") or ("character" if item.get("character_ids") else "generic")),
         }

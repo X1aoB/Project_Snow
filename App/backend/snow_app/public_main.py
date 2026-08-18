@@ -247,6 +247,7 @@ def create_app(
 
     @app.get("/public/v1/config")
     def config() -> dict[str, Any]:
+        sticker_status = chat_service.stickers.verify()
         enabled = []
         for provider_id in public_settings.enabled_providers:
             spec = PROVIDERS.get(provider_id)
@@ -283,8 +284,13 @@ def create_app(
             "analyst_avatar": chat_service.analyst_avatar(),
             "experience_notice_version": public_settings.experience_notice_version,
             "sticker_version": public_settings.sticker_version,
-            "sticker_count": int(chat_service.stickers.verify().get("sticker_count") or 0),
-            "sticker_manifest_url": f"/media/{public_settings.sticker_version}/manifest.json",
+            "sticker_count": int(sticker_status.get("sticker_count") or 0),
+            # Keep an unreviewed/private package out of the public URL space.
+            "sticker_manifest_url": (
+                f"/media/{public_settings.sticker_version}/manifest.json"
+                if sticker_status.get("status") == "ok"
+                else None
+            ),
             "state_schedule": {
                 "scope": "shared_daily",
                 "timezone": "Asia/Hong_Kong",
@@ -654,7 +660,7 @@ def create_app(
                 block_text = str(block.get("text") or "")
                 if block_type == "sticker":
                     # Metadata is sent in a delta so older clients can ignore
-                    # it while 0.8.3 clients render the asset after speech.
+                    # it while 0.8.4 clients render the asset after speech.
                     yield _sse(
                         "delta",
                         {
@@ -679,7 +685,14 @@ def create_app(
                         },
                     )
             if result_payload.get("state_package"):
-                yield _sse("state", {"state_package": result_payload["state_package"]})
+                state_event_payload: dict[str, Any] = {
+                    "state_package": result_payload["state_package"],
+                }
+                if result_payload.get("scene_state"):
+                    state_event_payload["scene_state"] = result_payload["scene_state"]
+                if result_payload.get("state_event"):
+                    state_event_payload["state_event"] = result_payload["state_event"]
+                yield _sse("state", state_event_payload)
             yield _sse(
                 "done",
                 {
@@ -689,6 +702,7 @@ def create_app(
                     "safety_category": result_payload.get("safety_category"),
                     "communication_channel": result_payload.get("communication_channel", "text"),
                     "content_blocks": content_blocks,
+                    "diagnostics": result_payload.get("diagnostics") or {},
                 },
             )
 
@@ -939,7 +953,10 @@ def create_app(
             StaticFiles(directory=public_settings.media_root, html=False),
             name="public_media",
         )
-    if public_settings.sticker_root.is_dir():
+    if (
+        public_settings.sticker_root.is_dir()
+        and chat_service.stickers.verify().get("status") == "ok"
+    ):
         app.mount(
             f"/media/{public_settings.sticker_version}",
             StaticFiles(directory=public_settings.sticker_root, html=False),

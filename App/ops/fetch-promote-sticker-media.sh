@@ -37,6 +37,28 @@ manifest_version="$(jq -r '.media_version // empty' "$staging/manifest.json")"
 sticker_count="$(jq -r '.count // 0' "$staging/manifest.json")"
 test "$manifest_version" = "$version"
 test "$sticker_count" -eq 363
+jq -e '
+  .schema_version == "project-snow-sticker-1" and
+  .private_candidate == false and
+  .license_review_status == "verified_public_release" and
+  ((.license_policy // "") | length > 0) and
+  (.stickers | length == 363) and
+  all(.stickers[];
+    ((.asset_id // "") | test("^[A-Za-z0-9][A-Za-z0-9_-]{5,63}$")) and
+    (.character_ids | type == "array") and
+    (all(.character_ids[]; test("^[0-9a-f]{12}$"))) and
+    (.emotion_tags | type == "array" and length > 0) and
+    (.candidate_scope == (if (.character_ids | length) > 0 then "character" else "generic" end)) and
+    ((.file_page_url // "") | startswith("https://")) and
+    ((.source_page_url // "") | startswith("https://")) and
+    ((.source_image_url // "") | startswith("https://")) and
+    ((.license // "") | contains("CC BY-NC-SA 4.0")) and
+    .license_version == "4.0" and
+    .license_status == "verified" and
+    ((.attribution // "") | length > 0) and
+    .content_hash == .sha256
+  )
+' "$staging/manifest.json" >/dev/null
 (
   cd "$staging"
   sha256sum -c SHA256SUMS

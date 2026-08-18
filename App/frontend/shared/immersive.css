@@ -1,6 +1,6 @@
 :root {
   color-scheme: light;
-  --snow-design-version: "0.8.3";
+  --snow-design-version: "0.8.4";
   --sidebar-width: 304px;
   --topbar-height: 80px;
   --character-row-height: 72px;
@@ -87,6 +87,20 @@ input, textarea, select { min-height: 44px; }
   backdrop-filter: blur(7px);
   transition: opacity 180ms ease;
 }
+.mode-transition-layer {
+  position: absolute;
+  z-index: 75;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--snow-ink);
+  background: rgba(225, 237, 244, .84);
+  backdrop-filter: blur(7px);
+  opacity: 1;
+  transition: opacity 180ms ease;
+}
+.mode-transition-layer[data-phase="entering"] { opacity: 0; }
+.mode-transition-layer[hidden] { display: none !important; }
 .scene-transition-layer[data-phase="leaving"] { opacity: 1; }
 .scene-transition-layer[data-phase="entering"] { opacity: 0; }
 .transition-card {

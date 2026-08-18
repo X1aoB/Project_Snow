@@ -73,15 +73,24 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
         if path == "/public/v1/characters":
             self._json(
                 {
-                    "count": 1,
+                    "count": 2,
                     "characters": [
                         {
                             "character_id": "25b23cb64398",
                             "display_name": "凯茜娅",
                             "aliases": ["凯茜娅", "凯西娅"],
+                            "search_tokens": ["kxy", "kaixiya"],
                             "avatar": None,
                             "license": "fixture",
-                        }
+                        },
+                        {
+                            "character_id": "9f5804761c56",
+                            "display_name": "安卡希雅",
+                            "aliases": ["安卡希雅"],
+                            "search_tokens": ["akxy", "ankaxiya"],
+                            "avatar": None,
+                            "license": "fixture",
+                        },
                     ],
                 }
             )
@@ -226,13 +235,50 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             meta_packet = (
                 f'event: meta\ndata: {json.dumps({"request_id": payload.get("request_id"), "character_id": payload.get("character_id"), "provider": "openai", "model": "gpt-e2e", "communication_channel": channel}, ensure_ascii=False)}\n\n'
             ).encode()
-            remaining_packets = "".join(
-                (
-                    'event: delta\ndata: {"text":"晚上好，分析员。"}\n\n',
-                    'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
-                    f'event: done\ndata: {json.dumps({"truncated": False, "degraded_services": [], "communication_channel": channel, "content_blocks": [{"type": block_type, "text": "晚上好，分析员。"}]}, ensure_ascii=False)}\n\n',
-                )
-            ).encode()
+            if payload.get("message") == "多段测试":
+                blocks = [
+                    {"type": "message", "text": "第一段"},
+                    {"type": "message", "text": "第二段"},
+                    {
+                        "type": "sticker",
+                        "asset_id": "fixture-sticker",
+                        "caption": "收到",
+                        "src": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+                        "thumbnail_src": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+                        "animated": False,
+                    },
+                ] if channel == "text" else [
+                    {"type": "action", "text": "凯茜娅抬起手。"},
+                    {"type": "speech", "text": "第一句。"},
+                    {"type": "speech", "text": "第二句。"},
+                ]
+                delta_packets = []
+                for index, block in enumerate(blocks):
+                    if block["type"] == "sticker":
+                        delta_packets.append(
+                            "event: delta\ndata: "
+                            + json.dumps({"block_index": index, "block_type": "sticker", **block}, ensure_ascii=False)
+                            + "\n\n"
+                        )
+                    else:
+                        delta_packets.append(
+                            "event: delta\ndata: "
+                            + json.dumps({"block_index": index, "block_type": block["type"], "text": block["text"]}, ensure_ascii=False)
+                            + "\n\n"
+                        )
+                remaining_packets = "".join(
+                    (*delta_packets,
+                     'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
+                     f'event: done\ndata: {json.dumps({"truncated": False, "degraded_services": [], "communication_channel": channel, "content_blocks": blocks}, ensure_ascii=False)}\n\n')
+                ).encode()
+            else:
+                remaining_packets = "".join(
+                    (
+                        'event: delta\ndata: {"text":"晚上好，分析员。"}\n\n',
+                        'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
+                        f'event: done\ndata: {json.dumps({"truncated": False, "degraded_services": [], "communication_channel": channel, "content_blocks": [{"type": block_type, "text": "晚上好，分析员。"}]}, ensure_ascii=False)}\n\n',
+                    )
+                ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Content-Length", str(len(meta_packet) + len(remaining_packets)))
@@ -365,7 +411,7 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#message-input").fill("晚上好")
             page.locator("#send-message").click()
             page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
-            self.assertEqual(page.locator("#request-status .typing-indicator").count(), 0)
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
             self.assertEqual(page.locator(".message-avatar .portrait").count(), 2)
             self.assertEqual(page.locator(".analyst-portrait img").count(), 1)
             self.assertEqual(page.locator(".analyst-portrait").count(), 1)
@@ -409,21 +455,21 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#message-input").fill("晚上好")
             page.locator("#send-message").click()
             self.assertTrue(PublicFrontendHandler.chat_stream_started.wait(timeout=5))
-            text_indicator = page.locator("#request-status .typing-indicator")
+            text_indicator = page.locator("#timeline .typing-indicator")
             text_indicator.wait_for(state="visible")
             self.assertEqual(text_indicator.count(), 1)
             self.assertEqual(text_indicator.get_attribute("aria-label"), "角色正在输入")
             self.assertEqual(page.locator("#request-status").get_attribute("aria-busy"), "true")
             self.assertTrue(page.locator("#go-in-person").is_disabled())
             self.assertEqual(
-                page.locator("#request-status .typing-dot").first.evaluate(
+                page.locator("#timeline .typing-dot").first.evaluate(
                     "element => getComputedStyle(element).animationName"
                 ),
                 "none",
             )
             PublicFrontendHandler.chat_stream_release.set()
             page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
-            self.assertEqual(page.locator("#request-status .typing-indicator").count(), 0)
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
 
             PublicFrontendHandler.arrival_started = threading.Event()
             PublicFrontendHandler.arrival_release = threading.Event()
@@ -483,6 +529,54 @@ class PublicFrontendE2ETests(TestCase):
                 page.goto(f"{self.base_url}/privacy/", wait_until="networkidle")
                 self._assert_no_horizontal_overflow(page)
                 page.close()
+            browser.close()
+
+    def test_desktop_contacts_toggle_and_exact_pinyin_search(self) -> None:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator("#character-list").get_by_text("凯茜娅").wait_for(state="visible")
+            page.locator("#character-search").fill("kxy")
+            self.assertEqual(page.locator("#character-list [data-character]").count(), 1)
+            self.assertIn("凯茜娅", page.locator("#character-list").inner_text())
+            self._configure_model(page)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#in-person-surface").wait_for(state="visible")
+            page.locator("#open-stage-contacts").click()
+            self.assertEqual(page.locator("#open-stage-contacts").get_attribute("aria-expanded"), "false")
+            self.assertTrue(page.locator("#chat-app").evaluate("element => element.classList.contains('sidebar-collapsed')"))
+            page.locator("#open-stage-contacts").click()
+            self.assertEqual(page.locator("#open-stage-contacts").get_attribute("aria-expanded"), "true")
+            browser.close()
+
+    def test_presentation_queue_shows_between_text_and_face_to_face_segments(self) -> None:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page()
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#message-input").fill("多段测试")
+            page.locator("#send-message").click()
+            page.locator("#timeline").get_by_text("第一段").wait_for(state="visible")
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 1)
+            page.locator("#timeline").get_by_text("第二段").wait_for(state="visible")
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 1)
+            page.locator("#timeline").get_by_text("收到").wait_for(state="visible")
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#in-person-surface").wait_for(state="visible")
+            page.locator("#message-input").fill("多段测试")
+            page.locator("#send-message").click()
+            page.locator("#stage-speech .typing-indicator").wait_for(state="visible")
+            page.locator("#stage-speech").get_by_text("第一句。").wait_for(state="visible")
+            page.locator("#stage-speech .typing-indicator").wait_for(state="visible")
+            page.locator("#stage-speech").get_by_text("第二句。").wait_for(state="visible")
+            self.assertEqual(page.locator("#stage-narration").inner_text(), "凯茜娅抬起手。")
             browser.close()
 
     def test_mobile_contacts_scroll_and_text_sticker_selection(self) -> None:

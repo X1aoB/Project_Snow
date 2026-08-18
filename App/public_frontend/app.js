@@ -19,6 +19,11 @@ const state = {
   sceneByCharacter: new Map(),
   latest: new Map(),
   typingByCharacter: new Map(),
+  presentationByCharacter: new Map(),
+  chatRequestByCharacter: new Map(),
+  modeTransitionSequence: 0,
+  modeTransitionPending: false,
+  modeTransitionController: null,
   requestStatusByCharacter: new Map(),
   feedbackMessageId: "",
   arrivalPending: false,
@@ -67,6 +72,7 @@ const errorMessages = {
   chat_failed: "对话请求失败，请稍后重试。",
   request_failed: "请求失败，请稍后重试。",
   request_timeout: "提交超时，反馈未能确认是否送达；请稍后重试。",
+  request_cancelled: "请求已取消。",
   experience_notice_required: "请先阅读并确认体验说明。",
   sticker_unavailable: "这个表情暂时不可用，请换一个或稍后再试。",
 };
@@ -105,6 +111,34 @@ function formatBytes(bytes) {
 }
 function delay(milliseconds) { return new Promise((resolve) => window.setTimeout(resolve, milliseconds)); }
 function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+function normalizedSearch(value) {
+  return plain(value).toLocaleLowerCase("zh-CN").replace(/[\s'·-]/g, "");
+}
+const CHAT_STREAM_TIMEOUT_MS = 165000;
+const LOCAL_PINYIN_TOKENS = {
+  "78aa7ab99154": ["yqe", "yiqieer"],
+  "d5ecfceba959": ["klrn", "keluoruina"],
+  "25b23cb64398": ["kxy", "kaixiya"],
+  "6455a5dcff6a": ["bb", "bubu"],
+  "41b7444e39cc": ["nld", "nailide"],
+  "4370a74d6fda": ["nt", "nita"],
+  "9f5804761c56": ["akxy", "ankaxiya"],
+  "43f05917bfa1": ["ey", "enya"],
+  "921f9ef0cc4e": ["q", "qing", "mlq", "minglaiqing"],
+  "6862c43d2ac9": ["mxe", "maoxier"],
+  "8d5b5c3912bb": ["qn", "qinnuo", "qin nuo"],
+  "85b205f6f623": ["srs", "seruisi"],
+  "702f4375675b": ["my", "mia", "miya"],
+  "cf0569ac6de9": ["y", "yao"],
+  "447ed3c401c9": ["ly", "longyan"],
+  "a2ffc5b44d7f": ["fty", "futiya"],
+  "1b0a6b35719a": ["fn", "fenni"],
+  "673ba6851b05": ["ts", "taisi", "tess", "taisiketejin"],
+  "daab0f4cceb4": ["mla", "molian"],
+  "5157b8972632": ["wdy", "weidiya"],
+  "98322bd505f4": ["cx", "chenxing"],
+  "ca0144ccd81b": ["lf", "lifu"],
+};
 function localDayKey(timestamp = Date.now()) {
   const value = new Date(timestamp);
   const year = value.getFullYear();
@@ -234,6 +268,7 @@ function normalizeMessage(message) {
   const hasCreatedAt = Number.isFinite(parsedCreatedAt) && parsedCreatedAt > 0;
   return {
     id: message.id || id(),
+    characterId: plain(message.characterId || message.character_id),
     role: message.role === "assistant" ? "assistant" : "user",
     content: renderBlocksText(blocks),
     contentBlocks: blocks,
@@ -251,6 +286,7 @@ function normalizeThread(record, characterId) {
   const segmentId = plain(record?.conversationSegmentId) || id();
   const normalizedMessages = (record?.messages || []).map((message) => normalizeMessage({
     ...message,
+    characterId: message.characterId || message.character_id || characterId,
     conversationSegmentId: message.conversationSegmentId || message.conversation_segment_id || segmentId,
   }));
   return {
@@ -436,7 +472,7 @@ async function showExperienceNoticeIfNeeded() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.8.3";
+  $("version-badge").textContent = state.config.app_version || "0.8.4";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
@@ -612,43 +648,142 @@ function characterById(characterId) {
 function typingStateFor(characterId = state.selected) {
   return characterId ? state.typingByCharacter.get(characterId) || null : null;
 }
+function presentationFor(characterId = state.selected) {
+  return characterId ? state.presentationByCharacter.get(characterId) || null : null;
+}
+function cancelPresentationQueue(characterId = state.selected, requestId = "") {
+  const queue = presentationFor(characterId);
+  if (!queue || (requestId && queue.requestId !== requestId)) return false;
+  queue.cancelled = true;
+  if (queue.timer) window.clearTimeout(queue.timer);
+  state.presentationByCharacter.delete(characterId);
+  if (characterId === state.selected) {
+    renderTimeline();
+    renderStage();
+  }
+  return true;
+}
+function presentationBlocks(message) {
+  const blocks = [];
+  for (const block of message?.contentBlocks || []) {
+    if (!block) continue;
+    if (block.type === "sticker") {
+      blocks.push({ ...block });
+      continue;
+    }
+    // Blank lines are an explicit presentation boundary.  Punctuation alone
+    // never creates a new bubble or interrupts a typewriter segment.
+    const parts = plain(block.text).split(/(?:\r?\n){2,}/).map((text) => text.trim()).filter(Boolean);
+    for (const text of parts.length ? parts : [plain(block.text).trim()]) {
+      if (text) blocks.push({ type: block.type, text });
+    }
+  }
+  return blocks;
+}
+function visibleBlocksFor(message) {
+  const queue = message ? presentationFor(message.characterId || state.selected) : null;
+  if (queue && queue.messageId === message?.id) return queue.blocks.slice(0, queue.visibleCount);
+  return message?.contentBlocks || [];
+}
+function timelineTypingMarkup(characterId = state.selected) {
+  const pending = typingStateFor(characterId);
+  if (!pending || pending.channel !== "text" || !["typing", "segment"].includes(pending.phase)) return "";
+  const character = characterById(pending.characterId);
+  return `<div class="timeline-typing-row">${typingIndicatorMarkup(character)}</div>`;
+}
+async function presentAssistantTurn(characterId, requestId, message) {
+  if (!ownsTypingState(characterId, requestId)) return false;
+  const blocks = presentationBlocks(message);
+  cancelPresentationQueue(characterId);
+  if (!blocks.length || !ownsTypingState(characterId, requestId)) return false;
+  const queue = {
+    characterId,
+    requestId,
+    messageId: message.id,
+    blocks,
+    visibleCount: 1,
+    timer: 0,
+    cancelled: false,
+  };
+  state.presentationByCharacter.set(characterId, queue);
+  if (characterId === state.selected) {
+    renderTimeline();
+    renderStage();
+  }
+  if (
+    !reducedMotion()
+    && message.communicationChannel === "in_person"
+    && blocks[0]?.type === "speech"
+  ) {
+    await delay(Math.min(1400, plain(blocks[0].text).length * 24 + 180));
+  }
+  for (let index = 1; index < blocks.length; index += 1) {
+    if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
+    const block = blocks[index];
+    updateTypingPhase(characterId, requestId, "segment");
+    const wait = block.type === "sticker" ? 800 : 600;
+    if (!reducedMotion()) await delay(wait);
+    if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
+    queue.visibleCount = index + 1;
+    updateTypingPhase(characterId, requestId, "presenting");
+    if (characterId === state.selected) {
+      renderTimeline();
+      renderStage();
+    }
+    if (
+      !reducedMotion()
+      && message.communicationChannel === "in_person"
+      && block.type === "speech"
+      && index < blocks.length - 1
+    ) {
+      await delay(Math.min(1400, plain(block.text).length * 24 + 180));
+    }
+  }
+  if (characterId === state.selected) {
+    renderTimeline();
+    renderStage();
+  }
+  if (state.presentationByCharacter.get(characterId) === queue) {
+    state.presentationByCharacter.delete(characterId);
+  }
+  return true;
+}
 function ownsTypingState(characterId, requestId) {
   const pending = typingStateFor(characterId);
   return Boolean(pending && pending.requestId === requestId);
 }
 function typingIndicatorMarkup(character, { includeAvatar = true } = {}) {
   const avatar = includeAvatar ? `<span class="typing-indicator-avatar">${avatarMarkup(character, { thumbnail: true, priority: true })}</span>` : "";
-  return `<span class="typing-indicator" aria-label="角色正在输入">${avatar}<span class="typing-indicator-bubble" aria-hidden="true"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></span><span class="sr-only">角色正在输入</span></span>`;
+  return `<span class="typing-indicator" role="status" aria-live="polite" aria-busy="true" aria-label="角色正在输入">${avatar}<span class="typing-indicator-bubble" aria-hidden="true"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></span><span class="sr-only">角色正在输入</span></span>`;
 }
 function renderRequestStatus() {
   const target = $("request-status");
   if (!target) return;
   const pending = typingStateFor();
-  if (pending?.channel === "text" && pending.phase === "typing") {
-    target.className = "request-status has-typing";
-    target.setAttribute("aria-busy", "true");
-    target.innerHTML = typingIndicatorMarkup(characterById(pending.characterId));
-    bindAvatarImages(target);
-    return;
-  }
   target.className = "request-status";
   target.setAttribute("aria-busy", pending ? "true" : "false");
   target.textContent = state.requestStatusByCharacter.get(state.selected) || "";
 }
-function setRequestStatus(characterId, message) {
+function setRequestStatus(characterId, message, requestId = "") {
   if (!characterId) return;
+  if (requestId && !ownsTypingState(characterId, requestId)) return;
   if (message) state.requestStatusByCharacter.set(characterId, plain(message));
   else state.requestStatusByCharacter.delete(characterId);
   if (characterId === state.selected) renderRequestStatus();
 }
 function setTypingState({ characterId, requestId, channel, phase = "typing" }) {
   if (!characterId || !requestId) return;
+  const current = typingStateFor(characterId);
+  if (current && current.requestId !== requestId) {
+    cancelPresentationQueue(characterId, current.requestId);
+  }
   state.typingByCharacter.set(
     characterId,
     new TypingIndicatorState({ characterId, requestId, channel, phase }),
   );
   if (characterId === state.selected) {
     renderRequestStatus();
+    if (channel === "text") renderTimeline();
     if (channel === "in_person") renderStage();
   }
   updateComposerAvailability();
@@ -660,6 +795,7 @@ function updateTypingPhase(characterId, requestId, phase) {
   state.typingByCharacter.set(characterId, current);
   if (characterId === state.selected) {
     renderRequestStatus();
+    if (current.channel === "text") renderTimeline();
     if (current.channel === "in_person") renderStage();
   }
 }
@@ -669,6 +805,7 @@ function clearTypingState(characterId, requestId) {
   state.typingByCharacter.delete(characterId);
   if (characterId === state.selected) {
     renderRequestStatus();
+    if (current.channel === "text") renderTimeline();
     if (current.channel === "in_person") renderStage();
   }
   updateComposerAvailability();
@@ -728,9 +865,30 @@ function bindStickerImages(root = document) {
   images.forEach((image) => stickerObserver.observe(image));
 }
 function renderCharacters() {
-  const query = $("character-search").value.trim().toLocaleLowerCase("zh-CN");
+  const query = normalizedSearch($("character-search").value);
+  const tokenRows = state.characters.map((character) => ({
+    character,
+    tokens: [
+      character.display_name,
+      ...(character.aliases || []),
+      ...(character.search_tokens || []),
+      ...(LOCAL_PINYIN_TOKENS[character.character_id] || []),
+    ].map(normalizedSearch).filter(Boolean),
+  }));
+  // An exact pinyin/initial token is more intentional than a substring. For
+  // example, `kxy` selects 凯茜娅 without also matching 安卡希雅's `akxy`.
+  const exactMatches = new Set(
+    query
+      ? tokenRows.filter((row) => row.tokens.includes(query)).map((row) => row.character.character_id)
+      : [],
+  );
   $("character-list").innerHTML = state.characters
-    .filter((character) => !query || `${character.display_name} ${(character.aliases || []).join(" ")}`.toLocaleLowerCase("zh-CN").includes(query))
+    .filter((character) => {
+      if (!query) return true;
+      const row = tokenRows.find((item) => item.character === character);
+      if (exactMatches.size) return exactMatches.has(character.character_id);
+      return row.tokens.some((token) => token.includes(query));
+    })
     .map((character) => {
       const thread = state.threads.get(character.character_id);
       const last = [...(thread?.messages || [])].reverse().find((message) => message.status === "sent");
@@ -754,6 +912,7 @@ async function loadCharacters() {
 }
 function sceneKeyForLocation(location) {
   const value = plain(location);
+  if (/商业街|商场|购物中心|公园/.test(value)) return "observation";
   if (/档案|资料|图书/.test(value)) return "archive";
   if (/食堂|餐厅|厨房/.test(value)) return "canteen";
   if (/走廊|通道/.test(value)) return "corridor";
@@ -835,16 +994,84 @@ async function runSceneTransition(operation, title = "正在前往……", owner
     throw error;
   }
 }
+async function runModeTransition(operation, title = "正在打开通讯器") {
+  if (state.modeTransitionPending) return null;
+  const layer = $("mode-transition-layer");
+  state.modeTransitionPending = true;
+  const owner = ++state.modeTransitionSequence;
+  const controller = new AbortController();
+  state.modeTransitionController = controller;
+  if (!layer) {
+    try {
+      return await operation(controller.signal);
+    } finally {
+      if (state.modeTransitionSequence === owner) {
+        state.modeTransitionPending = false;
+        state.modeTransitionController = null;
+      }
+    }
+  }
+  const started = performance.now();
+  layer.dataset.owner = String(owner);
+  layer.dataset.phase = "leaving";
+  layer.hidden = false;
+  layer.setAttribute("aria-busy", "true");
+  $("mode-transition-title").textContent = title;
+  $("mode-transition-detail").textContent = "正在准备通讯记录";
+  if (!reducedMotion()) await delay(180);
+  try {
+    const result = await operation(controller.signal);
+    const minimum = reducedMotion() ? 0 : 600;
+    const elapsed = performance.now() - started;
+    if (elapsed < minimum) await delay(minimum - elapsed);
+    if (layer.dataset.owner !== String(owner)) return result;
+    $("mode-transition-detail").textContent = "通讯器已打开";
+    layer.dataset.phase = "entering";
+    layer.setAttribute("aria-busy", "false");
+    if (!reducedMotion()) await delay(180);
+    if (layer.dataset.owner === String(owner)) layer.hidden = true;
+    return result;
+  } catch (error) {
+    if (layer.dataset.owner === String(owner)) {
+      layer.dataset.phase = "entering";
+      layer.setAttribute("aria-busy", "false");
+      layer.hidden = true;
+    }
+    throw error;
+  } finally {
+    if (state.modeTransitionSequence === owner) {
+      state.modeTransitionPending = false;
+      state.modeTransitionController = null;
+      updateComposerAvailability();
+    }
+  }
+}
+function cancelModeTransition() {
+  state.modeTransitionController?.abort();
+  state.modeTransitionController = null;
+  state.modeTransitionSequence += 1;
+  state.modeTransitionPending = false;
+  const layer = $("mode-transition-layer");
+  if (layer) {
+    layer.dataset.owner = String(state.modeTransitionSequence);
+    layer.dataset.phase = "idle";
+    layer.setAttribute("aria-busy", "false");
+    layer.hidden = true;
+  }
+  updateComposerAvailability();
+}
 async function selectCharacter(characterId) {
   if (!characterId || characterId === state.selected && !state.selectionController) return;
   const sequence = ++state.selectionSequence;
   state.selectionController?.abort();
+  cancelModeTransition();
   state.selectionController = new AbortController();
   const controller = state.selectionController;
   const previousId = state.selected;
   const previousThread = currentThread();
   const switchingFromStage = Boolean(previousId && previousId !== characterId && previousThread?.channel === "in_person");
   const previousScene = state.scene;
+  cancelPresentationQueue(previousId);
   state.selected = characterId;
   window.clearInterval(state.typewriter.timer);
   state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
@@ -888,6 +1115,7 @@ async function selectCharacter(characterId) {
     renderAll();
     updateComposerAvailability();
     $("contact-panel").classList.remove("open");
+    syncContactToggleState();
   } catch (error) {
     if (error?.name === "AbortError" || sequence !== state.selectionSequence) return;
     state.selected = previousId;
@@ -897,6 +1125,7 @@ async function selectCharacter(characterId) {
       await setChannel(oldThread.channel || "text", false);
       renderAll();
     }
+    syncContactToggleState();
     showBanner(displayError(error));
   }
 }
@@ -935,18 +1164,20 @@ function renderTimeline() {
   const thread = currentThread();
   const messages = (thread?.messages || []).filter((message) => message.communicationChannel === "text");
   if (!messages.length) {
-    $("timeline").innerHTML = '<div class="empty-conversation"><p>从一句问候开始吧。历史只保存在此浏览器。</p></div>';
+    $("timeline").innerHTML = `${timelineTypingMarkup()}<div class="empty-conversation"><p>从一句问候开始吧。历史只保存在此浏览器。</p></div>`;
     return;
   }
   $("timeline").innerHTML = messages.map((message, index) => {
     const failed = message.status === "failed";
+    const presenting = message.role === "assistant" && presentationFor()?.messageId === message.id;
     const tools = failed
       ? `<button type="button" data-retry-message="${escapeHtml(message.id)}">重试</button>`
-      : message.role === "assistant" ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
+      : message.role === "assistant" && !presenting ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
     const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
-    return `${time ? `<div class="message-time" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span>${message.contentBlocks.map(blockHtml).join("")}<div class="message-tools">${tools}</div></div></article>`;
-  }).join("");
+    const blocks = message.role === "assistant" ? visibleBlocksFor(message) : message.contentBlocks;
+    return `${time ? `<div class="message-time" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div><div class="message-tools">${tools}</div></div></article>`;
+  }).join("") + timelineTypingMarkup();
   document.querySelectorAll("[data-retry-message]").forEach((button) => { button.onclick = () => retryMessage(button.dataset.retryMessage); });
   document.querySelectorAll("[data-feedback-message]").forEach((button) => { button.onclick = () => openFeedback(button.dataset.feedbackMessage); });
   bindAvatarImages($("timeline"));
@@ -956,7 +1187,8 @@ function latestInPersonMessage(role = "") {
   return [...(currentThread()?.messages || [])].reverse().find((message) => message.communicationChannel === "in_person" && message.status !== "failed" && (!role || message.role === role)) || null;
 }
 function finishTypewriter() {
-  if (typingStateFor()?.channel === "in_person") return;
+  const pending = typingStateFor();
+  if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) return;
   if (!state.typewriter.fullText) return;
   window.clearInterval(state.typewriter.timer);
   state.typewriter.timer = 0;
@@ -967,6 +1199,8 @@ function finishTypewriter() {
 function renderTypewriter(text, key) {
   const value = plain(text);
   if (state.typewriter.key === key && (state.typewriter.fullText === value || state.typewriter.displayedText === value)) return;
+  const previousKey = state.typewriter.key;
+  const previousDisplayed = state.typewriter.displayedText;
   window.clearInterval(state.typewriter.timer);
   state.typewriter.key = key;
   state.typewriter.fullText = value;
@@ -977,8 +1211,11 @@ function renderTypewriter(text, key) {
     state.typewriter.fullText = "";
     return;
   }
-  let index = 0;
-  $("stage-speech").textContent = "";
+  const prefix = previousKey === key && value.startsWith(previousDisplayed)
+    ? previousDisplayed
+    : "";
+  let index = prefix.length;
+  $("stage-speech").textContent = prefix;
   state.typewriter.timer = window.setInterval(() => {
     index += 1;
     $("stage-speech").textContent = value.slice(0, index);
@@ -993,12 +1230,14 @@ function renderTypewriter(text, key) {
 function renderStage() {
   const pending = typingStateFor();
   const speechNode = $("stage-speech");
-  if (pending?.channel === "in_person" && ["connecting", "typing", "arrival"].includes(pending.phase)) {
+  if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {
     window.clearInterval(state.typewriter.timer);
     state.typewriter.timer = 0;
-    state.typewriter.key = "";
-    state.typewriter.fullText = "";
-    state.typewriter.displayedText = "";
+    if (pending.phase !== "segment") {
+      state.typewriter.key = "";
+      state.typewriter.fullText = "";
+      state.typewriter.displayedText = "";
+    }
     speechNode.classList.add("is-typing");
     speechNode.setAttribute("aria-busy", "true");
     speechNode.innerHTML = typingIndicatorMarkup(characterById(pending.characterId), { includeAvatar: false });
@@ -1010,12 +1249,14 @@ function renderStage() {
   speechNode.setAttribute("aria-busy", "false");
   const assistantMessage = latestInPersonMessage("assistant");
   const latestMessage = latestInPersonMessage();
-  const actions = (latestMessage?.contentBlocks || []).filter((block) => block.type === "action").map((block) => block.text);
-  const speeches = (assistantMessage?.contentBlocks || []).filter((block) => block.type === "speech").map((block) => block.text);
+  const visibleAssistantBlocks = assistantMessage ? visibleBlocksFor(assistantMessage) : [];
+  const visibleLatestBlocks = latestMessage ? visibleBlocksFor(latestMessage) : [];
+  const actions = visibleLatestBlocks.filter((block) => block.type === "action").map((block) => block.text);
+  const speeches = visibleAssistantBlocks.filter((block) => block.type === "speech").map((block) => block.text);
   $("stage-narration").textContent = actions.join("\n") || plain(state.scene?.character_activity);
   const speech = speeches.join("\n") || "场景已经建立。你可以说些什么，也可以只描述一个动作。";
   renderTypewriter(speech, assistantMessage?.id || `scene:${state.selected}:${state.scene?.visual_key || "generic"}`);
-  $("stage-message-feedback").disabled = !assistantMessage;
+  $("stage-message-feedback").disabled = !assistantMessage || Boolean(presentationFor()?.messageId === assistantMessage?.id);
   $("stage-message-feedback").dataset.messageId = assistantMessage?.id || "";
 }
 function renderTranscript() {
@@ -1051,15 +1292,15 @@ function updateComposerAvailability() {
   const selected = Boolean(state.selected);
   const inPerson = currentThread()?.channel === "in_person";
   const chatPending = Boolean(typingStateFor());
-  const transitionPending = state.arrivalPending || chatPending;
+  const transitionPending = state.arrivalPending || chatPending || state.modeTransitionPending;
   $("message-input").disabled = !selected;
-  $("send-message").disabled = !selected || state.arrivalPending || chatPending;
+  $("send-message").disabled = !selected || state.arrivalPending || chatPending || state.modeTransitionPending;
   $("go-in-person").disabled = !selected || transitionPending;
   $("open-communicator").disabled = !selected || transitionPending;
   $("toggle-sticker").hidden = inPerson;
   $("toggle-action").hidden = !inPerson;
-  $("toggle-sticker").disabled = !selected || state.arrivalPending || chatPending || inPerson;
-  $("toggle-action").disabled = !selected || state.arrivalPending || chatPending || !inPerson;
+  $("toggle-sticker").disabled = !selected || state.arrivalPending || chatPending || state.modeTransitionPending || inPerson;
+  $("toggle-action").disabled = !selected || state.arrivalPending || chatPending || state.modeTransitionPending || !inPerson;
   $("analyst-action-field").hidden = !inPerson || !state.actionComposerOpen;
   $("toggle-action").setAttribute("aria-expanded", String(inPerson && state.actionComposerOpen));
   $("message-input").placeholder = !selected ? "选择角色后输入消息……" : configured() ? (inPerson ? "说些什么，也可只填写动作……" : "输入文字通讯……") : "可浏览历史；发送前请在设置中配置模型";
@@ -1067,6 +1308,9 @@ function updateComposerAvailability() {
 }
 async function setChannel(channel, persist = true, targetThread = null) {
   const thread = targetThread || currentThread();
+  if (thread && thread.channel !== (channel === "in_person" ? "in_person" : "text")) {
+    cancelPresentationQueue(thread.characterId);
+  }
   if (thread) {
     thread.channel = channel === "in_person" ? "in_person" : "text";
     if (persist) await dbPutThread(thread);
@@ -1079,6 +1323,8 @@ async function setChannel(channel, persist = true, targetThread = null) {
   $("chat-app").dataset.channel = channel;
   $("text-surface").hidden = channel === "in_person";
   $("in-person-surface").hidden = channel !== "in_person";
+  $("chat-app").dataset.channel = channel === "in_person" ? "in_person" : "text";
+  syncContactToggleState();
   renderAll();
   updateComposerAvailability();
 }
@@ -1154,29 +1400,42 @@ async function runChat(thread, userMessage) {
   // turn must be written to its original thread and never overwrite the new
   // character's visible state.
   const characterId = thread.characterId;
+  const ownsRequest = () => ownsTypingState(characterId, requestId);
+  const ownsVisibleRequest = () => ownsRequest() && state.selected === characterId;
+  cancelPresentationQueue(characterId);
   const provider = state.provider;
   const credential = state.credential;
   const model = state.model;
+  const previousRequest = state.chatRequestByCharacter.get(characterId);
+  previousRequest?.controller.abort();
+  const requestController = new AbortController();
+  let requestTimedOut = false;
+  const requestTimeout = window.setTimeout(() => {
+    requestTimedOut = true;
+    requestController.abort();
+  }, CHAT_STREAM_TIMEOUT_MS);
+  state.chatRequestByCharacter.set(characterId, { requestId, controller: requestController });
   userMessage.requestId = requestId;
   userMessage.conversationSegmentId = thread.conversationSegmentId;
   userMessage.status = "pending";
   userMessage.errorCode = "";
   await dbPutThread(thread);
-  renderAll();
+  if (state.selected === characterId) renderAll();
   setTypingState({
     characterId,
     requestId,
     channel: userMessage.communicationChannel,
     phase: userMessage.communicationChannel === "in_person" ? "typing" : "connecting",
   });
-  if (userMessage.communicationChannel === "text") setRequestStatus(characterId, "正在连接……");
-  else setRequestStatus(characterId, "");
+  if (userMessage.communicationChannel === "text") setRequestStatus(characterId, "正在连接……", requestId);
+  else setRequestStatus(characterId, "", requestId);
   $("send-message").disabled = true;
   try {
     const response = await fetch(`${apiRoot}/chat/stream`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
+      signal: requestController.signal,
       body: JSON.stringify({
         request_id: requestId,
         provider,
@@ -1212,7 +1471,10 @@ async function runChat(thread, userMessage) {
     const streamedBlocks = new Map();
     let contentBlocks = [];
     let degraded = [];
+    let diagnostics = {};
     let returnedChannel = userMessage.communicationChannel;
+    let pendingSceneState = null;
+    let pendingStateEvent = null;
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -1242,9 +1504,14 @@ async function runChat(thread, userMessage) {
           streamedBlocks.set(blockIndex, current);
           updateTypingPhase(characterId, requestId, "typing");
         }
-        if (event === "state") await saveWorldPackage(payload.state_package);
+        if (event === "state") {
+          if (ownsRequest()) await saveWorldPackage(payload.state_package);
+          pendingSceneState = payload.scene_state || pendingSceneState;
+          pendingStateEvent = payload.state_event || pendingStateEvent;
+        }
         if (event === "done") {
           degraded = payload.degraded_services || [];
+          diagnostics = payload.diagnostics || {};
           returnedChannel = payload.communication_channel || returnedChannel;
           contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
         }
@@ -1254,32 +1521,63 @@ async function runChat(thread, userMessage) {
     if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, renderBlocksText([...streamedBlocks.values()]));
     if (!contentBlocks.length) throw new Error("upstream_invalid_response");
     userMessage.status = "sent";
-    thread.messages.push(normalizeMessage({ id: id(), role: "assistant", contentBlocks, communicationChannel: returnedChannel, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId }));
+    thread.messages.push(normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks, communicationChannel: returnedChannel, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId }));
     thread.turnCount += 1;
     // The explicit day choice only controls the first request of the new
     // segment.  Subsequent turns naturally use the locally stored segment
     // history without repeatedly suppressing it.
     thread.continuityDecision = "";
     thread.lastActiveAt = Date.now();
-    state.latest.set(characterId, { requestId, errorCode: "", degraded });
+    if (ownsRequest() || !typingStateFor(characterId)) {
+      state.latest.set(characterId, { requestId, errorCode: "", degraded, diagnostics });
+    }
     await dbPutThread(thread);
-    if (state.selected === characterId) {
+    updateTypingPhase(characterId, requestId, "presenting");
+    if (ownsVisibleRequest()) {
       renderAll();
     }
-    clearTypingState(characterId, requestId);
-    setRequestStatus(characterId, degraded.length ? `已完成，降级服务：${degraded.join("、")}` : "已完成");
+    const assistantMessage = thread.messages[thread.messages.length - 1];
+    await presentAssistantTurn(characterId, requestId, assistantMessage);
+    if (ownsRequest() && pendingSceneState) {
+      state.sceneByCharacter.set(characterId, pendingSceneState);
+      if (ownsVisibleRequest()) {
+        state.scene = pendingSceneState;
+        renderScene();
+        if (pendingStateEvent?.event_type === "joint_movement") {
+          setRequestStatus(characterId, `已一起前往${pendingSceneState.character_location || "新的地点"}`, requestId);
+        }
+      }
+    }
+    if (ownsRequest()) {
+      if (pendingStateEvent?.event_type !== "joint_movement") {
+        setRequestStatus(characterId, degraded.length ? `已完成，降级服务：${degraded.join("、")}` : "已完成", requestId);
+      }
+      clearTypingState(characterId, requestId);
+    }
     scheduleAutoSummary(thread);
-  } catch (error) {
+  } catch (caught) {
+    const error = caught?.name === "AbortError"
+      ? new Error(requestTimedOut ? "provider_timeout" : "request_cancelled")
+      : caught;
+    cancelPresentationQueue(characterId, requestId);
     userMessage.status = "failed";
     userMessage.errorCode = error instanceof Error ? error.message : "chat_failed";
-    state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode, degraded: [] });
+    if (ownsRequest() || !typingStateFor(characterId)) {
+      state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode, degraded: [] });
+    }
     await dbPutThread(thread);
-    if (state.selected === characterId) {
+    if (ownsVisibleRequest()) {
       renderAll();
     }
-    clearTypingState(characterId, requestId);
-    setRequestStatus(characterId, displayError(error));
+    if (ownsRequest()) {
+      setRequestStatus(characterId, displayError(error), requestId);
+      clearTypingState(characterId, requestId);
+    }
   } finally {
+    window.clearTimeout(requestTimeout);
+    if (state.chatRequestByCharacter.get(characterId)?.requestId === requestId) {
+      state.chatRequestByCharacter.delete(characterId);
+    }
     clearTypingState(characterId, requestId);
     updateComposerAvailability();
   }
@@ -1297,7 +1595,7 @@ async function sendMessage(event) {
   }
   const thread = await dbGetThread(state.selected);
   if (!(await ensureContinuityDecision(thread))) return;
-  const userMessage = normalizeMessage({ id: id(), role: "user", contentBlocks: blocks, communicationChannel: thread.channel, createdAt: Date.now(), status: "pending", conversationSegmentId: thread.conversationSegmentId });
+  const userMessage = normalizeMessage({ id: id(), characterId: thread.characterId, role: "user", contentBlocks: blocks, communicationChannel: thread.channel, createdAt: Date.now(), status: "pending", conversationSegmentId: thread.conversationSegmentId });
   thread.messages.push(userMessage);
   $("message-input").value = "";
   $("action-input").value = "";
@@ -1364,9 +1662,9 @@ async function runAutoSummary(thread) {
   }
 }
 
-async function transitionPresence(targetChannel, characterId = state.selected, targetThread = null) {
+async function transitionPresence(targetChannel, characterId = state.selected, targetThread = null, signal = undefined) {
   const thread = targetThread || state.threads.get(characterId) || currentThread();
-  const result = await api("/presence/transition", { method: "POST", body: JSON.stringify({ request_id: id(), character_id: characterId, target_channel: targetChannel, action: targetChannel === "in_person" ? "join_character" : "open_communicator", state_package: state.worldPackage || "" }) });
+  const result = await api("/presence/transition", { method: "POST", signal, body: JSON.stringify({ request_id: id(), character_id: characterId, target_channel: targetChannel, action: targetChannel === "in_person" ? "join_character" : "open_communicator", state_package: state.worldPackage || "" }) });
   await saveWorldPackage(result.state_package);
   state.sceneByCharacter.set(characterId, result.scene_state || {});
   if (state.selected === characterId) state.scene = result.scene_state;
@@ -1382,13 +1680,16 @@ async function arriveInPerson() {
   const arrivalId = id();
   const thread = currentThread();
   const previousChannel = thread?.channel || "text";
+  let arrivalMessage = null;
   const ownsArrival = () => ownsTypingState(characterId, arrivalId);
   const ownsVisibleArrival = () => ownsArrival() && state.selected === characterId;
   setTypingState({ characterId, requestId: arrivalId, channel: "in_person", phase: "arrival" });
   await setChannel("in_person", false, thread);
-  $("presence-arrival-loading").hidden = false;
-  $("stage-presence-status").hidden = false;
-  $("stage-presence-status").textContent = "正在靠近……";
+  if (ownsVisibleArrival()) {
+    $("presence-arrival-loading").hidden = false;
+    $("stage-presence-status").hidden = false;
+    $("stage-presence-status").textContent = "正在靠近……";
+  }
   updateComposerAvailability();
   try {
     if (!configured()) {
@@ -1397,25 +1698,31 @@ async function arriveInPerson() {
       return;
     }
     const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify({ arrival_id: arrivalId, provider: state.provider, credential: state.credential, model: state.model, character_id: characterId, recent_history: requestHistory(thread?.messages || [], "", thread?.conversationSegmentId || ""), history_summary: thread?.continuityDecision === "start_today" ? "" : (thread?.summary || ""), state_package: state.worldPackage || "" }) });
-    await saveWorldPackage(result.state_package);
-    state.sceneByCharacter.set(characterId, result.scene_state || {});
+    if (ownsArrival()) await saveWorldPackage(result.state_package);
+    if (ownsArrival()) state.sceneByCharacter.set(characterId, result.scene_state || {});
     if (ownsVisibleArrival()) state.scene = result.scene_state;
     if (thread) thread.channel = "in_person";
     if (thread && result.reaction) {
-      thread.messages.push(normalizeMessage({ id: result.reaction.message_id || id(), role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId }));
+      arrivalMessage = normalizeMessage({ id: result.reaction.message_id || id(), characterId, role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId });
+      thread.messages.push(arrivalMessage);
     }
     if (thread) await dbPutThread(thread);
     // Populate the arrival turn before exposing the stage. Otherwise
     // setChannel() can make the scene visible for one paint while the
     // reaction is still being persisted, producing an empty dialogue box.
     if (ownsVisibleArrival()) {
+      updateTypingPhase(characterId, arrivalId, "presenting");
       await setChannel("in_person");
       if (result.terminal_error) showBanner(displayError(new Error(result.terminal_error)));
       else if (result.decision === "unnoticed") showBanner("你来到她身边，她暂时没有注意到。位置切换已经完成。");
       else showBanner("她注意到了你的到来。");
       renderAll();
     }
+    if (arrivalMessage && ownsArrival()) {
+      await presentAssistantTurn(characterId, arrivalId, arrivalMessage);
+    }
   } catch (error) {
+    cancelPresentationQueue(characterId, arrivalId);
     if ((error instanceof Error ? error.message : "") === "credential_invalid") {
       clearCredential();
       if (ownsVisibleArrival()) {
@@ -1437,8 +1744,10 @@ async function arriveInPerson() {
     const elapsed = performance.now() - started;
     if (elapsed < minimum) await delay(minimum - elapsed);
     if (ownsArrival()) state.arrivalPending = false;
-    $("presence-arrival-loading").hidden = true;
-    $("stage-presence-status").hidden = true;
+    if (ownsVisibleArrival()) {
+      $("presence-arrival-loading").hidden = true;
+      $("stage-presence-status").hidden = true;
+    }
     clearTypingState(characterId, arrivalId);
     updateComposerAvailability();
     if (characterId === state.selected) renderStage();
@@ -1462,6 +1771,37 @@ function closeDrawers() {
   $("info-panel").classList.remove("open");
   $("transcript-panel").classList.remove("open");
   $("drawer-scrim").hidden = true;
+}
+function contactsExpanded() {
+  const panel = $("contact-panel");
+  const app = $("chat-app");
+  if (!panel || !app) return false;
+  return window.matchMedia("(max-width: 820px)").matches
+    ? panel.classList.contains("open")
+    : !app.classList.contains("sidebar-collapsed");
+}
+function syncContactToggleState(expanded = contactsExpanded()) {
+  const value = String(Boolean(expanded));
+  $("open-contacts")?.setAttribute("aria-expanded", value);
+  $("open-stage-contacts")?.setAttribute("aria-expanded", value);
+  return Boolean(expanded);
+}
+function toggleContacts({ mobileOpen = false } = {}) {
+  const panel = $("contact-panel");
+  const mobile = window.matchMedia("(max-width: 820px)").matches;
+  if (mobile) {
+    const open = mobileOpen || !panel.classList.contains("open");
+    panel.classList.toggle("open", open);
+    syncContactToggleState(open);
+    if (open) window.setTimeout(() => $("close-contacts")?.focus(), 0);
+    else $("open-stage-contacts")?.focus();
+    return open;
+  }
+  const collapsed = $("chat-app").classList.toggle("sidebar-collapsed");
+  const expanded = !collapsed;
+  syncContactToggleState(expanded);
+  $("open-stage-contacts")?.focus();
+  return expanded;
 }
 function openSettings(tab = "models") {
   document.querySelectorAll("[data-settings-tab]").forEach((button) => button.classList.toggle("active", button.dataset.settingsTab === tab));
@@ -1534,14 +1874,15 @@ $("go-in-person").onclick = openPresenceDialog;
 $("confirm-presence-transition").onclick = async () => { $("presence-dialog").close(); await arriveInPerson(); };
 $("stay-on-communicator").onclick = async () => {
   $("presence-dialog").close();
-  try { await transitionPresence("text"); } catch (error) { showBanner(displayError(error)); }
+  try { await runModeTransition((signal) => transitionPresence("text", state.selected, null, signal), "正在打开通讯器"); } catch (error) { if (error?.name !== "AbortError") showBanner(displayError(error)); }
 };
 $("open-communicator").onclick = async () => {
   if (state.arrivalPending || typingStateFor()) return;
-  try { await transitionPresence("text"); } catch (error) { showBanner(displayError(error)); }
+  try { await runModeTransition((signal) => transitionPresence("text", state.selected, null, signal), "正在打开通讯器"); } catch (error) { if (error?.name !== "AbortError") showBanner(displayError(error)); }
 };
-$("open-contacts").onclick = $("open-stage-contacts").onclick = () => $("contact-panel").classList.add("open");
-$("close-contacts").onclick = () => $("contact-panel").classList.remove("open");
+$("open-contacts").onclick = () => toggleContacts({ mobileOpen: true });
+$("open-stage-contacts").onclick = () => toggleContacts();
+$("close-contacts").onclick = () => toggleContacts({ mobileOpen: false });
 $("open-info").onclick = () => openDrawer("info-panel");
 $("open-transcript").onclick = () => openDrawer("transcript-panel");
 $("close-info").onclick = $("close-transcript").onclick = $("drawer-scrim").onclick = closeDrawers;
@@ -1594,6 +1935,7 @@ async function boot() {
   await showExperienceNoticeIfNeeded();
   await loadCharacters();
   $("connection-status").textContent = "服务已连接";
+  syncContactToggleState();
   $("auto-summary-enabled").checked = state.autoSummaryEnabled;
   updateComposerAvailability();
 }

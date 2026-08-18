@@ -359,7 +359,7 @@ def build_mvp_views() -> dict[str, Any]:
     write_json(
         question_path,
         {
-            "version": "mvp-22.0",
+            "version": "mvp-22.1",
             "registry_version": MVP_REGISTRY_VERSION,
             "characters": [
                 {

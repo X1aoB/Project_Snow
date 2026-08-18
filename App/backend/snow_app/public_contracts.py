@@ -222,11 +222,22 @@ class PresenceState(StrictModel):
 
 class StateEvent(StrictModel):
     event_id: str = Field(min_length=8, max_length=160)
-    event_type: Literal["presence_transition", "arrival", "communication"]
+    event_type: Literal["presence_transition", "arrival", "communication", "joint_movement"]
     character_id: str = Field(min_length=12, max_length=32)
     communication_channel: Literal["text", "in_person"]
     location: str | None = Field(default=None, max_length=120)
     arrival_decision: Literal["noticed", "unnoticed"] | None = None
+    location_id: str | None = Field(default=None, max_length=64)
+    activity_id: str | None = Field(default=None, max_length=64)
+
+
+class StateUpdateProposal(StrictModel):
+    """Model-produced state intent; validated before it can touch a package."""
+
+    type: Literal["joint_move"]
+    location_id: str = Field(min_length=1, max_length=64)
+    activity_id: str = Field(min_length=1, max_length=64)
+    commit: Literal["now"] = "now"
 
 
 class StatePayload(StrictModel):

@@ -29,6 +29,7 @@ from .public_contracts import (
     PresenceTransitionRequest,
     StateEvent,
     StatePayload,
+    StateUpdateProposal,
     SummarizeRequest,
 )
 from .public_media import PublicMediaCatalog
@@ -264,6 +265,72 @@ def _current_hong_kong_day() -> str:
     return datetime.now(ZoneInfo("Asia/Hong_Kong")).date().isoformat()
 
 
+_STICKER_EXPLICIT_TERMS = (
+    "表情包", "发个表情", "发送表情", "来个表情", "用表情", "贴图", "发张图",
+)
+_STICKER_STRONG_TERMS = (
+    "太棒", "恭喜", "庆祝", "成功", "谢谢你", "好感动", "哈哈哈", "笑死", "惊喜", "太好了",
+)
+_STICKER_PLAYFUL_TERMS = (
+    "哈哈", "开玩笑", "调侃", "可爱", "撒娇", "呜呜", "哭", "生气", "无语", "尴尬", "吐槽",
+)
+
+_CONTROLLED_JOINT_LOCATIONS: dict[str, dict[str, Any]] = {
+    "commercial_street": {
+        "location": "商业街",
+        "explicit_aliases": ("商业街",),
+        "aliases": ("商业街", "逛街"),
+        "activities": {"shopping_together": "和分析员一起逛街"},
+    },
+    "shopping_mall": {
+        "location": "购物中心",
+        "explicit_aliases": ("商场", "购物中心", "购物商场"),
+        "aliases": ("商场", "购物中心", "购物商场"),
+        "activities": {"shopping_together": "和分析员一起购物"},
+    },
+    "park": {
+        "location": "公园",
+        "explicit_aliases": ("公园",),
+        "aliases": ("公园", "散步"),
+        "activities": {"strolling_together": "和分析员一起散步"},
+    },
+    "base_restaurant": {
+        "location": "基地餐厅",
+        "explicit_aliases": ("基地餐厅", "餐厅"),
+        "aliases": ("基地餐厅", "餐厅"),
+        "activities": {"eating_together": "和分析员一起用餐"},
+    },
+    "base_canteen": {
+        "location": "基地食堂",
+        "explicit_aliases": ("基地食堂", "食堂"),
+        "aliases": ("基地食堂", "食堂"),
+        "activities": {"eating_together": "和分析员一起用餐"},
+    },
+}
+_JOINT_MOVE_REQUEST_TERMS = (
+    "一起去", "一起出发", "和我去", "陪我去", "跟我去", "带你去", "带你逛", "带你散步",
+    "我们去", "一起逛", "一起散步", "陪我逛", "跟我逛", "和我逛", "陪我散步", "跟我散步",
+    "带角色", "带她去", "带她逛", "带她散步", "和角色去", "陪角色去", "跟角色去",
+    "和她去", "陪她去", "跟她去", "和她逛", "陪她逛", "跟她逛",
+)
+_JOINT_MOVE_ACCEPT_TERMS = (
+    "可以", "当然", "愿意", "没问题", "走吧", "出发", "陪你", "跟你去", "跟你逛", "和你去",
+    "和你逛", "一起去", "我们去", "那就走", "现在走", "这就出发", "马上出发", "现在出发",
+    "好呀", "好啊", "好吧", "行啊", "行吧",
+)
+_JOINT_MOVE_REJECT_TERMS = (
+    "不去", "不想去", "不想", "不能", "不可以", "没空", "不方便", "拒绝", "下次", "以后", "改天",
+    "稍后", "晚点", "明天", "到时候", "之后再", "有机会", "如果", "假如", "理论上", "也许", "或许",
+    "去过", "逛过", "曾经", "已经", "要不要", "想不想", "愿不愿意", "可以吗", "好吗", "有空吗",
+    "去吗", "吗？", "吗?", "吗",
+)
+
+
+def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
+    compact = str(text or "").casefold()
+    return any(term.casefold() in compact for term in terms)
+
+
 class PublicChatService:
     def __init__(
         self,
@@ -344,35 +411,148 @@ class PublicChatService:
         *,
         request_id: str,
         character_id: str,
+        message: str = "",
+        recent_history: list[HistoryTurn] | None = None,
+        diagnostics: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Return a deterministic candidate set for the optional 20% branch.
+        """Return a deterministic, role-safe candidate set for this turn."""
+        history = recent_history or []
+        diagnostics = diagnostics if diagnostics is not None else {}
+        recent_asset_ids: list[str] = []
+        history_fingerprint: list[str] = []
+        for turn in history[-8:]:
+            role = turn.get("role") if isinstance(turn, dict) else getattr(turn, "role", None)
+            content = turn.get("content") if isinstance(turn, dict) else getattr(turn, "content", None)
+            blocks = turn.get("content_blocks") if isinstance(turn, dict) else getattr(turn, "content_blocks", None)
+            block_fingerprint: list[str] = []
+            for block in blocks or []:
+                block_type = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+                asset_id = block.get("asset_id") if isinstance(block, dict) else getattr(block, "asset_id", None)
+                text = block.get("text") if isinstance(block, dict) else getattr(block, "text", None)
+                if role == "assistant" and block_type == "sticker" and asset_id:
+                    recent_asset_ids.append(str(asset_id))
+                block_fingerprint.append(f"{block_type}:{asset_id or text or ''}")
+            history_fingerprint.append(
+                f"{role}:{str(content or '')[:240]}:{'|'.join(block_fingerprint)}"
+            )
+        assistant_sticker_turns = 0
+        for turn in reversed(history):
+            role = turn.get("role") if isinstance(turn, dict) else getattr(turn, "role", None)
+            if role != "assistant":
+                continue
+            blocks = turn.get("content_blocks") if isinstance(turn, dict) else getattr(turn, "content_blocks", None)
+            blocks = blocks or []
+            if any(
+                (block.get("type") if isinstance(block, dict) else getattr(block, "type", None)) == "sticker"
+                for block in blocks
+            ):
+                assistant_sticker_turns += 1
+            else:
+                break
+            if assistant_sticker_turns >= 2:
+                break
+        explicit = _contains_any(message, _STICKER_EXPLICIT_TERMS)
+        if assistant_sticker_turns >= 2 and not explicit:
+            diagnostics.update({
+                "sticker_gate": "closed",
+                "sticker_rejected_reason": "cooldown",
+                "sticker_consecutive_turns": assistant_sticker_turns,
+            })
+            return []
 
-        The roll is derived from the request UUID, character and Hong Kong
-        date.  Retrying the same idempotency key therefore cannot cause the
-        character to alternate between sending and not sending a sticker.
-        A candidate set is only exposed to the model when the roll succeeds;
-        the model may still choose not to send one.
-        """
-
+        history_key = "\x1e".join(history_fingerprint)
         digest = sha256(
-            f"sticker\x1f{request_id}\x1f{character_id}\x1f{_current_hong_kong_day()}".encode()
+            (
+                f"sticker\x1f{request_id}\x1f{character_id}\x1f{_current_hong_kong_day()}"
+                f"\x1f{history_key}"
+            ).encode()
         ).digest()
-        if digest[0] >= 51:  # 51/256 ~= 19.9%
+        if _contains_any(message, _STICKER_STRONG_TERMS):
+            probability, tier, emotion = 0.40, "strong", {"strong", "celebration"}
+        elif _contains_any(message, _STICKER_PLAYFUL_TERMS):
+            probability, tier, emotion = 0.25, "emotional", {"playful", "emotion"}
+        else:
+            # An explicit request is a gate, not an emotion.  Keep the
+            # neutral label only for the ordinary 8% branch; otherwise a
+            # generic "发个表情" request would reject every expressive asset.
+            probability, tier, emotion = 0.08, "ordinary", set()
+        roll = digest[0] / 256
+        diagnostics.update({
+            "sticker_probability_tier": tier,
+            "sticker_probability": probability,
+            "sticker_roll": round(roll, 6),
+        })
+        if not explicit and roll >= probability:
+            diagnostics.update({
+                "sticker_gate": "closed",
+                "sticker_rejected_reason": "probability_miss",
+            })
             return []
-        catalog = self.stickers.list(limit=500).get("stickers") or []
+        catalog_page = self.stickers.list(limit=500)
+        if catalog_page.get("status") != "ok":
+            diagnostics.update({
+                "sticker_gate": "closed",
+                "sticker_rejected_reason": "catalog_unavailable",
+            })
+            return []
+        catalog = catalog_page.get("stickers") or []
         if not catalog:
+            diagnostics.update({
+                "sticker_gate": "closed",
+                "sticker_rejected_reason": "catalog_unavailable",
+            })
             return []
-        start = int.from_bytes(digest[1:3], "big") % len(catalog)
-        ordered = (catalog[start:] + catalog[:start])[:8]
-        return [
+        role_specific = []
+        generic = []
+        for item in catalog:
+            owners = item.get("character_ids") or []
+            if owners and character_id not in owners and "generic" not in owners:
+                continue
+            tags = {str(value).casefold() for value in item.get("emotion_tags") or []}
+            if emotion and tags and not tags.intersection(emotion):
+                continue
+            if owners and character_id in owners:
+                role_specific.append(item)
+            elif not owners or "generic" in owners:
+                generic.append(item)
+        # Prefer the selected character's own package. Generic assets are a
+        # deliberate fallback and assets owned by another character never
+        # enter the candidate set.
+        compatible = role_specific or generic
+        if not compatible:
+            diagnostics.update({
+                "sticker_gate": "closed",
+                "sticker_rejected_reason": "no_matching_candidate",
+            })
+            return []
+        recent_asset_set = set(recent_asset_ids[-8:])
+        fresh = [
+            item
+            for item in compatible
+            if str(item.get("asset_id") or "") not in recent_asset_set
+        ]
+        if fresh:
+            compatible = fresh
+        start = int.from_bytes(digest[1:3], "big") % len(compatible)
+        ordered = (compatible[start:] + compatible[:start])[:8]
+        candidates = [
             {
                 "asset_id": str(item.get("asset_id") or ""),
                 "caption": str(item.get("caption") or "")[:120],
-                "tags": [str(item.get("section") or "未分类")],
+                "tags": [str(item.get("section") or "未分类"), *[str(value) for value in item.get("emotion_tags") or []]],
+                "character_ids": [str(value) for value in item.get("character_ids") or []],
+                "candidate_scope": str(item.get("candidate_scope") or "generic"),
             }
             for item in ordered
             if item.get("asset_id")
         ]
+        diagnostics.update({
+            "sticker_gate": "eligible",
+            "sticker_candidate_count": len(candidates),
+            "sticker_explicit_request": explicit,
+        })
+        diagnostics.pop("sticker_rejected_reason", None)
+        return candidates
 
     def characters(self) -> list[dict[str, Any]]:
         result = []
@@ -393,6 +573,7 @@ class PublicChatService:
                     "character_id": character.character_id,
                     "display_name": character.display_name,
                     "aliases": list(character.aliases),
+                    "search_tokens": list(character.search_tokens),
                     # The package is mounted separately from the GPL image and
                     # is verified before any URL is advertised to a client.
                     "avatar": avatar,
@@ -404,6 +585,131 @@ class PublicChatService:
         """Return the separately packaged default analyst portrait, if verified."""
 
         return self.media.analyst_avatar()
+
+    @staticmethod
+    def _joint_move_intent(message: str) -> tuple[str, dict[str, Any]] | None:
+        value = str(message or "").strip()
+        if not _contains_any(value, _JOINT_MOVE_REQUEST_TERMS):
+            return None
+        if _contains_any(value, _JOINT_MOVE_REJECT_TERMS):
+            return None
+        # Prefer a named destination over a generic activity. "去商场逛街"
+        # therefore resolves to the mall rather than the earlier 逛街 alias.
+        for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items():
+            if _contains_any(value, tuple(definition.get("explicit_aliases") or ())):
+                return location_id, definition
+        for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items():
+            if _contains_any(value, tuple(definition["aliases"])):
+                return location_id, definition
+        return None
+
+    @staticmethod
+    def _joint_move_is_accepted(answer: str) -> bool:
+        """Conservatively recognize an immediate, affirmative reply.
+
+        A bare substring such as ``好`` is intentionally insufficient: it
+        would match greetings like ``你好`` and produce a false location
+        mutation. Future, conditional, historical, or negative language wins
+        over an otherwise positive phrase.
+        """
+
+        value = str(answer or "").strip()
+        if not value or _contains_any(value, _JOINT_MOVE_REJECT_TERMS):
+            return False
+        return _contains_any(value, _JOINT_MOVE_ACCEPT_TERMS)
+
+    def _apply_joint_movement(
+        self,
+        state: dict[str, Any],
+        request: ChatRequest,
+        result: dict[str, Any],
+    ) -> tuple[dict[str, Any], StateEvent | None, dict[str, Any]]:
+        diagnostics: dict[str, Any] = {"state_update_status": "not_proposed"}
+        intent = self._joint_move_intent(request.message)
+        answer = str(result.get("answer") or "")
+        accepted = self._joint_move_is_accepted(answer)
+        raw_updates = result.get("state_updates") or []
+        if not raw_updates and intent and accepted:
+            location_id, definition = intent
+            activity_id = next(iter(definition["activities"]))
+            raw_updates = [{
+                "type": "joint_move",
+                "location_id": location_id,
+                "activity_id": activity_id,
+                "commit": "now",
+            }]
+        if not raw_updates:
+            diagnostics["state_update_rejected_reason"] = "no_controlled_proposal"
+            return state, None, diagnostics
+        try:
+            proposal = StateUpdateProposal.model_validate(raw_updates[0])
+        except (TypeError, ValueError):
+            diagnostics["state_update_rejected_reason"] = "proposal_invalid"
+            return state, None, diagnostics
+        definition = _CONTROLLED_JOINT_LOCATIONS.get(proposal.location_id)
+        if definition is None or proposal.activity_id not in definition["activities"]:
+            diagnostics["state_update_rejected_reason"] = "unknown_location_or_activity"
+            return state, None, diagnostics
+        if not intent or intent[0] != proposal.location_id:
+            diagnostics["state_update_rejected_reason"] = "user_did_not_request_current_departure"
+            return state, None, diagnostics
+        if not accepted:
+            diagnostics["state_update_rejected_reason"] = "character_did_not_accept_now"
+            return state, None, diagnostics
+
+        location = str(definition["location"])
+        activity = str(definition["activities"][proposal.activity_id])
+        event_id = f"{request.request_id}:joint_move"
+        existing = next(
+            (
+                item
+                for item in state.get("recent_events") or []
+                if str(item.get("event_id") or "") == event_id
+            ),
+            None,
+        )
+        if existing:
+            try:
+                event = StateEvent.model_validate(existing)
+            except (TypeError, ValueError):
+                diagnostics["state_update_rejected_reason"] = "existing_event_invalid"
+                return state, None, diagnostics
+            diagnostics.update({
+                "state_update_status": "already_applied",
+                "state_update_type": "joint_move",
+                "location_id": proposal.location_id,
+                "activity_id": proposal.activity_id,
+            })
+            return state, event, diagnostics
+        presence = dict(state.get("presence") or {})
+        character_scene = dict(presence.get(request.character_id) or {})
+        character_scene.update({
+            "location": location,
+            "activity": activity,
+            "state_scope": "conversation_confirmed",
+        })
+        presence[request.character_id] = character_scene
+        event = StateEvent(
+            event_id=event_id,
+            event_type="joint_movement",
+            character_id=request.character_id,
+            communication_channel=request.communication_channel,
+            location=location,
+            location_id=proposal.location_id,
+            activity_id=proposal.activity_id,
+        )
+        next_state = self._state_with_event(
+            {**state, "presence": presence},
+            event=event,
+            analyst_location=location,
+        )
+        diagnostics.update({
+            "state_update_status": "applied",
+            "state_update_type": "joint_move",
+            "location_id": proposal.location_id,
+            "activity_id": proposal.activity_id,
+        })
+        return next_state, event, diagnostics
 
     def _default_state(self, subject_hash: str) -> dict[str, Any]:
         # Presence is intentionally shared across anonymous users for one
@@ -1031,10 +1337,17 @@ class PublicChatService:
                 error_stage="content_validation",
             )
         model_message = _model_input_from_blocks(canonical_blocks, request.message)
+        sticker_diagnostics: dict[str, Any] = {
+            "sticker_gate": "closed",
+            "sticker_rejected_reason": "unsupported_channel",
+        }
         sticker_candidates = (
             self.sticker_candidates(
                 request_id=str(request.request_id),
                 character_id=request.character_id,
+                message=request.message,
+                recent_history=request.recent_history,
+                diagnostics=sticker_diagnostics,
             )
             if request.communication_channel == "text"
             else []
@@ -1065,6 +1378,15 @@ class PublicChatService:
                     persist_exchange=False,
                     remember_session=False,
                     public_sticker_candidates=sticker_candidates,
+                    public_state_update_catalog=[
+                        {
+                            "location_id": location_id,
+                            "activity_id": activity_id,
+                            "aliases": list(definition["aliases"]),
+                        }
+                        for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items()
+                        for activity_id in definition["activities"]
+                    ],
                 )
             except Exception as exc:
                 from .mvp_service import MVPProviderError
@@ -1118,6 +1440,9 @@ class PublicChatService:
             content_blocks, answer, truncated, safety_category = self._public_generation_content(
                 result,
                 request.communication_channel,
+                sticker_candidates=sticker_candidates,
+                explicit_sticker=_contains_any(request.message, _STICKER_EXPLICIT_TERMS),
+                sticker_diagnostics=sticker_diagnostics,
             )
             if not content_blocks or (
                 not answer and not any(block.get("type") == "sticker" for block in content_blocks)
@@ -1132,17 +1457,25 @@ class PublicChatService:
                     response_adjustments=adjustments,
                 )
             world_snapshot = self.mvp._world_snapshot(world_id)
+            communication_event = StateEvent(
+                event_id=str(request.request_id),
+                event_type="communication",
+                character_id=request.character_id,
+                communication_channel=request.communication_channel,
+                location=world_snapshot.get("analyst_location"),
+            )
             next_state = self._state_with_event(
                 prior_state,
-                event=StateEvent(
-                    event_id=str(request.request_id),
-                    event_type="communication",
-                    character_id=request.character_id,
-                    communication_channel=request.communication_channel,
-                    location=world_snapshot.get("analyst_location"),
-                ),
+                event=communication_event,
                 world_snapshot=world_snapshot,
             )
+            next_state, movement_event, state_update_diagnostics = self._apply_joint_movement(
+                next_state,
+                request,
+                {**result, "answer": answer},
+            )
+            response_state_event = movement_event or communication_event
+            response_scene_state = self._scene_state(next_state, request.character_id)
             request_health = self.repository.request_health()
             degraded = sorted(service for service, status in request_health.items() if status != "ok")
             if activity_fallback or set(adjustments).intersection(_PUBLIC_REWRITE_ADJUSTMENTS):
@@ -1161,6 +1494,8 @@ class PublicChatService:
                 "content_blocks": content_blocks,
                 "truncated": truncated,
                 "state_package": sign_state(self.public_settings, next_state),
+                "scene_state": response_scene_state,
+                "state_event": response_state_event.model_dump(),
                 "degraded_services": degraded,
                 "retrieval": result.get("retrieval") or {},
                 "usage": result.get("usage") or {},
@@ -1168,11 +1503,15 @@ class PublicChatService:
                 "generation_outcome": generation_outcome,
                 "response_adjustments": adjustments,
                 "terminal_error": "",
-                "diagnostics": self._diagnostics(
-                    total_started,
-                    result,
-                    generation_class=generation_outcome,
-                ),
+                "diagnostics": {
+                    **self._diagnostics(
+                        total_started,
+                        result,
+                        generation_class=generation_outcome,
+                    ),
+                    **sticker_diagnostics,
+                    **state_update_diagnostics,
+                },
             }
 
     def _allows_public_activity_fallback(
@@ -1218,6 +1557,10 @@ class PublicChatService:
         self,
         result: dict[str, Any],
         communication_channel: str,
+        *,
+        sticker_candidates: list[dict[str, Any]] | None = None,
+        explicit_sticker: bool = False,
+        sticker_diagnostics: dict[str, Any] | None = None,
     ) -> tuple[list[dict[str, str]], str, bool, str | None]:
         allowed = {"message", "sticker"} if communication_channel == "text" else {"speech", "action"}
         text_blocks: list[dict[str, str]] = []
@@ -1229,7 +1572,16 @@ class PublicChatService:
             if block_type == "sticker":
                 asset_id = str(item.get("asset_id") or "")
                 resolved = self.stickers.resolve(asset_id)
-                if communication_channel == "text" and resolved and sticker_block is None:
+                candidate_ids = {
+                    str(candidate.get("asset_id") or "")
+                    for candidate in (sticker_candidates or [])
+                    if isinstance(candidate, dict)
+                }
+                candidate_allowed = (
+                    sticker_candidates is None
+                    or asset_id in candidate_ids
+                )
+                if communication_channel == "text" and resolved and candidate_allowed and sticker_block is None:
                     sticker_block = {
                         "type": "sticker",
                         "asset_id": str(resolved.get("asset_id") or asset_id),
@@ -1238,6 +1590,14 @@ class PublicChatService:
                         "thumbnail_src": str(resolved.get("thumbnail_src") or ""),
                         "animated": bool(resolved.get("animated")),
                     }
+                    if sticker_diagnostics is not None:
+                        sticker_diagnostics.update({"sticker_selected": asset_id, "sticker_gate": "model"})
+                elif communication_channel == "text" and resolved and not candidate_allowed:
+                    if sticker_diagnostics is not None:
+                        sticker_diagnostics.setdefault("sticker_rejected_reason", "asset_outside_candidate_scope")
+                elif communication_channel == "text" and not resolved:
+                    if sticker_diagnostics is not None:
+                        sticker_diagnostics.setdefault("sticker_rejected_reason", "unknown_asset")
                 continue
             text = _strip_sticker_filenames(str(item.get("text") or "").strip())
             if block_type in allowed and text:
@@ -1252,6 +1612,32 @@ class PublicChatService:
         raw_blocks: list[dict[str, Any]] = [*text_blocks]
         if sticker_block is not None and communication_channel == "text":
             raw_blocks.append(sticker_block)
+        elif explicit_sticker and communication_channel == "text" and sticker_candidates:
+            # The explicit user request is a deterministic server-side gate:
+            # if the model omitted a sticker, select the first verified
+            # candidate supplied for this request.  URLs are still resolved
+            # through the signed catalog before entering the response.
+            selected_id = str(sticker_candidates[0].get("asset_id") or "")
+            resolved = self.stickers.resolve(selected_id)
+            if resolved:
+                sticker_block = {
+                    "type": "sticker",
+                    "asset_id": str(resolved.get("asset_id") or selected_id),
+                    "caption": _strip_sticker_filenames(str(resolved.get("caption") or ""))[:120],
+                    "src": str(resolved.get("src") or ""),
+                    "thumbnail_src": str(resolved.get("thumbnail_src") or ""),
+                    "animated": bool(resolved.get("animated")),
+                }
+                raw_blocks.append(sticker_block)
+                if sticker_diagnostics is not None:
+                    sticker_diagnostics.update({"sticker_selected": selected_id, "sticker_gate": "explicit"})
+            elif sticker_diagnostics is not None:
+                sticker_diagnostics.update({"sticker_rejected_reason": "unknown_asset"})
+        elif sticker_diagnostics is not None:
+            sticker_diagnostics.setdefault(
+                "sticker_rejected_reason",
+                "no_matching_candidate" if explicit_sticker else "model_declined",
+            )
         rendered = "\n".join(
             str(block.get("text") or "").strip()
             for block in raw_blocks

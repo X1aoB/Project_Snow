@@ -19,6 +19,7 @@ class MVPCharacter:
     display_name: str
     source_name: str
     aliases: tuple[str, ...]
+    search_tokens: tuple[str, ...] = ()
     selector_enabled: bool = True
 
 
@@ -35,6 +36,7 @@ def _load_character_registry() -> tuple[str, tuple[MVPCharacter, ...]]:
             str(record["display_name"]),
             str(record.get("source_name") or record["display_name"]),
             tuple(dict.fromkeys(str(alias) for alias in record.get("aliases", []) if str(alias).strip())),
+            tuple(dict.fromkeys(str(token).strip().casefold() for token in record.get("search_tokens", []) if str(token).strip())),
             bool(record.get("selector_enabled", True)),
         )
         for record in records

@@ -6,8 +6,8 @@
     <meta name="referrer" content="same-origin" />
     <meta name="color-scheme" content="light" />
     <title>Project Snow · 沉浸式体验</title>
-    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.3" />
-    <link rel="stylesheet" href="/app.css?v=0.8.3" />
+    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.4" />
+    <link rel="stylesheet" href="/app.css?v=0.8.4" />
   </head>
   <body>
     <div id="chat-app" class="app-shell" data-channel="text">
@@ -15,7 +15,7 @@
         <header class="product-header">
           <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
             <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="version-badge">0.8.3</small></span>
+            <span><strong>Project Snow</strong><small id="version-badge">0.8.4</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
         </header>
@@ -33,7 +33,7 @@
       <main class="chat-panel">
         <section id="text-surface" class="text-surface" aria-label="文字通讯">
           <header class="chat-header">
-            <button id="open-contacts" class="icon-button mobile-only" type="button" aria-label="打开角色列表">☰</button>
+            <button id="open-contacts" class="icon-button mobile-only" type="button" aria-label="打开角色列表" aria-expanded="false" aria-controls="contact-panel">☰</button>
             <div id="active-character" class="active-character">
               <span class="portrait portrait-text large">?</span><div><h1>选择角色</h1><p>从角色列表开始一段通讯</p></div>
             </div>
@@ -50,12 +50,12 @@
 
         <section id="in-person-surface" class="in-person-surface" data-scene="generic" aria-label="面对面场景" hidden>
           <header class="scene-hud">
-            <button id="open-stage-contacts" class="scene-character-button" type="button" aria-label="切换角色">
+            <button id="open-stage-contacts" class="scene-character-button" type="button" aria-label="展开或收起角色通讯栏" aria-expanded="true" aria-controls="contact-panel">
               <span id="stage-header-avatar" class="portrait portrait-text">?</span>
               <span><strong id="stage-character-name">选择角色</strong><small>面对面</small></span><span>⌄</span>
             </button>
             <div class="scene-location" aria-live="polite">
-              <span aria-hidden="true">⌖</span><span><strong id="stage-location">场景尚未建立</strong><small id="stage-activity">选择角色后读取当前位置</small></span>
+              <span><strong id="stage-location">场景尚未建立</strong><small id="stage-activity">选择角色后读取当前位置</small></span>
             </div>
             <div class="scene-hud-actions">
               <button id="open-transcript" class="scene-tool-button" type="button">回看</button>
@@ -89,7 +89,7 @@
             <div id="stage-portrait" class="stage-portrait" aria-label="角色头像"><span id="stage-portrait-avatar" class="stage-portrait-avatar">?</span></div>
             <div class="stage-dialogue-copy">
               <div class="stage-speaker-line"><strong id="stage-speaker">Project Snow</strong><span>面对面</span></div>
-              <div id="stage-speech" class="stage-speech" role="status" aria-live="polite" aria-atomic="true"><p>选择一位角色，开始一段面对面的对话。</p></div>
+              <div id="stage-speech" class="stage-speech" aria-live="polite" aria-atomic="true"><p>选择一位角色，开始一段面对面的对话。</p></div>
               <div class="stage-dialogue-hint"><span>单击对白框或按 Space 显示完整对白</span><span>H 隐藏界面</span></div>
             </div>
           </section>
@@ -108,13 +108,16 @@
             <button id="clear-sticker" class="icon-button" type="button" aria-label="清除已选择表情" title="清除已选择表情">×</button>
           </div>
           <div class="composer-row">
-            <button id="toggle-sticker" class="icon-button text-only" type="button" aria-expanded="false" aria-controls="sticker-picker" title="发送表情">☺</button>
-            <button id="toggle-action" class="icon-button face-only" type="button" aria-expanded="false" aria-controls="analyst-action-field" title="添加动作或神态">动作</button>
+            <button id="toggle-sticker" class="primary-button text-only composer-tool-button" type="button" aria-expanded="false" aria-controls="sticker-picker" title="发送表情包">表情包</button>
+            <button id="toggle-action" class="primary-button face-only composer-tool-button" type="button" aria-expanded="false" aria-controls="analyst-action-field" title="添加动作或神态">动作</button>
             <textarea id="message-input" rows="1" maxlength="2000" aria-label="输入对白或消息" placeholder="选择角色后输入消息……" disabled></textarea>
             <button id="send-message" class="send-button" type="submit" aria-label="发送消息" disabled>发送</button>
           </div>
           <div class="composer-foot"><p>Enter 发送 · Shift+Enter 换行 · 单轮合计不超过 2,000 字</p><span id="input-count">0 / 2000</span></div>
         </form>
+        <div id="mode-transition-layer" class="mode-transition-layer" data-phase="idle" hidden role="status" aria-live="polite" aria-busy="false">
+          <div class="transition-card"><div class="transition-dots" aria-hidden="true"><span></span><span></span><span></span></div><strong id="mode-transition-title">正在切换场景</strong><span id="mode-transition-detail">请稍候</span></div>
+        </div>
       </main>
 
       <aside id="info-panel" class="info-panel" aria-label="角色与场景" aria-hidden="true">
@@ -177,6 +180,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=0.8.3"></script>
+    <script type="module" src="/app.js?v=0.8.4"></script>
   </body>
 </html>

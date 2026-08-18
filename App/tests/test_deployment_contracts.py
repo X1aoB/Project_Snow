@@ -188,6 +188,18 @@ class DeploymentContractTests(TestCase):
         self.assertIn("PUBLIC_ENV_FILE=$public_env_path", script)
         self.assertIn('mv -f "$candidate_public_env" "$public_env_path"', script)
 
+    def test_sticker_promotion_requires_public_license_review_and_metadata(self) -> None:
+        script = self.read("ops/fetch-promote-sticker-media.sh")
+        for required in (
+            'private_candidate == false',
+            'license_review_status == "verified_public_release"',
+            'source_page_url',
+            'source_image_url',
+            'license_status == "verified"',
+            'content_hash == .sha256',
+        ):
+            self.assertIn(required, script)
+
     def test_promotion_and_rollback_use_the_workspace_ssh_config(self) -> None:
         for relative in ("scripts/promote.ps1", "scripts/rollback.ps1"):
             script = self.read(relative)
@@ -335,9 +347,9 @@ class DeploymentContractTests(TestCase):
         self.assertIn('header @frontend_assets Cache-Control "no-store, max-age=0"', caddyfile)
         self.assertIn("@scene_assets path /assets/immersive/scenes/*", caddyfile)
         self.assertIn('header @scene_assets Cache-Control "no-store, max-age=0"', caddyfile)
-        self.assertIn('href="/app.css?v=0.8.3"', public_html)
-        self.assertIn('src="/app.js?v=0.8.3"', public_html)
-        self.assertIn('href="/shared/immersive.css?v=0.8.3"', public_html)
-        self.assertIn("PUBLIC_APP_VERSION=0.8.3", public_env)
+        self.assertIn('href="/app.css?v=0.8.4"', public_html)
+        self.assertIn('src="/app.js?v=0.8.4"', public_html)
+        self.assertIn('href="/shared/immersive.css?v=0.8.4"', public_html)
+        self.assertIn("PUBLIC_APP_VERSION=0.8.4", public_env)
         self.assertIn("PUBLIC_MEDIA_VERSION=2026.08.17.avatar.2", public_env)
         self.assertIn("@versioned_media path /media/*", caddyfile)

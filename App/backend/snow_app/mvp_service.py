@@ -6505,7 +6505,7 @@ class MVPService:
 {dual_persona_rule}
 
 仅返回 JSON 对象，不要输出 Markdown 代码围栏。answer 必须与 content_blocks 按顺序拼接后的可读文本一致；content_blocks 是本轮媒介的唯一渲染依据。助手模式必须返回 analysis_process，并可继续返回 work_summary/work_steps 供旧客户端兼容。analysis_process 只能记录可复核的分析说明，不能包含隐藏思维链：
-{{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message|sticker","text":"...","asset_id":"仅在 sticker 时填写","caption":"仅在 sticker 时填写"}}],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
+{{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message|sticker","text":"...","asset_id":"仅在 sticker 时填写","caption":"仅在 sticker 时填写"}}],"state_updates":[],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
 """
 
     def _prompt(self, character: Any, message: str, context: dict[str, Any]) -> str:
@@ -9092,6 +9092,7 @@ class MVPService:
         presence_arrival: bool = False,
         max_tokens_override: int | None = None,
         public_sticker_candidates: list[dict[str, Any]] | None = None,
+        public_state_update_catalog: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if not self.chat_enabled():
             raise MVPChatDisabled("MVP 对话接口未开启。请设置 MVP_CHAT_ENABLED=true 后重启 API。")
@@ -9320,11 +9321,11 @@ class MVPService:
             + _COMPANION_SOCIAL_GUIDANCE
         )
         if active_channel == "text" and public_sticker_candidates:
-            # The public facade supplies a small, deterministic candidate set
-            # only on the 20% sticker branch.  The model may still decline to
-            # send one; it must never invent a path or filename.
+            # The public facade supplies a small deterministic, role-filtered
+            # candidate set after applying the context probability and
+            # cooldown gates. The model may still decline to send one.
             candidate_lines = "\n".join(
-                f"- asset_id={item.get('asset_id')}; caption={item.get('caption')}; tags={','.join(item.get('tags') or [])}"
+                f"- asset_id={item.get('asset_id')}; caption={item.get('caption')}; tags={','.join(item.get('tags') or [])}; scope={item.get('candidate_scope') or 'generic'}"
                 for item in public_sticker_candidates[:8]
                 if item.get("asset_id")
             )
@@ -9333,6 +9334,19 @@ class MVPService:
 【文字通讯可选表情】
 本轮最多发送一个表情，且只能从以下候选中选择；表情放在文字 message 之后。语境不合适时不要发送。不要输出文件名、URL 或路径，不要把 asset_id 写进可见文字；若发送，请返回 type=sticker、合法 asset_id 和简短 caption。
 {candidate_lines}
+"""
+        if public_state_update_catalog:
+            location_lines = "\n".join(
+                f"- location_id={item.get('location_id')}; activity_id={item.get('activity_id')}; aliases={','.join(item.get('aliases') or [])}"
+                for item in public_state_update_catalog
+                if item.get("location_id") and item.get("activity_id")
+            )
+            system_prompt += f"""
+
+【共同移动状态提案】
+仅当分析员在本轮明确提出现在共同出发、角色在本轮明确接受立刻行动，且回答不是拒绝、假设或未来计划时，返回一个 state_updates 项；否则返回空数组。提案不直接修改状态，服务端还会再次校验。只能使用以下受控地点与活动：
+{location_lines}
+格式："state_updates":[{{"type":"joint_move","location_id":"...","activity_id":"...","commit":"now"}}]
 """
         user_prompt = self._prompt(character, message.strip(), context)
         if request_key and not self.conversation_store.claim_request(
@@ -10230,6 +10244,17 @@ class MVPService:
                 )
         resolved_style = context.get("style_context") or {}
         style_active = resolved_style.get("status") in {"active", "unresolved"}
+        state_updates = []
+        for item in generated.get("state_updates") or []:
+            if not isinstance(item, dict) or str(item.get("type") or "") != "joint_move":
+                continue
+            state_updates.append({
+                "type": "joint_move",
+                "location_id": str(item.get("location_id") or "")[:64],
+                "activity_id": str(item.get("activity_id") or "")[:64],
+                "commit": str(item.get("commit") or "")[:16],
+            })
+            break
         result = {
             "message_id": "mvp_message_" + sha256(
                 f"{resolved_session}\x1f{request_key or _utc_now()}\x1f{message}".encode()
@@ -10245,6 +10270,7 @@ class MVPService:
             "question_focus": str(context.get("question_focus") or ""),
             "analyst_content_blocks": normalized_analyst_blocks,
             "content_blocks": content_blocks,
+            "state_updates": state_updates,
             "channel_transition": channel_transition,
             "scene_state": {
                 **scene_state,

@@ -16,7 +16,9 @@ from sqlalchemy import text
 
 from backend.snow_app.config import PublicSettings, Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
+from backend.snow_app.public_contracts import ChatRequest
 from backend.snow_app.public_main import create_app
+from backend.snow_app.public_service import PublicChatService
 from backend.snow_app.public_security import sign_state, verify_state
 from backend.snow_app.public_store import PublicStore
 
@@ -88,8 +90,80 @@ class PublicAPITests(TestCase):
         self.assertEqual(config.status_code, 200)
         self.assertEqual(config.json()["limits"]["input_characters"], 2000)
         self.assertEqual(config.json()["history_schema"], "indexeddb-v3")
-        self.assertEqual(config.json()["sticker_version"], "2026.08.16.sticker.1")
+        self.assertEqual(config.json()["sticker_version"], "2026.08.18.sticker.1")
         self.assertIn("Project Snow", self.client.get("/").text)
+
+    def test_joint_move_requires_named_current_request_and_immediate_acceptance(self) -> None:
+        service: PublicChatService = self.app.state.chat_service
+        character = MVP_CHARACTERS[0]
+        request = ChatRequest(
+            request_id=uuid4(),
+            provider="openai",
+            credential="c" * 24,
+            model="gpt-test",
+            character_id=character.character_id,
+            message="我们去商场逛街吧",
+        )
+        self.assertEqual(service._joint_move_intent(request.message)[0], "shopping_mall")
+        self.assertEqual(service._joint_move_intent("我想带角色逛街")[0], "commercial_street")
+        self.assertEqual(service._joint_move_intent("陪她去公园散步")[0], "park")
+        self.assertIsNone(service._joint_move_intent("我们明天去商场逛街吧"))
+        self.assertIsNone(service._joint_move_intent("要不要一起去商场逛街？"))
+        state = {
+            "schema_version": "public-state-2",
+            "data_version": "test-data",
+            "revision": 4,
+            "analyst_location": None,
+            "presence": {
+                character.character_id: {
+                    "character_id": character.character_id,
+                    "character_name": character.display_name,
+                    "location": "观景区",
+                    "activity": "正在看雪",
+                    "state_scope": "shared_daily",
+                }
+            },
+            "relationships": {},
+            "recent_events": [],
+            "schedule_date": "2026-08-18",
+            "schedule_revision": 1,
+            "generated_at": "",
+            "expires_at": "",
+        }
+        next_state, event, diagnostics = service._apply_joint_movement(
+            state,
+            request,
+            {
+                "answer": "好，我们去商场，现在走。",
+                "state_updates": [{
+                    "type": "joint_move",
+                    "location_id": "shopping_mall",
+                    "activity_id": "shopping_together",
+                    "commit": "now",
+                }],
+            },
+        )
+        self.assertEqual(diagnostics["state_update_status"], "applied")
+        self.assertEqual(next_state["analyst_location"], "购物中心")
+        self.assertEqual(next_state["presence"][character.character_id]["location"], "购物中心")
+        self.assertEqual(event.event_type, "joint_movement")
+        self.assertNotIn("scene_state", next_state)
+        replay_state, replay_event, replay_diagnostics = service._apply_joint_movement(
+            next_state,
+            request,
+            {
+                "answer": "好，我们去商场，现在走。",
+                "state_updates": [{
+                    "type": "joint_move",
+                    "location_id": "shopping_mall",
+                    "activity_id": "shopping_together",
+                    "commit": "now",
+                }],
+            },
+        )
+        self.assertEqual(replay_diagnostics["state_update_status"], "already_applied")
+        self.assertEqual(replay_state["revision"], next_state["revision"])
+        self.assertEqual(replay_event.event_id, event.event_id)
 
     def test_validation_errors_use_standard_code(self) -> None:
         response = self.client.post(
@@ -129,6 +203,7 @@ class PublicAPITests(TestCase):
         )
         self.assertEqual(character["display_name"], "凯茜娅")
         self.assertEqual(character["aliases"], ["凯茜娅", "凯西娅"])
+        self.assertEqual(character["search_tokens"], ["kxy", "kaixiya"])
 
     def test_production_readiness_requires_matching_data_release(self) -> None:
         production_settings = replace(
