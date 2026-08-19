@@ -62,9 +62,8 @@ apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 id deploy >/dev/null 2>&1 || useradd --create-home --shell /bin/bash deploy
-install -o root -g root -m 0750 -d \
-  /srv/project-snow/repo \
-  /srv/project-snow
+install -o root -g root -m 0755 -d /srv/project-snow
+install -o root -g root -m 0750 -d /srv/project-snow/repo
 install -o root -g root -m 0700 -d \
   /srv/project-snow/runtime \
   /srv/project-snow/releases \
@@ -164,9 +163,25 @@ sysctl --system
 systemctl enable docker
 systemctl restart docker
 
+current_effective_ports="$(sshd -T -C user=deploy,host=localhost,addr=127.0.0.1 | sed -n 's/^port //p')"
+unexpected_43556_ports="$(printf '%s\n' "$current_effective_ports" | grep -vx '43556' || true)"
+if [ -n "$current_effective_ports" ] && [ -z "$unexpected_43556_ports" ]; then
+  # A previous managed drop-in may have repeated the same safe port.  Omitting
+  # it here lets replacement of that drop-in self-heal the duplicate.
+  write_ssh_port=0
+elif [ "$current_effective_ports" = 22 ]; then
+  # Debian's stock configuration exposes only the implicit default port.
+  write_ssh_port=1
+else
+  echo 'Existing SSH configuration exposes an unexpected or mixed port set.' >&2
+  exit 78
+fi
 ssh_hardening_tmp="$(mktemp /etc/ssh/sshd_config.d/.60-project-snow.XXXXXX)"
-cat > "$ssh_hardening_tmp" <<'EOF'
-Port 43556
+: > "$ssh_hardening_tmp"
+if [ "$write_ssh_port" -eq 1 ]; then
+  printf '%s\n' 'Port 43556' >> "$ssh_hardening_tmp"
+fi
+cat >> "$ssh_hardening_tmp" <<'EOF'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no

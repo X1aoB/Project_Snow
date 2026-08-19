@@ -26,6 +26,7 @@ if ([string]$manifest.application.image -ne 'ghcr.io/x1aob/project_snow-public' 
 }
 $bootstrapImage = "$([string]$manifest.application.image)@$([string]$manifest.application.digest)"
 $sshBase = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName")
+$hardenedSshBase = @('-F', $configPath, '-i', $resolvedIdentity, '-p', '43556', "deploy@$HostName")
 
 Write-Host 'Cloudflare Access must remain enabled during exact-SHA host preparation and privilege migration.'
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
@@ -154,7 +155,7 @@ if sudo -n /bin/true >/dev/null 2>&1; then
   exit 78
 fi
 '@
-$verification = & ssh @sshBase $verifyCommand
+$verification = & ssh @hardenedSshBase $verifyCommand
 if ($LASTEXITCODE -ne 0) {
     throw 'Post-prepare least-privilege verification failed. Keep Cloudflare Access enabled.'
 }
