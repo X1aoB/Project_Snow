@@ -747,6 +747,29 @@ then
 fi
 # Default loading is stage-only: it creates/verifies the exact versioned
 # Qdrant collection and Neo4j dataset without changing legacy serving pointers.
+if ! compose run --rm --no-deps -T "$service" python - <<'PROJECT_SNOW_DATA_DEPENDENCIES'
+import socket
+import time
+
+pending = {("qdrant", 6333), ("neo4j", 7687)}
+deadline = time.monotonic() + 60
+while pending and time.monotonic() < deadline:
+    for target in tuple(pending):
+        try:
+            with socket.create_connection(target, timeout=2):
+                pending.remove(target)
+        except OSError:
+            pass
+    if pending:
+        time.sleep(1)
+if pending:
+    names = ", ".join(f"{host}:{port}" for host, port in sorted(pending))
+    raise SystemExit(f"Data dependencies did not become reachable: {names}")
+PROJECT_SNOW_DATA_DEPENDENCIES
+then
+  echo 'Qdrant or Neo4j did not become reachable before staged data loading.' >&2
+  exit 73
+fi
 compose run --rm --no-deps "$service" \
   python -m backend.snow_app.data_loader --release-root "$candidate_data_root"
 # Only the inactive API is started. Caddy and cloudflared keep serving the

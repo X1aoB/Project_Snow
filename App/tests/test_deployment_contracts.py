@@ -161,11 +161,13 @@ class DeploymentContractTests(TestCase):
             'python -m backend.snow_app.data_loader --release-root "$candidate_data_root"',
             verify_data + 1,
         )
+        dependency_probe = script.index("PROJECT_SNOW_DATA_DEPENDENCIES")
         start_api = script.index('compose up -d "$service"')
         smoke = script.index("/app/public_smoke.py")
         loopback_smoke = script.index('candidate_loopback_endpoint=')
         stage_env = script.index('mv -f "$candidate_env" "$colour_env"')
         self.assertLess(verify_data, load_data)
+        self.assertLess(dependency_probe, load_data)
         self.assertLess(load_data, start_api)
         self.assertLess(smoke, stage_env)
         self.assertLess(smoke, loopback_smoke)
@@ -196,6 +198,9 @@ class DeploymentContractTests(TestCase):
         self.assertIn("PUBLIC_DATA_ROOT=%s", script)
         self.assertIn('--release-root "$candidate_data_root" --verify-only', script)
         self.assertNotIn("data_loader --activate", script)
+        self.assertIn('pending = {("qdrant", 6333), ("neo4j", 7687)}', script)
+        self.assertIn("time.monotonic() + 60", script)
+        self.assertIn("Qdrant or Neo4j did not become reachable", script)
         self.assertIn("/run/project-snow-docker-after-firewall", script)
         self.assertIn("docker info --format '{{.LiveRestoreEnabled}}'", script)
         self.assertIn("systemctl restart docker", script)
