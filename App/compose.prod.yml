@@ -64,23 +64,21 @@ x-api: &api
       condition: service_healthy
     embedding:
       condition: service_healthy
+  # Port 8000 is available only on the private Docker networks. Candidate
+  # acceptance forwards a client-local loopback socket over authenticated SSH
+  # to the staged container's verified app-network address; no API port is
+  # published in the host namespace.
+  expose: ["8000"]
   networks: [app, data, egress-client]
 
 services:
   public-api-blue:
     <<: *api
     profiles: [blue]
-    # Loopback-only candidate port for private acceptance through an SSH tunnel.
-    # It is never exposed by the host firewall or Cloudflare Tunnel.
-    ports:
-      - "127.0.0.1:18081:8000"
 
   public-api-green:
     <<: *api
     profiles: [green]
-    # Keep the rollback colour independently reachable for diagnostics.
-    ports:
-      - "127.0.0.1:18082:8000"
 
   admin:
     image: ${PUBLIC_API_IMAGE:?Set immutable PUBLIC_API_IMAGE digest}
