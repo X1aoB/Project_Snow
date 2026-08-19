@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import TestCase, skipUnless
 from unittest.mock import patch
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 RUN_PUBLIC_E2E = os.getenv("RUN_PUBLIC_E2E") == "1"
 if RUN_PUBLIC_E2E:
@@ -932,6 +933,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_reload_recovers_persisted_request_id_without_a_second_generation(self) -> None:
         fixed_request_id = "de305d54-75b4-431b-adb2-eb6b9e546014"
+        current_local_day = datetime.now(ZoneInfo("Asia/Hong_Kong")).date().isoformat()
         attempts: list[dict[str, object]] = []
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
@@ -940,7 +942,7 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#accept-experience-notice").click()
             self._configure_model(page)
             page.evaluate(
-                """async ({requestId}) => {
+                """async ({requestId, localDayKey}) => {
                     const request = indexedDB.open('project-snow-public');
                     const db = await new Promise((resolve, reject) => {
                         request.onsuccess = () => resolve(request.result);
@@ -960,7 +962,7 @@ class PublicFrontendE2ETests(TestCase):
                         history_summary: '',
                         state_package: '',
                         continuity_decision: '',
-                        local_day_key: '2026-08-19',
+                        local_day_key: localDayKey,
                     };
                     const tx = db.transaction(['threads', 'messages'], 'readwrite');
                     tx.objectStore('threads').put({
@@ -968,7 +970,7 @@ class PublicFrontendE2ETests(TestCase):
                         channel: 'text',
                         turnCount: 0,
                         conversationSegmentId: segmentId,
-                        localDayKey: '2026-08-19',
+                        localDayKey,
                         messageCount: 1,
                         lastActiveAt: Date.now(),
                     });
@@ -992,7 +994,7 @@ class PublicFrontendE2ETests(TestCase):
                     });
                     db.close();
                 }""",
-                {"requestId": fixed_request_id},
+                {"requestId": fixed_request_id, "localDayKey": current_local_day},
             )
 
             def fulfill_chat(route) -> None:
