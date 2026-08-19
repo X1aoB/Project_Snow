@@ -850,7 +850,7 @@ install_docker_ufw_ordering() {
     echo 'Docker systemd drop-in directory must not be a symlink.' >&2
     return 1
   }
-  install -o root -g root -m 0755 -d "$docker_unit_dir"
+  install -o root -g root -m 0755 -d "$docker_unit_dir" || return 1
   if [ -e "$docker_ufw_dropin" ] || [ -L "$docker_ufw_dropin" ]; then
     [ -f "$docker_ufw_dropin" ] && [ ! -L "$docker_ufw_dropin" ] &&
       [ "$(stat -c %u:%g:%a:%h "$docker_ufw_dropin")" = 0:0:644:1 ] || {
@@ -858,17 +858,18 @@ install_docker_ufw_ordering() {
         return 1
       }
   fi
-  docker_ufw_dropin_tmp="$(mktemp "$docker_unit_dir/.20-project-snow-after-ufw.XXXXXX")"
-  cat > "$docker_ufw_dropin_tmp" <<'PROJECT_SNOW_DOCKER_UFW_ORDER'
+  docker_ufw_dropin_tmp="$(mktemp "$docker_unit_dir/.20-project-snow-after-ufw.XXXXXX")" || return 1
+  cat > "$docker_ufw_dropin_tmp" <<'PROJECT_SNOW_DOCKER_UFW_ORDER' || return 1
 [Unit]
 Wants=ufw.service
 After=ufw.service
 PROJECT_SNOW_DOCKER_UFW_ORDER
-  chown root:root "$docker_ufw_dropin_tmp"
-  chmod 0644 "$docker_ufw_dropin_tmp"
-  mv -f -- "$docker_ufw_dropin_tmp" "$docker_ufw_dropin"
+  [ -s "$docker_ufw_dropin_tmp" ] || return 1
+  chown root:root "$docker_ufw_dropin_tmp" || return 1
+  chmod 0644 "$docker_ufw_dropin_tmp" || return 1
+  mv -f -- "$docker_ufw_dropin_tmp" "$docker_ufw_dropin" || return 1
   docker_ufw_dropin_tmp=""
-  systemctl daemon-reload
+  systemctl daemon-reload || return 1
 }
 
 if ! candidate_binding_is_exact; then
