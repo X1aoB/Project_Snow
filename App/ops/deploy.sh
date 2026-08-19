@@ -811,16 +811,17 @@ print_candidate_diagnostics() {
   fi
 }
 candidate_binding_is_exact() {
+  # HostConfig is the declared exposure policy and must be loopback-only.
+  # NetworkSettings.Ports can be empty when UFW has removed Docker's runtime
+  # publication path; the separate loopback probe below detects that condition
+  # and is what authorizes a guarded daemon reconciliation.
   printf '%s\n' "$candidate_container_id" | grep -Eq '^[0-9a-f]{12,64}$' &&
     docker inspect "$candidate_container_id" 2>/dev/null |
       jq -e --arg port "$candidate_port" '
         length == 1 and
         ((.[0].HostConfig.PortBindings["8000/tcp"] // []) | length == 1) and
         (.[0].HostConfig.PortBindings["8000/tcp"][0].HostIp == "127.0.0.1") and
-        (.[0].HostConfig.PortBindings["8000/tcp"][0].HostPort == $port) and
-        ((.[0].NetworkSettings.Ports["8000/tcp"] // []) | length == 1) and
-        (.[0].NetworkSettings.Ports["8000/tcp"][0].HostIp == "127.0.0.1") and
-        (.[0].NetworkSettings.Ports["8000/tcp"][0].HostPort == $port)
+        (.[0].HostConfig.PortBindings["8000/tcp"][0].HostPort == $port)
       ' >/dev/null
 }
 wait_for_candidate_loopback() {
