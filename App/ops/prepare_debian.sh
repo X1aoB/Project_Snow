@@ -266,9 +266,9 @@ fail2ban-client status sshd >/dev/null
 
 dpkg-reconfigure -f noninteractive unattended-upgrades
 if [ -n "$controller_sha" ]; then
-  "$script_dir/bootstrap-release-runner.sh" --controller-sha "$controller_sha"
+  /bin/sh "$script_dir/bootstrap-release-runner.sh" --controller-sha "$controller_sha"
 else
-  "$script_dir/bootstrap-release-runner.sh"
+  /bin/sh "$script_dir/bootstrap-release-runner.sh"
 fi
 echo 'Preparation complete. Keep this SSH session open and verify a second deploy login before disconnecting.'
 echo 'Populate root-only secrets and the dedicated feedback-mailer.env, configure Cloudflare Access/Tunnel, then deploy behind private acceptance.'

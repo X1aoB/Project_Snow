@@ -347,7 +347,10 @@ class DeploymentContractTests(TestCase):
         self.assertIn("/srv/project-snow/media/stickers/staging", script)
         self.assertIn("install -o root -g root -m 0750 -d /etc/project-snow", script)
         self.assertIn("install -o deploy -g deploy -m 0700 -d /srv/project-snow/inbox", script)
-        self.assertIn('"$script_dir/bootstrap-release-runner.sh"', script)
+        self.assertIn(
+            '/bin/sh "$script_dir/bootstrap-release-runner.sh" --controller-sha',
+            script,
+        )
         self.assertIn("--controller-sha", script)
         self.assertIn("ufw status | grep -Fx 'Status: active'", script)
         self.assertNotIn("usermod -aG docker deploy", script)
