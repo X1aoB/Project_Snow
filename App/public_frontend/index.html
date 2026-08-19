@@ -6,8 +6,8 @@
     <meta name="referrer" content="same-origin" />
     <meta name="color-scheme" content="light" />
     <title>Project Snow · 沉浸式体验</title>
-    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.4" />
-    <link rel="stylesheet" href="/app.css?v=0.8.4" />
+    <link rel="stylesheet" href="/shared/immersive.css?v=0.9.0" />
+    <link rel="stylesheet" href="/app.css?v=0.9.0" />
   </head>
   <body>
     <div id="chat-app" class="app-shell" data-channel="text">
@@ -15,13 +15,13 @@
         <header class="product-header">
           <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
             <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="version-badge">0.8.4</small></span>
+            <span><strong>Project Snow</strong><small id="version-badge">0.9.0</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
         </header>
         <div class="contact-service"><span id="connection-status" class="connection-status">正在连接</span><span>记录保存在当前浏览器</span></div>
         <label class="contact-search"><span aria-hidden="true">⌕</span><input id="character-search" type="search" placeholder="搜索角色" autocomplete="off" /></label>
-        <div id="character-list" class="character-list" role="listbox" aria-label="选择角色"></div>
+        <div id="character-list" class="character-list" role="list" aria-label="角色列表"></div>
         <footer class="contact-footer">
           <button id="open-global-feedback" class="footer-command" type="button"><span>反馈</span></button>
           <a class="footer-command" href="/privacy/"><span>隐私与素材</span></a>
@@ -43,9 +43,11 @@
               <button id="open-info" class="icon-button" type="button" aria-label="角色与场景">i</button>
             </div>
           </header>
-          <section id="timeline" class="timeline" aria-live="polite" aria-label="文字通讯记录">
+          <section id="timeline" class="timeline" aria-label="文字通讯记录" tabindex="0">
             <div class="empty-conversation"><p>选择一位角色开始通讯。</p></div>
           </section>
+          <button id="new-replies" class="new-replies" type="button" hidden>有新回复</button>
+          <div id="conversation-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
         </section>
 
         <section id="in-person-surface" class="in-person-surface" data-scene="generic" aria-label="面对面场景" hidden>
@@ -85,19 +87,22 @@
             <div id="stage-narration" class="stage-narration" aria-live="polite"></div>
             <button id="restore-stage-ui" class="restore-stage-ui" type="button" hidden>显示界面</button>
           </div>
-          <section id="stage-dialogue" class="stage-dialogue" aria-live="polite" tabindex="0" aria-label="角色对白，单击或按空格显示完整对白">
+          <section id="stage-dialogue" class="stage-dialogue" aria-label="角色对白">
             <div id="stage-portrait" class="stage-portrait" aria-label="角色头像"><span id="stage-portrait-avatar" class="stage-portrait-avatar">?</span></div>
             <div class="stage-dialogue-copy">
               <div class="stage-speaker-line"><strong id="stage-speaker">Project Snow</strong><span>面对面</span></div>
-              <div id="stage-speech" class="stage-speech" aria-live="polite" aria-atomic="true"><p>选择一位角色，开始一段面对面的对话。</p></div>
-              <div class="stage-dialogue-hint"><span>单击对白框或按 Space 显示完整对白</span><span>H 隐藏界面</span></div>
+              <div id="stage-speech" class="stage-speech"><p>选择一位角色，开始一段面对面的对话。</p></div>
+              <div id="stage-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
             </div>
           </section>
         </section>
 
         <div id="system-banner" class="system-banner" role="status" hidden></div>
         <form id="composer" class="composer" autocomplete="off">
-          <div id="request-status" class="request-status" role="status" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+          <div class="request-status-row">
+            <div id="request-status" class="request-status" role="status" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
+            <button id="stop-waiting" class="stop-waiting" type="button" hidden>停止等待</button>
+          </div>
           <div id="analyst-action-field" class="action-composer" hidden>
             <label for="action-input">你的动作或神态 <span>可选，也可单独发送</span></label>
             <textarea id="action-input" rows="1" maxlength="1200" placeholder="描述动作或神态……"></textarea>
@@ -106,6 +111,9 @@
             <span class="selected-sticker-preview"><img id="selected-sticker-image" alt="" /></span>
             <span class="selected-sticker-copy"><strong>已选择表情</strong><small id="selected-sticker-caption"></small><span>发送时会单独作为一条消息</span></span>
             <button id="clear-sticker" class="icon-button" type="button" aria-label="清除已选择表情" title="清除已选择表情">×</button>
+          </div>
+          <div class="composer-shortcuts">
+            <button id="open-movement-shortcuts" class="shortcut-button" type="button" aria-haspopup="dialog">一起去……</button>
           </div>
           <div class="composer-row">
             <button id="toggle-sticker" class="primary-button text-only composer-tool-button" type="button" aria-expanded="false" aria-controls="sticker-picker" title="发送表情包">表情包</button>
@@ -121,11 +129,11 @@
       </main>
 
       <aside id="info-panel" class="info-panel" aria-label="角色与场景" aria-hidden="true">
-        <header><div><span class="panel-kicker">当前会话</span><h2>角色与场景</h2></div><button id="close-info" class="icon-button" type="button">×</button></header>
+        <header><div><span class="panel-kicker">当前会话</span><h2>角色与场景</h2></div><button id="close-info" class="icon-button" type="button" aria-label="关闭角色与场景">×</button></header>
         <div id="info-content" class="info-content"></div>
       </aside>
       <aside id="transcript-panel" class="transcript-panel" aria-label="完整对话记录" aria-hidden="true">
-        <header><div><span class="panel-kicker">浏览器本地记录</span><h2>回看对话</h2></div><button id="close-transcript" class="icon-button" type="button">×</button></header>
+        <header><div><span class="panel-kicker">浏览器本地记录</span><h2>回看对话</h2></div><button id="close-transcript" class="icon-button" type="button" aria-label="关闭对话回看">×</button></header>
         <div id="transcript-content" class="transcript-content"></div>
       </aside>
       <div id="drawer-scrim" class="drawer-scrim" hidden></div>
@@ -146,8 +154,27 @@
     <dialog id="sticker-picker" class="modal sticker-modal">
       <form method="dialog">
         <header><div><span class="panel-kicker">表情</span><h2>选一个表情</h2></div><button class="icon-button" type="button" data-close-dialog="sticker-picker">×</button></header>
-        <div id="sticker-list" class="sticker-list" aria-label="表情列表"></div>
+        <div class="sticker-controls">
+          <div id="sticker-sections" class="sticker-sections" role="tablist" aria-label="表情分类">
+            <button type="button" role="tab" data-sticker-section="recent">最近</button>
+            <button type="button" role="tab" data-sticker-section="character" aria-selected="true">当前角色</button>
+            <button type="button" role="tab" data-sticker-section="generic">通用</button>
+            <button type="button" role="tab" data-sticker-section="favorites">收藏</button>
+            <button type="button" role="tab" data-sticker-section="all">全部</button>
+          </div>
+          <label class="sticker-search"><span class="sr-only">搜索表情</span><input id="sticker-search" type="search" placeholder="搜索名称或情绪" autocomplete="off" /></label>
+        </div>
+        <div id="sticker-list" class="sticker-list" role="tabpanel" aria-label="表情列表"></div>
+        <div class="sticker-pagination"><button id="load-more-stickers" class="secondary-button" type="button" hidden>加载更多</button></div>
         <p id="sticker-empty" class="modal-context" hidden>表情暂时不可用，可以稍后再试。</p>
+      </form>
+    </dialog>
+
+    <dialog id="movement-dialog" class="modal movement-modal">
+      <form method="dialog">
+        <header><div><span class="panel-kicker">共同移动</span><h2>一起去哪里？</h2></div><button class="icon-button" type="button" data-close-dialog="movement-dialog" aria-label="关闭地点选择">×</button></header>
+        <p class="modal-context">选择后只会把邀请填入输入框。你仍可修改内容，并由角色在回复中决定是否现在出发。</p>
+        <div id="movement-options" class="movement-options"></div>
       </form>
     </dialog>
 
@@ -157,29 +184,38 @@
         <div class="notice-list">
           <p>API Key 只会短暂经过服务器内存，模型费用由你的 API 账户承担。</p>
           <p>聊天记录明文保存在当前浏览器，共享设备使用后请及时清理。</p>
-          <p>到场时有 50% 概率额外调用一次模型；每 12 轮会自动整理本地连续性摘要，并计入每日额度。</p>
+          <p>一次操作最多调用模型两次；到场反应和每 12 轮的连续性整理都可能使用其中的调用并计入额度。</p>
         </div>
         <label class="notice-choice"><input id="notice-auto-summary" type="checkbox" checked />自动整理连续性</label>
         <div class="modal-actions"><a class="secondary-button link-button" href="/privacy/">查看完整说明</a><button id="accept-experience-notice" type="button" class="primary-button">知道了，继续</button></div>
       </form>
     </dialog>
 
+    <aside id="onboarding-guide" class="onboarding-guide" aria-label="新手引导" hidden>
+      <button id="skip-onboarding" class="onboarding-skip" type="button">跳过</button>
+      <span id="onboarding-step-label" class="panel-kicker">第 1 步，共 3 步</span>
+      <strong id="onboarding-title">先选择想联系的角色</strong>
+      <p id="onboarding-copy">角色列表支持中文、拼音全拼和首字母搜索。</p>
+      <button id="next-onboarding" class="primary-button" type="button">下一步</button>
+    </aside>
+
     <button id="floating-feedback" class="floating-feedback" type="button">反馈</button>
     <dialog id="feedback-dialog" class="modal">
-      <form id="feedback-form" method="dialog"><header><div><span class="panel-kicker">反馈</span><h2>告诉我们哪里需要改进</h2></div><button class="icon-button" type="button" data-close-dialog="feedback-dialog">×</button></header><p id="feedback-context" class="modal-context">提交时会附带当前一问一答和不含密钥的请求诊断。</p><label>具体说明<textarea id="feedback-body" rows="5" maxlength="1000" required placeholder="请描述问题、期望表现或复现步骤。"></textarea></label><label>QQ（可选）<input id="feedback-qq" inputmode="numeric" pattern="[0-9]{5,12}" maxlength="12" placeholder="如愿意进一步交流，可留下 QQ" /></label><p class="modal-context">QQ 将加密保存，并随反馈在 30 天后删除。</p><p id="feedback-error" class="form-error" role="alert"></p><div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="feedback-dialog">取消</button><button type="submit" class="primary-button">提交反馈</button></div></form>
+      <form id="feedback-form" method="dialog"><header><div><span class="panel-kicker">反馈</span><h2>告诉我们哪里需要改进</h2></div><button class="icon-button" type="button" data-close-dialog="feedback-dialog">×</button></header><label class="feedback-context-choice"><span><strong>附带相关对话上下文</strong><small>默认开启，可在提交前取消</small></span><input id="feedback-include-context" type="checkbox" checked /></label><p id="feedback-context" class="modal-context">将附带当前一问一答和请求编号；服务端按编号关联内部诊断。</p><details id="feedback-context-preview" class="feedback-context-preview"><summary>预览将附带的内容</summary><pre id="feedback-context-preview-text"></pre></details><label>具体说明<textarea id="feedback-body" rows="5" maxlength="1000" required placeholder="请描述问题、期望表现或复现步骤。"></textarea></label><label>QQ（可选）<input id="feedback-qq" inputmode="numeric" pattern="[0-9]{5,12}" maxlength="12" placeholder="如愿意进一步交流，可留下 QQ" /></label><p class="modal-context">QQ 将加密保存，并随反馈在 30 天后删除。</p><p id="feedback-error" class="form-error" role="alert"></p><div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="feedback-dialog">取消</button><button type="submit" class="primary-button">提交反馈</button></div></form>
     </dialog>
 
     <dialog id="settings-dialog" class="modal settings-modal">
       <form method="dialog"><header><div><span class="panel-kicker">Project Snow</span><h2>体验设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog">×</button></header><nav class="settings-tabs"><button type="button" class="active" data-settings-tab="models">模型</button><button type="button" data-settings-tab="history">记录</button><button type="button" data-settings-tab="about">关于</button></nav>
         <section class="settings-section" data-settings-panel="models">
+          <div id="provider-doc-links" class="provider-doc-links" aria-label="模型厂商官方文档"></div>
           <p>选择你已有的模型服务。Key 只在当前标签页使用，获取模型列表后不会清除凭证。</p><div class="provider-form"><label>模型厂商<select id="provider-select"><option value="">正在读取可用厂商</option></select></label><p id="provider-empty" class="form-hint" hidden>当前暂未开放可用的模型厂商，请稍后再试。</p><label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" /></label><p id="credential-status" class="form-hint" hidden></p><div class="advanced-model-settings"><button id="toggle-advanced-model" class="secondary-button" type="button" aria-expanded="false">高级设置：手工填写模型 ID</button><div id="advanced-model-panel" hidden><label>模型 ID<input id="model-id" maxlength="200" placeholder="厂商未提供列表时填写" /></label></div></div><div class="settings-actions"><button id="discover-models" class="secondary-button" type="button">获取模型列表</button><select id="discovered-models" hidden aria-label="已发现模型"></select></div><p id="setup-error" class="form-error" role="alert"></p><div class="settings-actions"><button id="save-model" class="primary-button" type="button">保存本次模型会话</button><button id="clear-credential" class="danger-button" type="button">清除模型会话</button></div></div>
         </section>
-        <section class="settings-section" data-settings-panel="history" hidden><p>完整历史只在当前浏览器保存。共享电脑请及时清理。</p><label class="setting-toggle"><span><strong>自动整理连续性</strong><small id="summary-last-updated">尚未生成摘要</small></span><input id="auto-summary-enabled" type="checkbox" checked /></label><p id="storage-usage">正在计算占用空间……</p><label>选择角色<select id="history-character"></select></label><div class="settings-actions"><button id="delete-character-history" class="secondary-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部历史</button></div></section>
+        <section class="settings-section" data-settings-panel="history" hidden><p>完整历史只在当前浏览器保存。共享电脑请及时清理。</p><label>自动清理本地历史<select id="history-retention"><option value="0">永不（默认）</option><option value="30">保留 30 天</option><option value="90">保留 90 天</option></select></label><label class="setting-toggle"><span><strong>自动整理连续性</strong><small id="summary-last-updated">尚未生成摘要</small></span><input id="auto-summary-enabled" type="checkbox" checked /></label><p id="storage-usage">正在计算占用空间……</p><label>选择角色<select id="history-character"></select></label><div class="settings-actions"><button id="delete-character-history" class="secondary-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部历史</button></div></section>
         <section class="settings-section attribution" data-settings-panel="about" hidden><p>体验说明、反馈保留规则与头像来源统一放在“隐私与素材”页面。</p><div class="source-links"><a href="/privacy/">隐私与素材</a><a id="github-link" href="https://github.com/X1aoB/Project_Snow" rel="noreferrer">Project Snow 源码</a><a id="website-github-link" href="https://github.com/X1aoB/MyWebsite" rel="noreferrer">MyWebsite 源码</a><a id="releases-link" href="https://github.com/X1aoB/Project_Snow/releases" rel="noreferrer">版本发布</a></div></section>
       </form>
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=0.8.4"></script>
+    <script type="module" src="/app.js?v=0.9.0"></script>
   </body>
 </html>

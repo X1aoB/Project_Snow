@@ -161,9 +161,22 @@ class FeedbackRequest(StrictModel):
     error_code: str = Field(default="", max_length=80)
     degraded_services: list[str] = Field(default_factory=list, max_length=8)
     ui_surface: str = Field(default="immersive-web", max_length=80)
+    include_conversation_context: bool = True
 
     @model_validator(mode="after")
     def bound_feedback_blocks(self) -> "FeedbackRequest":
+        if not self.include_conversation_context:
+            self.chat_request_id = None
+            self.character_id = ""
+            self.provider = ""
+            self.model = ""
+            self.user_message = ""
+            self.assistant_answer = ""
+            self.user_content_blocks = []
+            self.assistant_content_blocks = []
+            self.request_stage = ""
+            self.error_code = ""
+            self.degraded_services = []
         user_length = sum(len(block.text) for block in self.user_content_blocks)
         assistant_length = sum(len(block.text) for block in self.assistant_content_blocks)
         if user_length > 2000:
@@ -229,6 +242,7 @@ class StateEvent(StrictModel):
     arrival_decision: Literal["noticed", "unnoticed"] | None = None
     location_id: str | None = Field(default=None, max_length=64)
     activity_id: str | None = Field(default=None, max_length=64)
+    target_character_id: str | None = Field(default=None, min_length=12, max_length=32)
 
 
 class StateUpdateProposal(StrictModel):
@@ -252,3 +266,5 @@ class StatePayload(StrictModel):
     schedule_revision: int = Field(default=0, ge=0)
     generated_at: str = Field(default="", max_length=64)
     expires_at: str = Field(default="", max_length=64)
+    subject_binding: str = Field(default="", max_length=64)
+    state_key_id: str = Field(default="", max_length=32)

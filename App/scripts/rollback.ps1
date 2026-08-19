@@ -1,5 +1,6 @@
 param(
-    [ValidateSet('blue','green')][string]$Colour,
+    [Parameter(Mandatory = $true)][ValidateSet('blue','green')][string]$Colour,
+    [Parameter(Mandatory = $true)][string]$Sha,
     [string]$HostName = 'project-snow-prod',
     [int]$Port = 43556,
     [string]$IdentityFile = "$env:USERPROFILE\.ssh\project_snow_prod_ed25519",
@@ -13,6 +14,9 @@ $configPath = if ($SshConfig) {
 } else {
     (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\runtime\project-snow-ssh-config')).Path
 }
-$sshArgs = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName", "cd /srv/project-snow/app && ./ops/rollback.sh '$Colour'")
+$shaPattern = '^[0-9a-f]{40}$'
+if ($Sha -notmatch $shaPattern) { throw 'Rollback SHA must be a verified 40-character main SHA.' }
+$remoteCommand = "sudo -n /usr/local/sbin/project-snow-release rollback '$Colour' '$Sha'"
+$sshArgs = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName", $remoteCommand)
 & ssh @sshArgs
 if ($LASTEXITCODE -ne 0) { throw 'Remote rollback failed.' }

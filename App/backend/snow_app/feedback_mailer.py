@@ -1,20 +1,18 @@
 """Asynchronous feedback notification worker.
 
-The public API only enqueues a reference to a feedback row.  QQ remains
-encrypted in PostgreSQL and is decrypted for the SMTP transaction only.
+The public API only enqueues a reference to a feedback row.  Email carries a
+receipt number, never user text, conversation context, diagnostics, or QQ.
 """
 
 from __future__ import annotations
 
 from email.message import EmailMessage
 from email.utils import format_datetime
-import json
 import smtplib
 from datetime import UTC, datetime
 from typing import Any, Callable
 
 from .config import PublicSettings
-from .public_security import decrypt_qq, redact_sensitive_text
 from .public_store import PublicStore
 
 
@@ -40,50 +38,20 @@ class FeedbackMailer:
             and self.settings.feedback_smtp_password
         )
 
-    @staticmethod
-    def _safe_context(context: dict[str, Any]) -> dict[str, Any]:
-        allowed = (
-            "character_id",
-            "provider",
-            "model",
-            "app_version",
-            "data_version",
-            "request_stage",
-            "error_code",
-            "chat_error_code",
-            "degraded_services",
-            "ui_surface",
-            "generation_outcome",
-            "response_adjustments",
-            "generation_diagnostics",
-        )
-        return {key: context.get(key) for key in allowed if context.get(key) not in (None, "", [], {})}
-
     def _message(self, row: dict[str, Any]) -> EmailMessage:
-        context = row.get("context") if isinstance(row.get("context"), dict) else {}
-        body = redact_sensitive_text(str(row.get("body_text") or ""), 1000)
-        qq_cipher = row.get("qq_cipher")
-        qq = decrypt_qq(self.settings, qq_cipher) if qq_cipher else "（未提供）"
-        safe_context = self._safe_context(context)
-        # This is intentionally a plain-text message: it avoids rendering any
-        # user-provided HTML while still including the requested QQ value.
+        receipt = str(row.get("public_code") or row.get("feedback_id") or "")[:96]
         lines = [
             "Project Snow 新反馈",
-            f"反馈编号：{row.get('public_code') or row.get('feedback_id')}",
+            f"反馈编号：{receipt}",
             f"提交时间：{row.get('created_at')}",
             "",
-            "反馈内容：",
-            body,
-            "",
-            f"QQ：{redact_sensitive_text(qq, 32)}",
-            "",
-            "安全上下文：",
-            json.dumps(safe_context, ensure_ascii=False, separators=(",", ":")),
+            "为保护用户隐私，通知邮件不包含反馈正文、对话、诊断或联系方式。",
+            "请通过 SSH 隧道访问私有管理端查看。",
         ]
         message = EmailMessage()
         message["From"] = self.settings.feedback_email_from
         message["To"] = self.settings.feedback_email_to
-        message["Subject"] = f"[Project Snow] 新反馈 {row.get('public_code') or ''}"[:180]
+        message["Subject"] = f"[Project Snow] 新反馈 {receipt}"[:180]
         message["Date"] = format_datetime(datetime.now(UTC))
         message.set_content("\n".join(lines))
         return message

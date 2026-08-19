@@ -1,24 +1,61 @@
 {
-  admin 127.0.0.1:2019
-  auto_https off
+	admin 127.0.0.1:2019
+	auto_https off
+	servers {
+		timeouts {
+			read_body 10s
+		}
+	}
 }
 
 :8080 {
-  encode zstd gzip
-  @frontend_assets path / /index.html /app.js /app.css
-  header @frontend_assets Cache-Control "no-store, max-age=0"
-  @scene_assets path /assets/immersive/scenes/*
-  header @scene_assets Cache-Control "no-store, max-age=0"
-  @versioned_media path /media/*
-  header @versioned_media Cache-Control "public, max-age=31536000, immutable"
-  header {
-    X-Content-Type-Options nosniff
-    Referrer-Policy same-origin
-    Permissions-Policy "camera=(), microphone=(), geolocation=()"
-    Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
-  }
-  reverse_proxy {$SNOW_UPSTREAM:public-api-blue:8000} {
-    flush_interval -1
-    header_up X-Forwarded-Proto https
-  }
+	encode zstd gzip
+	request_body {
+		max_size 65536
+	}
+	@invalid_host {
+		not host snow.xiaob.dev
+	}
+	respond @invalid_host 421
+	@invalid_write_origin {
+		method POST PUT PATCH DELETE
+		not header Origin https://snow.xiaob.dev
+	}
+	respond @invalid_write_origin 403
+	@invalid_write_content_type {
+		method POST PUT PATCH DELETE
+		not header_regexp Content-Type `(?i)^application/json([\t ]*;.*)?$`
+	}
+	respond @invalid_write_content_type 415
+	@private_health path /public/v1/health/ready /public/v1/health/full
+	respond @private_health 404
+	@frontend_assets path / /index.html /app.js /app.css
+	header @frontend_assets Cache-Control "no-store, max-age=0"
+	@privacy_document path /privacy/ /privacy/index.html
+	header @privacy_document Cache-Control "no-store, max-age=0"
+	@scene_assets path_regexp unversioned_scene `^/assets/immersive/scenes/[A-Za-z0-9_-]+\.svg$`
+	header @scene_assets Cache-Control "no-store, max-age=0"
+	@content_hashed path_regexp immutable `\.[0-9a-f]{8,}\.(css|js|webp|png|svg|woff2)$`
+	header @content_hashed Cache-Control "public, max-age=31536000, immutable"
+	@versioned_media path /media/*
+	header @versioned_media Cache-Control "public, max-age=31536000, immutable"
+	@catalog path /public/v1/characters /public/v1/stickers /public/v1/attributions /public/v1/attributions/data
+	header @catalog Cache-Control "public, max-age=300, stale-while-revalidate=60"
+	@private_response path /public/v1/config /public/v1/byok/* /public/v1/chat/* /public/v1/presence/* /public/v1/feedback
+	header @private_response Cache-Control "no-store, max-age=0"
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Cross-Origin-Opener-Policy same-origin
+		X-Frame-Options DENY
+		X-Permitted-Cross-Domain-Policies none
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+	}
+	reverse_proxy {$SNOW_UPSTREAM:public-api-blue:8000} {
+		flush_interval -1
+		header_up X-Forwarded-Proto https
+	}
 }

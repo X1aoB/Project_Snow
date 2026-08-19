@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import re
 import threading
 import time
@@ -12,6 +14,8 @@ from typing import Any
 import httpx
 
 from .config import PublicSettings, Settings
+from .data_loader import versioned_collection_name
+from .data_release import verify_data_release
 from .repository import RuntimeRepository
 
 
@@ -19,6 +23,23 @@ class PublicRuntimeRepository(RuntimeRepository):
     def __init__(self, settings: Settings, public_settings: PublicSettings):
         super().__init__(settings)
         self.public_settings = public_settings
+        self.qdrant_collection = versioned_collection_name(
+            public_settings.qdrant_collection, public_settings.data_version
+        )
+        self.data_manifest: dict[str, Any] | None = None
+        configured_data_root = str(os.getenv("PUBLIC_DATA_ROOT") or "").strip()
+        if configured_data_root:
+            expected_root = Path(configured_data_root).resolve()
+            if (
+                settings.data_root.resolve() != expected_root
+                or settings.runtime_root.resolve() != expected_root
+            ):
+                raise RuntimeError(
+                    "DATA_ROOT and APP_RUNTIME must match PUBLIC_DATA_ROOT"
+                )
+            self.data_manifest = verify_data_release(
+                expected_root, public_settings.data_version
+            )
         self._health_local = threading.local()
         self._request_context: ContextVar[dict[str, Any] | None] = ContextVar(
             f"project_snow_public_repository_{id(self)}", default=None
@@ -198,7 +219,7 @@ class PublicRuntimeRepository(RuntimeRepository):
         started_at = time.perf_counter()
         try:
             response = self._http_client.post(
-                f"{self.public_settings.qdrant_url}/collections/{self.public_settings.qdrant_collection}/points/search",
+                f"{self.public_settings.qdrant_url}/collections/{self.qdrant_collection}/points/search",
                 json={"vector": query_vector, "limit": limit, "with_payload": True, "with_vector": False},
                 headers={"api-key": self.public_settings.qdrant_api_key},
                 timeout=15,
@@ -251,10 +272,8 @@ class PublicRuntimeRepository(RuntimeRepository):
             with driver.session() as session:
                 rows = session.run(
                         """
-                        MATCH (pointer:SnowDatasetPointer {name: 'active'})
-                        MATCH (start:SnowEntity)
-                        WHERE start.dataset_version = pointer.version
-                          AND (start.node_id = $character_node_id
+                        MATCH (start:SnowEntity {dataset_version: $data_version})
+                        WHERE (start.node_id = $character_node_id
                            OR any(term IN $terms WHERE start.name CONTAINS term))
                         WITH DISTINCT start LIMIT 4
                         OPTIONAL MATCH path=(start)-[rels:SNOW_RELATION*1..2]-(other:SnowEntity)
@@ -263,6 +282,7 @@ class PublicRuntimeRepository(RuntimeRepository):
                         """,
                         character_node_id=f"character:{character_id}" if character_id else "",
                         terms=terms,
+                        data_version=self.public_settings.data_version,
                     )
                 nodes: dict[str, dict[str, Any]] = {}
                 edges: dict[str, dict[str, Any]] = {}
@@ -301,7 +321,7 @@ class PublicRuntimeRepository(RuntimeRepository):
             ("embedding", f"{self.public_settings.embedding_url}/health"),
             (
                 "qdrant",
-                f"{self.public_settings.qdrant_url}/collections/{self.public_settings.qdrant_collection}",
+                f"{self.public_settings.qdrant_url}/collections/{self.qdrant_collection}",
             ),
         ):
             try:
@@ -333,10 +353,9 @@ class PublicRuntimeRepository(RuntimeRepository):
                     driver = self._neo4j_driver
                 with driver.session() as session:
                     active = session.run(
-                        "MATCH (pointer:SnowDatasetPointer {name: 'active'}) "
-                        "MATCH (node:SnowEntity) "
-                        "WHERE node.dataset_version = pointer.version "
-                        "RETURN count(node) AS nodes"
+                        "MATCH (node:SnowEntity {dataset_version: $data_version}) "
+                        "RETURN count(node) AS nodes",
+                        data_version=self.public_settings.data_version,
                     ).single()
                 health["neo4j"] = "ok" if active and int(active["nodes"]) > 0 else "degraded"
             except Exception:

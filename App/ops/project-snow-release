@@ -1,0 +1,485 @@
+#!/bin/sh
+set -eu
+
+# Root-owned release control plane.  The SSH deploy account may invoke this
+# file through one sudoers rule, but it never receives Docker socket access.
+umask 077
+
+if [ "${PROJECT_SNOW_RELEASE_CLEAN_PID:-}" != "$$" ]; then
+  exec /usr/bin/env -i \
+    HOME=/root USER=root LOGNAME=root \
+    LC_ALL=C \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PROJECT_SNOW_RELEASE_CLEAN_PID="$$" \
+    /bin/sh "$0" "$@"
+fi
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo 'project-snow-release must run as root through its sudoers rule.' >&2
+  exit 77
+fi
+
+repo=/srv/project-snow/repo
+app_root="$repo/App"
+inbox=/srv/project-snow/inbox
+release_lock=/run/lock/project-snow-release.lock
+expected_origin=https://github.com/X1aoB/Project_Snow.git
+expected_public_image=ghcr.io/x1aob/project_snow-public
+expected_embedding_image=ghcr.io/x1aob/project_snow-embedding
+active_file=/srv/project-snow/releases/active-colour
+colour_root=/srv/project-snow/releases/colours
+
+operation="${1:-}"
+case "$operation" in
+  stage|promote|rollback)
+    [ "$#" -eq 3 ] || {
+      echo "Usage: project-snow-release $operation <blue|green> <40-character-main-sha>" >&2
+      exit 64
+    }
+    colour="$2"
+    requested_sha="$3"
+    case "$colour" in blue|green) ;; *) echo 'Colour must be blue or green.' >&2; exit 64 ;; esac
+    printf '%s\n' "$requested_sha" | grep -Eq '^[0-9a-f]{40}$' || {
+      echo 'A 40-character lowercase main SHA is required.' >&2
+      exit 64
+    }
+    ;;
+  status)
+    [ "$#" -eq 1 ] || { echo 'Usage: project-snow-release status' >&2; exit 64; }
+    ;;
+  *)
+    echo 'Allowed operations: stage, promote, rollback, status.' >&2
+    exit 64
+    ;;
+esac
+
+install -o root -g root -m 0755 -d /run/lock
+exec 9>"$release_lock"
+if ! flock -n 9; then
+  echo 'Another Project Snow release operation is already running.' >&2
+  exit 75
+fi
+
+cleanup_paths=""
+cleanup() {
+  for cleanup_path in $cleanup_paths; do
+    rm -f -- "$cleanup_path"
+  done
+}
+trap cleanup EXIT HUP INT TERM
+
+require_root_controlled_repo() {
+  [ -d "$repo/.git" ] && [ ! -L "$repo" ] && [ ! -L "$repo/.git" ] || {
+    echo 'The root-owned release repository is missing.' >&2
+    return 1
+  }
+  [ "$(stat -c %u "$repo")" -eq 0 ] &&
+    [ "$(stat -c %u "$repo/.git")" -eq 0 ] || {
+      echo 'The release repository is not root-owned.' >&2
+      return 1
+    }
+  if find "$repo" "$repo/.git" -maxdepth 0 -perm /022 -print -quit | grep -q .; then
+    echo 'The release repository is writable by a non-root principal.' >&2
+    return 1
+  fi
+  [ "$(git -C "$repo" config --get remote.origin.url)" = "$expected_origin" ] || {
+    echo 'The release repository origin is not the pinned Project Snow origin.' >&2
+    return 1
+  }
+  [ "$(git -C "$repo" config --get core.hooksPath)" = /dev/null ] || {
+    echo 'Git hooks are not disabled in the release repository.' >&2
+    return 1
+  }
+}
+
+fetch_main() {
+  require_root_controlled_repo
+  git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+    -C "$repo" fetch --quiet --force --prune origin \
+    '+refs/heads/main:refs/remotes/origin/main'
+}
+
+require_main_commit() {
+  commit_sha="$1"
+  git -C "$repo" cat-file -e "$commit_sha^{commit}" 2>/dev/null || {
+    echo "Commit $commit_sha is not available from the pinned repository." >&2
+    return 1
+  }
+  [ "$(git -C "$repo" rev-parse "$commit_sha^{commit}")" = "$commit_sha" ] || return 1
+  git -C "$repo" merge-base --is-ancestor "$commit_sha" refs/remotes/origin/main || {
+    echo "Commit $commit_sha is not an ancestor of origin/main." >&2
+    return 1
+  }
+}
+
+checkout_controller() {
+  commit_sha="$1"
+  require_main_commit "$commit_sha"
+  git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+    -C "$repo" checkout --quiet --force --detach "$commit_sha"
+  git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+    -C "$repo" reset --quiet --hard "$commit_sha"
+  git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+    -C "$repo" clean -ffdx >/dev/null
+  [ "$(git -C "$repo" rev-parse HEAD)" = "$commit_sha" ] || return 1
+  [ -z "$(git -C "$repo" status --porcelain --untracked-files=no)" ] || {
+    echo 'The trusted release checkout is not clean.' >&2
+    return 1
+  }
+}
+
+current_controller_sha() {
+  controller_sha="$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null || true)"
+  printf '%s\n' "$controller_sha" | grep -Eq '^[0-9a-f]{40}$' || {
+    echo 'The release controller has no valid checked-out commit.' >&2
+    return 1
+  }
+  require_main_commit "$controller_sha"
+  [ -z "$(git -C "$repo" status --porcelain --untracked-files=no)" ] || {
+    echo 'The release controller checkout has tracked modifications.' >&2
+    return 1
+  }
+  printf '%s\n' "$controller_sha"
+}
+
+copy_inbox_manifest() {
+  manifest_source="$1"
+  manifest_destination="$2"
+  deploy_uid="$(id -u deploy)"
+  python3 - "$manifest_source" "$manifest_destination" "$deploy_uid" <<'PY'
+import json
+import os
+import stat
+import sys
+
+source, destination, expected_uid = sys.argv[1], sys.argv[2], int(sys.argv[3])
+flags = os.O_RDONLY | os.O_CLOEXEC
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+descriptor = os.open(source, flags)
+try:
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode):
+        raise SystemExit("release manifest inbox entry is not a regular file")
+    if metadata.st_uid != expected_uid or metadata.st_nlink != 1:
+        raise SystemExit("release manifest inbox ownership/link count is invalid")
+    if metadata.st_size < 2 or metadata.st_size > 131072:
+        raise SystemExit("release manifest inbox entry has an invalid size")
+    payload = bytearray()
+    while True:
+        chunk = os.read(descriptor, 65536)
+        if not chunk:
+            break
+        payload.extend(chunk)
+finally:
+    os.close(descriptor)
+json.loads(payload.decode("utf-8"))
+with open(destination, "wb") as output:
+    output.write(payload)
+os.chmod(destination, 0o600)
+PY
+}
+
+validate_release_manifest() {
+  manifest_path="$1"
+  commit_sha="$2"
+  jq -e \
+    --arg sha "$commit_sha" \
+    --arg public_image "$expected_public_image" \
+    --arg embedding_image "$expected_embedding_image" '
+      .schema_version == "project-snow-release-1" and
+      .commit_sha == $sha and
+      .application.image == $public_image and
+      .embedding.image == $embedding_image and
+      (.application.digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+      (.embedding.digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+      .release_artifacts.data.version == .data_version and
+      .release_artifacts.avatar.version == .media_version and
+      .release_artifacts.sticker.version == .sticker_version and
+      (.release_artifacts.data.manifest_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+      (.release_artifacts.avatar.manifest_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+      (.release_artifacts.avatar.checksums_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+      (.release_artifacts.sticker.manifest_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+      (.release_artifacts.sticker.checksums_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
+    ' "$manifest_path" >/dev/null || {
+      echo 'The uploaded release manifest has an invalid identity.' >&2
+      return 1
+    }
+
+  public_digest="$(jq -r '.application.digest' "$manifest_path")"
+  embedding_digest="$(jq -r '.embedding.digest' "$manifest_path")"
+  regenerated_manifest="$(mktemp /run/project-snow-release.expected.XXXXXX.json)"
+  uploaded_normalized="$(mktemp /run/project-snow-release.uploaded.XXXXXX.json)"
+  expected_normalized="$(mktemp /run/project-snow-release.normalized.XXXXXX.json)"
+  cleanup_paths="$cleanup_paths $regenerated_manifest $uploaded_normalized $expected_normalized"
+  python3 "$app_root/scripts/release_manifest.py" \
+    --sha "$commit_sha" \
+    --public-image "$expected_public_image" \
+    --public-digest "$public_digest" \
+    --embedding-image "$expected_embedding_image" \
+    --embedding-digest "$embedding_digest" \
+    --app-root "$app_root" \
+    --output "$regenerated_manifest" >/dev/null
+  jq -S 'del(.generated_at)' "$manifest_path" > "$uploaded_normalized"
+  jq -S 'del(.generated_at)' "$regenerated_manifest" > "$expected_normalized"
+  cmp -s "$uploaded_normalized" "$expected_normalized" || {
+    echo 'The uploaded manifest does not match the trusted main checkout.' >&2
+    return 1
+  }
+
+  public_tag_digest="$(docker buildx imagetools inspect \
+    "$expected_public_image:$commit_sha" 2>/dev/null | awk '/^Digest:/ {print $2; exit}')"
+  embedding_tag_digest="$(docker buildx imagetools inspect \
+    "$expected_embedding_image:$commit_sha" 2>/dev/null | awk '/^Digest:/ {print $2; exit}')"
+  [ "$public_tag_digest" = "$public_digest" ] || {
+    echo 'The public image digest is not the digest tagged for this main SHA.' >&2
+    return 1
+  }
+  [ "$embedding_tag_digest" = "$embedding_digest" ] || {
+    echo 'The embedding image digest is not the digest tagged for this main SHA.' >&2
+    return 1
+  }
+}
+
+install_manifest_releases() {
+  manifest_path="$1"
+  deploy_uid="$(id -u deploy)"
+  data_version="$(jq -r '.data_version // empty' "$manifest_path")"
+  avatar_version="$(jq -r '.media_version // empty' "$manifest_path")"
+  sticker_version="$(jq -r '.sticker_version // empty' "$manifest_path")"
+  install_manifest_release \
+    data "$data_version" /srv/project-snow/data/releases \
+    "$(jq -r '.release_artifacts.data.manifest_sha256 // empty' "$manifest_path")" "" \
+    "$deploy_uid" || return 1
+  install_manifest_release \
+    avatar "$avatar_version" /srv/project-snow/media/releases \
+    "$(jq -r '.release_artifacts.avatar.manifest_sha256 // empty' "$manifest_path")" \
+    "$(jq -r '.release_artifacts.avatar.checksums_sha256 // empty' "$manifest_path")" \
+    "$deploy_uid" || return 1
+  install_manifest_release \
+    sticker "$sticker_version" /srv/project-snow/media/stickers/releases \
+    "$(jq -r '.release_artifacts.sticker.manifest_sha256 // empty' "$manifest_path")" \
+    "$(jq -r '.release_artifacts.sticker.checksums_sha256 // empty' "$manifest_path")" \
+    "$deploy_uid" || return 1
+}
+
+install_manifest_release() {
+  release_kind="$1"
+  release_version="$2"
+  release_destination="$3"
+  release_manifest_sha256="$4"
+  release_checksums_sha256="$5"
+  deploy_uid="$6"
+  case "$release_kind" in data|avatar|sticker) ;; *) return 1 ;; esac
+  case "$release_version" in
+    *[!0-9A-Za-z._-]*|'')
+      echo "Manifest contains an unsafe $release_kind release version." >&2
+      return 1
+      ;;
+  esac
+  printf '%s\n' "$release_manifest_sha256" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  if [ "$release_kind" = data ]; then
+    [ -z "$release_checksums_sha256" ] || return 1
+  else
+    printf '%s\n' "$release_checksums_sha256" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  fi
+  install -o root -g root -m 0755 -d "$release_destination" || return 1
+  release_archive="$inbox/$release_kind-$release_version.tar"
+  set -- python3 "$app_root/scripts/install_release_archive.py" \
+    --kind "$release_kind" \
+    --version "$release_version" \
+    --destination-root "$release_destination" \
+    --expected-owner-uid "$deploy_uid" \
+    --manifest-sha256 "$release_manifest_sha256"
+  if [ -n "$release_checksums_sha256" ]; then
+    set -- "$@" --checksums-sha256 "$release_checksums_sha256"
+  fi
+  if [ -e "$release_archive" ] || [ -L "$release_archive" ]; then
+    set -- "$@" --archive "$release_archive"
+  fi
+  "$@"
+}
+
+run_stage() {
+  manifest_source="$inbox/release-$requested_sha.json"
+  [ -d "$inbox" ] && [ ! -L "$inbox" ] || {
+    echo 'The release inbox is missing.' >&2
+    exit 66
+  }
+  [ "$(stat -c %U "$inbox")" = deploy ] && [ "$(stat -c %a "$inbox")" = 700 ] || {
+    echo 'The release inbox must be deploy-owned with mode 0700.' >&2
+    exit 66
+  }
+  manifest_copy="$(mktemp /run/project-snow-release.manifest.XXXXXX.json)"
+  cleanup_paths="$cleanup_paths $manifest_copy"
+  copy_inbox_manifest "$manifest_source" "$manifest_copy"
+
+  fetch_main
+  previous_controller="$(current_controller_sha)"
+  checkout_controller "$requested_sha"
+  if ! validate_release_manifest "$manifest_copy" "$requested_sha" ||
+     ! install_manifest_releases "$manifest_copy"; then
+    checkout_controller "$previous_controller" || true
+    exit 71
+  fi
+  public_image="$expected_public_image@$(jq -r '.application.digest' "$manifest_copy")"
+  embedding_image="$expected_embedding_image@$(jq -r '.embedding.digest' "$manifest_copy")"
+  if ! (
+    cd "$app_root"
+    /usr/bin/env -i \
+      HOME=/root USER=root LOGNAME=root \
+      PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+      PROJECT_SNOW_RELEASE_MANIFEST="$manifest_copy" \
+      PUBLIC_API_IMAGE="$public_image" \
+      EMBEDDING_IMAGE="$embedding_image" \
+      ./ops/deploy.sh "$colour" "$requested_sha"
+  ); then
+    checkout_controller "$previous_controller" || true
+    echo 'Release staging failed; the previous trusted controller was restored.' >&2
+    exit 72
+  fi
+  rm -f -- "$manifest_source"
+  for installed_coordinate in \
+    "data|$(jq -r '.data_version' "$manifest_copy")" \
+    "avatar|$(jq -r '.media_version' "$manifest_copy")" \
+    "sticker|$(jq -r '.sticker_version' "$manifest_copy")"; do
+    rm -f -- "$inbox/${installed_coordinate%%|*}-${installed_coordinate#*|}.tar"
+  done
+  printf '%s\n' "Staged $colour at $requested_sha through the root-owned release runner."
+}
+
+run_switch() {
+  switch_operation="$1"
+  fetch_main
+  controller_sha="$(current_controller_sha)"
+  marker="$colour_root/$colour"
+  [ -r "$marker" ] && [ ! -L "$marker" ] || {
+    echo "No staged release marker exists for $colour." >&2
+    exit 66
+  }
+  read -r marker_colour marker_sha marker_public marker_embedding < "$marker"
+  [ "$marker_colour" = "$colour" ] && [ "$marker_sha" = "$requested_sha" ] || {
+    echo 'The requested release does not match the staged colour marker.' >&2
+    exit 67
+  }
+  printf '%s\n' "$controller_sha" | grep -Eq '^[0-9a-f]{40}$' || exit 67
+  if [ "$switch_operation" = promote ]; then
+    (cd "$app_root" && ./ops/promote.sh "$colour" "$requested_sha")
+  else
+    # This flag cannot be inherited or supplied by the SSH caller because the
+    # runner re-executes under an empty environment.  The rollback path uses it
+    # only to require an unauthenticated Cloudflare Access gate before a
+    # compatibility smoke against a legacy edge snapshot.
+    (cd "$app_root" && PROJECT_SNOW_ROLLBACK_MODE=1 \
+      ./ops/rollback.sh "$colour" "$requested_sha")
+  fi
+}
+
+verified_version_array() {
+  release_kind="$1"
+  versions_root="$2"
+  artifact_index="$app_root/config/public_release_artifacts.json"
+  if [ ! -d "$versions_root" ] || [ -L "$versions_root" ] ||
+     [ ! -r "$artifact_index" ] || [ -L "$artifact_index" ]; then
+    printf '%s\n' '[]'
+    return
+  fi
+  release_version="$(jq -r --arg kind "$release_kind" '.artifacts[$kind].version // empty' "$artifact_index")"
+  release_manifest_sha256="$(jq -r --arg kind "$release_kind" '.artifacts[$kind].manifest_sha256 // empty' "$artifact_index")"
+  release_checksums_sha256="$(jq -r --arg kind "$release_kind" '.artifacts[$kind].checksums_sha256 // empty' "$artifact_index")"
+  set -- python3 "$app_root/scripts/install_release_archive.py" \
+    --kind "$release_kind" \
+    --version "$release_version" \
+    --destination-root "$versions_root" \
+    --expected-owner-uid "$(id -u deploy)" \
+    --manifest-sha256 "$release_manifest_sha256"
+  if [ -n "$release_checksums_sha256" ]; then
+    set -- "$@" --checksums-sha256 "$release_checksums_sha256"
+  fi
+  if "$@" >/dev/null 2>&1; then
+    jq -n --arg version "$release_version" '[$version]'
+  else
+    printf '%s\n' '[]'
+  fi
+}
+
+sshd_policy_active() {
+  effective_deploy="$(sshd -T -C user=deploy,host=localhost,addr=127.0.0.1 2>/dev/null)" || return 1
+  for required_setting in \
+    'passwordauthentication no' \
+    'kbdinteractiveauthentication no' \
+    'permitrootlogin no' \
+    'pubkeyauthentication yes' \
+    'maxauthtries 3' \
+    'maxsessions 4' \
+    'allowtcpforwarding yes' \
+    'x11forwarding no' \
+    'allowusers deploy'; do
+    printf '%s\n' "$effective_deploy" | grep -Fxq "$required_setting" || return 1
+  done
+  [ "$(printf '%s\n' "$effective_deploy" | sed -n 's/^port //p')" = 43556 ] || return 1
+  effective_root="$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null)" || return 1
+  printf '%s\n' "$effective_root" | grep -Fxq 'permitrootlogin no' &&
+    printf '%s\n' "$effective_root" | grep -Fxq 'passwordauthentication no' &&
+    printf '%s\n' "$effective_root" | grep -Fxq 'kbdinteractiveauthentication no'
+}
+
+run_status() {
+  require_root_controlled_repo
+  controller_sha="$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null || true)"
+  active_colour=""
+  if [ -r "$active_file" ] && [ ! -L "$active_file" ]; then
+    active_colour="$(cat "$active_file")"
+  fi
+  case "$active_colour" in blue|green) ;; *) active_colour=invalid ;; esac
+  deploy_groups="$(id -nG deploy 2>/dev/null || true)"
+  docker_group=false
+  case " $deploy_groups " in *' docker '*) docker_group=true ;; esac
+  docker_access=false
+  if runuser -u deploy -- docker info >/dev/null 2>&1; then
+    docker_access=true
+  fi
+  ufw_active=false
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -Fxq 'Status: active'; then
+    ufw_active=true
+  fi
+  fail2ban_active=false
+  if systemctl is-active --quiet fail2ban 2>/dev/null &&
+     fail2ban-client status sshd >/dev/null 2>&1; then
+    fail2ban_active=true
+  fi
+  sshd_hardened=false
+  if sshd_policy_active; then
+    sshd_hardened=true
+  fi
+  data_versions="$(verified_version_array data /srv/project-snow/data/releases)"
+  avatar_versions="$(verified_version_array avatar /srv/project-snow/media/releases)"
+  sticker_versions="$(verified_version_array sticker /srv/project-snow/media/stickers/releases)"
+  jq -n \
+    --arg controller_sha "$controller_sha" \
+    --arg active_colour "$active_colour" \
+    --argjson deploy_has_docker_group "$docker_group" \
+    --argjson deploy_can_access_docker "$docker_access" \
+    --argjson ufw_active "$ufw_active" \
+    --argjson fail2ban_active "$fail2ban_active" \
+    --argjson sshd_hardened "$sshd_hardened" \
+    --argjson data_versions "$data_versions" \
+    --argjson avatar_versions "$avatar_versions" \
+    --argjson sticker_versions "$sticker_versions" \
+    '{controller_sha: $controller_sha, active_colour: $active_colour,
+      deploy_has_docker_group: $deploy_has_docker_group,
+      deploy_can_access_docker: $deploy_can_access_docker,
+      ufw_active: $ufw_active,
+      fail2ban_active: $fail2ban_active,
+      sshd_hardened: $sshd_hardened,
+      installed_data_versions: $data_versions,
+      installed_avatar_versions: $avatar_versions,
+      installed_sticker_versions: $sticker_versions}'
+}
+
+case "$operation" in
+  stage) run_stage ;;
+  promote) run_switch promote ;;
+  rollback) run_switch rollback ;;
+  status) run_status ;;
+esac

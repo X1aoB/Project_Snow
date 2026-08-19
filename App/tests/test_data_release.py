@@ -42,6 +42,8 @@ def _build_fixture(root: Path, version: str = "2026.08.14.1") -> Path:
             "source_license": "CC BY-NC-SA 4.0 unless page-specific notice applies",
             "source_manifest": "stories.jsonl",
             "source_content_hash": "hash-a",
+            "source_revision_id": "101",
+            "source_revision_timestamp": "2026-08-19T00:00:00Z",
             "local_path": "Data/Source/a.wikitext",
             "metadata": {"source_priority": 1.0},
         },
@@ -56,6 +58,8 @@ def _build_fixture(root: Path, version: str = "2026.08.14.1") -> Path:
             "source_license": "CC BY-NC-SA 4.0 unless page-specific notice applies",
             "source_manifest": "stories.jsonl",
             "source_content_hash": "hash-b",
+            "source_revision_id": "102",
+            "source_revision_timestamp": "2026-08-19T00:01:00Z",
             "local_path": "Data/Source/b.wikitext",
             "metadata": {"source_priority": 1.0},
         },
@@ -195,7 +199,7 @@ class FakeQdrantClient:
 
 
 class DataReleaseTests(TestCase):
-    def test_builds_exact_serving_layout_and_unspecified_license(self) -> None:
+    def test_builds_exact_serving_layout_and_verified_licence(self) -> None:
         with TemporaryDirectory() as directory:
             release = _build_fixture(Path(directory))
             manifest = verify_data_release(release, "2026.08.14.1")
@@ -221,7 +225,17 @@ class DataReleaseTests(TestCase):
                 (release / "lakehouse" / "documents.jsonl").read_text(encoding="utf-8").splitlines()[0]
             )
             self.assertEqual(published_document["source_license"], PUBLIC_CONTENT_LICENSE)
-            self.assertNotIn("4.0", (release / "LICENSES.json").read_text(encoding="utf-8"))
+            licences = json.loads((release / "LICENSES.json").read_text(encoding="utf-8"))
+            self.assertEqual(licences["content"]["version"], "4.0")
+            self.assertEqual(
+                manifest["public_release_status"],
+                "verified_against_bwiki_source_declaration",
+            )
+            attribution = json.loads(
+                (release / "ATTRIBUTION.jsonl").read_text(encoding="utf-8").splitlines()[0]
+            )
+            self.assertTrue(attribution["source_revision_id"])
+            self.assertTrue(attribution["modifications"])
 
     def test_verifier_rejects_tampering(self) -> None:
         with TemporaryDirectory() as directory:
@@ -230,7 +244,7 @@ class DataReleaseTests(TestCase):
             with self.assertRaisesRegex(DataReleaseError, "mismatch"):
                 verify_data_release(release)
 
-    def test_qdrant_load_switches_alias_and_keeps_previous(self) -> None:
+    def test_qdrant_load_stages_without_switch_then_explicitly_activates(self) -> None:
         with TemporaryDirectory() as directory:
             version = "2026.08.14.1"
             release = _build_fixture(Path(directory), version)
@@ -244,18 +258,25 @@ class DataReleaseTests(TestCase):
                 client=client,
             )
             self.assertEqual(result["points"], 2)
-            self.assertEqual(client.alias_target, result["collection"])
-            self.assertIn("project_snow_documents__stale", client.deleted)
+            self.assertFalse(result["activated"])
+            self.assertEqual(
+                client.alias_target, "project_snow_documents__previous"
+            )
+            self.assertNotIn("project_snow_documents__stale", client.deleted)
             self.assertIn("project_snow_documents__previous", client.collections)
-            reused = load_qdrant(
+            activated = load_qdrant(
                 release,
                 version,
                 "http://qdrant",
                 "project_snow_documents",
                 "test-key",
                 client=client,
+                activate=True,
             )
-            self.assertTrue(reused["reused"])
+            self.assertTrue(activated["reused"])
+            self.assertTrue(activated["activated"])
+            self.assertEqual(client.alias_target, activated["collection"])
+            self.assertIn("project_snow_documents__stale", client.deleted)
 
     def test_versioned_ids_and_neo4j_rows_are_stable(self) -> None:
         self.assertEqual(qdrant_point_id("doc_a"), qdrant_point_id("doc_a"))

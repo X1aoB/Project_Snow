@@ -66,6 +66,7 @@ EMBEDDING_PATTERNS = (
 
 DEPLOY_PATTERNS = (
     ".github/workflows/**",
+    "App/config/public_release_artifacts.json",
     "App/compose*.yml",
     "App/infra/Caddyfile",
     "App/infra/egress-squid.conf",
@@ -74,7 +75,10 @@ DEPLOY_PATTERNS = (
     "App/infra/public-entrypoint.sh",
     "App/infra/public_smoke.py",
     "App/ops/**",
+    "App/scripts/bootstrap-release-runner.ps1",
+    "App/scripts/bootstrap_release_host.py",
     "App/scripts/deploy.ps1",
+    "App/scripts/install_release_archive.py",
     "App/scripts/promote.ps1",
     "App/scripts/rollback.ps1",
     "App/scripts/release_manifest.py",

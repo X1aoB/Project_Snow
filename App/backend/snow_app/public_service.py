@@ -74,32 +74,10 @@ class CharacterUnavailable(RuntimeError):
 
 _PUBLIC_WHOLE_ANSWER_FALLBACKS = frozenset(
     {
-        "immersive_boundary_fallback",
-        "live_scene_guard",
-        "companion_social_guard",
-        "fenny_voice_guard",
-        "communication_guard",
-        "analyst_premise_guard",
-        "session_premise_guard",
-        "casual_state_guard",
-        "current_food_guard",
-        "shared_meal_guard",
-        "routine_activity_guard",
-        "open_invitation_guard",
-        "signature_frequency_guard",
-        "cross_character_guard",
-        "dual_persona_guard",
-        "direct_answer_guard",
-        "scene_privacy_guard",
-        "continuity_guard",
-        "interaction_hint_guard",
-        "natural_dialogue_guard",
-        "plot_recap_guard",
-        "mechanical_dialogue_guard",
-        "visit_location_guard",
-        "repetition_guard",
-        "logistics_evidence_fallback",
-        "relationship_roster_guard",
+        # Empty provider output has no answer to preserve. Every other
+        # deterministic guard produces a channel-safe, revalidated fallback
+        # and is returned instead of turning a recoverable role issue into a
+        # failed public request.
         "empty_model_output_guard",
     }
 )
@@ -134,7 +112,7 @@ class GenerationGate:
     def _noop(self) -> Iterator[None]:
         yield
 
-    async def run(self, callback):
+    async def acquire(self) -> None:
         async with self._lock:
             if self.semaphore.locked() and self._waiting >= self.queued_limit:
                 raise GenerationBusy("generation_queue_full")
@@ -147,10 +125,16 @@ class GenerationGate:
         finally:
             async with self._lock:
                 self._waiting = max(0, self._waiting - 1)
+
+    def release(self) -> None:
+        self.semaphore.release()
+
+    async def run(self, callback):
+        await self.acquire()
         try:
             return await callback()
         finally:
-            self.semaphore.release()
+            self.release()
 
 
 def _history_turns(history: list[HistoryTurn]) -> list[dict[str, Any]]:
@@ -193,7 +177,7 @@ def _trim_content_blocks(
     blocks: list[dict[str, Any]],
     *,
     limit: int = 1200,
-) -> tuple[list[dict[str, str]], bool]:
+) -> tuple[list[dict[str, Any]], bool]:
     remaining = limit
     trimmed: list[dict[str, str]] = []
     truncated = False
@@ -206,6 +190,9 @@ def _trim_content_blocks(
                     "caption": str(block.get("caption") or ""),
                     "src": str(block.get("src") or ""),
                     "thumbnail_src": str(block.get("thumbnail_src") or ""),
+                    "display_src": str(block.get("display_src") or ""),
+                    "display_mime_type": str(block.get("display_mime_type") or ""),
+                    "display_animated": bool(block.get("display_animated")),
                     "animated": bool(block.get("animated")),
                 })
             continue
@@ -306,6 +293,30 @@ _CONTROLLED_JOINT_LOCATIONS: dict[str, dict[str, Any]] = {
         "aliases": ("基地食堂", "食堂"),
         "activities": {"eating_together": "和分析员一起用餐"},
     },
+    "base_lounge": {
+        "location": "基地休息区",
+        "explicit_aliases": ("基地休息区", "休息区", "基地公共区", "公共区"),
+        "aliases": ("基地休息区", "休息区", "基地公共区", "公共区", "茶话会", "聊天"),
+        "activities": {"relaxing_together": "和分析员一起休息聊天"},
+    },
+    "observation": {
+        "location": "观景区",
+        "explicit_aliases": ("观景区",),
+        "aliases": ("观景区", "看风景", "观景"),
+        "activities": {"viewing_together": "和分析员一起看风景"},
+    },
+    "training": {
+        "location": "训练区",
+        "explicit_aliases": ("训练区", "训练场", "训练室"),
+        "aliases": ("训练区", "训练场", "训练室", "训练"),
+        "activities": {"training_together": "和分析员一起训练"},
+    },
+    "archive": {
+        "location": "资料室",
+        "explicit_aliases": ("资料室", "资料阅览区", "阅览区"),
+        "aliases": ("资料室", "资料阅览区", "阅览区", "查资料", "看资料"),
+        "activities": {"reading_together": "和分析员一起查阅资料"},
+    },
 }
 _JOINT_MOVE_REQUEST_TERMS = (
     "一起去", "一起出发", "和我去", "陪我去", "跟我去", "带你去", "带你逛", "带你散步",
@@ -313,22 +324,41 @@ _JOINT_MOVE_REQUEST_TERMS = (
     "带角色", "带她去", "带她逛", "带她散步", "和角色去", "陪角色去", "跟角色去",
     "和她去", "陪她去", "跟她去", "和她逛", "陪她逛", "跟她逛",
 )
+_JOINT_MOVE_TARGET_TERMS = ("一起去找", "和我去找", "陪我去找", "跟我去找", "去找", "去见", "去看看")
+_JOINT_MOVE_CONTINUATION_TERMS = (
+    "那就走吧", "我们走吧", "一起走吧", "走吧", "出发吧", "现在出发", "这就出发", "现在走",
+)
 _JOINT_MOVE_ACCEPT_TERMS = (
     "可以", "当然", "愿意", "没问题", "走吧", "出发", "陪你", "跟你去", "跟你逛", "和你去",
     "和你逛", "一起去", "我们去", "那就走", "现在走", "这就出发", "马上出发", "现在出发",
     "好呀", "好啊", "好吧", "行啊", "行吧",
 )
-_JOINT_MOVE_REJECT_TERMS = (
+_JOINT_MOVE_NEGATIVE_TERMS = (
     "不去", "不想去", "不想", "不能", "不可以", "没空", "不方便", "拒绝", "下次", "以后", "改天",
     "稍后", "晚点", "明天", "到时候", "之后再", "有机会", "如果", "假如", "理论上", "也许", "或许",
-    "去过", "逛过", "曾经", "已经", "要不要", "想不想", "愿不愿意", "可以吗", "好吗", "有空吗",
-    "去吗", "吗？", "吗?", "吗",
+)
+_JOINT_MOVE_HISTORICAL_TERMS = (
+    "去过", "逛过", "曾经", "已经去", "上次去", "以前去",
+)
+_JOINT_MOVE_ANSWER_QUESTION_TERMS = (
+    "要不要", "想不想", "愿不愿意", "能不能", "可不可以", "可以吗", "好吗", "有空吗", "去吗",
 )
 
 
 def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
     compact = str(text or "").casefold()
     return any(term.casefold() in compact for term in terms)
+
+
+def _joint_move_has_blocker(text: str) -> bool:
+    # Chinese invitation forms can contain a literal negative substring
+    # (“想不想” contains “不想”, “能不能” contains “不能”) without being a
+    # refusal. Remove only those reviewed question forms before checking true
+    # negative, future, conditional, and historical blockers.
+    value = str(text or "")
+    for invitation in ("要不要", "想不想", "愿不愿意", "能不能", "可不可以"):
+        value = value.replace(invitation, "")
+    return _contains_any(value, _JOINT_MOVE_NEGATIVE_TERMS + _JOINT_MOVE_HISTORICAL_TERMS)
 
 
 class PublicChatService:
@@ -557,17 +587,10 @@ class PublicChatService:
     def characters(self) -> list[dict[str, Any]]:
         result = []
         for character in MVP_CHARACTERS:
-            avatar = self.media.avatar(character.character_id) or {
-                "src": f"/media/{self.public_settings.media_version}/avatars/{character.character_id}-200.webp",
-                "thumbnail_src": f"/media/{self.public_settings.media_version}/avatars/{character.character_id}-96.webp",
-                "portrait_kind": "headshot",
-                "portrait_scale": 1.0,
-                "portrait_focus_x": 50,
-                "portrait_focus_y": 50,
-                "source_page": "",
-                "license": "CC BY-NC-SA",
-                "license_version": "version unspecified by source",
-            }
+            # Never synthesize a URL for an unverified package.  The client
+            # can render its neutral placeholder while readiness blocks the
+            # candidate from promotion.
+            avatar = self.media.avatar(character.character_id)
             result.append(
                 {
                     "character_id": character.character_id,
@@ -587,20 +610,132 @@ class PublicChatService:
         return self.media.analyst_avatar()
 
     @staticmethod
-    def _joint_move_intent(message: str) -> tuple[str, dict[str, Any]] | None:
+    def movement_catalog() -> list[dict[str, str]]:
+        """Expose only the reviewed invitation choices, never prompt internals."""
+
+        values: list[dict[str, str]] = []
+        for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items():
+            activities = dict(definition.get("activities") or {})
+            activity_id = next(iter(activities), "")
+            values.append(
+                {
+                    "location_id": location_id,
+                    "display_name": str(definition.get("location") or location_id),
+                    "activity_id": activity_id,
+                    "activity_name": str(activities.get(activity_id) or ""),
+                }
+            )
+        return values
+
+    @staticmethod
+    def _history_text(turn: HistoryTurn | dict[str, Any]) -> str:
+        if isinstance(turn, dict):
+            return str(turn.get("content") or "")
+        return str(getattr(turn, "content", "") or "")
+
+    @staticmethod
+    def _controlled_location_for_scene(location: str) -> tuple[str, dict[str, Any]] | None:
+        value = str(location or "").strip()
+        if not value:
+            return None
+        for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items():
+            aliases = (
+                str(definition.get("location") or ""),
+                *tuple(definition.get("explicit_aliases") or ()),
+            )
+            if any(alias and (alias in value or value in alias) for alias in aliases):
+                return location_id, definition
+        return None
+
+    @classmethod
+    def _target_presence_move_intent(
+        cls,
+        message: str,
+        state: dict[str, Any] | None,
+        selected_character_id: str | None,
+    ) -> tuple[str, dict[str, Any]] | None:
         value = str(message or "").strip()
+        if not state or not _contains_any(value, _JOINT_MOVE_TARGET_TERMS):
+            return None
+        presence = state.get("presence") or {}
+        for character in sorted(MVP_CHARACTERS, key=lambda item: len(item.display_name), reverse=True):
+            if character.character_id == selected_character_id:
+                continue
+            names = tuple(dict.fromkeys((character.display_name, character.source_name, *character.aliases)))
+            if not _contains_any(value, names):
+                continue
+            raw_scene = presence.get(character.character_id) or {}
+            scene = raw_scene.model_dump() if hasattr(raw_scene, "model_dump") else dict(raw_scene)
+            resolved = cls._controlled_location_for_scene(str(scene.get("location") or ""))
+            if not resolved:
+                return None
+            location_id, definition = resolved
+            target_definition = {
+                **definition,
+                "activities": {
+                    **dict(definition.get("activities") or {}),
+                    "meeting_companion": f"和分析员一起去找{character.display_name}",
+                },
+                "resolved_activity_id": "meeting_companion",
+                "target_character_id": character.character_id,
+                "target_character_name": character.display_name,
+                "resolution": "target_presence",
+            }
+            return location_id, target_definition
+        return None
+
+    @classmethod
+    def _direct_joint_move_intent(
+        cls,
+        message: str,
+        state: dict[str, Any] | None = None,
+        selected_character_id: str | None = None,
+    ) -> tuple[str, dict[str, Any]] | None:
+        value = str(message or "").strip()
+        if _joint_move_has_blocker(value):
+            return None
+        target_intent = cls._target_presence_move_intent(value, state, selected_character_id)
+        if target_intent:
+            return target_intent
         if not _contains_any(value, _JOINT_MOVE_REQUEST_TERMS):
             return None
-        if _contains_any(value, _JOINT_MOVE_REJECT_TERMS):
-            return None
         # Prefer a named destination over a generic activity. "去商场逛街"
-        # therefore resolves to the mall rather than the earlier 逛街 alias.
+        # therefore resolves to the mall rather than the generic 逛街 alias.
         for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items():
             if _contains_any(value, tuple(definition.get("explicit_aliases") or ())):
-                return location_id, definition
+                return location_id, {**definition, "resolution": "current_explicit"}
         for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items():
             if _contains_any(value, tuple(definition["aliases"])):
-                return location_id, definition
+                return location_id, {**definition, "resolution": "current_activity"}
+        return None
+
+    @classmethod
+    def _joint_move_intent(
+        cls,
+        message: str,
+        recent_history: list[HistoryTurn] | None = None,
+        state: dict[str, Any] | None = None,
+        selected_character_id: str | None = None,
+    ) -> tuple[str, dict[str, Any]] | None:
+        direct = cls._direct_joint_move_intent(message, state, selected_character_id)
+        if direct:
+            return direct
+        value = str(message or "").strip()
+        if not _contains_any(value, _JOINT_MOVE_CONTINUATION_TERMS):
+            return None
+        if _joint_move_has_blocker(value):
+            return None
+        # A short continuation such as “那就走吧” inherits only the latest
+        # explicit, current invitation from the bounded browser history.
+        for turn in reversed((recent_history or [])[-8:]):
+            inherited = cls._direct_joint_move_intent(
+                cls._history_text(turn),
+                state,
+                selected_character_id,
+            )
+            if inherited:
+                location_id, definition = inherited
+                return location_id, {**definition, "resolution": "history_continuation"}
         return None
 
     @staticmethod
@@ -614,7 +749,12 @@ class PublicChatService:
         """
 
         value = str(answer or "").strip()
-        if not value or _contains_any(value, _JOINT_MOVE_REJECT_TERMS):
+        if not value or _joint_move_has_blocker(value):
+            return False
+        if _contains_any(value, _JOINT_MOVE_ANSWER_QUESTION_TERMS) and not _contains_any(
+            value,
+            ("当然", "愿意", "没问题", "走吧", "出发", "现在走", "好呀", "好啊", "好吧", "行啊", "行吧"),
+        ):
             return False
         return _contains_any(value, _JOINT_MOVE_ACCEPT_TERMS)
 
@@ -624,41 +764,51 @@ class PublicChatService:
         request: ChatRequest,
         result: dict[str, Any],
     ) -> tuple[dict[str, Any], StateEvent | None, dict[str, Any]]:
-        diagnostics: dict[str, Any] = {"state_update_status": "not_proposed"}
-        intent = self._joint_move_intent(request.message)
+        diagnostics: dict[str, Any] = {"state_update_status": "not_requested"}
+        intent = self._joint_move_intent(
+            request.message,
+            request.recent_history,
+            state,
+            request.character_id,
+        )
         answer = str(result.get("answer") or "")
         accepted = self._joint_move_is_accepted(answer)
         raw_updates = result.get("state_updates") or []
-        if not raw_updates and intent and accepted:
-            location_id, definition = intent
-            activity_id = next(iter(definition["activities"]))
-            raw_updates = [{
-                "type": "joint_move",
-                "location_id": location_id,
-                "activity_id": activity_id,
-                "commit": "now",
-            }]
-        if not raw_updates:
-            diagnostics["state_update_rejected_reason"] = "no_controlled_proposal"
-            return state, None, diagnostics
-        try:
-            proposal = StateUpdateProposal.model_validate(raw_updates[0])
-        except (TypeError, ValueError):
-            diagnostics["state_update_rejected_reason"] = "proposal_invalid"
-            return state, None, diagnostics
-        definition = _CONTROLLED_JOINT_LOCATIONS.get(proposal.location_id)
-        if definition is None or proposal.activity_id not in definition["activities"]:
-            diagnostics["state_update_rejected_reason"] = "unknown_location_or_activity"
-            return state, None, diagnostics
-        if not intent or intent[0] != proposal.location_id:
-            diagnostics["state_update_rejected_reason"] = "user_did_not_request_current_departure"
+        proposal: StateUpdateProposal | None = None
+        if raw_updates:
+            try:
+                proposal = StateUpdateProposal.model_validate(raw_updates[0])
+                diagnostics["model_proposal_status"] = "valid"
+            except (TypeError, ValueError):
+                diagnostics["model_proposal_status"] = "invalid"
+        else:
+            diagnostics["model_proposal_status"] = "absent"
+        if not intent:
+            diagnostics["state_update_rejected_reason"] = "movement_intent_unresolved"
             return state, None, diagnostics
         if not accepted:
             diagnostics["state_update_rejected_reason"] = "character_did_not_accept_now"
             return state, None, diagnostics
 
+        # The deterministic server resolver is authoritative. A model
+        # proposal can confirm it, but absence, malformed data, or a mismatch
+        # never suppresses an otherwise valid natural-language movement.
+        location_id, definition = intent
+        activity_id = str(
+            definition.get("resolved_activity_id")
+            or next(iter(definition.get("activities") or {}), "")
+        )
+        if not activity_id or activity_id not in definition.get("activities", {}):
+            diagnostics["state_update_rejected_reason"] = "controlled_activity_unavailable"
+            return state, None, diagnostics
+        if proposal and (
+            proposal.location_id != location_id or proposal.activity_id != activity_id
+        ):
+            diagnostics["model_proposal_status"] = "mismatch_ignored"
+
         location = str(definition["location"])
-        activity = str(definition["activities"][proposal.activity_id])
+        activity = str(definition["activities"][activity_id])
+        target_character_id = str(definition.get("target_character_id") or "") or None
         event_id = f"{request.request_id}:joint_move"
         existing = next(
             (
@@ -677,8 +827,9 @@ class PublicChatService:
             diagnostics.update({
                 "state_update_status": "already_applied",
                 "state_update_type": "joint_move",
-                "location_id": proposal.location_id,
-                "activity_id": proposal.activity_id,
+                "location_id": location_id,
+                "activity_id": activity_id,
+                "target_character_id": target_character_id,
             })
             return state, event, diagnostics
         presence = dict(state.get("presence") or {})
@@ -695,8 +846,9 @@ class PublicChatService:
             character_id=request.character_id,
             communication_channel=request.communication_channel,
             location=location,
-            location_id=proposal.location_id,
-            activity_id=proposal.activity_id,
+            location_id=location_id,
+            activity_id=activity_id,
+            target_character_id=target_character_id,
         )
         next_state = self._state_with_event(
             {**state, "presence": presence},
@@ -706,8 +858,10 @@ class PublicChatService:
         diagnostics.update({
             "state_update_status": "applied",
             "state_update_type": "joint_move",
-            "location_id": proposal.location_id,
-            "activity_id": proposal.activity_id,
+            "location_id": location_id,
+            "activity_id": activity_id,
+            "target_character_id": target_character_id,
+            "intent_resolution": str(definition.get("resolution") or "current_explicit"),
         })
         return next_state, event, diagnostics
 
@@ -741,6 +895,8 @@ class PublicChatService:
             schedule_revision=1,
             generated_at=schedule_start.isoformat(),
             expires_at=schedule_expires.isoformat(),
+            subject_binding=subject_hash,
+            state_key_id=self.public_settings.state_key_id,
         ).model_dump()
 
     def _normalized_state(self, token: str, subject_hash: str) -> dict[str, Any]:
@@ -752,6 +908,9 @@ class PublicChatService:
         schema_version = str(raw.get("schema_version") or "public-state-1")
         if schema_version not in {"public-state-1", "public-state-2"}:
             raise PublicSecurityError("Public state schema is not supported")
+        incoming_binding = str(raw.get("subject_binding") or "")
+        if incoming_binding and not hmac.compare_digest(incoming_binding, subject_hash):
+            raise PublicSecurityError("Public state belongs to another anonymous session")
         incoming_schedule_date = str(raw.get("schedule_date") or "")
         if schema_version == "public-state-1":
             old_world = raw.get("world") if isinstance(raw.get("world"), dict) else {}
@@ -811,6 +970,8 @@ class PublicChatService:
             schedule_revision=int(defaults.get("schedule_revision") or 1),
             generated_at=str(defaults.get("generated_at") or ""),
             expires_at=str(defaults.get("expires_at") or ""),
+            subject_binding=subject_hash,
+            state_key_id=self.public_settings.state_key_id,
         ).model_dump()
 
     @staticmethod
@@ -866,6 +1027,8 @@ class PublicChatService:
             schedule_revision=int(state.get("schedule_revision") or 1),
             generated_at=str(state.get("generated_at") or ""),
             expires_at=str(state.get("expires_at") or ""),
+            subject_binding=str(state.get("subject_binding") or ""),
+            state_key_id=self.public_settings.state_key_id,
         ).model_dump()
 
     def resolve_presence(
@@ -1063,6 +1226,8 @@ class PublicChatService:
                         "effective": "off",
                         "reason": "public_immersive_policy",
                         "provider_kind": provider.provider_id,
+                        "max_provider_http_calls": 2,
+                        "disable_compatibility_retries": True,
                     },
                     max_tokens_override=1600,
                     persist_exchange=False,
@@ -1247,10 +1412,14 @@ class PublicChatService:
         subject_hash: str,
         provider: ProviderSpec,
         api_key: str,
+        *,
+        gate_reserved: bool = False,
     ) -> dict[str, Any]:
         async def generate():
             return await asyncio.to_thread(self._chat_sync, request, subject_hash, provider, api_key)
 
+        if gate_reserved:
+            return await generate()
         return await self.gate.run(generate)
 
     def policy_rejection(
@@ -1296,6 +1465,8 @@ class PublicChatService:
             "usage": {},
             "safety_category": safety_category,
             "generation_outcome": "valid_initial",
+            "validation_disposition": "accepted",
+            "movement_status": {"status": "not_requested"},
             "response_adjustments": [],
             "terminal_error": "",
             "diagnostics": {
@@ -1353,6 +1524,25 @@ class PublicChatService:
             else []
         )
         with self._request_state(request, subject_hash) as (session_id, world_id, prior_state):
+            movement_intent = self._joint_move_intent(
+                request.message,
+                request.recent_history,
+                prior_state,
+                request.character_id,
+            )
+            movement_catalog: list[dict[str, Any]] = []
+            if movement_intent:
+                location_id, definition = movement_intent
+                activity_id = str(
+                    definition.get("resolved_activity_id")
+                    or next(iter(definition.get("activities") or {}), "")
+                )
+                if activity_id:
+                    movement_catalog.append({
+                        "location_id": location_id,
+                        "activity_id": activity_id,
+                        "aliases": list(definition.get("aliases") or ()),
+                    })
             try:
                 result = self.mvp.chat(
                     request.character_id,
@@ -1373,20 +1563,17 @@ class PublicChatService:
                         "effective": "off",
                         "reason": "public_immersive_policy",
                         "provider_kind": provider.provider_id,
+                        "max_provider_http_calls": 2,
+                        "disable_compatibility_retries": True,
                     },
                     max_tokens_override=1600,
                     persist_exchange=False,
                     remember_session=False,
                     public_sticker_candidates=sticker_candidates,
-                    public_state_update_catalog=[
-                        {
-                            "location_id": location_id,
-                            "activity_id": activity_id,
-                            "aliases": list(definition["aliases"]),
-                        }
-                        for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items()
-                        for activity_id in definition["activities"]
-                    ],
+                    # Do not ask the model to invent movement. The catalog is
+                    # exposed only after the server has resolved an eligible
+                    # current invitation or bounded-history continuation.
+                    public_state_update_catalog=movement_catalog,
                 )
             except Exception as exc:
                 from .mvp_service import MVPProviderError
@@ -1469,11 +1656,20 @@ class PublicChatService:
                 event=communication_event,
                 world_snapshot=world_snapshot,
             )
-            next_state, movement_event, state_update_diagnostics = self._apply_joint_movement(
-                next_state,
-                request,
-                {**result, "answer": answer},
-            )
+            try:
+                next_state, movement_event, state_update_diagnostics = self._apply_joint_movement(
+                    next_state,
+                    request,
+                    {**result, "answer": answer},
+                )
+            except Exception:
+                # State is presentation metadata. A signing or state-shape
+                # regression must never discard a valid model reply.
+                movement_event = None
+                state_update_diagnostics = {
+                    "state_update_status": "state_unchanged",
+                    "state_update_rejected_reason": "state_apply_failed",
+                }
             response_state_event = movement_event or communication_event
             response_scene_state = self._scene_state(next_state, request.character_id)
             request_health = self.repository.request_health()
@@ -1484,6 +1680,32 @@ class PublicChatService:
                 generation_outcome = "normalized"
             else:
                 generation_outcome = "valid_initial"
+            validation_disposition = str(result.get("validation_disposition") or "")
+            if validation_disposition not in {"accepted", "normalized", "safe_fallback"}:
+                validation_disposition = (
+                    "safe_fallback"
+                    if activity_fallback or bool(set(adjustments).difference(_PUBLIC_NORMALIZATION_ADJUSTMENTS | _PUBLIC_REWRITE_ADJUSTMENTS))
+                    else "normalized"
+                    if adjustments
+                    else "accepted"
+                )
+            state_status = str(state_update_diagnostics.get("state_update_status") or "not_requested")
+            movement_status = {
+                "status": (
+                    state_status
+                    if state_status in {"applied", "already_applied", "state_unchanged"}
+                    else "not_accepted"
+                    if state_update_diagnostics.get("state_update_rejected_reason") == "character_did_not_accept_now"
+                    else "unresolved"
+                    if movement_intent
+                    else "not_requested"
+                ),
+                **{
+                    key: state_update_diagnostics.get(key)
+                    for key in ("location_id", "activity_id", "target_character_id")
+                    if state_update_diagnostics.get(key)
+                },
+            }
             return {
                 "request_id": str(request.request_id),
                 "character_id": request.character_id,
@@ -1501,6 +1723,13 @@ class PublicChatService:
                 "usage": result.get("usage") or {},
                 "safety_category": safety_category,
                 "generation_outcome": generation_outcome,
+                "validation_disposition": validation_disposition,
+                "movement_status": movement_status,
+                "recovery_action": (
+                    "refresh_scene"
+                    if movement_status.get("status") == "state_unchanged"
+                    else "none"
+                ),
                 "response_adjustments": adjustments,
                 "terminal_error": "",
                 "diagnostics": {
@@ -1588,6 +1817,9 @@ class PublicChatService:
                         "caption": _strip_sticker_filenames(str(resolved.get("caption") or ""))[:120],
                         "src": str(resolved.get("src") or ""),
                         "thumbnail_src": str(resolved.get("thumbnail_src") or ""),
+                        "display_src": str(resolved.get("display_src") or ""),
+                        "display_mime_type": str(resolved.get("display_mime_type") or ""),
+                        "display_animated": bool(resolved.get("display_animated")),
                         "animated": bool(resolved.get("animated")),
                     }
                     if sticker_diagnostics is not None:
@@ -1626,6 +1858,9 @@ class PublicChatService:
                     "caption": _strip_sticker_filenames(str(resolved.get("caption") or ""))[:120],
                     "src": str(resolved.get("src") or ""),
                     "thumbnail_src": str(resolved.get("thumbnail_src") or ""),
+                    "display_src": str(resolved.get("display_src") or ""),
+                    "display_mime_type": str(resolved.get("display_mime_type") or ""),
+                    "display_animated": bool(resolved.get("display_animated")),
                     "animated": bool(resolved.get("animated")),
                 }
                 raw_blocks.append(sticker_block)
@@ -1700,6 +1935,8 @@ class PublicChatService:
             "usage": result.get("usage") or {},
             "safety_category": None,
             "generation_outcome": "rejected",
+            "validation_disposition": "rejected",
+            "movement_status": {"status": "state_unchanged"},
             "response_adjustments": response_adjustments or [],
             "terminal_error": code,
             "diagnostics": diagnostics,
@@ -1742,6 +1979,8 @@ class PublicChatService:
             "generation_class": generation_class or str(result.get("generation_class") or ""),
             "guard_code": guard_code or str(result.get("guard_code") or ""),
             "guard_violation_count": int(result.get("guard_violation_count") or 0),
+            "final_guard_violation_count": int(result.get("final_guard_violation_count") or 0),
+            "guard_resolution": str(result.get("guard_resolution") or ""),
         }
         if error_stage:
             diagnostics["error_stage"] = error_stage
@@ -1776,20 +2015,26 @@ class PublicChatService:
             },
             ensure_ascii=False,
         )
-        content, usage = await simple_completion(
-            provider,
-            api_key,
-            request.model,
-            system_prompt=(
-                "你是会话压缩器。只总结明确内容，不推断隐私，不输出Markdown代码块。"
-                "请只返回 JSON：{\"summary\":\"不超过1200字的中文摘要\","
-                "\"open_threads\":[\"仍待继续的话题，最多12条\"]}。"
-                "open_threads 只能记录可选话题，不能写成用户必须完成的承诺。"
-            ),
-            user_prompt=prompt,
-            max_tokens=1200,
-            client=self.provider_client,
-        )
+        async def generate_summary() -> tuple[str, dict[str, Any]]:
+            return await simple_completion(
+                provider,
+                api_key,
+                request.model,
+                system_prompt=(
+                    "你是会话压缩器。只总结明确内容，不推断隐私，不输出Markdown代码块。"
+                    "请只返回 JSON：{\"summary\":\"不超过1200字的中文摘要\","
+                    "\"open_threads\":[\"仍待继续的话题，最多12条\"]}。"
+                    "open_threads 只能记录可选话题，不能写成用户必须完成的承诺。"
+                ),
+                user_prompt=prompt,
+                max_tokens=1200,
+                client=self.provider_client,
+            )
+
+        # Summaries use the same global 4-active/8-queued budget as chat and
+        # arrival generation. Otherwise a burst of browser-side checkpoints
+        # could bypass the public generation cap entirely.
+        content, usage = await self.gate.run(generate_summary)
         summary = str(content or "").strip()
         pending_topics: list[str] = []
         # Newer providers may follow the structured summary contract. Keep a

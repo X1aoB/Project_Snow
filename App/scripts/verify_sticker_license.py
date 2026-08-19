@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import UTC, datetime
+from hashlib import sha1, sha256
 import json
 from pathlib import Path
 import re
@@ -18,7 +19,7 @@ import time
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-import requests
+import httpx
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -26,11 +27,30 @@ WIKI_API = "https://wiki.biligame.com/sonw/api.php"
 LICENSE_SOURCE_PAGE = "https://wiki.biligame.com/sonw/%E9%A6%96%E9%A1%B5"
 LICENSE_SOURCE_URL = "https://creativecommons.org/licenses/by-nc-sa/4.0/"
 STICKER_SOURCE_PAGE = "https://wiki.biligame.com/sonw/%E8%81%8A%E5%A4%A9%E8%A1%A8%E6%83%85"
-USER_AGENT = "ProjectSnow-public-media-review/0.8.4 (contact: admin@xiaob.dev)"
+USER_AGENT = "ProjectSnow-public-media-review/0.9.0 (contact: admin@xiaob.dev)"
 SPECIAL_NOTICE = re.compile(
     r"特殊说明|CC\s*BY|版权声明|许可证|许可协议|禁止转载|版权所有|保留所有权利",
     re.IGNORECASE,
 )
+
+
+def _base36(number: int) -> str:
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+    output = ""
+    while number:
+        number, remainder = divmod(number, 36)
+        output = alphabet[remainder] + output
+    return output or "0"
+
+
+def _source_sha1_matches(content: bytes, declared: str) -> bool:
+    digest = sha1(content).hexdigest()
+    normalized = str(declared or "").casefold().strip()
+    if re.fullmatch(r"[0-9a-f]{40}", normalized):
+        return normalized == digest
+    if re.fullmatch(r"[0-9a-z]{1,31}", normalized):
+        return normalized.lstrip("0") == _base36(int(digest, 16)).lstrip("0")
+    return False
 
 
 def _title(url: str) -> str:
@@ -46,7 +66,7 @@ def _read_rows(path: Path) -> list[dict[str, Any]]:
     ]
 
 
-def _query(session: requests.Session, titles: list[str]) -> dict[str, dict[str, Any]]:
+def _query(session: httpx.Client, titles: list[str]) -> dict[str, dict[str, Any]]:
     pages: dict[str, dict[str, Any]] = {}
     for start in range(0, len(titles), 20):
         batch = titles[start : start + 20]
@@ -57,9 +77,10 @@ def _query(session: requests.Session, titles: list[str]) -> dict[str, dict[str, 
                 "format": "json",
                 "formatversion": "2",
                 "titles": "|".join(batch),
-                "prop": "revisions",
+                "prop": "revisions|imageinfo",
                 "rvprop": "ids|timestamp|content",
                 "rvslots": "main",
+                "iiprop": "url|sha1|timestamp|user|size|mime",
             },
             timeout=30,
         )
@@ -75,6 +96,7 @@ def _query(session: requests.Session, titles: list[str]) -> dict[str, dict[str, 
                 "content": str(
                     ((revision.get("slots") or {}).get("main") or {}).get("content") or ""
                 ),
+                "imageinfo": (page.get("imageinfo") or [{}])[0],
             }
         time.sleep(0.25)
     return pages
@@ -94,19 +116,22 @@ def review(*, project_root: Path, apply: bool) -> dict[str, Any]:
     index_path = project_root / "Data" / "Manifest" / "chat_stickers_index.jsonl"
     rows = _read_rows(index_path)
     titles = [_title(str(row["file_page_url"])) for row in rows]
-    session = requests.Session()
-    session.headers.update({"User-Agent": USER_AGENT})
-    pages = _query(session, titles)
-    source_pages = _query(session, [_title(LICENSE_SOURCE_PAGE), _title(STICKER_SOURCE_PAGE)])
-    home = source_pages.get(_title(LICENSE_SOURCE_PAGE)) or {}
-    gallery = source_pages.get(_title(STICKER_SOURCE_PAGE)) or {}
-    home_html_response = session.get(
-        LICENSE_SOURCE_PAGE,
-        params={"license-review": "project-snow-0.8.4"},
-        timeout=30,
-    )
-    home_html_response.raise_for_status()
-    home_html = home_html_response.text
+    with httpx.Client(
+        headers={"User-Agent": USER_AGENT},
+        timeout=httpx.Timeout(60.0),
+        follow_redirects=False,
+    ) as session:
+        pages = _query(session, titles)
+        source_pages = _query(session, [_title(LICENSE_SOURCE_PAGE), _title(STICKER_SOURCE_PAGE)])
+        home = source_pages.get(_title(LICENSE_SOURCE_PAGE)) or {}
+        gallery = source_pages.get(_title(STICKER_SOURCE_PAGE)) or {}
+        home_html_response = session.get(
+            LICENSE_SOURCE_PAGE,
+            params={"license-review": "project-snow-0.9.0"},
+            timeout=30,
+        )
+        home_html_response.raise_for_status()
+        home_html = home_html_response.text
 
     errors: list[str] = []
     if home.get("missing") or not home.get("revid") or LICENSE_SOURCE_URL not in home_html:
@@ -125,8 +150,27 @@ def review(*, project_root: Path, apply: bool) -> dict[str, Any]:
             errors.append(f"{asset_id}: file page is missing a revision")
             continue
         content = str(page.get("content") or "")
+        image_info = page.get("imageinfo") if isinstance(page.get("imageinfo"), dict) else {}
         if SPECIAL_NOTICE.search(content):
             errors.append(f"{asset_id}: file page contains a license or special-notice marker")
+            continue
+        local_relative = Path(str(row.get("local_path") or "").replace("\\", "/"))
+        local_path = (project_root / local_relative).resolve()
+        try:
+            local_path.relative_to(project_root.resolve())
+        except ValueError:
+            errors.append(f"{asset_id}: unsafe local source path")
+            continue
+        if not local_path.is_file():
+            errors.append(f"{asset_id}: local source file is missing")
+            continue
+        local_content = local_path.read_bytes()
+        source_sha1 = str(image_info.get("sha1") or "")
+        if not _source_sha1_matches(local_content, source_sha1):
+            errors.append(f"{asset_id}: local bytes do not match MediaWiki SHA1")
+            continue
+        if sha256(local_content).hexdigest() != str(row.get("content_hash") or "").casefold():
+            errors.append(f"{asset_id}: local bytes do not match recorded SHA256")
             continue
         record = dict(row)
         record.update(
@@ -142,6 +186,12 @@ def review(*, project_root: Path, apply: bool) -> dict[str, Any]:
                 ),
                 "source_revision_id": str(page.get("revid") or ""),
                 "source_revision_timestamp": str(page.get("timestamp") or ""),
+                "source_uploader": str(image_info.get("user") or ""),
+                "source_sha1": source_sha1,
+                "source_image_url": str(image_info.get("url") or row.get("source_image_url") or ""),
+                "source_width": int(image_info.get("width") or 0),
+                "source_height": int(image_info.get("height") or 0),
+                "source_mime_type": str(image_info.get("mime") or ""),
                 "source_page_revision_id": str(gallery.get("revid") or ""),
                 "source_page_revision_timestamp": str(gallery.get("timestamp") or ""),
             }
@@ -153,6 +203,8 @@ def review(*, project_root: Path, apply: bool) -> dict[str, Any]:
                 "file_page_url": str(row.get("file_page_url") or ""),
                 "source_revision_id": str(page.get("revid") or ""),
                 "source_revision_timestamp": str(page.get("timestamp") or ""),
+                "source_uploader": str(image_info.get("user") or ""),
+                "source_sha1": source_sha1,
             }
         )
 

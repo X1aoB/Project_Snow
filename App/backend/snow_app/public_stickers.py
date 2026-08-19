@@ -2,16 +2,39 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
+from hashlib import sha1, sha256
 import json
 from pathlib import Path
 import re
 import threading
-import time
 from typing import Any
+import unicodedata
 
 
 _ASSET_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{5,63}\Z")
+
+
+def _base36(number: int) -> str:
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+    output = ""
+    while number:
+        number, remainder = divmod(number, 36)
+        output = alphabet[remainder] + output
+    return output or "0"
+
+
+def _source_sha1_matches(path: Path, declared: str) -> bool:
+    digest = sha1()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    hexadecimal = digest.hexdigest()
+    normalized = str(declared or "").casefold().strip()
+    if re.fullmatch(r"[0-9a-f]{40}", normalized):
+        return normalized == hexadecimal
+    if re.fullmatch(r"[0-9a-z]{1,31}", normalized):
+        return normalized.lstrip("0") == _base36(int(hexadecimal, 16)).lstrip("0")
+    return False
 
 
 def _string_list(value: Any) -> list[str]:
@@ -29,7 +52,6 @@ class PublicStickerCatalog:
         self.root = Path(root)
         self.version = str(version)
         self._lock = threading.RLock()
-        self._cached_at = 0.0
         self._cached_status: dict[str, Any] | None = None
         self._cached_manifest: dict[str, Any] | None = None
 
@@ -50,9 +72,8 @@ class PublicStickerCatalog:
         return digest.hexdigest()
 
     def verify(self, *, force: bool = False) -> dict[str, Any]:
-        now = time.monotonic()
         with self._lock:
-            if not force and self._cached_status is not None and now - self._cached_at < 30:
+            if not force and self._cached_status is not None:
                 return dict(self._cached_status)
             errors: list[str] = []
             manifest: dict[str, Any] = {}
@@ -69,7 +90,11 @@ class PublicStickerCatalog:
 
             if manifest and str(manifest.get("media_version") or "") != self.version:
                 errors.append("media_version_mismatch")
-            if manifest and str(manifest.get("schema_version") or "") != "project-snow-sticker-1":
+            schema_version = str(manifest.get("schema_version") or "")
+            if manifest and schema_version not in {
+                "project-snow-sticker-1",
+                "project-snow-sticker-2",
+            }:
                 errors.append("schema_version_mismatch")
             if manifest and manifest.get("private_candidate") is not False:
                 errors.append("license_review_incomplete")
@@ -151,6 +176,20 @@ class PublicStickerCatalog:
                 ):
                     errors.append(f"sticker_license_invalid:{asset_id}")
                     continue
+                if schema_version == "project-snow-sticker-2" and (
+                    not str(item.get("source_revision_id") or "").isdigit()
+                    or not str(item.get("source_revision_timestamp") or "").strip()
+                    or str(item.get("source_uploader") or "").casefold() in {"", "unknown", "未知"}
+                    or not re.fullmatch(
+                        r"(?:[0-9a-fA-F]{40}|[0-9a-z]{1,31})",
+                        str(item.get("source_sha1") or "").strip(),
+                    )
+                    or not str(item.get("license_source_revision_id") or "").isdigit()
+                    or not isinstance(item.get("transformations"), list)
+                    or not item.get("transformations")
+                ):
+                    errors.append(f"sticker_provenance_invalid:{asset_id}")
+                    continue
                 relative = str(item.get("path") or "").replace("\\", "/")
                 relative_path = Path(relative)
                 if not relative or relative_path.is_absolute() or ".." in relative_path.parts:
@@ -173,6 +212,11 @@ class PublicStickerCatalog:
                     continue
                 if len(expected) != 64 or self._hash(candidate) != expected:
                     errors.append(f"sticker_hash_mismatch:{asset_id}")
+                    continue
+                if schema_version == "project-snow-sticker-2" and not _source_sha1_matches(
+                    candidate, str(item.get("source_sha1") or "")
+                ):
+                    errors.append(f"sticker_source_sha1_mismatch:{asset_id}")
                     continue
                 if checksum_entries.get(normalized) != expected:
                     errors.append(f"sticker_checksum_mismatch:{asset_id}")
@@ -200,6 +244,30 @@ class PublicStickerCatalog:
                 if checksum_entries.get(thumbnail_normalized) != thumbnail_expected:
                     errors.append(f"sticker_thumbnail_checksum_mismatch:{asset_id}")
                     continue
+                if schema_version == "project-snow-sticker-2":
+                    display = str(item.get("display_path") or "").replace("\\", "/")
+                    display_path = Path(display)
+                    if not display or display_path.is_absolute() or ".." in display_path.parts:
+                        errors.append(f"unsafe_sticker_display_path:{asset_id}")
+                        continue
+                    display_normalized = display_path.as_posix()
+                    referenced.add(display_normalized)
+                    display_candidate = (self.root / display_path).resolve()
+                    try:
+                        display_candidate.relative_to(self.root.resolve())
+                    except ValueError:
+                        errors.append(f"unsafe_sticker_display_path:{asset_id}")
+                        continue
+                    display_expected = str(item.get("display_sha256") or "").lower()
+                    if not display_candidate.is_file():
+                        errors.append(f"sticker_display_missing:{asset_id}")
+                        continue
+                    if len(display_expected) != 64 or self._hash(display_candidate) != display_expected:
+                        errors.append(f"sticker_display_hash_mismatch:{asset_id}")
+                        continue
+                    if checksum_entries.get(display_normalized) != display_expected:
+                        errors.append(f"sticker_display_checksum_mismatch:{asset_id}")
+                        continue
                 verified += 1
 
             unexpected = sorted(set(checksum_entries) - referenced)
@@ -223,18 +291,93 @@ class PublicStickerCatalog:
                 "verified_file_count": verified,
                 "errors": errors[:24],
             }
-            self._cached_at = now
             self._cached_status = status
             self._cached_manifest = manifest if manifest else None
             return dict(status)
 
-    def list(self, *, section: str = "", cursor: int = 0, limit: int = 60) -> dict[str, Any]:
+    @staticmethod
+    def _search_value(value: str) -> str:
+        return unicodedata.normalize("NFKC", str(value or "")).casefold().strip()
+
+    def list(
+        self,
+        *,
+        section: str = "",
+        character_id: str = "",
+        emotion_tag: str = "",
+        candidate_scope: str = "",
+        q: str = "",
+        cursor: int = 0,
+        limit: int = 60,
+    ) -> dict[str, Any]:
         status = self.verify()
         if status["status"] != "ok" or self._cached_manifest is None:
-            return {"stickers": [], "next_cursor": None, "status": status["status"]}
+            return {
+                "version": self.version,
+                "stickers": [],
+                "next_cursor": None,
+                "total": 0,
+                "facets": {"sections": {}, "emotion_tags": {}, "candidate_scopes": {}},
+                "status": status["status"],
+            }
         values = [item for item in self._cached_manifest.get("stickers") or [] if isinstance(item, dict)]
+        if candidate_scope not in {"", "generic", "character"}:
+            raise ValueError("candidate_scope must be generic or character")
         if section:
             values = [item for item in values if str(item.get("section") or "") == section]
+        if candidate_scope:
+            values = [
+                item
+                for item in values
+                if str(
+                    item.get("candidate_scope")
+                    or ("character" if item.get("character_ids") else "generic")
+                )
+                == candidate_scope
+            ]
+        if character_id:
+            values = [
+                item
+                for item in values
+                if character_id in _string_list(item.get("character_ids"))
+            ]
+        if emotion_tag:
+            values = [
+                item
+                for item in values
+                if emotion_tag in _string_list(item.get("emotion_tags"))
+            ]
+        query = self._search_value(q)
+        if query:
+            values = [
+                item
+                for item in values
+                if query
+                in self._search_value(
+                    " ".join(
+                        (
+                            str(item.get("caption") or ""),
+                            str(item.get("section") or ""),
+                            " ".join(_string_list(item.get("emotion_tags"))),
+                            str(item.get("asset_id") or ""),
+                        )
+                    )
+                )
+            ]
+        facets: dict[str, dict[str, int]] = {
+            "sections": {},
+            "emotion_tags": {},
+            "candidate_scopes": {},
+        }
+        for item in values:
+            for facet, facet_values in (
+                ("sections", [str(item.get("section") or "未分类")]),
+                ("emotion_tags", _string_list(item.get("emotion_tags"))),
+                ("candidate_scopes", [str(item.get("candidate_scope") or "generic")]),
+            ):
+                for value in facet_values:
+                    facets[facet][value] = facets[facet].get(value, 0) + 1
+        total = len(values)
         start = max(0, int(cursor))
         page = values[start : start + max(1, min(int(limit), 500))]
         prefix = f"/media/{self.version}/"
@@ -246,6 +389,18 @@ class PublicStickerCatalog:
                 "section": str(item.get("section") or "未分类"),
                 "src": prefix + str(item.get("path") or "").lstrip("/"),
                 "thumbnail_src": prefix + str(item.get("thumbnail_path") or item.get("path") or "").lstrip("/"),
+                "display_src": prefix + str(
+                    item.get("display_path")
+                    or item.get("thumbnail_path")
+                    or item.get("path")
+                    or ""
+                ).lstrip("/"),
+                "display_mime_type": str(
+                    item.get("display_mime_type")
+                    or item.get("mime_type")
+                    or "image/png"
+                ),
+                "display_animated": bool(item.get("display_animated")),
                 "mime_type": str(item.get("mime_type") or "image/png"),
                 "animated": bool(item.get("animated")),
                 "width": int(item.get("width") or 0),
@@ -255,7 +410,14 @@ class PublicStickerCatalog:
                 "candidate_scope": str(item.get("candidate_scope") or ("character" if item.get("character_ids") else "generic")),
             })
         next_cursor = start + len(page) if start + len(page) < len(values) else None
-        return {"stickers": output, "next_cursor": next_cursor, "status": status["status"]}
+        return {
+            "version": self.version,
+            "stickers": output,
+            "next_cursor": next_cursor,
+            "total": total,
+            "facets": facets,
+            "status": status["status"],
+        }
 
     def resolve(self, asset_id: str) -> dict[str, Any] | None:
         status = self.verify()
@@ -271,9 +433,74 @@ class PublicStickerCatalog:
             "section": str(item.get("section") or "未分类"),
             "src": prefix + str(item.get("path") or "").lstrip("/"),
             "thumbnail_src": prefix + str(item.get("thumbnail_path") or item.get("path") or "").lstrip("/"),
+            "display_src": prefix + str(
+                item.get("display_path")
+                or item.get("thumbnail_path")
+                or item.get("path")
+                or ""
+            ).lstrip("/"),
+            "display_mime_type": str(
+                item.get("display_mime_type")
+                or item.get("mime_type")
+                or "image/png"
+            ),
+            "display_animated": bool(item.get("display_animated")),
             "mime_type": str(item.get("mime_type") or "image/png"),
             "animated": bool(item.get("animated")),
             "character_ids": _string_list(item.get("character_ids") or item.get("character_scope")),
             "emotion_tags": _string_list(item.get("emotion_tags") or item.get("tags")),
             "candidate_scope": str(item.get("candidate_scope") or ("character" if item.get("character_ids") else "generic")),
         }
+
+    def attributions(self) -> list[dict[str, Any]]:
+        status = self.verify()
+        if status["status"] != "ok" or not self._cached_manifest:
+            return []
+        prefix = f"/media/{self.version}/"
+        return [
+            {
+                "package_version": self.version,
+                "asset_id": str(item.get("asset_id") or ""),
+                "caption": str(item.get("caption") or ""),
+                "preview_url": prefix
+                + str(
+                    item.get("display_path")
+                    or item.get("thumbnail_path")
+                    or item.get("path")
+                    or ""
+                ).lstrip("/"),
+                "file_page_url": str(item.get("file_page_url") or ""),
+                "source_image_url": str(item.get("source_image_url") or ""),
+                "source_revision_id": str(item.get("source_revision_id") or ""),
+                "source_revision_timestamp": str(
+                    item.get("source_revision_timestamp") or ""
+                ),
+                "source_uploader": str(item.get("source_uploader") or ""),
+                "creator": "源页未提供",
+                "source_sha1": str(item.get("source_sha1") or ""),
+                "source_sha256": str(item.get("content_hash") or item.get("sha256") or ""),
+                "thumbnail_sha256": str(item.get("thumbnail_sha256") or ""),
+                "display_sha256": str(item.get("display_sha256") or ""),
+                "dimensions": {
+                    "source": {
+                        "width": int(item.get("width") or 0),
+                        "height": int(item.get("height") or 0),
+                    },
+                    "thumbnail": {
+                        "width": int(item.get("thumbnail_width") or 0),
+                        "height": int(item.get("thumbnail_height") or 0),
+                    },
+                    "display": {
+                        "width": int(item.get("display_width") or 0),
+                        "height": int(item.get("display_height") or 0),
+                    },
+                },
+                "license": str(item.get("license") or ""),
+                "license_version": str(item.get("license_version") or ""),
+                "license_source_page": str(item.get("license_source_page") or ""),
+                "license_source_revision_id": str(item.get("license_source_revision_id") or ""),
+                "modifications": list(item.get("transformations") or []),
+            }
+            for item in self._cached_manifest.get("stickers") or []
+            if isinstance(item, dict)
+        ]

@@ -1,8 +1,8 @@
 # Project Snow Application
 
-## Public immersive surface (private acceptance)
+## Public immersive surface
 
-`backend.snow_app.public_main` is a separate registration-free application for `snow.xiaob.dev`. It exposes only `/public/v1` and serves the public immersive experience: 22-character search and switching, text communication, in-person scenes, structured action/dialogue blocks, cross-channel continuity, local transcript/history controls and anonymous feedback. IndexedDB v2 stores browser-local threads while a signed `public-state-2` package carries shared presence state. BYOK credentials remain two-hour AES-GCM envelopes bound to an anonymous HttpOnly cookie. The internal `/api/v1` workspace is not mounted.
+`backend.snow_app.public_main` is a separate registration-free application for `snow.xiaob.dev`. It exposes only `/public/v1` and serves the public immersive experience: 22-character search and switching, text communication, in-person scenes, structured action/dialogue blocks, cross-channel continuity, local transcript/history controls and anonymous feedback. IndexedDB v4 stores browser-local thread metadata and paged messages separately, while a signed `public-state-2` package carries shared presence state. BYOK credentials remain two-hour AES-GCM envelopes bound to an anonymous HttpOnly cookie. The internal `/api/v1` workspace is not mounted.
 
 Provider adapters exist for OpenAI, DeepSeek, Alibaba Cloud Model Studio, Zhipu and Moonshot. `PUBLIC_ENABLED_PROVIDERS` is empty by default; enable each adapter only after a real-key smoke test. Custom base URLs are not accepted.
 

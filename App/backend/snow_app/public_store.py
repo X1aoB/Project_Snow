@@ -522,8 +522,7 @@ class PublicStore:
                 text(
                     """
                     SELECT o.outbox_id, o.feedback_id, o.attempt_count,
-                           f.public_code, f.body_text, f.context_json,
-                           f.qq_cipher, f.created_at, f.expires_at
+                           f.public_code, f.created_at
                     FROM public_feedback_email_outbox o
                     JOIN public_feedback f ON f.feedback_id = o.feedback_id
                     WHERE f.expires_at > :now
@@ -558,8 +557,6 @@ class PublicStore:
                     continue
                 item = dict(row)
                 item["attempt_count"] = int(row["attempt_count"] or 0) + 1
-                item["context"] = json.loads(row["context_json"] or "{}")
-                item["context_json"] = None
                 claimed.append(item)
             return claimed
 

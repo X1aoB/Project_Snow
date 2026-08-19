@@ -16,9 +16,9 @@ from sqlalchemy import text
 
 from backend.snow_app.config import PublicSettings, Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
-from backend.snow_app.public_contracts import ChatRequest
+from backend.snow_app.public_contracts import ChatRequest, HistoryTurn
 from backend.snow_app.public_main import create_app
-from backend.snow_app.public_service import PublicChatService
+from backend.snow_app.public_service import GenerationBusy, PublicChatService
 from backend.snow_app.public_security import sign_state, verify_state
 from backend.snow_app.public_store import PublicStore
 
@@ -88,9 +88,20 @@ class PublicAPITests(TestCase):
         self.assertEqual(self.client.get("/api/v1/mvp/bootstrap").status_code, 404)
         config = self.client.get("/public/v1/config")
         self.assertEqual(config.status_code, 200)
-        self.assertEqual(config.json()["limits"]["input_characters"], 2000)
-        self.assertEqual(config.json()["history_schema"], "indexeddb-v3")
-        self.assertEqual(config.json()["sticker_version"], "2026.08.18.sticker.1")
+        payload = config.json()
+        self.assertEqual(payload["limits"]["input_characters"], 2000)
+        self.assertEqual(payload["history_schema"], "indexeddb-v4")
+        self.assertEqual(payload["sticker_version"], "2026.08.19.sticker.1")
+        self.assertEqual(payload["privacy_policy"]["version"], "0.9")
+        self.assertEqual(payload["privacy_policy"]["url"], "/privacy/")
+        self.assertEqual(payload["attribution_url"], "/public/v1/attributions")
+        self.assertEqual(payload["max_provider_calls_per_action"], 2)
+        self.assertTrue(payload["movement_catalog"])
+        self.assertTrue(payload["feature_flags"]["joint_movement"])
+        self.assertTrue(payload["feature_flags"]["request_recovery"])
+        self.assertTrue(payload["feature_flags"]["indexeddb_v4"])
+        self.assertTrue(payload["providers"][0]["documentation_url"].startswith("https://"))
+        self.assertTrue(payload["providers"][0]["privacy_url"].startswith("https://"))
         self.assertIn("Project Snow", self.client.get("/").text)
 
     def test_joint_move_requires_named_current_request_and_immediate_acceptance(self) -> None:
@@ -108,7 +119,18 @@ class PublicAPITests(TestCase):
         self.assertEqual(service._joint_move_intent("我想带角色逛街")[0], "commercial_street")
         self.assertEqual(service._joint_move_intent("陪她去公园散步")[0], "park")
         self.assertIsNone(service._joint_move_intent("我们明天去商场逛街吧"))
-        self.assertIsNone(service._joint_move_intent("要不要一起去商场逛街？"))
+        self.assertEqual(
+            service._joint_move_intent("要不要一起去商场逛街？")[0],
+            "shopping_mall",
+        )
+        self.assertEqual(
+            service._joint_move_intent("想不想一起去公园散步？")[0],
+            "park",
+        )
+        self.assertEqual(
+            service._joint_move_intent("能不能陪我去基地食堂？")[0],
+            "base_canteen",
+        )
         state = {
             "schema_version": "public-state-2",
             "data_version": "test-data",
@@ -165,6 +187,91 @@ class PublicAPITests(TestCase):
         self.assertEqual(replay_state["revision"], next_state["revision"])
         self.assertEqual(replay_event.event_id, event.event_id)
 
+    def test_joint_move_continuation_target_presence_and_advisory_proposal(self) -> None:
+        service: PublicChatService = self.app.state.chat_service
+        speaker, target = MVP_CHARACTERS[:2]
+        state = {
+            "schema_version": "public-state-2",
+            "data_version": "test-data",
+            "revision": 2,
+            "analyst_location": "基地休息区",
+            "presence": {
+                speaker.character_id: {
+                    "character_id": speaker.character_id,
+                    "character_name": speaker.display_name,
+                    "location": "基地休息区",
+                    "activity": "正在休息",
+                    "state_scope": "conversation_confirmed",
+                },
+                target.character_id: {
+                    "character_id": target.character_id,
+                    "character_name": target.display_name,
+                    "location": "观景区",
+                    "activity": "正在看风景",
+                    "state_scope": "shared_daily",
+                },
+            },
+            "relationships": {},
+            "recent_events": [],
+            "schedule_date": "2026-08-19",
+            "schedule_revision": 1,
+            "generated_at": "",
+            "expires_at": "",
+        }
+        target_message = f"我们去找{target.display_name}吧"
+        target_intent = service._joint_move_intent(
+            target_message,
+            [],
+            state,
+            speaker.character_id,
+        )
+        self.assertEqual(target_intent[0], "observation")
+        self.assertEqual(target_intent[1]["target_character_id"], target.character_id)
+
+        continuation = service._joint_move_intent(
+            "那就走吧",
+            [
+                HistoryTurn(role="user", content="要不要一起去商场？"),
+                HistoryTurn(role="assistant", content="当然愿意。"),
+            ],
+            state,
+            speaker.character_id,
+        )
+        self.assertEqual(continuation[0], "shopping_mall")
+        self.assertEqual(continuation[1]["resolution"], "history_continuation")
+
+        request = ChatRequest(
+            request_id=uuid4(),
+            provider="openai",
+            credential="c" * 24,
+            model="gpt-test",
+            character_id=speaker.character_id,
+            message="要不要一起去商场？",
+        )
+        moved, event, diagnostics = service._apply_joint_movement(
+            state,
+            request,
+            {
+                "answer": "当然，走吧。",
+                "state_updates": [{
+                    "type": "joint_move",
+                    "location_id": "park",
+                    "activity_id": "strolling_together",
+                    "commit": "now",
+                }],
+            },
+        )
+        self.assertEqual(moved["analyst_location"], "购物中心")
+        self.assertEqual(event.location_id, "shopping_mall")
+        self.assertEqual(diagnostics["model_proposal_status"], "mismatch_ignored")
+
+    def test_joint_move_rejects_future_or_noncommittal_answer(self) -> None:
+        service: PublicChatService = self.app.state.chat_service
+        self.assertIsNone(service._joint_move_intent("我们明天一起去公园吧"))
+        self.assertFalse(service._joint_move_is_accepted("可以吗？"))
+        self.assertFalse(service._joint_move_is_accepted("改天再去吧。"))
+        self.assertTrue(service._joint_move_is_accepted("好呀，现在出发。"))
+
     def test_validation_errors_use_standard_code(self) -> None:
         response = self.client.post(
             "/public/v1/feedback",
@@ -189,10 +296,106 @@ class PublicAPITests(TestCase):
         self.assertEqual(response.status_code, 415)
 
     def test_anonymous_cookie_is_securely_scoped_in_production(self) -> None:
-        response = self.client.get("/public/v1/config")
-        cookie = response.headers.get("set-cookie", "")
-        self.assertIn("HttpOnly", cookie)
-        self.assertIn("SameSite=lax", cookie)
+        production_settings = replace(
+            self.settings,
+            allow_insecure_dev=False,
+            turnstile_secret="turnstile-test",
+            neo4j_password="neo4j-test",
+        )
+        with (
+            patch(
+                "backend.snow_app.public_media.PublicMediaCatalog.verify",
+                return_value={"status": "ok"},
+            ),
+            patch(
+                "backend.snow_app.public_stickers.PublicStickerCatalog.verify",
+                return_value={"status": "ok", "sticker_count": 363},
+            ),
+        ):
+            app = create_app(production_settings, self.internal_settings, self.store)
+        with TestClient(app, base_url="https://snow.xiaob.dev") as client:
+            for route in (
+                "/public/v1/config",
+                "/public/v1/characters",
+                "/public/v1/stickers",
+            ):
+                response = client.get(route)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers.get("set-cookie", ""), "")
+            response = client.post(
+                "/public/v1/presence/resolve",
+                headers={"Origin": "https://snow.xiaob.dev"},
+                json={
+                    "request_id": str(uuid4()),
+                    "character_id": MVP_CHARACTERS[0].character_id,
+                    "state_package": "",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            cookie = response.headers.get("set-cookie", "")
+            self.assertIn("__Host-snow_anon=", cookie)
+            self.assertIn("HttpOnly", cookie)
+            self.assertIn("Secure", cookie)
+            self.assertIn("SameSite=lax", cookie)
+            self.assertIn("Path=/", cookie)
+            self.assertNotIn("Domain=", cookie)
+
+    def test_sticker_route_exposes_filtered_paged_display_contract(self) -> None:
+        expected = {
+            "version": "2026.08.19.sticker.1",
+            "stickers": [
+                {
+                    "asset_id": "sticker-1",
+                    "display_src": "/media/2026.08.19.sticker.1/display/sticker-1.webp",
+                    "display_animated": True,
+                    "character_ids": [MVP_CHARACTERS[0].character_id],
+                    "emotion_tags": ["happy"],
+                }
+            ],
+            "next_cursor": 40,
+            "total": 41,
+            "facets": {
+                "sections": {"角色": 41},
+                "emotion_tags": {"happy": 41},
+                "candidate_scopes": {"character": 41},
+            },
+            "status": "ok",
+        }
+        with patch.object(
+            self.app.state.chat_service.stickers,
+            "list",
+            return_value=expected,
+        ) as list_stickers:
+            response = self.client.get(
+                "/public/v1/stickers",
+                params={
+                    "section": "角色",
+                    "character_id": MVP_CHARACTERS[0].character_id,
+                    "emotion_tag": "happy",
+                    "candidate_scope": "character",
+                    "q": "微笑",
+                    "cursor": 0,
+                    "limit": 40,
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected)
+        list_stickers.assert_called_once_with(
+            section="角色",
+            character_id=MVP_CHARACTERS[0].character_id,
+            emotion_tag="happy",
+            candidate_scope="character",
+            q="微笑",
+            cursor=0,
+            limit=40,
+        )
+        invalid = self.client.get(
+            "/public/v1/stickers", params={"candidate_scope": "another-character"}
+        )
+        self.assertEqual(invalid.status_code, 422)
+        self.assertEqual(
+            invalid.json()["detail"]["code"], "invalid_sticker_candidate_scope"
+        )
 
     def test_characters_returns_full_registry(self) -> None:
         response = self.client.get("/public/v1/characters")
@@ -210,6 +413,7 @@ class PublicAPITests(TestCase):
             self.settings,
             allow_insecure_dev=False,
             turnstile_secret="turnstile-test",
+            neo4j_password="neo4j-test",
         )
         with TemporaryDirectory() as directory:
             runtime_root = Path(directory)
@@ -218,8 +422,18 @@ class PublicAPITests(TestCase):
                 data_root=runtime_root,
                 runtime_root=runtime_root,
             )
-            app = create_app(production_settings, internal_settings, self.store)
-            client = TestClient(app)
+            with (
+                patch(
+                    "backend.snow_app.public_media.PublicMediaCatalog.verify",
+                    return_value={"status": "ok"},
+                ),
+                patch(
+                    "backend.snow_app.public_stickers.PublicStickerCatalog.verify",
+                    return_value={"status": "ok", "sticker_count": 363},
+                ),
+            ):
+                app = create_app(production_settings, internal_settings, self.store)
+            client = TestClient(app, base_url="http://127.0.0.1")
             missing = client.get("/public/v1/health/ready")
             self.assertEqual(missing.status_code, 503)
             self.assertEqual(missing.json()["data"], "unavailable")
@@ -335,6 +549,73 @@ class PublicAPITests(TestCase):
         self.assertNotIn(leaked, stored)
         self.assertIn("[已隐藏]", stored)
 
+    def test_feedback_accepts_sticker_only_user_context(self) -> None:
+        response = self.client.post(
+            "/public/v1/feedback",
+            headers={"Origin": "http://testserver"},
+            json={
+                "request_id": str(uuid4()),
+                "body": "这条表情的展示有问题",
+                "user_content_blocks": [
+                    {
+                        "type": "sticker",
+                        "asset_id": "fixture-sticker",
+                        "caption": "收到",
+                    }
+                ],
+                "turnstile_token": "development-bypass",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        context = self.store.feedback_rows()[0]["context"]
+        self.assertEqual(context["user_message"], "")
+        self.assertEqual(
+            context["user_content_blocks"],
+            [{"type": "sticker", "asset_id": "fixture-sticker", "caption": "收到"}],
+        )
+
+    def test_feedback_opt_out_discards_forged_conversation_context(self) -> None:
+        forged_chat_request_id = str(uuid4())
+        response = self.client.post(
+            "/public/v1/feedback",
+            headers={"Origin": "http://testserver"},
+            json={
+                "request_id": str(uuid4()),
+                "chat_request_id": forged_chat_request_id,
+                "body": "只提交这段反馈正文",
+                "character_id": MVP_CHARACTERS[0].character_id,
+                "provider": "openai",
+                "model": "gpt-forged",
+                "user_message": "不应保留的用户消息",
+                "assistant_answer": "不应保留的角色回复",
+                "user_content_blocks": [
+                    {"type": "message", "text": "不应保留的用户块"}
+                ],
+                "assistant_content_blocks": [
+                    {"type": "message", "text": "不应保留的回复块"}
+                ],
+                "request_stage": "text",
+                "error_code": "forged_error",
+                "degraded_services": ["forged_dependency"],
+                "include_conversation_context": False,
+                "turnstile_token": "development-bypass",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        context = self.store.feedback_rows()[0]["context"]
+        self.assertNotIn("chat_request_id", context)
+        self.assertNotIn("generation_diagnostics", context)
+        self.assertEqual(context["character_id"], "")
+        self.assertEqual(context["provider"], "")
+        self.assertEqual(context["model"], "")
+        self.assertEqual(context["user_message"], "")
+        self.assertEqual(context["assistant_answer"], "")
+        self.assertEqual(context["user_content_blocks"], [])
+        self.assertEqual(context["assistant_content_blocks"], [])
+        self.assertEqual(context["request_stage"], "")
+        self.assertEqual(context["error_code"], "")
+        self.assertEqual(context["degraded_services"], [])
+
     def test_request_body_larger_than_64kb_is_rejected(self) -> None:
         response = self.client.post(
             "/public/v1/feedback",
@@ -416,6 +697,34 @@ class PublicAPITests(TestCase):
         self.assertIn(": heartbeat", stream)
         self.assertIn("event: done", stream)
 
+    def test_chat_queue_rejection_is_http_429_with_retry_after(self) -> None:
+        credential, _ = self._byok()
+        payload = {
+            "request_id": str(uuid4()),
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": MVP_CHARACTERS[0].character_id,
+            "message": "你好",
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        with patch.object(
+            self.app.state.chat_service.gate,
+            "acquire",
+            side_effect=GenerationBusy("generation_queue_full"),
+        ):
+            response = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["Retry-After"], "2")
+        self.assertEqual(response.json()["detail"]["code"], "generation_queue_full")
+        self.assertEqual(response.json()["detail"]["retry_after_seconds"], 2)
+
     def test_public_rejects_whole_answer_fallback_and_replays_terminal_error(self) -> None:
         credential, _ = self._byok()
         request_id = str(uuid4())
@@ -484,6 +793,42 @@ class PublicAPITests(TestCase):
         self.assertIn("整理手边的资料", response.text)
         self.assertIn("event: done", response.text)
         self.assertEqual(chat.call_count, 1)
+
+    def test_public_renders_revalidated_companion_fallback(self) -> None:
+        credential, _ = self._byok()
+        payload = {
+            "request_id": str(uuid4()),
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": "a2ffc5b44d7f",
+            "message": "你和猫汐尔相处得怎么样？",
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        result = {
+            "answer": "我和猫汐尔偶尔会拌嘴，但我们是可以互相信任的同伴。",
+            "content_blocks": [{
+                "type": "message",
+                "text": "我和猫汐尔偶尔会拌嘴，但我们是可以互相信任的同伴。",
+            }],
+            "retrieval": {},
+            "usage": {"total_tokens": 10},
+            "validation_disposition": "safe_fallback",
+            "guard_resolution": "safe_fallback",
+            "response_adjustments": ["answer_guardrail_retry", "companion_social_guard"],
+        }
+        with patch.object(self.app.state.chat_service.mvp, "chat", return_value=result):
+            response = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('"code":"role_guard_rejected"', response.text)
+        self.assertIn("猫汐尔", response.text)
+        self.assertIn("event: done", response.text)
 
     def test_feedback_attaches_server_side_chat_diagnostics(self) -> None:
         credential, _ = self._byok()
@@ -719,8 +1064,39 @@ class PublicAPITests(TestCase):
                 "state_package": signed[:-1] + ("A" if signed[-1] != "A" else "B"),
             },
         )
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.json()["detail"]["code"], "credential_invalid")
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"]["code"], "state_invalid")
+
+    def test_subject_bound_state_cannot_cross_anonymous_cookie(self) -> None:
+        first_client = TestClient(self.app)
+        second_client = TestClient(self.app)
+        try:
+            resolved = first_client.post(
+                "/public/v1/presence/resolve",
+                headers={"Origin": "http://testserver"},
+                json={
+                    "request_id": str(uuid4()),
+                    "character_id": MVP_CHARACTERS[0].character_id,
+                    "state_package": "",
+                },
+            )
+            self.assertEqual(resolved.status_code, 200)
+            rejected = second_client.post(
+                "/public/v1/presence/resolve",
+                headers={"Origin": "http://testserver"},
+                json={
+                    "request_id": str(uuid4()),
+                    "character_id": MVP_CHARACTERS[0].character_id,
+                    "state_package": resolved.json()["state_package"],
+                },
+            )
+            self.assertEqual(rejected.status_code, 409)
+            self.assertEqual(
+                rejected.json()["detail"]["code"], "state_subject_mismatch"
+            )
+        finally:
+            first_client.close()
+            second_client.close()
 
     def test_in_person_action_only_turn_reaches_mvp_with_structured_blocks(self) -> None:
         credential, _ = self._byok()
@@ -835,6 +1211,34 @@ class PublicAPITests(TestCase):
         self.assertTrue(second.json()["idempotent_replay"])
         chat.assert_not_called()
 
+    def test_arrival_queue_rejection_is_http_429_with_retry_after(self) -> None:
+        credential, _ = self._byok()
+        payload = {
+            "arrival_id": str(uuid4()),
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": MVP_CHARACTERS[0].character_id,
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        with patch(
+            "backend.snow_app.public_service.secrets.randbelow", return_value=0
+        ), patch.object(
+            self.app.state.chat_service.gate,
+            "acquire",
+            side_effect=GenerationBusy("generation_queue_full"),
+        ):
+            response = self.client.post(
+                "/public/v1/presence/arrival",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["Retry-After"], "2")
+        self.assertEqual(response.json()["detail"]["code"], "generation_queue_full")
+
     def test_arrival_guard_failure_keeps_transition_without_fake_dialogue(self) -> None:
         credential, _ = self._byok()
         payload = {
@@ -905,3 +1309,6 @@ class PublicAPITests(TestCase):
         self.assertEqual(response.json()["reaction"]["content_blocks"][0]["type"], "action")
         self.assertEqual(response.json()["reaction"]["content_blocks"][1]["type"], "speech")
         self.assertEqual(chat.call_count, 1)
+        decision = chat.call_args.kwargs["thinking_decision"]
+        self.assertEqual(decision["max_provider_http_calls"], 2)
+        self.assertTrue(decision["disable_compatibility_retries"])

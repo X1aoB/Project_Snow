@@ -53,8 +53,12 @@ def verify_data_release(root: Path, expected_version: str | None = None) -> dict
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise DataReleaseError("missing or invalid data release manifest") from exc
-    if manifest.get("schema_version") != "project-snow-data-release-2":
+    if manifest.get("schema_version") != "project-snow-data-release-3":
         raise DataReleaseError("unsupported data release schema")
+    if manifest.get("private_candidate") is not False:
+        raise DataReleaseError("data release is not approved for public use")
+    if manifest.get("public_release_status") != "verified_against_bwiki_source_declaration":
+        raise DataReleaseError("data release licence review is incomplete")
     version = str(manifest.get("data_version") or "")
     if not version or (expected_version is not None and version != expected_version):
         raise DataReleaseError("data release version mismatch")
@@ -76,4 +80,27 @@ def verify_data_release(root: Path, expected_version: str | None = None) -> dict
             raise DataReleaseError(f"data release size mismatch: {relative}")
         if file_sha256(path) != str(item.get("sha256") or ""):
             raise DataReleaseError(f"data release digest mismatch: {relative}")
+    if "ATTRIBUTION.jsonl" not in seen or "LICENSES.json" not in seen:
+        raise DataReleaseError("data release lacks public attribution files")
+    for row in iter_jsonl(root / "ATTRIBUTION.jsonl"):
+        if not all(
+            str(row.get(field) or "").strip()
+            for field in (
+                "canonical_url",
+                "source_revision_id",
+                "source_revision_timestamp",
+                "source_license_url",
+                "contributors_url",
+            )
+        ):
+            raise DataReleaseError("data attribution contains an unverified source")
+        if not isinstance(row.get("modifications"), list) or not row["modifications"]:
+            raise DataReleaseError("data attribution lacks transformation details")
+    try:
+        licenses = json.loads((root / "LICENSES.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DataReleaseError("invalid data licence manifest") from exc
+    content_license = licenses.get("content") if isinstance(licenses, dict) else None
+    if not isinstance(content_license, dict) or content_license.get("version") != "4.0":
+        raise DataReleaseError("data content licence version is not verified")
     return manifest

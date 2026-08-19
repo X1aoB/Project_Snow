@@ -19,7 +19,17 @@ from backend.snow_app.data_release import file_sha256, iter_jsonl, verify_data_r
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
 
 
-PUBLIC_CONTENT_LICENSE = "CC BY-NC-SA; version unspecified by source; page-specific notices take precedence"
+PUBLIC_CONTENT_LICENSE = "CC BY-NC-SA 4.0; page-specific notices take precedence"
+PUBLIC_LICENSE_URL = "https://creativecommons.org/licenses/by-nc-sa/4.0/"
+PUBLIC_LICENSE_SOURCE = (
+    "https://wiki.biligame.com/sonw/index.php?title=%E9%A6%96%E9%A1%B5&oldid=21546"
+)
+PUBLIC_TRANSFORMATIONS = [
+    "normalized Wiki markup",
+    "cleaned and segmented text",
+    "generated retrieval metadata",
+    "derived summaries, personas, graph records and embeddings",
+]
 
 
 def file_record(output: Path, destination: Path) -> dict[str, Any]:
@@ -36,7 +46,31 @@ def copy_file(source: Path, destination: Path, output: Path) -> dict[str, Any]:
     return file_record(output, destination)
 
 
-def publish_documents(source: Path, destination: Path, attribution_path: Path, output: Path) -> tuple[list[dict[str, Any]], list[str]]:
+def _load_source_review(path: Path | None) -> dict[str, dict[str, Any]]:
+    if path is None or not path.is_file():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    records = payload.get("sources") if isinstance(payload, dict) else None
+    if not isinstance(records, list):
+        raise RuntimeError("data source review must contain a sources list")
+    result: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            raise RuntimeError("data source review contains a non-object row")
+        url = str(record.get("canonical_url") or "").strip()
+        if not url or url in result:
+            raise RuntimeError("data source review contains an empty or duplicate URL")
+        result[url] = record
+    return result
+
+
+def publish_documents(
+    source: Path,
+    destination: Path,
+    attribution_path: Path,
+    output: Path,
+    source_review: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
     destination.parent.mkdir(parents=True, exist_ok=True)
     document_ids: list[str] = []
     attribution: dict[tuple[str, str], dict[str, Any]] = {}
@@ -50,17 +84,49 @@ def publish_documents(source: Path, destination: Path, attribution_path: Path, o
             target.write(json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
             page_id = str(row.get("page_id") or "")
             content_hash = str(row.get("source_content_hash") or "")
+            canonical_url = str(row.get("canonical_url") or "").strip()
+            review = source_review.get(canonical_url, {})
+            revision_id = str(
+                review.get("source_revision_id")
+                or row.get("source_revision_id")
+                or row.get("revision_id")
+                or ""
+            ).strip()
+            revision_timestamp = str(
+                review.get("source_revision_timestamp")
+                or row.get("source_revision_timestamp")
+                or ""
+            ).strip()
+            if not canonical_url or not revision_id or not revision_timestamp:
+                raise RuntimeError(
+                    f"document source lacks a verified fixed revision: {canonical_url or page_id}"
+                )
+            if review and review.get("exception_status") != "no_page_exception_detected":
+                raise RuntimeError(f"document source has an unresolved licence exception: {canonical_url}")
             key = (page_id, content_hash)
             attribution.setdefault(
                 key,
                 {
                     "page_id": page_id,
-                    "canonical_url": row.get("canonical_url"),
+                    "canonical_url": canonical_url,
+                    "fixed_revision_url": review.get("fixed_revision_url"),
                     "attribution": row.get("attribution"),
                     "source_license": PUBLIC_CONTENT_LICENSE,
+                    "source_license_url": PUBLIC_LICENSE_URL,
+                    "source_license_policy_revision": "21546",
+                    "source_license_policy_url": PUBLIC_LICENSE_SOURCE,
                     "source_manifest": row.get("source_manifest"),
                     "source_content_hash": content_hash,
                     "source_local_path": row.get("local_path"),
+                    "source_revision_id": revision_id,
+                    "source_revision_timestamp": revision_timestamp,
+                    "latest_editor": review.get("latest_editor") or "source page history",
+                    "contributors_url": (
+                        f"{str(row.get('canonical_url') or '')}?action=history"
+                        if row.get("canonical_url")
+                        else None
+                    ),
+                    "modifications": PUBLIC_TRANSFORMATIONS,
                 },
             )
     if len(document_ids) != len(set(document_ids)):
@@ -114,11 +180,12 @@ def build_release(
     denylist_path: Path,
     *,
     enforce_disk_guard: bool = True,
+    source_review_path: Path | None = None,
 ) -> dict[str, Any]:
     runtime = runtime.resolve()
     usage = shutil.disk_usage(runtime)
     used_ratio = (usage.total - usage.free) / usage.total
-    if enforce_disk_guard and (used_ratio >= 0.70 or usage.free < 12 * 1024**3):
+    if usage.free < 12 * 1024**3 or (enforce_disk_guard and used_ratio >= 0.70):
         raise RuntimeError(
             f"refusing data release: disk used={used_ratio:.1%}, free={usage.free / 1024**3:.1f} GiB"
         )
@@ -143,11 +210,13 @@ def build_release(
             raise RuntimeError("missing release artifacts: " + ", ".join(missing))
 
         files: list[dict[str, Any]] = []
+        source_review = _load_source_review(source_review_path)
         document_files, document_ids = publish_documents(
             required["lakehouse/documents.jsonl"],
             output / "lakehouse" / "documents.jsonl",
             output / "ATTRIBUTION.jsonl",
             output,
+            source_review,
         )
         files.extend(document_files)
         vector_count, vector_dimension = validate_vectors(required["vectors/local_vectors.jsonl"], document_ids)
@@ -200,8 +269,16 @@ def build_release(
             "code": {"license": "GPL-3.0-only", "scope": "application source code"},
             "content": {
                 "license": "CC BY-NC-SA",
-                "version": "version unspecified by source",
-                "policy": "Page-specific notices and denylist entries take precedence.",
+                "version": "4.0",
+                "license_url": PUBLIC_LICENSE_URL,
+                "policy_source_url": PUBLIC_LICENSE_SOURCE,
+                "policy_source_revision_id": "21546",
+                "status": "verified_against_bwiki_source_declaration",
+                "policy": (
+                    "Page-specific notices and denylist entries take precedence; "
+                    "the source declaration does not establish ownership of underlying game art."
+                ),
+                "modifications": PUBLIC_TRANSFORMATIONS,
             },
             "denylist": denylist,
         }
@@ -209,10 +286,12 @@ def build_release(
         licenses_path.write_text(json.dumps(license_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         files.append(file_record(output, licenses_path))
         manifest = {
-            "schema_version": "project-snow-data-release-2",
+            "schema_version": "project-snow-data-release-3",
             "data_version": version,
             "generated_at": datetime.now(UTC).isoformat(),
             "contains_raw_wiki_media": False,
+            "private_candidate": False,
+            "public_release_status": "verified_against_bwiki_source_declaration",
             "statistics": {
                 "documents": len(document_ids),
                 "vectors": vector_count,
@@ -241,9 +320,26 @@ def main() -> int:
     parser.add_argument("--runtime-root", type=Path, default=APP_ROOT / "runtime")
     parser.add_argument("--output-root", type=Path, default=APP_ROOT / "runtime" / "releases")
     parser.add_argument("--denylist", type=Path, default=APP_ROOT / "config" / "content_denylist.json")
+    parser.add_argument(
+        "--source-review",
+        type=Path,
+        default=APP_ROOT / "config" / "public_knowledge" / "data_license_review.json",
+    )
+    parser.add_argument(
+        "--allow-high-used-ratio",
+        action="store_true",
+        help="Allow a release when the volume is over 70%% used; the 12 GiB free-space guard remains active.",
+    )
     args = parser.parse_args()
     try:
-        manifest = build_release(args.version, args.runtime_root, args.output_root, args.denylist)
+        manifest = build_release(
+            args.version,
+            args.runtime_root,
+            args.output_root,
+            args.denylist,
+            enforce_disk_guard=not args.allow_high_used_ratio,
+            source_review_path=args.source_review,
+        )
     except RuntimeError as exc:
         raise SystemExit(str(exc)) from exc
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

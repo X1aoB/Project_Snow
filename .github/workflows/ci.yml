@@ -28,7 +28,7 @@ jobs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       full: ${{ steps.classify.outputs.full }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
       - id: classify
@@ -50,7 +50,7 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
       - name: Reject committed secrets
@@ -58,7 +58,7 @@ jobs:
         run: |
           secret_pattern='(sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA |OPENSSH )?PRIVATE KEY|cloudflare_''tunnel_token=)'
           ! git grep -niE "$secret_pattern" -- ':!App/tests/**'
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -68,13 +68,14 @@ jobs:
       run:
         working-directory: App
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: App/requirements-public.txt
-      - run: pip install -r requirements-public.txt pytest
+      - run: pip install --require-hashes -r requirements-public.txt
+      - run: pip install pytest
       - name: Public security and interface contracts
         run: >-
           python -m pytest
@@ -88,7 +89,7 @@ jobs:
           python scripts/validate_shared_design.py
           python -m pytest tests/test_shared_design.py -q
       - run: python -m compileall -q backend migrations scripts
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
       - run: node --check public_frontend/app.js
@@ -101,8 +102,8 @@ jobs:
       run:
         working-directory: App
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -115,7 +116,7 @@ jobs:
         env:
           RUN_PUBLIC_E2E: "1"
         run: python -m pytest tests/test_ui_v050.py tests/test_public_frontend_e2e.py -q
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
       - run: node --check public_frontend/app.js
@@ -128,13 +129,14 @@ jobs:
       run:
         working-directory: App
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: App/requirements-public.txt
-      - run: pip install -r requirements-public.txt pytest
+      - run: pip install --require-hashes -r requirements-public.txt
+      - run: pip install pytest
       - name: Public API unit and integration tests
         run: >-
           python -m pytest
@@ -153,8 +155,8 @@ jobs:
       run:
         working-directory: App
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -181,8 +183,8 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - run: pip install pytest
@@ -204,6 +206,7 @@ jobs:
       - name: Validate shell and deployment contracts
         run: |
           find App/ops App/infra -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          python -m py_compile App/scripts/bootstrap_release_host.py App/scripts/install_release_archive.py App/scripts/release_manifest.py
           PYTHONPATH=App python -m pytest App/tests/test_deployment_contracts.py App/tests/test_change_classifier.py App/tests/test_release_manifest.py -q
 
   app-image:
@@ -213,9 +216,9 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: App
           file: App/infra/public-api.Dockerfile
@@ -224,7 +227,7 @@ jobs:
           tags: project-snow-public:ci
           cache-from: type=gha,scope=public-api
           cache-to: type=gha,mode=max,scope=public-api
-      - uses: aquasecurity/trivy-action@v0.36.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: project-snow-public:ci
           format: json
@@ -259,9 +262,9 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: App
           file: App/infra/embedding.Dockerfile
@@ -271,7 +274,7 @@ jobs:
           no-cache: ${{ github.event_name == 'schedule' }}
           cache-from: type=gha,scope=embedding
           cache-to: type=gha,mode=max,scope=embedding
-      - uses: aquasecurity/trivy-action@v0.36.0
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: project-snow-embedding:ci
           format: json
@@ -316,8 +319,8 @@ jobs:
     env:
       PYTHON_KEYRING_BACKEND: keyring.backends.null.Keyring
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip

@@ -1,5 +1,5 @@
 {
-  "version": "mvp-22.1",
+  "version": "mvp-22.2",
   "coverage_policy": "runtime/mvp/character_views.jsonl",
   "characters": [
     {"character_id": "78aa7ab99154", "display_name": "伊切尔", "source_name": "伊切尔", "aliases": ["伊切尔"], "search_tokens": ["yqe", "yiqieer"], "selector_enabled": true},

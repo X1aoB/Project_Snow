@@ -326,14 +326,26 @@ _QUERY_INTENT_TERMS: dict[str, tuple[str, ...]] = {
     "logistics": (
         "\u540e\u52e4",
         "\u540e\u52e4\u5c0f\u961f",
-        "\u5c0f\u961f",
-        "\u961f\u5458",
-        "\u6210\u5458",
         "\u540e\u52e4\u6210\u5458",
         "\u540e\u52e4\u961f\u5458",
         "\u63a8\u8350\u89d2\u8272",
         "\u5c65\u5386",
         "\u4e13\u957f",
+    ),
+    # Bare “队员/成员/小队” questions are usually about the selectable
+    # companions, not armor logistics. Logistics remains available through
+    # explicit qualifiers above.
+    "companion_social": (
+        "队员",
+        "成员",
+        "小队",
+        "同伴",
+        "她们",
+        "相处",
+        "熟悉",
+        "认识",
+        "印象",
+        "怎么看",
     ),
     # A named costume is a concrete, character-scoped question.  It must not
     # be treated as a generic chat prompt: the matching costume and its armor
@@ -449,6 +461,17 @@ _INTENT_SOURCE_WEIGHTS: dict[str, dict[str, float]] = {
         "character_story": 64.0,
         "character_voice": 54.0,
         "main_story": 28.0,
+    },
+    "companion_social": {
+        "main_story": 108.0,
+        "character_story": 104.0,
+        "affinity_story": 94.0,
+        "character_profile": 90.0,
+        "character_profiles": 90.0,
+        "character_voice": 78.0,
+        "random_event": 70.0,
+        "event_lore": 64.0,
+        "logistics_lore": 18.0,
     },
     "costume": {
         "character_costume": 124.0,
@@ -601,6 +624,9 @@ _COMPANION_SOCIAL_GUIDANCE = (
     "首批可对话少女彼此属于共同生活和行动的同伴。谈到她们之间的关系时，可以有拌嘴、玩笑、竞争和争取分析员关注的桥段，"
     "但这些属于亲近关系中的轻松互动，不能写成仇恨、敌对、伤害意图或真正的敌人关系。"
     "关系候选中的 OPPOSES 不能覆盖这条运行时对话边界；只有明确的最新主线事实才能说明一段真实冲突，而且仍须区分当时事件与当前关系。"
+    "回答时按 companion_social_context 的证据层级处理：shared_evidence 可以支持明确共同事实；profile_impression 只能写成‘我印象里’一类角色观察；"
+    "hypothetical_only 仍允许当前或假设性的逛街、茶话会、吃饭、普通训练和轻微玩笑，但不能把它们说成早已发生的固定剧情。"
+    "不得凭空增加重大任务、伤亡、秘密身份、正式关系、历史原话或主线结局；没有共同证据不等于角色彼此完全陌生。"
 )
 
 _COMPANION_HOSTILITY_MARKERS = (
@@ -1788,9 +1814,18 @@ class MVPService:
         )
         self._generation_diagnostics.value = diagnostics
 
-    def _post_model(self, endpoint: str, **kwargs: Any) -> httpx.Response:
+    def _post_model(
+        self,
+        endpoint: str,
+        *,
+        max_provider_http_calls: int | None = None,
+        **kwargs: Any,
+    ) -> httpx.Response:
         diagnostics = self.generation_diagnostics()
-        diagnostics["provider_http_calls"] = int(diagnostics.get("provider_http_calls", 0)) + 1
+        current_calls = int(diagnostics.get("provider_http_calls", 0))
+        if max_provider_http_calls is not None and current_calls >= max_provider_http_calls:
+            raise MVPProviderError("本次操作已达到模型请求次数上限。")
+        diagnostics["provider_http_calls"] = current_calls + 1
         self._generation_diagnostics.value = diagnostics
         return self._model_http_client.post(endpoint, **kwargs)
 
@@ -2793,6 +2828,142 @@ class MVPService:
             and not _contains_term(message, str(item.get("canonical_name")))
         ]
         return " ".join(dict.fromkeys([message, *canonical_names])).strip()
+
+    def _companion_social_evidence(
+        self,
+        character: Any,
+        mentions: list[dict[str, Any]],
+        limit: int = 4,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Build a narrow, three-tier acquaintance context for companions.
+
+        A shared source can support a firm interaction fact. A target profile
+        can support only an attributed impression. With neither, the model may
+        still improvise a small present/hypothetical interaction, but it may
+        not turn that scene into canonical history.
+        """
+
+        targets = [
+            item
+            for item in mentions
+            if str(item.get("character_id") or "") != character.character_id
+        ][:2]
+        if not targets:
+            return [], {
+                "active": False,
+                "relationship": "allied_companions",
+                "evidence_tier": "none",
+                "mentioned_characters": [],
+                "shared_evidence": [],
+                "profile_evidence": [],
+            }
+        target_ids = {str(item.get("character_id") or "") for item in targets}
+        target_names = {
+            str(item.get("canonical_name") or "")
+            for item in targets
+            if item.get("canonical_name")
+        }
+        shared_types = {
+            "main_story",
+            "character_story",
+            "affinity_story",
+            "random_event",
+            "event_lore",
+        }
+        profile_types = {"character_profile", "character_profiles", "character_voice"}
+        shared: list[dict[str, Any]] = []
+        profiles: list[dict[str, Any]] = []
+        for document in self.repository.documents():
+            document_id = str(document.get("document_id") or "")
+            if not document_id:
+                continue
+            source_type = str(document.get("source_type") or "")
+            metadata = document.get("metadata") or {}
+            text = " ".join(
+                (str(document.get("title") or ""), str(document.get("text") or ""))
+            )
+            associated_ids = {
+                str(metadata.get("character_id") or ""),
+                *[str(item or "") for item in metadata.get("character_ids") or []],
+                *[str(item or "") for item in metadata.get("related_character_ids") or []],
+            }
+            speaker_present = (
+                character.character_id in associated_ids
+                or _contains_term(text, character.display_name)
+            )
+            matched_names = [name for name in target_names if _contains_term(text, name)]
+            matched_ids = target_ids.intersection(associated_ids)
+            if source_type in shared_types and speaker_present and (matched_names or matched_ids):
+                shared.append(document)
+            elif source_type in profile_types and matched_ids:
+                profiles.append(document)
+
+        def evidence_key(document: dict[str, Any]) -> tuple[float, int, str]:
+            return (
+                float((document.get("metadata") or {}).get("source_priority") or 0.0),
+                _document_date_key(document),
+                str(document.get("document_id") or ""),
+            )
+
+        shared.sort(key=evidence_key, reverse=True)
+        profiles.sort(key=evidence_key, reverse=True)
+        selected_documents = [*shared[:2]]
+        seen_profile_targets: set[str] = set()
+        for document in profiles:
+            metadata = document.get("metadata") or {}
+            document_target = str(metadata.get("character_id") or "")
+            if not document_target:
+                document_target = next(
+                    (
+                        target_id
+                        for target_id in target_ids
+                        if target_id in {
+                            *[str(item or "") for item in metadata.get("character_ids") or []],
+                            *[str(item or "") for item in metadata.get("related_character_ids") or []],
+                        }
+                    ),
+                    "",
+                )
+            if document_target in seen_profile_targets:
+                continue
+            seen_profile_targets.add(document_target)
+            selected_documents.append(document)
+            if len(selected_documents) >= max(1, min(limit, 6)):
+                break
+        hits = [self._hit_from_document(document) for document in selected_documents]
+
+        def compact_evidence(document: dict[str, Any], tier: str) -> dict[str, Any]:
+            return {
+                "tier": tier,
+                "document_id": str(document.get("document_id") or ""),
+                "title": str(document.get("title") or ""),
+                "source_type": str(document.get("source_type") or ""),
+                "excerpt": str(document.get("text") or "")[:520],
+            }
+
+        tier = "shared_evidence" if shared else "profile_impression" if profiles else "hypothetical_only"
+        return hits, {
+            "active": True,
+            "relationship": "allied_companions",
+            "evidence_tier": tier,
+            "mentioned_characters": targets,
+            "shared_evidence": [compact_evidence(item, "shared") for item in shared[:2]],
+            "profile_evidence": [
+                compact_evidence(item, "profile")
+                for item in selected_documents
+                if item in profiles
+            ],
+            "allowed_interactions": ["shopping", "tea_chat", "meal", "ordinary_training", "light_joke"],
+            "forbidden_inventions": [
+                "major_mission",
+                "injury_or_death",
+                "secret_identity",
+                "formal_relationship",
+                "exact_historical_quote",
+                "canonical_plot_outcome",
+            ],
+            "persistence": "current_or_hypothetical_only_without_shared_evidence",
+        }
 
     @staticmethod
     def _world_snapshot(world_session_id: str) -> dict[str, Any]:
@@ -4293,14 +4464,32 @@ class MVPService:
         return not needle or needle in haystack
 
     @staticmethod
-    def _query_intents(message: str) -> tuple[str, ...]:
+    def _query_intents(
+        message: str,
+        selected_character_id: str | None = None,
+    ) -> tuple[str, ...]:
         normalized = _compact(message)
         matched = [
             intent
             for intent, terms in _QUERY_INTENT_TERMS.items()
             if any(_compact(term) in normalized for term in terms)
         ]
-        return tuple(matched or ["general"])
+        social_relation_terms = (
+            "关系", "相处", "熟不熟", "认识", "了解", "怎么看", "印象", "评价", "觉得她", "觉得他",
+        )
+        mentioned_other = any(
+            character.character_id != selected_character_id
+            and any(
+                _contains_term(message, alias)
+                for alias in dict.fromkeys(
+                    (character.display_name, character.source_name, *character.aliases)
+                )
+            )
+            for character in MVP_CHARACTERS
+        )
+        if mentioned_other and any(term in normalized for term in social_relation_terms):
+            matched.append("companion_social")
+        return tuple(dict.fromkeys(matched or ["general"]))
 
     @staticmethod
     def _dialogue_boundary(message: str, mode: str) -> dict[str, Any]:
@@ -4399,6 +4588,8 @@ class MVPService:
         normalized = _compact(message)
         if intents and "costume" in intents:
             return "costume_detail"
+        if intents and "companion_social" in intents and "logistics" not in intents:
+            return "companion_relationship"
         if intents and "logistics" in intents:
             return "logistics_detail"
         # A meal that the analyst has already brought or proposed is a shared
@@ -4572,6 +4763,7 @@ class MVPService:
             "casual_check_in": "用户是在自然问候或关心今天过得怎么样。先用角色口吻直接接住这句问候，通常只需一两句；不要无端引入恒约、旧剧情、当前行程或‘自从……之后我变得……’这类未经本轮证据支持的状态。",
             "relationship_label": "用户问的是关系称谓。先直接回答已经建立的关系，再补充一句情感背景；不要先输出资料检索免责声明。",
             "preference_or_value": "用户问的是喜欢、在意或不喜欢什么。先分别回答对应类别；不得用‘关心分析员’替代具体偏好，也不要把一次性场景硬说成永久喜好。",
+            "companion_relationship": "用户问的是当前角色与一名或多名可对话队员的相处和印象。先使用 companion_social_context 的 shared_evidence；没有共同剧情时，可基于目标角色稳定资料用‘我印象里’做谨慎评价；仍无证据时，只生成当前或假设性的普通小互动。可以写逛街、茶话会、吃饭、训练和轻微玩笑，但不得虚构重大任务、伤亡、秘密身份、正式关系、历史原话或主线结局。",
             "logistics_detail": "用户问的是该角色当前装甲关联的后勤小队、队员、成员履历、爱好或专长。先直接列出与该角色/装甲明确关联的小队和成员；再补充与问题相关的成员特点。不要把无关小队、获取方式、数值或套装机制混入回答。",
             "past_experience": "用户问的是过去经历或剧情。可以按时间顺序简洁回忆，但只引用与问题直接相关的事件，不要把无关故事堆在一起。",
             "costume_detail": "用户正在问具体时装、皮肤或适配装甲。先直接回答这套时装的简介、细节或与装甲的关联；如果用户点名了一套时装，必须同时参考该时装和它对应装甲的资料，不能只重复名字或改答泛泛的角色背景。",
@@ -5493,7 +5685,7 @@ class MVPService:
         lexical search missed their title, then scored by intent/source and
         text evidence.  Original search ranks remain a small tie-breaker.
         """
-        intents = self._query_intents(message)
+        intents = self._query_intents(message, character_id)
         question_focus = self._question_focus(message, intents)
         natural_focus = question_focus in {
             "food_or_drink",
@@ -5987,13 +6179,26 @@ class MVPService:
             for item in mentioned_characters
             if item.get("character_id") != character.character_id
         ]
-        companion_social_context = {
-            "active": bool(companion_mentions),
-            "relationship": "allied_companions",
-            "mentioned_characters": companion_mentions,
+        social_hits, companion_social_context = self._companion_social_evidence(
+            character,
+            companion_mentions,
+        )
+        companion_social_context.update({
             "allowed_tones": ["friendly", "relaxed", "teasing", "playful_rivalry"],
             "forbidden_tones": ["hostility", "hatred", "harm_intent", "enemy_framing"],
-        }
+        })
+        if question_focus == "companion_relationship" and social_hits:
+            seen_social_ids: set[str] = set()
+            promoted_social_hits: list[dict[str, Any]] = []
+            for hit in [*social_hits, *filtered]:
+                document_id = str(hit.get("citation", {}).get("document_id") or "")
+                if not document_id or document_id in seen_social_ids:
+                    continue
+                seen_social_ids.add(document_id)
+                promoted_social_hits.append(hit)
+                if len(promoted_social_hits) >= max(1, min(limit, 12)):
+                    break
+            filtered = promoted_social_hits
         if question_focus in {
             "food_or_drink",
             "shared_meal",
@@ -6104,6 +6309,7 @@ class MVPService:
                 "casual_check_in",
                 "general",
                 "open_invitation",
+                "companion_relationship",
             }
             else "current_fact"
             if "current_state" in query_intents
@@ -6523,7 +6729,13 @@ class MVPService:
             "open_invitation",
         }:
             per_document_limit, evidence_budget = 1200, 5200
-        elif focus in {"preference_or_value", "costume_detail", "logistics_detail", "general"}:
+        elif focus in {
+            "preference_or_value",
+            "costume_detail",
+            "logistics_detail",
+            "companion_relationship",
+            "general",
+        }:
             per_document_limit, evidence_budget = 2200, 10500
         else:
             per_document_limit, evidence_budget = 3200, 18000
@@ -6690,6 +6902,18 @@ class MVPService:
                 else "openai-compatible"
             )
         request_fields = dict((thinking_decision or {}).get("request_fields") or {})
+        raw_provider_limit = (thinking_decision or {}).get("max_provider_http_calls")
+        try:
+            max_provider_http_calls = (
+                max(1, min(int(raw_provider_limit), 2))
+                if raw_provider_limit is not None
+                else None
+            )
+        except (TypeError, ValueError):
+            max_provider_http_calls = None
+        disable_compatibility_retries = bool(
+            (thinking_decision or {}).get("disable_compatibility_retries")
+        )
         if not thinking_decision:
             # Direct service callers retain the safe mode defaults.  Main API
             # requests always pass an explicit normalized decision.
@@ -6709,20 +6933,40 @@ class MVPService:
                 body["enable_thinking"] = False
         timeout = float(os.getenv("MVP_CHAT_TIMEOUT_SECONDS", str(self.settings.mvp_chat_timeout_seconds)))
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        max_attempts = max(1, min(int(os.getenv("MVP_CHAT_MAX_ATTEMPTS", "2")), 3))
+        max_attempts = (
+            1
+            if disable_compatibility_retries
+            else max(1, min(int(os.getenv("MVP_CHAT_MAX_ATTEMPTS", "2")), 3))
+        )
         backoff = max(0.0, min(float(os.getenv("MVP_CHAT_RETRY_BACKOFF_SECONDS", "1.5")), 10.0))
         empty_retry_done = False
         length_retry_done = False
         usage_total: dict[str, Any] = {}
         for attempt in range(1, max_attempts + 1):
             try:
-                response = self._post_model(endpoint, headers=headers, json=body, timeout=timeout)
-                if response.status_code >= 400 and "response_format" in body:
+                response = self._post_model(
+                    endpoint,
+                    max_provider_http_calls=max_provider_http_calls,
+                    headers=headers,
+                    json=body,
+                    timeout=timeout,
+                )
+                if (
+                    not disable_compatibility_retries
+                    and response.status_code >= 400
+                    and "response_format" in body
+                ):
                     # Some compatible gateways reject JSON mode while still
                     # returning valid JSON in the message content.
                     body.pop("response_format", None)
-                    response = self._post_model(endpoint, headers=headers, json=body, timeout=timeout)
-                if response.status_code >= 400 and any(
+                    response = self._post_model(
+                        endpoint,
+                        max_provider_http_calls=max_provider_http_calls,
+                        headers=headers,
+                        json=body,
+                        timeout=timeout,
+                    )
+                if not disable_compatibility_retries and response.status_code >= 400 and any(
                     key in body for key in ("thinking", "enable_thinking", "reasoning_effort")
                 ):
                     # Provider capability declarations are advisory.  A
@@ -6731,7 +6975,13 @@ class MVPService:
                     body.pop("thinking", None)
                     body.pop("enable_thinking", None)
                     body.pop("reasoning_effort", None)
-                    response = self._post_model(endpoint, headers=headers, json=body, timeout=timeout)
+                    response = self._post_model(
+                        endpoint,
+                        max_provider_http_calls=max_provider_http_calls,
+                        headers=headers,
+                        json=body,
+                        timeout=timeout,
+                    )
                 response.raise_for_status()
                 payload = response.json()
                 content = _json_content(response)
@@ -8535,9 +8785,8 @@ class MVPService:
                 violations.append(f"address_alias_echo:{alias}")
         social_context = context.get("companion_social_context") or {}
         if social_context.get("active"):
-            normalized_answer = _compact(answer)
             for marker in _COMPANION_HOSTILITY_MARKERS:
-                if _compact(marker) in normalized_answer:
+                if cls._companion_hostility_asserted(answer, marker):
                     violations.append(f"companion_hostility:{marker}")
         violations.extend(cls._fenny_voice_violations(message, answer, context))
         violations.extend(
@@ -8669,6 +8918,59 @@ class MVPService:
             for span in cls._unsupported_quoted_spans(message, answer, context)
         )
         return list(dict.fromkeys(violations))
+
+    @staticmethod
+    def _companion_hostility_asserted(answer: str, marker: str) -> bool:
+        """Return true only for an affirmative hostility statement.
+
+        Literal matching previously rejected friendly corrections such as
+        “她不是我的敌人”. Keep the rule deterministic while recognizing the
+        short negation window that naturally precedes a Chinese predicate.
+        """
+
+        normalized_answer = _compact(answer)
+        normalized_marker = _compact(marker)
+        if not normalized_marker:
+            return False
+        start = 0
+        while True:
+            index = normalized_answer.find(normalized_marker, start)
+            if index < 0:
+                return False
+            prefix = normalized_answer[max(0, index - 10) : index]
+            if not any(
+                prefix.endswith(negation)
+                for negation in ("不", "不是", "并非", "并不是", "绝非", "没有", "从不", "谈不上", "算不上")
+            ):
+                return True
+            start = index + max(1, len(normalized_marker))
+
+    @staticmethod
+    def _hard_guard_violation(violation: str) -> bool:
+        """Classify violations that cannot be shown if still unresolved."""
+
+        value = str(violation or "")
+        return value.startswith(
+            (
+                "in_person_",
+                "communication_block_type:",
+                "text_channel_",
+                "immersive_meta_",
+                "relationship_roster_",
+                "unsupported_analyst_premise:",
+                "unsupported_session_premise:",
+                "unsupported_casual_state_claim:",
+                "unprompted_scene_disclosure:",
+                "cross_character_fact_",
+                "dual_persona_",
+                "live_scene_mismatch:",
+                "unsupported_quote:",
+            )
+        ) or value in {
+            "unsupported_current_food_fact",
+            "shared_meal_context_lost",
+            "routine_activity_contradiction",
+        }
 
     @staticmethod
     def _guarded_rewrite_prompt(
@@ -10159,6 +10461,46 @@ class MVPService:
         answer_text = self._render_content_blocks(content_blocks)
         generated["content_blocks"] = content_blocks
         generated["answer"] = answer_text
+        final_guardrail_violations = self._answer_guardrail_violations(
+            message.strip(),
+            answer_text,
+            context,
+            mode,
+            content_blocks,
+        )
+        unresolved_hard_violations = [
+            item for item in final_guardrail_violations if self._hard_guard_violation(item)
+        ]
+        if unresolved_hard_violations:
+            content_block_guard_rejected = True
+        validation_disposition = (
+            "rejected"
+            if content_block_guard_rejected or empty_model_output_guard
+            else "safe_fallback"
+            if deterministic_fallback
+            else "normalized"
+            if guardrail_retried
+            or relationship_repaired
+            or latest_state_repaired
+            or address_alias_normalized
+            or relationship_address_normalized
+            or unsupported_quote_sanitized
+            or in_person_blocks_reclassified
+            else "accepted"
+        )
+        guard_resolution = (
+            "unresolved_hard_violation"
+            if unresolved_hard_violations
+            else "empty_output"
+            if empty_model_output_guard
+            else "safe_fallback"
+            if deterministic_fallback
+            else "controlled_rewrite"
+            if guardrail_retried
+            else "normalized"
+            if validation_disposition == "normalized"
+            else "accepted"
+        )
         if relationship_repaired:
             generated["confidence"] = "high"
             generated["uncertainties"] = []
@@ -10326,7 +10668,17 @@ class MVPService:
             "agent_run_id": None,
             "content_block_guard_rejected": content_block_guard_rejected,
             "guard_violation_count": len(guardrail_violations),
-            "guard_code": (guardrail_violations[0] if guardrail_violations else ""),
+            "final_guard_violation_count": len(final_guardrail_violations),
+            "final_hard_guard_violation_count": len(unresolved_hard_violations),
+            "guard_code": (
+                unresolved_hard_violations[0]
+                if unresolved_hard_violations
+                else guardrail_violations[0]
+                if guardrail_violations
+                else ""
+            ),
+            "guard_resolution": guard_resolution,
+            "validation_disposition": validation_disposition,
             "response_adjustments": [
                 adjustment
                 for adjustment, active in (

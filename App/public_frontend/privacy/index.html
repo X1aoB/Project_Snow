@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light" />
     <title>隐私与素材 · Project Snow</title>
-    <link rel="stylesheet" href="/shared/immersive.css?v=0.8.4" />
-    <link rel="stylesheet" href="/app.css?v=0.8.4" />
+    <link rel="stylesheet" href="/shared/immersive.css?v=0.9.0" />
+    <link rel="stylesheet" href="/app.css?v=0.9.0" />
   </head>
   <body class="privacy-page">
     <header class="privacy-header">
@@ -14,17 +14,21 @@
       <a class="secondary-button link-button" href="/">返回体验</a>
     </header>
     <main class="privacy-main">
-      <section class="privacy-hero"><span class="panel-kicker">0.8.4 使用说明</span><h1>隐私、模型调用与素材来源</h1><p>这里集中说明沉浸式体验会处理哪些数据，以及当前私有候选所使用的角色头像和表情来源。</p></section>
+      <section class="privacy-hero"><span class="panel-kicker">0.9.0 · 2026-08-19 生效</span><h1>隐私、模型调用与素材来源</h1><p>Project Snow 是非官方、非商业的 AI 角色互动实验。模型回答可能出错或偏离原作，请勿输入真实密码、证件、财务或其他敏感信息。</p></section>
       <div class="privacy-grid">
-        <article><h2>API Key</h2><p>Key 会短暂经过 Project Snow 服务器内存，用于向你选择的官方模型服务发起请求。Key 不写入数据库、磁盘、反馈、IndexedDB 或应用日志；浏览器只在当前标签页保存两小时加密凭证。</p></article>
-        <article><h2>本地历史</h2><p>完整聊天记录和自动摘要以明文保存在当前浏览器 IndexedDB，不会跨设备同步。共享电脑使用后可在设置中删除单个角色记录或清空全部记录。</p></article>
-        <article><h2>额外模型调用</h2><p>进入面对面场景时有 50% 概率触发一次主动到场反应。每新增 12 个成功对话轮次，默认会在后台调用当前模型更新本地连续性摘要；可在设置中关闭。</p></article>
-        <article><h2>反馈与 QQ</h2><p>反馈会附带当前一问一答、结构化动作/对白和不含密钥的阶段诊断。可选 QQ 在数据库中加密保存，并会临时解密后发送到 admin@xiaob.dev 的通知邮件；邮件和数据库记录均在 30 天后清理。原始 IP 不入库。</p></article>
+        <article><h2>API Key 与模型供应商</h2><p>Key 会经过 Project Snow 服务器内存并发送给你选择的官方模型接口，但不写入数据库、磁盘、反馈或日志。服务器签发的两小时凭证保存在当前标签页；它由服务器加密，并非端到端加密。关闭标签页或清除会话存储即可移除。</p><div id="provider-privacy-links" class="source-links"></div></article>
+        <article><h2>发送给模型的内容</h2><p>一次对话最多携带当前消息、最近 24 条消息、连续性摘要、角色系统指令和检索到的公开剧情资料。每次用户操作最多发起两次模型请求，可能包括一次受控重写；到场反应和每 12 轮一次的可关闭摘要也会消耗你的模型额度。</p></article>
+        <article><h2>浏览器本地历史</h2><p>聊天、摘要、草稿和收藏以明文保存在当前浏览器 IndexedDB，不会自动跨设备同步。可选择永不自动清理、保留 30 天或 90 天，并可删除单个角色或全部本地数据。存储不可用时将退化为“本次不会保存”。</p></article>
+        <article><h2>Cookie、缓存与滥用防护</h2><p>首次进行写操作时建立一个 30 天的 <code>__Host-snow_anon</code> 匿名 Cookie。幂等请求结果最多缓存 10 分钟。原始 IP 不写入业务数据库；限流只使用每日轮换的 HMAC-IP 指纹，最长保留 48 小时。</p></article>
+        <article><h2>Cloudflare</h2><p>站点通过 Cloudflare Tunnel/CDN 提供，并使用 Turnstile 防止自动滥用。Cloudflare 可能处理 IP、浏览器和挑战信号；详见 <a href="https://www.cloudflare.com/turnstile-privacy-policy/" rel="noreferrer">Turnstile 隐私补充说明</a>。本站不接入第三方内容分析或广告统计。</p></article>
+        <article><h2>反馈与 QQ</h2><p>“附带相关对话上下文”默认勾选，但可在提交前取消并预览。取消后服务器会丢弃对话、模型、阶段和诊断字段。反馈正文与可选的加密 QQ 保存 30 天；加密备份最多额外保留 7 天。如已启用通知邮件，邮件只含反馈编号和时间，不含正文、对话、诊断或 QQ。</p></article>
       </div>
-      <section class="privacy-section"><h2>角色头像来源与许可</h2><p>头像作为独立媒体包部署，不进入 GPL 应用镜像或 Git 历史。分析员默认头像来自 Wiki 的“分析员头像.png”文件页；媒体清单同时记录文件修订号、哈希和许可证依据。移除 Cloudflare Access 前仍需重新进行公开发布与许可审查。</p><div id="avatar-attribution" class="attribution-list"><p>正在读取媒体清单……</p></div></section>
-      <section class="privacy-section"><h2>表情资源</h2><p>0.8.4 私有候选包含 363 个懒加载表情资源（其中 29 个 GIF），通过独立版本媒体包提供。媒体清单同时记录角色归属、情绪标签、来源页和文件哈希；公开访问前会再次进行来源与许可审查。</p></section>
-      <section class="privacy-section"><h2>项目与联系</h2><div class="source-links"><a id="privacy-project-link" href="https://github.com/X1aoB/Project_Snow">Project Snow 源码</a><a id="privacy-website-link" href="https://github.com/X1aoB/MyWebsite">MyWebsite 源码</a><a id="privacy-release-link" href="https://github.com/X1aoB/Project_Snow/releases">版本发布</a><a href="mailto:admin@xiaob.dev">版权问题联系</a></div><p>第三方内容的许可说明不构成对 Wiki 或游戏权利归属的法律保证；页面或文件的特殊声明优先。</p></section>
+      <section class="privacy-section"><h2>角色头像来源与许可</h2><p>头像作为独立、不可变媒体包部署，不进入 GPL 应用镜像。每个头像都必须记录 BWiki 文件页、固定修订、上传者、原始 URL/哈希和裁剪转换；缺少任一项时整个包不会公开。</p><div id="avatar-attribution" class="attribution-list"><p>正在读取公开署名索引……</p></div></section>
+      <section class="privacy-section"><h2>表情资源</h2><p id="sticker-attribution-summary">正在读取表情署名信息……</p><p><a id="download-attributions" href="/public/v1/attributions">下载完整头像与表情署名索引（JSON）</a></p></section>
+      <section class="privacy-section"><h2>知识数据</h2><p id="knowledge-attribution-summary">正在读取知识数据署名信息……</p><p><a id="download-data-attributions" href="/public/v1/attributions/data">下载逐页固定修订与校验索引（JSON）</a></p></section>
+      <section class="privacy-section"><h2>许可边界</h2><p>BWiki 首页固定修订 21546 表示：若无特殊说明，Wiki 内容按 CC BY-NC-SA 提供。Project Snow 对逐个文件页检查特别例外，并按 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh-hans" rel="noreferrer">CC BY-NC-SA 4.0</a>署名、标注处理并保持非商业与相同方式共享。该说明不代表游戏原始美术权属已经由 Project Snow 确认，也不表示官方认可；文件页的特殊声明优先。</p></section>
+      <section class="privacy-section"><h2>项目与联系</h2><div class="source-links"><a id="privacy-project-link" href="https://github.com/X1aoB/Project_Snow">Project Snow 源码</a><a id="privacy-website-link" href="https://github.com/X1aoB/MyWebsite">MyWebsite 源码</a><a id="privacy-release-link" href="https://github.com/X1aoB/Project_Snow/releases">版本发布</a><a href="mailto:admin@xiaob.dev">隐私、版权更正与下架联系</a></div><p>Project Snow 自有代码采用 GPL-3.0-only。本站不设置广告、付费墙、捐赠导流或商业推广。</p></section>
     </main>
-    <script type="module" src="/privacy/privacy.js?v=0.8.4"></script>
+    <script type="module" src="/privacy/privacy.js?v=0.9.0"></script>
   </body>
 </html>

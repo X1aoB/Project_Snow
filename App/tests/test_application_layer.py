@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import httpx
@@ -26,6 +26,7 @@ from backend.snow_app.mvp_service import (
     _parse_model_json,
 )
 from backend.snow_app.repository import RuntimeRepository
+from backend.snow_app.public_repository import PublicRuntimeRepository
 from pipelines.benchmark_relation_extraction import _balanced_sample, _completed_before
 from pipelines.build_entity_node_candidates import discover_entity_node_candidates
 from pipelines.build_graph import _relation_job, _split_relation_evidence_documents
@@ -130,6 +131,46 @@ class ApplicationLayerTests(unittest.TestCase):
                 repository.clear_caches()
                 self.assertIsNone(repository._embed_query("after reload"))
                 self.assertEqual(len(attempts), 2)
+
+    def test_public_repository_uses_one_pinned_version_for_local_and_remote_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            pinned_root = Path(temporary_directory) / "releases" / "2026.08.19.1"
+            other_root = Path(temporary_directory) / "current"
+            pinned_root.mkdir(parents=True)
+            other_root.mkdir()
+            public_settings = SimpleNamespace(
+                qdrant_collection="project_snow_documents",
+                data_version="2026.08.19.1",
+            )
+            aligned = Settings(
+                data_root=pinned_root,
+                runtime_root=pinned_root,
+                chat_enabled=False,
+                embedding_model=self.settings.embedding_model,
+                allowed_origins=self.settings.allowed_origins,
+            )
+            with patch.dict(os.environ, {"PUBLIC_DATA_ROOT": ""}):
+                repository = PublicRuntimeRepository(aligned, public_settings)
+            try:
+                self.assertTrue(
+                    repository.qdrant_collection.startswith(
+                        "project_snow_documents__2026-08-19-1-"
+                    )
+                )
+            finally:
+                repository.close()
+
+            mismatched = Settings(
+                data_root=pinned_root,
+                runtime_root=other_root,
+                chat_enabled=False,
+                embedding_model=self.settings.embedding_model,
+                allowed_origins=self.settings.allowed_origins,
+            )
+            with patch.dict(
+                os.environ, {"PUBLIC_DATA_ROOT": str(pinned_root)}
+            ), self.assertRaisesRegex(RuntimeError, "must match PUBLIC_DATA_ROOT"):
+                PublicRuntimeRepository(mismatched, public_settings)
 
     def test_relation_review_groups_preserve_all_evidence_without_alias_merging(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -2450,6 +2491,109 @@ class ApplicationLayerTests(unittest.TestCase):
                 )
             )
         )
+        self.assertFalse(
+            any(
+                item.startswith("companion_hostility:")
+                for item in service._answer_guardrail_violations(
+                    "猫汐尔怎么样？", "她不是我的敌人，我们只是偶尔拌嘴。", active, "immersive"
+                )
+            )
+        )
+
+    def test_mvp_all_companion_pairs_route_before_unqualified_logistics(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        for speaker in MVP_CHARACTERS:
+            for target in MVP_CHARACTERS:
+                if target.character_id == speaker.character_id:
+                    continue
+                with self.subTest(speaker=speaker.display_name, target=target.display_name):
+                    message = f"你和{target.display_name}相处得怎么样？"
+                    intents = service._query_intents(message, speaker.character_id)
+                    self.assertIn("companion_social", intents)
+                    self.assertNotIn("logistics", intents)
+                    self.assertEqual(
+                        service._question_focus(message, intents),
+                        "companion_relationship",
+                    )
+        qualified = service._query_intents("后勤小队成员的履历和专长", MVP_CHARACTERS[0].character_id)
+        self.assertIn("logistics", qualified)
+        self.assertEqual(
+            service._question_focus("后勤小队成员的履历和专长", qualified),
+            "logistics_detail",
+        )
+
+    def test_public_byok_generation_has_two_http_call_budget_without_probing(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        service.reset_generation_diagnostics()
+        response = httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://example.test/v1/chat/completions"),
+            json={
+                "choices": [{"message": {"content": '{"answer":"好。"}'}, "finish_reason": "stop"}],
+                "usage": {"total_tokens": 3},
+            },
+        )
+        decision = {
+            "provider_kind": "openai",
+            "max_provider_http_calls": 2,
+            "disable_compatibility_retries": True,
+        }
+        with patch.object(service._model_http_client, "post", return_value=response) as post:
+            service._call_model(
+                "system",
+                "first",
+                model_settings=("https://example.test/v1", "secret", "model"),
+                thinking_decision=decision,
+            )
+            service._call_model(
+                "system",
+                "rewrite",
+                model_settings=("https://example.test/v1", "secret", "model"),
+                thinking_decision=decision,
+            )
+            with self.assertRaises(MVPProviderError):
+                service._call_model(
+                    "system",
+                    "third",
+                    model_settings=("https://example.test/v1", "secret", "model"),
+                    thinking_decision=decision,
+                )
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(service.generation_diagnostics()["provider_http_calls"], 2)
+        service.close()
+
+    def test_companion_social_evidence_prefers_shared_story_then_profile(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        speaker, target = MVP_CHARACTERS[:2]
+        mentions = [{
+            "character_id": target.character_id,
+            "canonical_name": target.display_name,
+            "matched_alias": target.display_name,
+        }]
+        shared = {
+            "document_id": "shared-social-doc",
+            "title": "一次普通茶话会",
+            "source_type": "character_story",
+            "text": f"{speaker.display_name}和{target.display_name}在休息区聊了一会儿。",
+            "metadata": {"character_id": speaker.character_id, "source_priority": 80},
+        }
+        profile = {
+            "document_id": "target-profile-doc",
+            "title": f"{target.display_name}资料",
+            "source_type": "character_profile",
+            "text": f"{target.display_name}的稳定公开资料。",
+            "metadata": {"character_id": target.character_id, "source_priority": 90},
+        }
+        with patch.object(service.repository, "documents", return_value=[profile, shared]):
+            hits, context = service._companion_social_evidence(speaker, mentions)
+        self.assertEqual(context["evidence_tier"], "shared_evidence")
+        self.assertEqual(context["relationship"], "allied_companions")
+        self.assertEqual(
+            {hit["citation"]["document_id"] for hit in hits},
+            {"shared-social-doc", "target-profile-doc"},
+        )
+        self.assertEqual(context["persistence"], "current_or_hypothetical_only_without_shared_evidence")
+        service.close()
 
     def test_mvp_chat_request_keeps_world_session_optional_for_old_clients(self) -> None:
         legacy = MVPChatRequest(character_id="ca0144ccd81b", message="你在哪？")
@@ -2518,6 +2662,9 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertNotIn("敌人", result["answer"])
         self.assertNotIn("讨厌", result["answer"])
         self.assertEqual(result["citations"], [])
+        self.assertEqual(result["validation_disposition"], "safe_fallback")
+        self.assertEqual(result["guard_resolution"], "safe_fallback")
+        self.assertEqual(result["final_hard_guard_violation_count"], 0)
 
     def test_mvp_immersive_boundary_reframes_meta_costume_questions_only(self) -> None:
         service = MVPService(self.settings, self.repository)

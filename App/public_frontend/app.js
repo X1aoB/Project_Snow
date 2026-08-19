@@ -1,6 +1,6 @@
 const apiRoot = "/public/v1";
 const dbName = "project-snow-public";
-const dbVersion = 3;
+const dbVersion = 4;
 const SCENE_KEYS = new Set(["generic", "quarters", "lounge", "training", "archive", "canteen", "observation", "medical", "corridor"]);
 const state = {
   config: null,
@@ -10,6 +10,15 @@ const state = {
   model: "",
   characters: [],
   stickers: [],
+  stickerCatalog: new Map(),
+  stickerLoadPromise: null,
+  stickerCursor: null,
+  stickerHasMore: true,
+  stickerSection: "character",
+  stickerQuery: "",
+  favoriteStickerIds: new Set(),
+  favoriteStickers: new Map(),
+  recentStickerIds: [],
   selectedSticker: null,
   actionComposerOpen: false,
   selected: "",
@@ -21,10 +30,15 @@ const state = {
   typingByCharacter: new Map(),
   presentationByCharacter: new Map(),
   chatRequestByCharacter: new Map(),
+  retrySnapshots: new Map(),
+  presenceResolvePending: 0,
+  deferredPresenceCharacter: "",
+  deferredPresenceRunning: false,
   modeTransitionSequence: 0,
   modeTransitionPending: false,
   modeTransitionController: null,
   requestStatusByCharacter: new Map(),
+  requestRecoveryByCharacter: new Map(),
   feedbackMessageId: "",
   arrivalPending: false,
   autoSummaryEnabled: true,
@@ -33,6 +47,16 @@ const state = {
   typewriter: { key: "", timer: 0, fullText: "", displayedText: "" },
   summaryInFlight: new Set(),
   continuityPrompt: null,
+  storageAvailable: true,
+  memoryStores: { threads: new Map(), messages: new Map(), app_state: new Map() },
+  drafts: new Map(),
+  draftTimer: 0,
+  pinnedCharacters: new Set(),
+  timelineVisibleLimit: 60,
+  drawerReturnFocus: null,
+  contactReturnFocus: null,
+  onboardingStep: 0,
+  historyRetentionDays: 0,
 };
 
 // A request may outlive the character currently visible in the UI.  Keeping
@@ -43,6 +67,18 @@ function TypingIndicatorState({ channel, characterId, requestId, phase = "typing
   this.characterId = plain(characterId);
   this.requestId = plain(requestId);
   this.phase = plain(phase || "typing");
+}
+
+let dbPromise = null;
+let storageWarningShown = false;
+
+function useMemoryStorage() {
+  state.storageAvailable = false;
+  dbPromise = Promise.resolve(null);
+  if (!storageWarningShown) {
+    storageWarningShown = true;
+    showBanner("浏览器本地存储不可用，本次聊天不会保存；仍可继续使用。");
+  }
 }
 
 const $ = (id) => document.getElementById(id);
@@ -72,23 +108,84 @@ const errorMessages = {
   chat_failed: "对话请求失败，请稍后重试。",
   request_failed: "请求失败，请稍后重试。",
   request_timeout: "提交超时，反馈未能确认是否送达；请稍后重试。",
-  request_cancelled: "请求已取消。",
+  request_too_large: "本轮上下文过长，已无法在安全请求上限内发送；请先整理摘要或开始新的连续性段。",
+  request_cancelled: "已停止等待。模型供应商仍可能完成本次生成或产生费用。",
+  stream_disconnected: "连接中断，未能恢复本次回复。你可以使用原消息重新发起请求。",
   experience_notice_required: "请先阅读并确认体验说明。",
   sticker_unavailable: "这个表情暂时不可用，请换一个或稍后再试。",
+  state_subject_mismatch: "本地场景凭证仍然无效，请重新发送本条消息。",
+  state_invalid: "本地场景状态仍然无效，请重新发送本条消息。",
 };
 
+const STATE_PACKAGE_RECOVERY_CODES = new Set(["state_subject_mismatch", "state_invalid"]);
+
 function id() {
-  return window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (window.crypto?.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 function plain(value) { return String(value ?? ""); }
 function escapeHtml(value) {
   const span = document.createElement("span");
   span.textContent = plain(value);
-  return span.innerHTML;
+  return span.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 function displayError(error) {
   const code = error instanceof Error ? error.message : plain(error);
   return errorMessages[code] || (/^[a-z][a-z0-9_]*$/.test(code) ? errorMessages.request_failed : code);
+}
+
+const PUBLIC_REQUEST_LIMIT_BYTES = 64 * 1024;
+const PUBLIC_REQUEST_TARGET_BYTES = 63 * 1024;
+const requestTextEncoder = new TextEncoder();
+function jsonBodyBytes(payload) {
+  return requestTextEncoder.encode(JSON.stringify(payload)).byteLength;
+}
+function safePrefix(value, length) {
+  let result = plain(value).slice(0, Math.max(0, length));
+  const finalCodeUnit = result ? result.charCodeAt(result.length - 1) : 0;
+  if (finalCodeUnit >= 0xD800 && finalCodeUnit <= 0xDBFF) result = result.slice(0, -1);
+  return result;
+}
+function fitPublicRequestPayload(payload, { arrays = [], texts = [], targetBytes = PUBLIC_REQUEST_TARGET_BYTES } = {}) {
+  const fitted = structuredClone(payload);
+  const target = Math.min(PUBLIC_REQUEST_LIMIT_BYTES, Math.max(1024, Number(targetBytes) || PUBLIC_REQUEST_TARGET_BYTES));
+  for (const { key, minimum = 0 } of arrays) {
+    const values = Array.isArray(fitted[key]) ? fitted[key] : [];
+    fitted[key] = values;
+    while (values.length > minimum && jsonBodyBytes(fitted) > target) values.shift();
+  }
+  for (const key of texts) {
+    if (jsonBodyBytes(fitted) <= target) break;
+    const original = plain(fitted[key]);
+    let low = 0;
+    let high = original.length;
+    let best = "";
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const candidate = safePrefix(original, middle);
+      fitted[key] = candidate;
+      if (jsonBodyBytes(fitted) <= target) {
+        best = candidate;
+        low = middle + 1;
+      } else high = middle - 1;
+    }
+    fitted[key] = best;
+  }
+  if (jsonBodyBytes(fitted) > target) throw new Error("request_too_large");
+  return fitted;
+}
+if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
+  Object.defineProperty(window, "__projectSnowTest", {
+    value: Object.freeze({ escapeHtml, fitPublicRequestPayload }),
+    configurable: false,
+    writable: false,
+  });
 }
 function showError(target, error) { $(target).textContent = error ? displayError(error) : ""; }
 function toast(message) {
@@ -140,11 +237,14 @@ const LOCAL_PINYIN_TOKENS = {
   "ca0144ccd81b": ["lf", "lifu"],
 };
 function localDayKey(timestamp = Date.now()) {
-  const value = new Date(timestamp);
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(timestamp));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 function newConversationSegment() { return id(); }
 
@@ -182,59 +282,230 @@ async function api(path, options = {}) {
 }
 
 function openDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(dbName, dbVersion);
-    request.onupgradeneeded = () => {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    let request;
+    try {
+      request = indexedDB.open(dbName, dbVersion);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    request.onupgradeneeded = (event) => {
       const db = request.result;
-      if (!db.objectStoreNames.contains("threads")) db.createObjectStore("threads", { keyPath: "characterId" });
+      const transaction = request.transaction;
+      const threads = db.objectStoreNames.contains("threads")
+        ? transaction.objectStore("threads")
+        : db.createObjectStore("threads", { keyPath: "characterId" });
       if (!db.objectStoreNames.contains("app_state")) db.createObjectStore("app_state", { keyPath: "key" });
+      const messages = db.objectStoreNames.contains("messages")
+        ? transaction.objectStore("messages")
+        : db.createObjectStore("messages", { keyPath: "id" });
+      if (!messages.indexNames.contains("by_character_created")) {
+        messages.createIndex("by_character_created", ["characterId", "createdAt"], { unique: false });
+      }
+      if (!messages.indexNames.contains("by_character_segment_created")) {
+        messages.createIndex("by_character_segment_created", ["characterId", "conversationSegmentId", "createdAt"], { unique: false });
+      }
+      if (Number(event.oldVersion || 0) < 4) {
+        const cursorRequest = threads.openCursor();
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result;
+          if (!cursor) return;
+          const record = cursor.value || {};
+          const legacyMessages = Array.isArray(record.messages) ? record.messages : [];
+          for (const message of legacyMessages) {
+            const normalized = normalizeMessage({ ...message, characterId: message.characterId || message.character_id || record.characterId });
+            messages.put(normalized);
+          }
+          const metadata = { ...record, messageCount: legacyMessages.length };
+          delete metadata.messages;
+          cursor.update(metadata);
+          cursor.continue();
+        };
+      }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        dbPromise = null;
+      };
+      resolve(db);
+    };
     request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("indexeddb_blocked"));
+  }).catch(() => {
+    useMemoryStorage();
+    return null;
   });
+  return dbPromise;
+}
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(plain(value));
+    return url.protocol === "https:" ? url.href : "";
+  } catch { return ""; }
 }
 async function storeGet(storeName, key) {
   const db = await openDB();
-  return new Promise((resolve, reject) => {
+  if (!db) return state.memoryStores[storeName]?.get(key) || null;
+  try {
+    return await new Promise((resolve, reject) => {
     const request = db.transaction(storeName, "readonly").objectStore(storeName).get(key);
     request.onsuccess = () => resolve(request.result || null);
     request.onerror = () => reject(request.error);
-  });
+    });
+  } catch {
+    useMemoryStorage();
+    return state.memoryStores[storeName]?.get(key) || null;
+  }
 }
 async function storeAll(storeName) {
   const db = await openDB();
-  return new Promise((resolve, reject) => {
+  if (!db) return [...(state.memoryStores[storeName]?.values() || [])];
+  try {
+    return await new Promise((resolve, reject) => {
     const request = db.transaction(storeName, "readonly").objectStore(storeName).getAll();
     request.onsuccess = () => resolve(request.result || []);
     request.onerror = () => reject(request.error);
-  });
+    });
+  } catch {
+    useMemoryStorage();
+    return [...(state.memoryStores[storeName]?.values() || [])];
+  }
 }
 async function storePut(storeName, value) {
+  const key = storeName === "messages" ? value.id : storeName === "app_state" ? value.key : value.characterId;
+  state.memoryStores[storeName]?.set(key, structuredClone(value));
   const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    tx.objectStore(storeName).put(value);
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+  if (!db) return;
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite");
+      tx.objectStore(storeName).put(value);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("indexeddb_write_aborted"));
+    });
+  } catch {
+    useMemoryStorage();
+  }
 }
 async function storeDelete(storeName, key) {
+  state.memoryStores[storeName]?.delete(key);
   const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    tx.objectStore(storeName).delete(key);
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+  if (!db) return;
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite");
+      tx.objectStore(storeName).delete(key);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("indexeddb_delete_aborted"));
+    });
+  } catch {
+    useMemoryStorage();
+  }
 }
 async function storeClear(storeName) {
+  state.memoryStores[storeName]?.clear();
   const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(storeName, "readwrite");
-    tx.objectStore(storeName).clear();
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
+  if (!db) return;
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, "readwrite");
+      tx.objectStore(storeName).clear();
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("indexeddb_clear_aborted"));
+    });
+  } catch {
+    useMemoryStorage();
+  }
+}
+
+async function messageCount(characterId) {
+  const db = await openDB();
+  if (!db) {
+    return [...state.memoryStores.messages.values()].filter((message) => message.characterId === characterId).length;
+  }
+  try {
+    return await new Promise((resolve, reject) => {
+      const index = db.transaction("messages", "readonly").objectStore("messages").index("by_character_created");
+      const request = index.count(IDBKeyRange.bound([characterId, 0], [characterId, Number.MAX_SAFE_INTEGER]));
+      request.onsuccess = () => resolve(Number(request.result || 0));
+      request.onerror = () => reject(request.error);
+    });
+  } catch {
+    useMemoryStorage();
+    return [...state.memoryStores.messages.values()].filter((message) => message.characterId === characterId).length;
+  }
+}
+
+async function loadMessagePage(characterId, { before = Number.MAX_SAFE_INTEGER, limit = 60 } = {}) {
+  const db = await openDB();
+  if (!db) {
+    return [...state.memoryStores.messages.values()]
+      .filter((message) => message.characterId === characterId && Number(message.createdAt || 0) < before)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .slice(0, limit)
+      .reverse()
+      .map(normalizeMessage);
+  }
+  try {
+    return await new Promise((resolve, reject) => {
+    const values = [];
+    const index = db.transaction("messages", "readonly").objectStore("messages").index("by_character_created");
+    const upper = before >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : Math.max(0, before);
+    const range = IDBKeyRange.bound([characterId, 0], [characterId, upper], false, before < Number.MAX_SAFE_INTEGER);
+    const request = index.openCursor(range, "prev");
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor || values.length >= limit) {
+        resolve(values.reverse().map(normalizeMessage));
+        return;
+      }
+      values.push(cursor.value);
+      cursor.continue();
+    };
+    request.onerror = () => reject(request.error);
+    });
+  } catch {
+    useMemoryStorage();
+    return [...state.memoryStores.messages.values()]
+      .filter((message) => message.characterId === characterId && Number(message.createdAt || 0) < before)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .slice(0, limit)
+      .reverse()
+      .map(normalizeMessage);
+  }
+}
+
+async function deleteMessagesForCharacter(characterId) {
+  for (const [key, message] of state.memoryStores.messages) {
+    if (message.characterId === characterId) state.memoryStores.messages.delete(key);
+  }
+  const db = await openDB();
+  if (!db) return;
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("messages", "readwrite");
+      const index = tx.objectStore("messages").index("by_character_created");
+      const request = index.openKeyCursor(IDBKeyRange.bound([characterId, 0], [characterId, Number.MAX_SAFE_INTEGER]));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        tx.objectStore("messages").delete(cursor.primaryKey);
+        cursor.continue();
+      };
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("indexeddb_delete_aborted"));
+    });
+  } catch {
+    useMemoryStorage();
+  }
 }
 
 function normalizeBlocks(blocks, channel, fallback = "") {
@@ -243,7 +514,7 @@ function normalizeBlocks(blocks, channel, fallback = "") {
     .filter((item) => item && allowed.has(item.type) && (item.type === "sticker" || plain(item.text).trim()))
     .slice(0, 8)
     .map((item) => item.type === "sticker"
-      ? { type: "sticker", assetId: plain(item.assetId || item.asset_id), asset_id: plain(item.assetId || item.asset_id), caption: plain(item.caption).trim().slice(0, 120), src: plain(item.src), thumbnailSrc: plain(item.thumbnailSrc || item.thumbnail_src), animated: Boolean(item.animated) }
+      ? { type: "sticker", assetId: plain(item.assetId || item.asset_id), asset_id: plain(item.assetId || item.asset_id), caption: plain(item.caption).trim().slice(0, 120), src: plain(item.src), displaySrc: plain(item.displaySrc || item.display_src), thumbnailSrc: plain(item.thumbnailSrc || item.thumbnail_src), animated: Boolean(item.animated), displayAnimated: Boolean(item.displayAnimated ?? item.display_animated ?? item.animated) }
       : { type: item.type, text: plain(item.text).trim() }) : [];
   if (channel === "text" && normalized.length) {
     normalized = [
@@ -261,7 +532,7 @@ function wireBlocks(blocks) {
     : { type: block.type, text: plain(block.text).trim() });
 }
 function normalizeMessage(message) {
-  const channel = message.communicationChannel || message.communication_channel || "text";
+  const channel = (message.communicationChannel || message.communication_channel) === "in_person" ? "in_person" : "text";
   const blocks = normalizeBlocks(message.contentBlocks || message.content_blocks, channel, message.content || "");
   const rawCreatedAt = message.createdAt ?? message.created_at;
   const parsedCreatedAt = Number(rawCreatedAt);
@@ -275,11 +546,15 @@ function normalizeMessage(message) {
     communicationChannel: channel,
     createdAt: hasCreatedAt ? parsedCreatedAt : Date.now(),
     createdAtEstimated: Boolean(message.createdAtEstimated || message.created_at_estimated || !hasCreatedAt),
-    status: message.status || "sent",
-    requestId: message.requestId || "",
+    status: ["sent", "pending", "failed"].includes(message.status) ? message.status : "sent",
+    requestId: plain(message.requestId || message.request_id),
+    requestSnapshot: message.requestSnapshot && typeof message.requestSnapshot === "object"
+      ? structuredClone(message.requestSnapshot)
+      : null,
     errorCode: message.errorCode || "",
     source: message.source || "chat",
     conversationSegmentId: plain(message.conversationSegmentId || message.conversation_segment_id),
+    usage: message.usage && typeof message.usage === "object" ? { ...message.usage } : null,
   };
 }
 function normalizeThread(record, characterId) {
@@ -306,19 +581,33 @@ function normalizeThread(record, characterId) {
     pendingTopics: Array.isArray(record?.pendingTopics) ? record.pendingTopics.map(plain).slice(0, 12) : [],
     lastActiveAt: Number(record?.lastActiveAt || 0),
     legacyStatePackage: plain(record?.statePackage),
+    messageCount: Number(record?.messageCount || normalizedMessages.length),
+    hasOlderMessages: Boolean(record?.hasOlderMessages),
   };
 }
-async function dbGetThread(characterId) {
-  if (state.threads.has(characterId)) return state.threads.get(characterId);
-  const thread = normalizeThread(await storeGet("threads", characterId), characterId);
+async function dbGetThread(characterId, initialLimit = 60) {
+  if (state.threads.has(characterId)) {
+    const cached = state.threads.get(characterId);
+    if (initialLimit > cached.messages.length && cached.hasOlderMessages) {
+      cached.messages = await loadMessagePage(characterId, { limit: initialLimit });
+      cached.hasOlderMessages = cached.messages.length < Number(cached.messageCount || 0);
+    }
+    return cached;
+  }
+  const record = await storeGet("threads", characterId);
+  const persistedCount = await messageCount(characterId);
+  const storedMessages = persistedCount
+    ? await loadMessagePage(characterId, { limit: initialLimit })
+    : (record?.messages || []);
+  const thread = normalizeThread({ ...record, messages: storedMessages, messageCount: persistedCount || storedMessages.length }, characterId);
+  thread.hasOlderMessages = (persistedCount || storedMessages.length) > storedMessages.length;
   state.threads.set(characterId, thread);
   return thread;
 }
 async function dbPutThread(thread) {
   state.threads.set(thread.characterId, thread);
-  await storePut("threads", {
+  const metadata = {
     characterId: thread.characterId,
-    messages: thread.messages,
     summary: thread.summary,
     channel: thread.channel,
     turnCount: thread.turnCount,
@@ -332,7 +621,47 @@ async function dbPutThread(thread) {
     continuityDecision: thread.continuityDecision,
     pendingTopics: thread.pendingTopics,
     lastActiveAt: thread.lastActiveAt,
-  });
+    messageCount: Math.max(Number(thread.messageCount || 0), thread.messages.length),
+  };
+  state.memoryStores.threads.set(thread.characterId, structuredClone(metadata));
+  for (const message of thread.messages) {
+    state.memoryStores.messages.set(message.id, structuredClone(message));
+  }
+  const db = await openDB();
+  if (!db) {
+    await storePut("threads", metadata);
+    await Promise.all(thread.messages.map((message) => storePut("messages", message)));
+  } else {
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(["threads", "messages"], "readwrite");
+        tx.objectStore("threads").put(metadata);
+        for (const message of thread.messages) tx.objectStore("messages").put(message);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error("indexeddb_write_aborted"));
+      });
+    } catch {
+      useMemoryStorage();
+    }
+  }
+  thread.messageCount = metadata.messageCount;
+}
+
+async function loadOlderMessages() {
+  const thread = currentThread();
+  if (!thread?.hasOlderMessages || !thread.messages.length) return;
+  const timeline = $("timeline");
+  const previousHeight = timeline.scrollHeight;
+  const previousTop = timeline.scrollTop;
+  const oldest = Math.min(...thread.messages.map((message) => Number(message.createdAt || 0)));
+  const older = await loadMessagePage(thread.characterId, { before: oldest, limit: 40 });
+  const known = new Set(thread.messages.map((message) => message.id));
+  const additions = older.filter((message) => !known.has(message.id));
+  thread.messages = [...additions, ...thread.messages];
+  thread.hasOlderMessages = additions.length === 40 && thread.messages.length < Number(thread.messageCount || 0);
+  renderTimeline({ preserveScroll: true });
+  timeline.scrollTop = previousTop + (timeline.scrollHeight - previousHeight);
 }
 function decodeStatePackage(token) {
   try {
@@ -343,20 +672,57 @@ function decodeStatePackage(token) {
   } catch { return {}; }
 }
 async function saveWorldPackage(token) {
-  if (!token) return;
+  if (!token) return false;
   const decoded = decodeStatePackage(token);
   const incomingRevision = Number(decoded.revision || 0);
   const currentRevision = Number(decodeStatePackage(state.worldPackage || "").revision || 0);
   // A slow response from a character the user has already left must not roll
-  // the shared world back over a newer signed package. Every server mutation
-  // increments revision, so equal revisions are safe to keep as-is.
-  if (state.worldPackage && incomingRevision < currentRevision) return;
+  // the shared world back over a newer signed package. A revision identifies
+  // exactly one signed payload; response order must not choose between two
+  // different tokens carrying the same revision.
+  if (state.worldPackage && incomingRevision < currentRevision) return false;
+  if (state.worldPackage && incomingRevision === currentRevision) {
+    return token === state.worldPackage;
+  }
   state.worldPackage = token;
   await storePut("app_state", { key: "world", statePackage: token, revision: Number(decoded.revision || 0) });
+  return true;
+}
+function statePackageRecoveryError(error) {
+  const code = error instanceof Error ? error.message : plain(error);
+  return STATE_PACKAGE_RECOVERY_CODES.has(code);
+}
+async function clearPersistedWorldPackage() {
+  state.worldPackage = "";
+  state.scene = null;
+  state.sceneByCharacter.clear();
+  await storeDelete("app_state", "world");
+  // v3 stored a signed world package inside each thread. The v4 migration
+  // intentionally stopped writing it, but old metadata can still survive an
+  // upgrade. Strip both spellings so a later boot cannot resurrect a token
+  // that was rejected for a different anonymous subject.
+  const threadRecords = await storeAll("threads");
+  await Promise.all(threadRecords.map(async (record) => {
+    const cleaned = { ...record };
+    delete cleaned.statePackage;
+    delete cleaned.legacyStatePackage;
+    await storePut("threads", cleaned);
+  }));
+  for (const thread of state.threads.values()) thread.legacyStatePackage = "";
 }
 async function migrateBrowserState() {
   const preferences = await storeGet("app_state", "preferences");
   state.autoSummaryEnabled = preferences?.autoSummaryEnabled !== false;
+  const uiPreferences = await storeGet("app_state", "ui_preferences");
+  state.pinnedCharacters = new Set(Array.isArray(uiPreferences?.pinnedCharacters) ? uiPreferences.pinnedCharacters.map(plain) : []);
+  state.favoriteStickerIds = new Set(Array.isArray(uiPreferences?.favoriteStickerIds) ? uiPreferences.favoriteStickerIds.map(plain) : []);
+  state.recentStickerIds = Array.isArray(uiPreferences?.recentStickerIds) ? uiPreferences.recentStickerIds.map(plain).slice(0, 24) : [];
+  state.historyRetentionDays = [30, 90].includes(Number(uiPreferences?.historyRetentionDays)) ? Number(uiPreferences.historyRetentionDays) : 0;
+  for (const sticker of Array.isArray(uiPreferences?.favoriteStickers) ? uiPreferences.favoriteStickers : []) {
+    if (sticker?.asset_id) state.favoriteStickers.set(plain(sticker.asset_id), sticker);
+  }
+  const draftRecord = await storeGet("app_state", "drafts");
+  state.drafts = new Map(Object.entries(draftRecord?.values || {}).map(([key, value]) => [key, plain(value)]));
   const saved = await storeGet("app_state", "world");
   if (saved?.statePackage) {
     state.worldPackage = saved.statePackage;
@@ -373,8 +739,55 @@ async function migrateBrowserState() {
   if (best.token) await saveWorldPackage(best.token);
 }
 async function storageBytes() {
-  const payload = { threads: await storeAll("threads"), appState: await storeAll("app_state") };
+  const payload = { threads: await storeAll("threads"), messages: await storeAll("messages"), appState: await storeAll("app_state") };
   return new Blob([JSON.stringify(payload)]).size;
+}
+
+async function saveUiPreferences() {
+  await storePut("app_state", {
+    key: "ui_preferences",
+    pinnedCharacters: [...state.pinnedCharacters],
+    favoriteStickerIds: [...state.favoriteStickerIds],
+    favoriteStickers: [...state.favoriteStickers.values()].slice(0, 120),
+    recentStickerIds: state.recentStickerIds.slice(0, 24),
+    historyRetentionDays: state.historyRetentionDays,
+  });
+}
+
+async function pruneExpiredMessages() {
+  if (!state.historyRetentionDays) return;
+  const cutoff = Date.now() - state.historyRetentionDays * 86400000;
+  const expired = (await storeAll("messages")).filter((message) => Number(message.createdAt || 0) < cutoff);
+  if (!expired.length) return;
+  await Promise.all(expired.map((message) => storeDelete("messages", message.id)));
+  const counts = new Map();
+  for (const message of await storeAll("messages")) counts.set(message.characterId, Number(counts.get(message.characterId) || 0) + 1);
+  for (const record of await storeAll("threads")) {
+    await storePut("threads", { ...record, messageCount: Number(counts.get(record.characterId) || 0) });
+  }
+}
+
+function draftKey(characterId = state.selected, channel = currentThread()?.channel || "text", field = "message") {
+  return `${plain(characterId)}:${channel === "in_person" ? "in_person" : "text"}:${field}`;
+}
+async function saveDraftNow() {
+  window.clearTimeout(state.draftTimer);
+  if (!state.selected) return;
+  const channel = currentThread()?.channel || "text";
+  state.drafts.set(draftKey(state.selected, channel, "message"), $("message-input").value);
+  state.drafts.set(draftKey(state.selected, channel, "action"), $("action-input").value);
+  await storePut("app_state", { key: "drafts", values: Object.fromEntries(state.drafts) });
+}
+function scheduleDraftSave() {
+  window.clearTimeout(state.draftTimer);
+  state.draftTimer = window.setTimeout(() => { void saveDraftNow(); }, 220);
+}
+function restoreDraft() {
+  if (!state.selected) return;
+  const channel = currentThread()?.channel || "text";
+  $("message-input").value = state.drafts.get(draftKey(state.selected, channel, "message")) || "";
+  $("action-input").value = state.drafts.get(draftKey(state.selected, channel, "action")) || "";
+  updateInputCount();
 }
 
 function sessionKey() { return "project-snow-public:byok"; }
@@ -442,7 +855,7 @@ function attachTurnstile() {
 }
 
 function experienceNoticeKey() {
-  return `project-snow-public:notice:${state.config?.experience_notice_version || "0.8"}`;
+  return `project-snow-public:notice:${state.config?.experience_notice_version || "0.9"}`;
 }
 function experienceNoticeAccepted() { return localStorage.getItem(experienceNoticeKey()) === "accepted"; }
 async function showExperienceNoticeIfNeeded() {
@@ -472,13 +885,22 @@ async function showExperienceNoticeIfNeeded() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.8.4";
+  $("version-badge").textContent = state.config.app_version || "0.9.0";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
   $("provider-select").innerHTML = state.config.providers.length
     ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}">${escapeHtml(provider.display_name)}</option>`).join("")
     : '<option value="">暂未开放模型厂商</option>';
+  const providerLinks = [];
+  for (const provider of state.config.providers || []) {
+    const docs = safeExternalUrl(provider.documentation_url || provider.docs_url);
+    const privacy = safeExternalUrl(provider.privacy_url);
+    if (docs) providerLinks.push(`<a href="${escapeHtml(docs)}" target="_blank" rel="noreferrer">${escapeHtml(provider.display_name)} 官方文档</a>`);
+    if (privacy) providerLinks.push(`<a href="${escapeHtml(privacy)}" target="_blank" rel="noreferrer">${escapeHtml(provider.display_name)} 隐私说明</a>`);
+  }
+  $("provider-doc-links").innerHTML = providerLinks.join("");
+  $("provider-doc-links").hidden = !providerLinks.length;
   $("provider-empty").hidden = Boolean(state.config.providers.length);
   $("discover-models").disabled = !state.config.providers.length;
   $("save-model").disabled = !state.config.providers.length;
@@ -501,24 +923,76 @@ async function loadConfig() {
   }
   refreshCredentialStatus();
 }
-async function loadStickers() {
-  try {
-    const values = [];
-    let cursor = 0;
-    for (let page = 0; page < 8; page += 1) {
-      const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
-      const payload = await api(`/stickers?limit=100${suffix}`, { headers: {} });
-      if (Array.isArray(payload.stickers)) values.push(...payload.stickers);
-      if (payload.next_cursor === null || payload.next_cursor === undefined) break;
-      const next = Number(payload.next_cursor);
-      if (!Number.isInteger(next) || next <= cursor) break;
-      cursor = next;
-    }
-    const seen = new Set();
-    state.stickers = values.filter((item) => item?.asset_id && !seen.has(item.asset_id) && seen.add(item.asset_id));
-  } catch {
-    state.stickers = [];
+function normalizeSticker(sticker) {
+  if (!sticker?.asset_id) return null;
+  return {
+    ...sticker,
+    asset_id: plain(sticker.asset_id),
+    caption: plain(sticker.caption || "表情"),
+    src: plain(sticker.src),
+    display_src: plain(sticker.display_src || sticker.displaySrc),
+    thumbnail_src: plain(sticker.thumbnail_src || sticker.thumbnailSrc),
+    display_animated: Boolean(sticker.display_animated ?? sticker.displayAnimated ?? sticker.animated),
+    emotion_tags: Array.isArray(sticker.emotion_tags) ? sticker.emotion_tags.map(plain) : [],
+    character_ids: Array.isArray(sticker.character_ids) ? sticker.character_ids.map(plain) : [],
+  };
+}
+function localStickerSectionValues(section = state.stickerSection) {
+  const ids = section === "recent" ? state.recentStickerIds : [...state.favoriteStickerIds];
+  return ids.map((assetId) => state.stickerCatalog.get(assetId) || state.favoriteStickers.get(assetId)).filter(Boolean);
+}
+function stickerMatchesLoadedFilter(sticker) {
+  const query = normalizedSearch(state.stickerQuery);
+  if (query) {
+    const tokens = [sticker.caption, sticker.category, ...(sticker.emotion_tags || [])].map(normalizedSearch);
+    if (!tokens.some((token) => token.includes(query))) return false;
   }
+  if (state.stickerSection === "character" && sticker.character_ids?.length && !sticker.character_ids.includes(state.selected)) return false;
+  if (state.stickerSection === "generic" && sticker.character_ids?.length) return false;
+  return true;
+}
+async function loadStickers({ reset = false } = {}) {
+  if (["recent", "favorites"].includes(state.stickerSection)) {
+    state.stickers = localStickerSectionValues().filter(stickerMatchesLoadedFilter);
+    state.stickerCursor = null;
+    state.stickerHasMore = false;
+    renderStickerPicker();
+    return state.stickers;
+  }
+  if (reset) {
+    state.stickers = [];
+    state.stickerCursor = null;
+    state.stickerHasMore = true;
+  }
+  if (!state.stickerHasMore && !reset) return state.stickers;
+  const requestKey = `${state.stickerSection}:${state.selected}:${state.stickerQuery}:${plain(state.stickerCursor)}`;
+  if (state.stickerLoadPromise) return state.stickerLoadPromise;
+  const params = new URLSearchParams({ limit: "40" });
+  if (state.stickerCursor !== null && state.stickerCursor !== "") params.set("cursor", plain(state.stickerCursor));
+  if (state.stickerQuery) params.set("q", state.stickerQuery);
+  if (state.stickerSection === "character" && state.selected) params.set("character_id", state.selected);
+  if (state.stickerSection === "generic") params.set("candidate_scope", "generic");
+  state.stickerLoadPromise = (async () => {
+    try {
+      const payload = await api(`/stickers?${params}`, { headers: {} });
+      if (requestKey !== `${state.stickerSection}:${state.selected}:${state.stickerQuery}:${plain(state.stickerCursor)}`) return state.stickers;
+      const incoming = (Array.isArray(payload.stickers) ? payload.stickers : []).map(normalizeSticker).filter(Boolean);
+      for (const sticker of incoming) state.stickerCatalog.set(sticker.asset_id, sticker);
+      const seen = new Set(state.stickers.map((item) => item.asset_id));
+      state.stickers.push(...incoming.filter((item) => !seen.has(item.asset_id) && seen.add(item.asset_id) && stickerMatchesLoadedFilter(item)));
+      state.stickerCursor = payload.next_cursor ?? null;
+      state.stickerHasMore = state.stickerCursor !== null && state.stickerCursor !== undefined && state.stickerCursor !== "";
+      return state.stickers;
+    } catch {
+      if (!state.stickers.length) state.stickerHasMore = false;
+      return state.stickers;
+    } finally {
+      state.stickerLoadPromise = null;
+      renderStickerPicker();
+    }
+  })();
+  renderStickerPicker();
+  return state.stickerLoadPromise;
 }
 async function issueCredential() {
   const provider = $("provider-select").value;
@@ -648,6 +1122,16 @@ function characterById(characterId) {
 function typingStateFor(characterId = state.selected) {
   return characterId ? state.typingByCharacter.get(characterId) || null : null;
 }
+function globalRequestBusy() {
+  return Boolean(
+    state.chatRequestByCharacter.size
+    || state.typingByCharacter.size
+    || state.arrivalPending
+    || state.modeTransitionPending
+    || state.presenceResolvePending
+    || state.summaryInFlight.size,
+  );
+}
 function presentationFor(characterId = state.selected) {
   return characterId ? state.presentationByCharacter.get(characterId) || null : null;
 }
@@ -689,7 +1173,24 @@ function timelineTypingMarkup(characterId = state.selected) {
   const pending = typingStateFor(characterId);
   if (!pending || pending.channel !== "text" || !["typing", "segment"].includes(pending.phase)) return "";
   const character = characterById(pending.characterId);
-  return `<div class="timeline-typing-row">${typingIndicatorMarkup(character)}</div>`;
+  return `<article class="message assistant timeline-typing-row" aria-label="${escapeHtml(character?.display_name || "角色")}正在输入"><div class="message-avatar">${avatarMarkup(character, { thumbnail: true, priority: true })}</div><div class="message-body">${typingIndicatorMarkup(character, { includeAvatar: false })}</div></article>`;
+}
+function stickerDisplaySource(block) {
+  return plain(block?.displaySrc || block?.display_src || block?.thumbnailSrc || block?.thumbnail_src || block?.src);
+}
+async function preloadStickerBlock(block, timeoutMs = 450) {
+  const src = stickerDisplaySource(block);
+  if (!src) return;
+  const loading = new Promise((resolve) => {
+    const image = new Image();
+    image.onload = async () => {
+      try { if (image.decode) await image.decode(); } catch { /* decoded fallback remains usable */ }
+      resolve();
+    };
+    image.onerror = resolve;
+    image.src = src;
+  });
+  await Promise.race([loading, delay(timeoutMs)]);
 }
 async function presentAssistantTurn(characterId, requestId, message) {
   if (!ownsTypingState(characterId, requestId)) return false;
@@ -721,8 +1222,10 @@ async function presentAssistantTurn(characterId, requestId, message) {
     if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
     const block = blocks[index];
     updateTypingPhase(characterId, requestId, "segment");
-    const wait = block.type === "sticker" ? 800 : 600;
-    if (!reducedMotion()) await delay(wait);
+    const wait = block.type === "sticker" ? 500 : 600;
+    const preload = block.type === "sticker" ? preloadStickerBlock(block) : Promise.resolve();
+    if (!reducedMotion()) await Promise.all([delay(wait), preload]);
+    else await preload;
     if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
     queue.visibleCount = index + 1;
     updateTypingPhase(characterId, requestId, "presenting");
@@ -763,12 +1266,35 @@ function renderRequestStatus() {
   target.className = "request-status";
   target.setAttribute("aria-busy", pending ? "true" : "false");
   target.textContent = state.requestStatusByCharacter.get(state.selected) || "";
+  if (state.requestRecoveryByCharacter.get(state.selected) === "refresh_scene") {
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "request-recovery";
+    refresh.textContent = "重新读取场景";
+    refresh.disabled = globalRequestBusy();
+    refresh.onclick = async () => {
+      if (globalRequestBusy()) return;
+      refresh.disabled = true;
+      try {
+        await resolvePresence();
+        state.requestRecoveryByCharacter.delete(state.selected);
+        setRequestStatus(state.selected, "场景已重新读取");
+      } catch (error) {
+        setRequestStatus(state.selected, `重新读取失败：${displayError(error)}`, "", "refresh_scene");
+      }
+    };
+    target.append(" ", refresh);
+  }
+  const stop = $("stop-waiting");
+  if (stop) stop.hidden = !pending || ["arrival", "presenting"].includes(pending.phase);
 }
-function setRequestStatus(characterId, message, requestId = "") {
+function setRequestStatus(characterId, message, requestId = "", recoveryAction = "") {
   if (!characterId) return;
   if (requestId && !ownsTypingState(characterId, requestId)) return;
   if (message) state.requestStatusByCharacter.set(characterId, plain(message));
   else state.requestStatusByCharacter.delete(characterId);
+  if (recoveryAction) state.requestRecoveryByCharacter.set(characterId, recoveryAction);
+  else state.requestRecoveryByCharacter.delete(characterId);
   if (characterId === state.selected) renderRequestStatus();
 }
 function setTypingState({ characterId, requestId, channel, phase = "typing" }) {
@@ -781,6 +1307,7 @@ function setTypingState({ characterId, requestId, channel, phase = "typing" }) {
     characterId,
     new TypingIndicatorState({ characterId, requestId, channel, phase }),
   );
+  if ($("stop-waiting")) $("stop-waiting").disabled = false;
   if (characterId === state.selected) {
     renderRequestStatus();
     if (channel === "text") renderTimeline();
@@ -862,11 +1389,20 @@ function bindStickerImages(root = document) {
       }
     }, { rootMargin: "120px 0px" });
   }
-  images.forEach((image) => stickerObserver.observe(image));
+  images.forEach((image) => {
+    if (image.dataset.stickerObserved) return;
+    image.dataset.stickerObserved = "true";
+    stickerObserver.observe(image);
+  });
 }
 function renderCharacters() {
   const query = normalizedSearch($("character-search").value);
-  const tokenRows = state.characters.map((character) => ({
+  const orderedCharacters = [...state.characters].sort((left, right) => {
+    const pinned = Number(state.pinnedCharacters.has(right.character_id)) - Number(state.pinnedCharacters.has(left.character_id));
+    if (pinned) return pinned;
+    return Number(state.threads.get(right.character_id)?.lastActiveAt || 0) - Number(state.threads.get(left.character_id)?.lastActiveAt || 0);
+  });
+  const tokenRows = orderedCharacters.map((character) => ({
     character,
     tokens: [
       character.display_name,
@@ -882,7 +1418,7 @@ function renderCharacters() {
       ? tokenRows.filter((row) => row.tokens.includes(query)).map((row) => row.character.character_id)
       : [],
   );
-  $("character-list").innerHTML = state.characters
+  $("character-list").innerHTML = orderedCharacters
     .filter((character) => {
       if (!query) return true;
       const row = tokenRows.find((item) => item.character === character);
@@ -897,18 +1433,57 @@ function renderCharacters() {
         : last?.contentBlocks?.some((block) => block.type === "sticker")
           ? `发送了表情：${last.contentBlocks.find((block) => block.type === "sticker")?.caption || "表情"}`
           : "尚未开始对话";
-      return `<button class="character" role="option" aria-selected="${character.character_id === state.selected}" data-character="${escapeHtml(character.character_id)}">${avatarMarkup(character, { thumbnail: true, priority: character.character_id === state.selected })}<span><strong>${escapeHtml(character.display_name)}</strong><small>${escapeHtml(summary)}</small></span></button>`;
+      const pinned = state.pinnedCharacters.has(character.character_id);
+      return `<div class="character-row" role="listitem"><button class="character" aria-current="${character.character_id === state.selected}" data-character="${escapeHtml(character.character_id)}">${avatarMarkup(character, { thumbnail: true, priority: character.character_id === state.selected })}<span><strong>${escapeHtml(character.display_name)}</strong><small>${escapeHtml(summary)}</small></span></button><button class="pin-character" type="button" data-pin-character="${escapeHtml(character.character_id)}" aria-pressed="${pinned}" aria-label="${pinned ? "取消置顶" : "置顶"}${escapeHtml(character.display_name)}">${pinned ? "★" : "☆"}</button></div>`;
     }).join("");
   bindAvatarImages($("character-list"));
   document.querySelectorAll("[data-character]").forEach((button) => { button.onclick = () => selectCharacter(button.dataset.character); });
+  document.querySelectorAll("[data-pin-character]").forEach((button) => {
+    button.onclick = async () => {
+      const characterId = button.dataset.pinCharacter;
+      if (state.pinnedCharacters.has(characterId)) state.pinnedCharacters.delete(characterId);
+      else state.pinnedCharacters.add(characterId);
+      await saveUiPreferences();
+      renderCharacters();
+      document.querySelector(`[data-pin-character="${CSS.escape(characterId)}"]`)?.focus();
+    };
+  });
+}
+
+const ONBOARDING_STEPS = [
+  { title: "先选择想联系的角色", copy: "角色列表支持中文、拼音全拼和首字母搜索。" },
+  { title: "使用你自己的模型", copy: "在设置中配置 BYOK 模型会话；API Key 不会写入聊天历史。" },
+  { title: "从一句自然的话开始", copy: "输入消息或选择安全的开场建议。建议只会填入输入框，不会自动发送。" },
+];
+function finishOnboarding() {
+  localStorage.setItem("project-snow-public:onboarding", "complete");
+  $("onboarding-guide").hidden = true;
+}
+function renderOnboarding() {
+  if (localStorage.getItem("project-snow-public:onboarding") === "complete") return;
+  const step = Math.min(state.onboardingStep, ONBOARDING_STEPS.length - 1);
+  const item = ONBOARDING_STEPS[step];
+  $("onboarding-guide").hidden = false;
+  $("onboarding-step-label").textContent = `第 ${step + 1} 步，共 ${ONBOARDING_STEPS.length} 步`;
+  $("onboarding-title").textContent = item.title;
+  $("onboarding-copy").textContent = item.copy;
+  $("next-onboarding").textContent = step === ONBOARDING_STEPS.length - 1 ? "开始聊天" : "下一步";
+}
+function advanceOnboarding() {
+  if (state.onboardingStep >= ONBOARDING_STEPS.length - 1) return finishOnboarding();
+  state.onboardingStep += 1;
+  renderOnboarding();
 }
 async function loadCharacters() {
   const payload = await api("/characters", { headers: {} });
   state.characters = payload.characters || [];
-  await Promise.all(state.characters.map((character) => dbGetThread(character.character_id)));
+  await Promise.all(state.characters.map((character) => dbGetThread(character.character_id, 1)));
+  await restoreInterruptedChatRequests();
   $("history-character").innerHTML = state.characters.map((character) => `<option value="${escapeHtml(character.character_id)}">${escapeHtml(character.display_name)}</option>`).join("");
   renderCharacters();
-  if (!state.selected && state.characters[0]) await selectCharacter(state.characters[0].character_id);
+  if (!state.selected && state.characters[0]) {
+    await selectCharacter(state.characters[0].character_id, { closeContacts: false });
+  }
 }
 function sceneKeyForLocation(location) {
   const value = plain(location);
@@ -949,16 +1524,82 @@ function fillAvatar(node, character, { thumbnail = true, priority = false } = {}
   node.innerHTML = source.innerHTML;
   bindAvatarImages(node.parentElement || node);
 }
+async function resolvePresenceAttempt(characterId, signal, stateRecoveryAttempt = 0) {
+  try {
+    const result = await api("/presence/resolve", { method: "POST", signal, body: JSON.stringify({ request_id: id(), character_id: characterId, state_package: state.worldPackage || "" }) });
+    await saveWorldPackage(result.state_package);
+    state.sceneByCharacter.set(characterId, result.scene_state || {});
+    if (characterId === state.selected) {
+      state.scene = result.scene_state;
+      renderScene();
+    }
+    return result;
+  } catch (error) {
+    if (stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !signal?.aborted) {
+      await clearPersistedWorldPackage();
+      return resolvePresenceAttempt(characterId, signal, stateRecoveryAttempt + 1);
+    }
+    throw error;
+  }
+}
+
+async function restoreInterruptedChatRequests() {
+  for (const thread of state.threads.values()) {
+    let changed = false;
+    for (const message of thread.messages || []) {
+      if (message.role !== "user") continue;
+      if (message.requestId && message.requestSnapshot && typeof message.requestSnapshot === "object") {
+        state.retrySnapshots.set(message.id, {
+          requestId: message.requestId,
+          payload: structuredClone(message.requestSnapshot),
+        });
+      }
+      if (message.status === "pending") {
+        message.status = "failed";
+        message.errorCode = "stream_disconnected";
+        changed = true;
+      }
+    }
+    if (changed) await dbPutThread(thread);
+  }
+}
 async function resolvePresence(characterId = state.selected, signal = undefined) {
   if (!characterId) return null;
-  const result = await api("/presence/resolve", { method: "POST", signal, body: JSON.stringify({ request_id: id(), character_id: characterId, state_package: state.worldPackage || "" }) });
-  await saveWorldPackage(result.state_package);
-  state.sceneByCharacter.set(characterId, result.scene_state || {});
-  if (characterId === state.selected) {
-    state.scene = result.scene_state;
-    renderScene();
+  state.presenceResolvePending += 1;
+  updateComposerAvailability();
+  try {
+    return await resolvePresenceAttempt(characterId, signal);
+  } finally {
+    state.presenceResolvePending = Math.max(0, state.presenceResolvePending - 1);
+    updateComposerAvailability();
+    void flushDeferredPresenceRefresh();
   }
-  return result;
+}
+async function flushDeferredPresenceRefresh() {
+  const characterId = state.deferredPresenceCharacter;
+  if (
+    !characterId
+    || characterId !== state.selected
+    || state.deferredPresenceRunning
+    || globalRequestBusy()
+  ) return;
+  state.deferredPresenceCharacter = "";
+  state.deferredPresenceRunning = true;
+  setRequestStatus(characterId, "正在重新读取当前角色的场景……");
+  try {
+    await resolvePresence(characterId, state.selectionController?.signal);
+    if (characterId === state.selected) setRequestStatus(characterId, "场景已重新读取");
+  } catch (error) {
+    if (error?.name !== "AbortError" && characterId === state.selected) {
+      setRequestStatus(characterId, `重新读取失败：${displayError(error)}`, "", "refresh_scene");
+    }
+  } finally {
+    state.deferredPresenceRunning = false;
+    updateComposerAvailability();
+    if (state.deferredPresenceCharacter && state.deferredPresenceCharacter !== characterId) {
+      void flushDeferredPresenceRefresh();
+    }
+  }
 }
 async function runSceneTransition(operation, title = "正在前往……", owner = 0) {
   const layer = $("scene-transition-layer");
@@ -995,9 +1636,10 @@ async function runSceneTransition(operation, title = "正在前往……", owner
   }
 }
 async function runModeTransition(operation, title = "正在打开通讯器") {
-  if (state.modeTransitionPending) return null;
+  if (globalRequestBusy()) return null;
   const layer = $("mode-transition-layer");
   state.modeTransitionPending = true;
+  updateComposerAvailability();
   const owner = ++state.modeTransitionSequence;
   const controller = new AbortController();
   state.modeTransitionController = controller;
@@ -1060,8 +1702,9 @@ function cancelModeTransition() {
   }
   updateComposerAvailability();
 }
-async function selectCharacter(characterId) {
+async function selectCharacter(characterId, { closeContacts = true } = {}) {
   if (!characterId || characterId === state.selected && !state.selectionController) return;
+  if (state.selected) await saveDraftNow();
   const sequence = ++state.selectionSequence;
   state.selectionController?.abort();
   cancelModeTransition();
@@ -1075,9 +1718,21 @@ async function selectCharacter(characterId) {
   state.selected = characterId;
   window.clearInterval(state.typewriter.timer);
   state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
+  // Remove the previous owner's transient UI synchronously. Thread loading
+  // may yield to IndexedDB; an old typing bubble must never sit under the new
+  // character selection during that gap.
+  renderTimeline();
+  renderStage();
+  renderRequestStatus();
+  updateComposerAvailability();
   if (previousId !== characterId) {
     state.selectedSticker = null;
     state.actionComposerOpen = false;
+    if (state.stickerSection === "character") {
+      state.stickers = [];
+      state.stickerCursor = null;
+      state.stickerHasMore = true;
+    }
   }
   try {
     const thread = await dbGetThread(characterId);
@@ -1086,6 +1741,8 @@ async function selectCharacter(characterId) {
       if (sequence === state.selectionSequence) state.selected = previousId;
       return;
     }
+    thread.lastActiveAt = Date.now();
+    await dbPutThread(thread);
     const character = currentCharacter();
     renderCharacters();
     $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: false, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
@@ -1094,9 +1751,26 @@ async function selectCharacter(characterId) {
     $("stage-character-name").textContent = character.display_name;
     $("stage-speaker").textContent = character.display_name;
     const cached = state.sceneByCharacter.get(characterId) || cachedSceneForCharacter(characterId);
-    if (cached) {
-      state.scene = cached;
-      renderScene();
+    state.scene = cached || null;
+    renderScene();
+    if (globalRequestBusy()) {
+      // Generation is owned globally by the anonymous subject. Let the prior
+      // character finish in the background, but do not start a competing
+      // presence read for the newly selected character.
+      state.deferredPresenceCharacter = characterId;
+      await setChannel(thread.channel || "text", false);
+      setRequestStatus(characterId, "上一位角色仍在回复，完成后会重新读取当前场景。");
+      renderAll();
+      updateComposerAvailability();
+      if (closeContacts) {
+        $("contact-panel").classList.remove("open");
+        if (window.matchMedia("(max-width: 820px)").matches) {
+          $("contact-panel").setAttribute("aria-hidden", "true");
+          $("contact-panel").inert = true;
+        }
+        syncContactToggleState();
+      }
+      return;
     }
     const resolving = resolvePresence(characterId, controller.signal);
     if (switchingFromStage) {
@@ -1114,8 +1788,14 @@ async function selectCharacter(characterId) {
     }
     renderAll();
     updateComposerAvailability();
-    $("contact-panel").classList.remove("open");
-    syncContactToggleState();
+    if (closeContacts) {
+      $("contact-panel").classList.remove("open");
+      if (window.matchMedia("(max-width: 820px)").matches) {
+        $("contact-panel").setAttribute("aria-hidden", "true");
+        $("contact-panel").inert = true;
+      }
+      syncContactToggleState();
+    }
   } catch (error) {
     if (error?.name === "AbortError" || sequence !== state.selectionSequence) return;
     state.selected = previousId;
@@ -1134,10 +1814,13 @@ function blockHtml(block) {
   if (block.type === "sticker") {
     const fullSrc = block.src || block.thumbnailSrc || block.thumbnail_src || "";
     const staticSrc = block.thumbnailSrc || block.thumbnail_src || fullSrc;
-    const animated = Boolean(block.animated);
-    const src = animated ? staticSrc : fullSrc;
-    const media = src
-      ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(block.caption || "表情")}" loading="lazy" decoding="async"${animated ? ` data-animated="true" data-animated-src="${escapeHtml(fullSrc)}" data-static-src="${escapeHtml(staticSrc)}"` : ""} />`
+    const displaySrc = block.displaySrc || block.display_src || "";
+    const animatedSrc = displaySrc || fullSrc;
+    const displayAnimated = Boolean(block.displayAnimated ?? block.display_animated ?? block.animated);
+    const animateOnScreen = Boolean(displayAnimated && animatedSrc && animatedSrc !== staticSrc);
+    const initialSrc = animateOnScreen ? staticSrc : (displaySrc || fullSrc || staticSrc);
+    const media = initialSrc
+      ? `<img src="${escapeHtml(initialSrc)}" alt="${escapeHtml(block.caption || "表情")}" loading="lazy" decoding="async"${animateOnScreen ? ` data-animated="true" data-animated-src="${escapeHtml(animatedSrc)}" data-static-src="${escapeHtml(staticSrc)}"` : ""} />`
       : "";
     return `<div class="content-sticker"><span>${media}</span><small>${escapeHtml(block.caption || "表情")}</small></div>`;
   }
@@ -1160,41 +1843,79 @@ function formatMessageTime(timestamp, previousTimestamp = 0, estimated = false) 
   else label = `${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")} ${clock}`;
   return estimated ? `${label}（估算）` : label;
 }
-function renderTimeline() {
+function timelineNearBottom() {
+  const timeline = $("timeline");
+  return !timeline || timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 72;
+}
+function starterPromptsMarkup() {
+  return `<div class="starter-prompts" aria-label="开场建议"><button type="button" data-starter-prompt="晚上好，今天过得怎么样？">问候近况</button><button type="button" data-starter-prompt="最近有什么想聊的事吗？">聊聊最近</button><button type="button" data-starter-prompt="要一起去休息区喝杯茶吗？">邀请喝茶</button></div>`;
+}
+function usageMarkup(message) {
+  const usage = message?.usage;
+  if (!usage || typeof usage !== "object") return "";
+  const total = Number(usage.total_tokens ?? usage.totalTokens ?? 0);
+  const calls = Number(usage.provider_calls ?? usage.model_calls ?? usage.call_count ?? 0);
+  const model = plain(usage.model || message.model);
+  const values = [model, total > 0 ? `${total} tokens` : "", calls > 0 ? `${calls} 次模型调用` : ""].filter(Boolean);
+  return values.length ? `<span class="message-usage">${escapeHtml(values.join(" · "))}</span>` : "";
+}
+function bindTimelineActions() {
+  document.querySelectorAll("[data-retry-message]").forEach((button) => { button.onclick = () => retryMessage(button.dataset.retryMessage); });
+  document.querySelectorAll("[data-feedback-message]").forEach((button) => { button.onclick = () => openFeedback(button.dataset.feedbackMessage); });
+  document.querySelectorAll("[data-starter-prompt]").forEach((button) => {
+    button.onclick = () => {
+      $("message-input").value = button.dataset.starterPrompt;
+      updateInputCount();
+      scheduleDraftSave();
+      $("message-input").focus();
+    };
+  });
+  $("load-older-messages")?.addEventListener("click", () => { void loadOlderMessages(); });
+}
+function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   const thread = currentThread();
   const messages = (thread?.messages || []).filter((message) => message.communicationChannel === "text");
+  const timeline = $("timeline");
+  const wasNearBottom = timelineNearBottom();
+  const previousDistance = timeline.scrollHeight - timeline.scrollTop;
+  const previousCount = Number(timeline.dataset.messageCount || 0);
+  const older = thread?.hasOlderMessages ? '<button id="load-older-messages" class="secondary-button load-older-messages" type="button">加载更早的 40 条</button>' : "";
   if (!messages.length) {
-    $("timeline").innerHTML = `${timelineTypingMarkup()}<div class="empty-conversation"><p>从一句问候开始吧。历史只保存在此浏览器。</p></div>`;
+    timeline.innerHTML = `${older}${timelineTypingMarkup()}<div class="empty-conversation"><p>从一句问候开始吧。历史只保存在此浏览器。</p>${starterPromptsMarkup()}</div>`;
+    timeline.dataset.messageCount = "0";
+    bindTimelineActions();
     return;
   }
-  $("timeline").innerHTML = messages.map((message, index) => {
+  timeline.innerHTML = older + messages.map((message, index) => {
     const failed = message.status === "failed";
     const presenting = message.role === "assistant" && presentationFor()?.messageId === message.id;
     const tools = failed
-      ? `<button type="button" data-retry-message="${escapeHtml(message.id)}">重试</button>`
+      ? `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
       : message.role === "assistant" && !presenting ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
     const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
     const blocks = message.role === "assistant" ? visibleBlocksFor(message) : message.contentBlocks;
-    return `${time ? `<div class="message-time" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div><div class="message-tools">${tools}</div></div></article>`;
+    return `${time ? `<div class="message-time" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div><div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
   }).join("") + timelineTypingMarkup();
-  document.querySelectorAll("[data-retry-message]").forEach((button) => { button.onclick = () => retryMessage(button.dataset.retryMessage); });
-  document.querySelectorAll("[data-feedback-message]").forEach((button) => { button.onclick = () => openFeedback(button.dataset.feedbackMessage); });
-  bindAvatarImages($("timeline"));
-  $("timeline").scrollTop = $("timeline").scrollHeight;
+  timeline.dataset.messageCount = String(messages.length);
+  bindTimelineActions();
+  bindAvatarImages(timeline);
+  const newMessages = messages.length > previousCount;
+  if (!preserveScroll && (forceScroll || wasNearBottom || previousCount === 0)) {
+    timeline.scrollTop = timeline.scrollHeight;
+    $("new-replies").hidden = true;
+  } else if (!preserveScroll) {
+    timeline.scrollTop = Math.max(0, timeline.scrollHeight - previousDistance);
+    if (newMessages && messages[messages.length - 1]?.role === "assistant") $("new-replies").hidden = false;
+  }
+  const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant" && message.status === "sent" && !presentationFor()?.messageId);
+  if (latestAssistant && timeline.dataset.announcedMessageId !== latestAssistant.id) {
+    timeline.dataset.announcedMessageId = latestAssistant.id;
+    $("conversation-announcer").textContent = `${currentCharacter()?.display_name || "角色"}的新回复已显示`;
+  }
 }
 function latestInPersonMessage(role = "") {
   return [...(currentThread()?.messages || [])].reverse().find((message) => message.communicationChannel === "in_person" && message.status !== "failed" && (!role || message.role === role)) || null;
-}
-function finishTypewriter() {
-  const pending = typingStateFor();
-  if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) return;
-  if (!state.typewriter.fullText) return;
-  window.clearInterval(state.typewriter.timer);
-  state.typewriter.timer = 0;
-  $("stage-speech").textContent = state.typewriter.fullText;
-  state.typewriter.displayedText = state.typewriter.fullText;
-  state.typewriter.fullText = "";
 }
 function renderTypewriter(text, key) {
   const value = plain(text);
@@ -1209,6 +1930,10 @@ function renderTypewriter(text, key) {
     $("stage-speech").textContent = value;
     state.typewriter.displayedText = value;
     state.typewriter.fullText = "";
+    if (value && $("stage-announcer").dataset.key !== key) {
+      $("stage-announcer").dataset.key = key;
+      $("stage-announcer").textContent = `${currentCharacter()?.display_name || "角色"}：${value}`;
+    }
     return;
   }
   const prefix = previousKey === key && value.startsWith(previousDisplayed)
@@ -1224,6 +1949,10 @@ function renderTypewriter(text, key) {
       state.typewriter.timer = 0;
       state.typewriter.displayedText = value;
       state.typewriter.fullText = "";
+      if ($("stage-announcer").dataset.key !== key) {
+        $("stage-announcer").dataset.key = key;
+        $("stage-announcer").textContent = `${currentCharacter()?.display_name || "角色"}：${value}`;
+      }
     }
   }, 24);
 }
@@ -1286,21 +2015,59 @@ function renderScene() {
   renderStage();
   renderInfo();
 }
+function movementCatalog() {
+  const configuredCatalog = state.config?.movement_catalog;
+  const values = Array.isArray(configuredCatalog)
+    ? configuredCatalog
+    : configuredCatalog && typeof configuredCatalog === "object"
+      ? Object.entries(configuredCatalog).map(([locationId, value]) => typeof value === "string" ? { location_id: locationId, display_name: value } : { location_id: locationId, ...value })
+      : [];
+  return values.filter((item) => item && (item.display_name || item.name || item.location_name)).slice(0, 20);
+}
+function openMovementShortcuts() {
+  if (globalRequestBusy()) return;
+  const values = movementCatalog();
+  const root = $("movement-options");
+  if (!values.length) {
+    root.innerHTML = '<p class="modal-context">地点目录正在准备中，你仍可直接输入自然语言邀请。</p>';
+  } else {
+    root.innerHTML = values.map((item) => {
+      const name = plain(item.display_name || item.name || item.location_name);
+      return `<button type="button" data-movement-name="${escapeHtml(name)}"><strong>${escapeHtml(name)}</strong>${item.activity_name ? `<small>${escapeHtml(item.activity_name)}</small>` : ""}</button>`;
+    }).join("");
+    root.querySelectorAll("[data-movement-name]").forEach((button) => {
+      button.onclick = () => {
+        $("message-input").value = `现在一起去${button.dataset.movementName}吗？`;
+        updateInputCount();
+        scheduleDraftSave();
+        $("movement-dialog").close();
+        $("message-input").focus();
+      };
+    });
+  }
+  $("movement-dialog").showModal();
+}
 function renderAll() { renderTimeline(); renderStage(); renderTranscript(); renderInfo(); renderRequestStatus(); }
 
 function updateComposerAvailability() {
   const selected = Boolean(state.selected);
   const inPerson = currentThread()?.channel === "in_person";
-  const chatPending = Boolean(typingStateFor());
-  const transitionPending = state.arrivalPending || chatPending || state.modeTransitionPending;
+  const requestPending = globalRequestBusy();
   $("message-input").disabled = !selected;
-  $("send-message").disabled = !selected || state.arrivalPending || chatPending || state.modeTransitionPending;
-  $("go-in-person").disabled = !selected || transitionPending;
-  $("open-communicator").disabled = !selected || transitionPending;
+  $("send-message").disabled = !selected || requestPending;
+  $("go-in-person").disabled = !selected || requestPending;
+  $("open-communicator").disabled = !selected || requestPending;
+  $("open-movement-shortcuts").disabled = !selected || requestPending;
   $("toggle-sticker").hidden = inPerson;
   $("toggle-action").hidden = !inPerson;
-  $("toggle-sticker").disabled = !selected || state.arrivalPending || chatPending || state.modeTransitionPending || inPerson;
-  $("toggle-action").disabled = !selected || state.arrivalPending || chatPending || state.modeTransitionPending || !inPerson;
+  $("toggle-sticker").disabled = !selected || requestPending || inPerson;
+  $("toggle-action").disabled = !selected || requestPending || !inPerson;
+  if ($("confirm-presence-transition")) $("confirm-presence-transition").disabled = !selected || requestPending;
+  if ($("stay-on-communicator")) $("stay-on-communicator").disabled = !selected || requestPending;
+  if ($("delete-character-history")) $("delete-character-history").disabled = requestPending;
+  if ($("clear-all-history")) $("clear-all-history").disabled = requestPending;
+  document.querySelectorAll("[data-retry-message]").forEach((button) => { button.disabled = requestPending; });
+  document.querySelectorAll(".request-recovery").forEach((button) => { button.disabled = requestPending; });
   $("analyst-action-field").hidden = !inPerson || !state.actionComposerOpen;
   $("toggle-action").setAttribute("aria-expanded", String(inPerson && state.actionComposerOpen));
   $("message-input").placeholder = !selected ? "选择角色后输入消息……" : configured() ? (inPerson ? "说些什么，也可只填写动作……" : "输入文字通讯……") : "可浏览历史；发送前请在设置中配置模型";
@@ -1308,6 +2075,7 @@ function updateComposerAvailability() {
 }
 async function setChannel(channel, persist = true, targetThread = null) {
   const thread = targetThread || currentThread();
+  if (thread && thread.characterId === state.selected) await saveDraftNow();
   if (thread && thread.channel !== (channel === "in_person" ? "in_person" : "text")) {
     cancelPresentationQueue(thread.characterId);
   }
@@ -1326,12 +2094,12 @@ async function setChannel(channel, persist = true, targetThread = null) {
   $("chat-app").dataset.channel = channel === "in_person" ? "in_person" : "text";
   syncContactToggleState();
   renderAll();
+  restoreDraft();
   updateComposerAvailability();
 }
 function requestHistory(messages, excludedId = "", segmentId = "") {
   return messages.filter((message) => message.id !== excludedId && !["failed", "pending"].includes(message.status) && (!segmentId || message.conversationSegmentId === segmentId)).slice(-24).map((message) => ({
     role: message.role,
-    content: message.content,
     communication_channel: message.communicationChannel,
     content_blocks: wireBlocks(message.contentBlocks),
     created_at: new Date(message.createdAt || Date.now()).toISOString(),
@@ -1343,7 +2111,7 @@ function inputBlocks() {
   const action = $("action-input").value.trim();
   if (channel === "text") {
     const blocks = speech ? [{ type: "message", text: speech }] : [];
-    if (state.selectedSticker) blocks.push({ type: "sticker", assetId: state.selectedSticker.asset_id, caption: state.selectedSticker.caption, src: state.selectedSticker.src, thumbnailSrc: state.selectedSticker.thumbnail_src, animated: state.selectedSticker.animated });
+    if (state.selectedSticker) blocks.push({ type: "sticker", assetId: state.selectedSticker.asset_id, caption: state.selectedSticker.caption, src: state.selectedSticker.src, displaySrc: state.selectedSticker.display_src, thumbnailSrc: state.selectedSticker.thumbnail_src, animated: state.selectedSticker.animated, displayAnimated: state.selectedSticker.display_animated });
     return blocks;
   }
   return [action ? { type: "action", text: action } : null, speech ? { type: "speech", text: speech } : null].filter(Boolean);
@@ -1360,7 +2128,7 @@ function renderSelectedSticker() {
   root.hidden = !sticker || currentThread()?.channel === "in_person";
   if (!sticker || root.hidden) return;
   const image = $("selected-sticker-image");
-  image.src = sticker.thumbnail_src || sticker.src || "";
+  image.src = sticker.thumbnail_src || sticker.display_src || sticker.src || "";
   image.alt = sticker.caption || "已选择表情";
   $("selected-sticker-caption").textContent = sticker.caption || "发送时会单独作为一条消息";
 }
@@ -1372,14 +2140,35 @@ function clearSelectedSticker() {
 }
 function renderStickerPicker() {
   const list = $("sticker-list");
-  const values = state.stickers || [];
-  $("sticker-empty").hidden = values.length > 0;
-  list.innerHTML = values.map((sticker) => `<button type="button" class="sticker-choice" data-sticker-id="${escapeHtml(sticker.asset_id)}" title="${escapeHtml(sticker.caption || "表情")}"><img src="${escapeHtml(sticker.thumbnail_src || sticker.src || "")}" alt="${escapeHtml(sticker.caption || "表情")}" loading="lazy" decoding="async" /><span>${escapeHtml(sticker.caption || "表情")}</span></button>`).join("");
+  if (!list) return;
+  const values = (state.stickers || []).slice(-60);
+  const loading = Boolean(state.stickerLoadPromise) && !values.length;
+  $("sticker-empty").hidden = loading || values.length > 0;
+  $("load-more-stickers").hidden = !state.stickerHasMore || Boolean(state.stickerLoadPromise);
+  document.querySelectorAll("[data-sticker-section]").forEach((button) => {
+    button.setAttribute("aria-selected", String(button.dataset.stickerSection === state.stickerSection));
+    button.tabIndex = button.dataset.stickerSection === state.stickerSection ? 0 : -1;
+  });
+  if (loading) {
+    list.setAttribute("aria-busy", "true");
+    list.innerHTML = Array.from({ length: 12 }, () => '<span class="sticker-skeleton" aria-hidden="true"></span>').join("");
+    return;
+  }
+  list.setAttribute("aria-busy", "false");
+  list.innerHTML = values.map((sticker) => {
+    const favorite = state.favoriteStickerIds.has(sticker.asset_id);
+    return `<div class="sticker-choice-wrap"><button type="button" class="sticker-choice" data-sticker-id="${escapeHtml(sticker.asset_id)}" title="${escapeHtml(sticker.caption || "表情")}"><img src="${escapeHtml(sticker.thumbnail_src || sticker.display_src || sticker.src || "")}" alt="${escapeHtml(sticker.caption || "表情")}" loading="lazy" decoding="async" /><span>${escapeHtml(sticker.caption || "表情")}</span></button><button type="button" class="favorite-sticker" data-favorite-sticker="${escapeHtml(sticker.asset_id)}" aria-pressed="${favorite}" aria-label="${favorite ? "取消收藏" : "收藏"}${escapeHtml(sticker.caption || "表情")}">${favorite ? "★" : "☆"}</button></div>`;
+  }).join("");
   list.querySelectorAll("[data-sticker-id]").forEach((button) => {
     button.onclick = () => {
-      state.selectedSticker = state.stickers.find((item) => item.asset_id === button.dataset.stickerId) || null;
+      state.selectedSticker = state.stickerCatalog.get(button.dataset.stickerId) || state.stickers.find((item) => item.asset_id === button.dataset.stickerId) || null;
+      if (state.selectedSticker) {
+        state.recentStickerIds = [state.selectedSticker.asset_id, ...state.recentStickerIds.filter((assetId) => assetId !== state.selectedSticker.asset_id)].slice(0, 24);
+        state.favoriteStickers.set(state.selectedSticker.asset_id, state.selectedSticker);
+        void saveUiPreferences();
+      }
       $("sticker-picker").close();
-      $("toggle-sticker").setAttribute("aria-expanded", "true");
+      $("toggle-sticker").setAttribute("aria-expanded", "false");
       updateComposerAvailability();
       if (state.selectedSticker) {
         toast(`已选择“${state.selectedSticker.caption || "表情"}”，发送时会单独作为一条消息。`);
@@ -1387,27 +2176,194 @@ function renderStickerPicker() {
       }
     };
   });
+  list.querySelectorAll("[data-favorite-sticker]").forEach((button) => {
+    button.onclick = async () => {
+      const assetId = button.dataset.favoriteSticker;
+      const sticker = state.stickerCatalog.get(assetId) || state.stickers.find((item) => item.asset_id === assetId);
+      if (state.favoriteStickerIds.has(assetId)) {
+        state.favoriteStickerIds.delete(assetId);
+        if (!state.recentStickerIds.includes(assetId)) state.favoriteStickers.delete(assetId);
+      } else {
+        state.favoriteStickerIds.add(assetId);
+        if (sticker) state.favoriteStickers.set(assetId, sticker);
+      }
+      await saveUiPreferences();
+      if (state.stickerSection === "favorites") state.stickers = localStickerSectionValues("favorites").filter(stickerMatchesLoadedFilter);
+      renderStickerPicker();
+    };
+  });
 }
 async function openStickerPicker() {
-  if (!state.stickers.length) await loadStickers();
+  if (globalRequestBusy()) return;
+  $("toggle-sticker").setAttribute("aria-expanded", "true");
+  if (!$("sticker-picker").open) $("sticker-picker").showModal();
   renderStickerPicker();
-  $("sticker-picker").showModal();
+  if (!state.stickers.length) await loadStickers({ reset: true });
 }
-async function runChat(thread, userMessage) {
-  const requestId = id();
-  // Capture request ownership before any asynchronous work. The user can
-  // switch characters while a provider is still generating; the completed
-  // turn must be written to its original thread and never overwrite the new
-  // character's visible state.
+async function selectStickerSection(section) {
+  if (!["recent", "character", "generic", "favorites", "all"].includes(section)) return;
+  if (state.stickerLoadPromise) await state.stickerLoadPromise;
+  state.stickerSection = section;
+  state.stickers = [];
+  state.stickerCursor = null;
+  state.stickerHasMore = true;
+  renderStickerPicker();
+  await loadStickers({ reset: true });
+}
+async function consumeChatStream(response, { characterId, requestId, fallbackChannel }) {
+  if (!response.body) throw new Error("stream_disconnected");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const streamedBlocks = new Map();
+  let buffer = "";
+  let completed = false;
+  let contentBlocks = [];
+  let usage = null;
+  let returnedChannel = fallbackChannel;
+  let pendingSceneState = null;
+  let pendingStateEvent = null;
+  let movementStatus = null;
+  let recoveryAction = "none";
+  const handlePacket = async (packet) => {
+    const event = (packet.match(/^event: (.+)$/m) || [])[1];
+    const data = (packet.match(/^data: (.+)$/m) || [])[1];
+    if (!event || !data) return;
+    const payload = JSON.parse(data);
+    if (event === "delta") {
+      const blockIndex = Number.isFinite(Number(payload.block_index)) ? Number(payload.block_index) : 0;
+      const current = streamedBlocks.get(blockIndex) || { type: payload.block_type || (returnedChannel === "text" ? "message" : "speech"), text: "" };
+      if (payload.block_type === "sticker") {
+        current.asset_id = plain(payload.asset_id);
+        current.assetId = current.asset_id;
+        current.caption = plain(payload.caption);
+        current.src = plain(payload.src);
+        current.displaySrc = plain(payload.display_src);
+        current.thumbnailSrc = plain(payload.thumbnail_src);
+        current.animated = Boolean(payload.animated);
+        current.displayAnimated = Boolean(payload.display_animated ?? payload.animated);
+      } else current.text += plain(payload.text);
+      if (payload.block_type) current.type = payload.block_type;
+      streamedBlocks.set(blockIndex, current);
+    }
+    if (event === "state") {
+      if (ownsTypingState(characterId, requestId)) await saveWorldPackage(payload.state_package);
+      pendingSceneState = payload.scene_state || pendingSceneState;
+      pendingStateEvent = payload.state_event || pendingStateEvent;
+    }
+    if (event === "done") {
+      completed = true;
+      usage = payload.usage || null;
+      movementStatus = payload.movement_status && typeof payload.movement_status === "object" ? payload.movement_status : null;
+      recoveryAction = plain(payload.recovery_action || "none");
+      returnedChannel = payload.communication_channel || returnedChannel;
+      contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
+    }
+    if (event === "error") throw new Error(payload.code || "chat_failed");
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const packets = buffer.split("\n\n");
+    buffer = packets.pop() || "";
+    for (const packet of packets) await handlePacket(packet);
+  }
+  if (buffer.trim()) await handlePacket(buffer);
+  if (!completed) throw new Error("stream_disconnected");
+  if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, renderBlocksText([...streamedBlocks.values()]));
+  if (!contentBlocks.length) throw new Error("upstream_invalid_response");
+  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction };
+}
+
+function recoverableChatError(error) {
+  const code = error instanceof Error ? error.message : plain(error);
+  return error instanceof TypeError || ["stream_disconnected", "request_in_progress", "provider_network_error", "request_failed"].includes(code);
+}
+
+function shouldReuseChatRequest(error) {
+  const code = error instanceof Error ? error.message : plain(error);
+  return error instanceof TypeError || [
+    "stream_disconnected",
+    "request_in_progress",
+    "provider_network_error",
+    "provider_timeout",
+    "request_cancelled",
+  ].includes(code);
+}
+
+function compatibleRetrySnapshot(userMessage) {
+  const candidate = state.retrySnapshots.get(userMessage.id)
+    || (userMessage.requestId && userMessage.requestSnapshot
+      ? { requestId: userMessage.requestId, payload: userMessage.requestSnapshot }
+      : null);
+  if (!candidate?.requestId || !candidate.payload || typeof candidate.payload !== "object") return null;
+  const candidateRequestId = plain(candidate.requestId);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidateRequestId)) return null;
+  if (plain(candidate.payload.request_id) !== candidateRequestId) return null;
+  if (plain(candidate.payload.character_id) !== plain(userMessage.characterId)) return null;
+  if (plain(candidate.payload.message) !== plain(userMessage.content)) return null;
+  if (plain(candidate.payload.communication_channel) !== plain(userMessage.communicationChannel)) return null;
+  if (plain(candidate.payload.provider) !== state.provider || plain(candidate.payload.model) !== state.model) return null;
+  return { requestId: candidateRequestId, payload: structuredClone(candidate.payload) };
+}
+
+async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
+  let retrySnapshot = stateRecoveryAttempt ? null : compatibleRetrySnapshot(userMessage);
+  let requestId = plain(retrySnapshot?.requestId) || id();
   const characterId = thread.characterId;
+  const buildRequestSnapshot = () => ({
+    request_id: requestId,
+    provider: state.provider,
+    model: state.model,
+    character_id: characterId,
+    message: userMessage.content,
+    communication_channel: userMessage.communicationChannel,
+    content_blocks: wireBlocks(userMessage.contentBlocks),
+    recent_history: requestHistory(thread.messages, userMessage.id, thread.conversationSegmentId),
+    history_summary: thread.continuityDecision === "start_today" ? "" : [thread.summary || "", thread.pendingTopics?.length ? `可能想继续的话题：${thread.pendingTopics.join("；")}` : ""].filter(Boolean).join("\n"),
+    state_package: state.worldPackage || "",
+    continuity_decision: thread.continuityDecision || "",
+    local_day_key: thread.localDayKey || localDayKey(),
+  });
+  let requestSnapshot = retrySnapshot?.payload || buildRequestSnapshot();
+  if (retrySnapshot && jsonBodyBytes({ ...requestSnapshot, credential: state.credential }) > PUBLIC_REQUEST_LIMIT_BYTES) {
+    state.retrySnapshots.delete(userMessage.id);
+    retrySnapshot = null;
+    requestId = id();
+    requestSnapshot = buildRequestSnapshot();
+  }
+  let boundedRequest;
+  try {
+    boundedRequest = fitPublicRequestPayload(
+      { ...requestSnapshot, credential: state.credential },
+      {
+        arrays: [{ key: "recent_history", minimum: 0 }],
+        texts: ["history_summary"],
+        targetBytes: retrySnapshot ? PUBLIC_REQUEST_LIMIT_BYTES : PUBLIC_REQUEST_TARGET_BYTES,
+      },
+    );
+  } catch (error) {
+    state.retrySnapshots.delete(userMessage.id);
+    userMessage.requestId = requestId;
+    userMessage.requestSnapshot = null;
+    userMessage.status = "failed";
+    userMessage.errorCode = error instanceof Error ? error.message : "request_too_large";
+    state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode });
+    await dbPutThread(thread);
+    if (state.selected === characterId) {
+      renderAll();
+      setRequestStatus(characterId, displayError(error));
+    }
+    updateComposerAvailability();
+    return;
+  }
+  requestSnapshot = { ...boundedRequest };
+  delete requestSnapshot.credential;
+  const requestBody = JSON.stringify(boundedRequest);
   const ownsRequest = () => ownsTypingState(characterId, requestId);
   const ownsVisibleRequest = () => ownsRequest() && state.selected === characterId;
   cancelPresentationQueue(characterId);
-  const provider = state.provider;
-  const credential = state.credential;
-  const model = state.model;
-  const previousRequest = state.chatRequestByCharacter.get(characterId);
-  previousRequest?.controller.abort();
+  state.chatRequestByCharacter.get(characterId)?.controller.abort();
   const requestController = new AbortController();
   let requestTimedOut = false;
   const requestTimeout = window.setTimeout(() => {
@@ -1419,172 +2375,118 @@ async function runChat(thread, userMessage) {
   userMessage.conversationSegmentId = thread.conversationSegmentId;
   userMessage.status = "pending";
   userMessage.errorCode = "";
-  await dbPutThread(thread);
   if (state.selected === characterId) renderAll();
-  setTypingState({
-    characterId,
-    requestId,
-    channel: userMessage.communicationChannel,
-    phase: userMessage.communicationChannel === "in_person" ? "typing" : "connecting",
-  });
-  if (userMessage.communicationChannel === "text") setRequestStatus(characterId, "正在连接……", requestId);
-  else setRequestStatus(characterId, "", requestId);
-  $("send-message").disabled = true;
+  setTypingState({ characterId, requestId, channel: userMessage.communicationChannel, phase: "waiting" });
+  setRequestStatus(characterId, "", requestId);
+  const timing = { shownAt: 0 };
+  const typingGate = (async () => {
+    await delay(350);
+    if (!ownsRequest()) return;
+    timing.shownAt = performance.now();
+    updateTypingPhase(characterId, requestId, "typing");
+  })();
+  userMessage.requestSnapshot = structuredClone(requestSnapshot);
+  state.retrySnapshots.set(userMessage.id, { requestId, payload: structuredClone(requestSnapshot) });
+  const userPersistence = dbPutThread(thread);
   try {
-    const response = await fetch(`${apiRoot}/chat/stream`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      signal: requestController.signal,
-      body: JSON.stringify({
-        request_id: requestId,
-        provider,
-        credential,
-        model,
-        character_id: characterId,
-        message: userMessage.content,
-        communication_channel: userMessage.communicationChannel,
-        content_blocks: wireBlocks(userMessage.contentBlocks),
-        recent_history: requestHistory(
-          thread.messages,
-          userMessage.id,
-          thread.conversationSegmentId,
-        ),
-        history_summary: thread.continuityDecision === "start_today"
-          ? ""
-          : [
-            thread.summary || "",
-            thread.pendingTopics?.length ? `可能想继续的话题：${thread.pendingTopics.join("；")}` : "",
-          ].filter(Boolean).join("\n"),
-        state_package: state.worldPackage || "",
-        continuity_decision: thread.continuityDecision || "",
-        local_day_key: thread.localDayKey || localDayKey(),
-      }),
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      throw new Error(payload?.detail?.code || "chat_failed");
-    }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    const streamedBlocks = new Map();
-    let contentBlocks = [];
-    let degraded = [];
-    let diagnostics = {};
-    let returnedChannel = userMessage.communicationChannel;
-    let pendingSceneState = null;
-    let pendingStateEvent = null;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const packets = buffer.split("\n\n");
-      buffer = packets.pop();
-      for (const packet of packets) {
-        const event = (packet.match(/^event: (.+)$/m) || [])[1];
-        const data = (packet.match(/^data: (.+)$/m) || [])[1];
-        if (!event || !data) continue;
-        const payload = JSON.parse(data);
-        if (event === "meta") {
-          updateTypingPhase(characterId, requestId, "typing");
+    let result = null;
+    let lastError = null;
+    const backoffs = [0, 1000, 2000, 4000];
+    for (let attempt = 0; attempt < backoffs.length; attempt += 1) {
+      if (attempt > 0) {
+        if (!recoverableChatError(lastError) || requestController.signal.aborted) throw lastError;
+        setRequestStatus(characterId, `连接中断，正在恢复（${attempt}/3）……`, requestId);
+        await delay(backoffs[attempt]);
+      }
+      try {
+        const response = await fetch(`${apiRoot}/chat/stream`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, signal: requestController.signal, body: requestBody });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          const serverCode = plain(payload?.detail?.code);
+          const error = new Error(serverCode || ([502, 503, 504].includes(response.status) ? "provider_network_error" : "chat_failed"));
+          throw error;
         }
-        if (event === "delta") {
-          const blockIndex = Number.isFinite(Number(payload.block_index)) ? Number(payload.block_index) : 0;
-          const current = streamedBlocks.get(blockIndex) || { type: payload.block_type || (returnedChannel === "text" ? "message" : "speech"), text: "" };
-          if (payload.block_type === "sticker") {
-            current.asset_id = plain(payload.asset_id);
-            current.assetId = current.asset_id;
-            current.caption = plain(payload.caption);
-            current.src = plain(payload.src);
-            current.thumbnailSrc = plain(payload.thumbnail_src);
-            current.animated = Boolean(payload.animated);
-          } else current.text += plain(payload.text);
-          if (payload.block_type) current.type = payload.block_type;
-          streamedBlocks.set(blockIndex, current);
-          updateTypingPhase(characterId, requestId, "typing");
-        }
-        if (event === "state") {
-          if (ownsRequest()) await saveWorldPackage(payload.state_package);
-          pendingSceneState = payload.scene_state || pendingSceneState;
-          pendingStateEvent = payload.state_event || pendingStateEvent;
-        }
-        if (event === "done") {
-          degraded = payload.degraded_services || [];
-          diagnostics = payload.diagnostics || {};
-          returnedChannel = payload.communication_channel || returnedChannel;
-          contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
-        }
-        if (event === "error") throw new Error(payload.code || "chat_failed");
+        result = await consumeChatStream(response, { characterId, requestId, fallbackChannel: userMessage.communicationChannel });
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt === backoffs.length - 1 || !recoverableChatError(error)) throw error;
       }
     }
-    if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, renderBlocksText([...streamedBlocks.values()]));
-    if (!contentBlocks.length) throw new Error("upstream_invalid_response");
+    if (!result) throw lastError || new Error("stream_disconnected");
+    state.retrySnapshots.delete(userMessage.id);
+    userMessage.requestSnapshot = null;
+    await userPersistence;
+    await typingGate;
+    if (timing.shownAt) {
+      const visibleFor = performance.now() - timing.shownAt;
+      if (visibleFor < 300) await delay(300 - visibleFor);
+    }
     userMessage.status = "sent";
-    thread.messages.push(normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks, communicationChannel: returnedChannel, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId }));
+    const assistantMessage = normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, communicationChannel: result.returnedChannel, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model } });
+    thread.messages.push(assistantMessage);
+    thread.messageCount = Number(thread.messageCount || 0) + 1;
     thread.turnCount += 1;
-    // The explicit day choice only controls the first request of the new
-    // segment.  Subsequent turns naturally use the locally stored segment
-    // history without repeatedly suppressing it.
     thread.continuityDecision = "";
     thread.lastActiveAt = Date.now();
-    if (ownsRequest() || !typingStateFor(characterId)) {
-      state.latest.set(characterId, { requestId, errorCode: "", degraded, diagnostics });
-    }
+    if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: "", usage: result.usage });
     await dbPutThread(thread);
     updateTypingPhase(characterId, requestId, "presenting");
-    if (ownsVisibleRequest()) {
-      renderAll();
-    }
-    const assistantMessage = thread.messages[thread.messages.length - 1];
+    if (ownsVisibleRequest()) renderAll();
     await presentAssistantTurn(characterId, requestId, assistantMessage);
-    if (ownsRequest() && pendingSceneState) {
-      state.sceneByCharacter.set(characterId, pendingSceneState);
+    if (ownsRequest() && result.pendingSceneState) {
+      state.sceneByCharacter.set(characterId, result.pendingSceneState);
       if (ownsVisibleRequest()) {
-        state.scene = pendingSceneState;
+        state.scene = result.pendingSceneState;
         renderScene();
-        if (pendingStateEvent?.event_type === "joint_movement") {
-          setRequestStatus(characterId, `已一起前往${pendingSceneState.character_location || "新的地点"}`, requestId);
-        }
+        if (result.pendingStateEvent?.event_type === "joint_movement") setRequestStatus(characterId, `已一起前往${result.pendingSceneState.character_location || "新的地点"}`, requestId);
       }
     }
     if (ownsRequest()) {
-      if (pendingStateEvent?.event_type !== "joint_movement") {
-        setRequestStatus(characterId, degraded.length ? `已完成，降级服务：${degraded.join("、")}` : "已完成", requestId);
+      if (result.movementStatus?.status === "state_unchanged") {
+        setRequestStatus(characterId, "对白已完成，但场景未更新。", requestId, result.recoveryAction === "refresh_scene" ? "refresh_scene" : "");
+      } else if (result.pendingStateEvent?.event_type !== "joint_movement") {
+        setRequestStatus(characterId, "已完成", requestId);
       }
       clearTypingState(characterId, requestId);
     }
-    scheduleAutoSummary(thread);
+    scheduleAutoSummary(thread, result.usage);
+    renderCharacters();
   } catch (caught) {
-    const error = caught?.name === "AbortError"
-      ? new Error(requestTimedOut ? "provider_timeout" : "request_cancelled")
-      : caught;
+    await userPersistence.catch(() => {});
+    const error = caught?.name === "AbortError" ? new Error(requestTimedOut ? "provider_timeout" : "request_cancelled") : caught;
+    if (stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
+      cancelPresentationQueue(characterId, requestId);
+      state.retrySnapshots.delete(userMessage.id);
+      await clearPersistedWorldPackage();
+      if (characterId === state.selected) renderScene();
+      return await runChat(thread, userMessage, { stateRecoveryAttempt: stateRecoveryAttempt + 1 });
+    }
+    if (!shouldReuseChatRequest(error)) {
+      state.retrySnapshots.delete(userMessage.id);
+      userMessage.requestSnapshot = null;
+    }
     cancelPresentationQueue(characterId, requestId);
     userMessage.status = "failed";
     userMessage.errorCode = error instanceof Error ? error.message : "chat_failed";
-    if (ownsRequest() || !typingStateFor(characterId)) {
-      state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode, degraded: [] });
-    }
+    if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode });
     await dbPutThread(thread);
-    if (ownsVisibleRequest()) {
-      renderAll();
-    }
+    if (ownsVisibleRequest()) renderAll();
     if (ownsRequest()) {
       setRequestStatus(characterId, displayError(error), requestId);
       clearTypingState(characterId, requestId);
     }
   } finally {
     window.clearTimeout(requestTimeout);
-    if (state.chatRequestByCharacter.get(characterId)?.requestId === requestId) {
-      state.chatRequestByCharacter.delete(characterId);
-    }
+    if (state.chatRequestByCharacter.get(characterId)?.requestId === requestId) state.chatRequestByCharacter.delete(characterId);
     clearTypingState(characterId, requestId);
     updateComposerAvailability();
+    void flushDeferredPresenceRefresh();
   }
 }
 async function sendMessage(event) {
   event.preventDefault();
-  if (!state.selected) return;
+  if (!state.selected || globalRequestBusy()) return;
   const blocks = inputBlocks();
   const total = renderBlocksText(blocks).length;
   if (!blocks.length) return;
@@ -1597,26 +2499,55 @@ async function sendMessage(event) {
   if (!(await ensureContinuityDecision(thread))) return;
   const userMessage = normalizeMessage({ id: id(), characterId: thread.characterId, role: "user", contentBlocks: blocks, communicationChannel: thread.channel, createdAt: Date.now(), status: "pending", conversationSegmentId: thread.conversationSegmentId });
   thread.messages.push(userMessage);
+  thread.messageCount = Number(thread.messageCount || 0) + 1;
   $("message-input").value = "";
   $("action-input").value = "";
   clearSelectedSticker();
   state.actionComposerOpen = false;
+  state.drafts.set(draftKey(thread.characterId, thread.channel, "message"), "");
+  state.drafts.set(draftKey(thread.characterId, thread.channel, "action"), "");
+  void storePut("app_state", { key: "drafts", values: Object.fromEntries(state.drafts) });
   $("toggle-sticker").setAttribute("aria-expanded", "false");
   updateInputCount();
   await runChat(thread, userMessage);
 }
 async function retryMessage(messageId) {
+  if (globalRequestBusy()) return;
   if (!configured()) return openSettings("models");
   const thread = currentThread();
   const message = thread?.messages.find((item) => item.id === messageId && item.role === "user");
   if (!message || message.status !== "failed") return;
+  const snapshot = state.retrySnapshots.get(message.id)
+    || (message.requestId && message.requestSnapshot ? { requestId: message.requestId, payload: message.requestSnapshot } : null);
+  if (snapshot && (
+    plain(snapshot.payload?.provider) !== state.provider
+    || plain(snapshot.payload?.model) !== state.model
+  )) {
+    state.retrySnapshots.delete(message.id);
+    message.requestId = "";
+    message.requestSnapshot = null;
+    await dbPutThread(thread);
+  }
   await runChat(thread, message);
 }
 function successfulChatMessages(thread) {
   return (thread.messages || []).filter((message) => message.role === "assistant" && message.status === "sent" && message.source !== "presence_arrival");
 }
-function scheduleAutoSummary(thread) {
+function remainingProviderCallBudget(usage) {
+  const used = Number(usage?.provider_calls);
+  if (!Number.isInteger(used) || used < 0) return 0;
+  const configuredLimit = Number(state.config?.max_provider_calls_per_action);
+  const limit = Number.isInteger(configuredLimit) && configuredLimit > 0
+    ? Math.min(2, configuredLimit)
+    : 2;
+  return Math.max(0, limit - used);
+}
+function scheduleAutoSummary(thread, chatUsage = null) {
   if (!state.autoSummaryEnabled || !configured()) return;
+  // A summary is another provider operation belonging to the current user
+  // action. Never start it when validation/rewriting already consumed both
+  // calls, or when an older server omitted the auditable call count.
+  if (remainingProviderCallBudget(chatUsage) < 1) return;
   const successful = successfulChatMessages(thread);
   if (successful.length < 12 || successful.length < thread.summarizedThroughTurnCount + 12) return;
   const checkpoint = successful[successful.length - 1];
@@ -1629,17 +2560,21 @@ function scheduleAutoSummary(thread) {
   void dbPutThread(thread).then(() => runAutoSummary(thread));
 }
 async function runAutoSummary(thread) {
-  if (!thread.summaryRequestId || !state.autoSummaryEnabled || !configured() || state.summaryInFlight.has(thread.characterId)) return;
+  if (!thread.summaryRequestId || !state.autoSummaryEnabled || !configured() || state.summaryInFlight.has(thread.characterId) || globalRequestBusy()) return;
   state.summaryInFlight.add(thread.characterId);
+  updateComposerAvailability();
   const requestId = thread.summaryRequestId;
   try {
     const turns = thread.messages.filter((message) => message.status === "sent").slice(-24).map((message) => ({
       role: message.role,
-      content: message.content,
       communication_channel: message.communicationChannel,
       content_blocks: wireBlocks(message.contentBlocks),
     }));
-    const payload = await api("/chat/summarize", { method: "POST", body: JSON.stringify({ request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, character_id: thread.characterId, turns, previous_summary: thread.summary || "" }) });
+    const requestPayload = fitPublicRequestPayload(
+      { request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, character_id: thread.characterId, turns, previous_summary: thread.summary || "" },
+      { arrays: [{ key: "turns", minimum: 2 }], texts: ["previous_summary"] },
+    );
+    const payload = await api("/chat/summarize", { method: "POST", body: JSON.stringify(requestPayload) });
     thread.summary = payload.summary || thread.summary;
     thread.pendingTopics = Array.isArray(payload.pending_topics)
       ? payload.pending_topics.map(plain).filter(Boolean).slice(0, 12)
@@ -1659,6 +2594,8 @@ async function runAutoSummary(thread) {
     if (error?.message === "credential_invalid") clearCredential();
   } finally {
     state.summaryInFlight.delete(thread.characterId);
+    updateComposerAvailability();
+    void flushDeferredPresenceRefresh();
   }
 }
 
@@ -1673,7 +2610,7 @@ async function transitionPresence(targetChannel, characterId = state.selected, t
   return result;
 }
 async function arriveInPerson() {
-  if (!state.selected || state.arrivalPending || typingStateFor()) return;
+  if (!state.selected || globalRequestBusy()) return;
   state.arrivalPending = true;
   const started = performance.now();
   const characterId = state.selected;
@@ -1697,7 +2634,11 @@ async function arriveInPerson() {
       if (ownsVisibleArrival()) showBanner("场景已更新。配置模型后可以开始对话。");
       return;
     }
-    const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify({ arrival_id: arrivalId, provider: state.provider, credential: state.credential, model: state.model, character_id: characterId, recent_history: requestHistory(thread?.messages || [], "", thread?.conversationSegmentId || ""), history_summary: thread?.continuityDecision === "start_today" ? "" : (thread?.summary || ""), state_package: state.worldPackage || "" }) });
+    const arrivalPayload = fitPublicRequestPayload(
+      { arrival_id: arrivalId, provider: state.provider, credential: state.credential, model: state.model, character_id: characterId, recent_history: requestHistory(thread?.messages || [], "", thread?.conversationSegmentId || ""), history_summary: thread?.continuityDecision === "start_today" ? "" : (thread?.summary || ""), state_package: state.worldPackage || "" },
+      { arrays: [{ key: "recent_history", minimum: 0 }], texts: ["history_summary"] },
+    );
+    const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify(arrivalPayload) });
     if (ownsArrival()) await saveWorldPackage(result.state_package);
     if (ownsArrival()) state.sceneByCharacter.set(characterId, result.scene_state || {});
     if (ownsVisibleArrival()) state.scene = result.scene_state;
@@ -1705,6 +2646,7 @@ async function arriveInPerson() {
     if (thread && result.reaction) {
       arrivalMessage = normalizeMessage({ id: result.reaction.message_id || id(), characterId, role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId });
       thread.messages.push(arrivalMessage);
+      thread.messageCount = Number(thread.messageCount || 0) + 1;
     }
     if (thread) await dbPutThread(thread);
     // Populate the arrival turn before exposing the stage. Otherwise
@@ -1751,10 +2693,11 @@ async function arriveInPerson() {
     clearTypingState(characterId, arrivalId);
     updateComposerAvailability();
     if (characterId === state.selected) renderStage();
+    void flushDeferredPresenceRefresh();
   }
 }
 async function openPresenceDialog() {
-  if (!state.selected || state.arrivalPending || typingStateFor()) return;
+  if (!state.selected || globalRequestBusy()) return;
   try { await resolvePresence(); } catch (error) { return showBanner(displayError(error)); }
   $("presence-dialog-location").textContent = state.scene?.character_location || "当前位置尚未建立";
   $("presence-dialog-activity").textContent = state.scene?.character_activity || "场景建立后即可前往。";
@@ -1762,15 +2705,50 @@ async function openPresenceDialog() {
 }
 
 function openDrawer(name) {
-  for (const panel of [$("info-panel"), $("transcript-panel")]) panel.classList.toggle("open", panel.id === name);
+  state.drawerReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  for (const panel of [$("info-panel"), $("transcript-panel")]) {
+    const open = panel.id === name;
+    panel.classList.toggle("open", open);
+    panel.setAttribute("aria-hidden", String(!open));
+    panel.inert = !open;
+  }
+  $("chat-app").querySelector(".chat-panel").inert = true;
+  $("contact-panel").inert = true;
   $("drawer-scrim").hidden = false;
   renderInfo();
   renderTranscript();
+  window.setTimeout(() => $(name)?.querySelector("button, [href], input, select, textarea")?.focus(), 0);
 }
 function closeDrawers() {
-  $("info-panel").classList.remove("open");
-  $("transcript-panel").classList.remove("open");
+  for (const panel of [$("info-panel"), $("transcript-panel")]) {
+    panel.classList.remove("open");
+    panel.setAttribute("aria-hidden", "true");
+    panel.inert = true;
+  }
+  $("chat-app").querySelector(".chat-panel").inert = false;
+  $("contact-panel").inert = window.matchMedia("(max-width: 820px)").matches
+    ? !$("contact-panel").classList.contains("open")
+    : $("chat-app").classList.contains("sidebar-collapsed");
   $("drawer-scrim").hidden = true;
+  state.drawerReturnFocus?.focus?.();
+  state.drawerReturnFocus = null;
+}
+function trapDrawerFocus(event) {
+  const panel = [$("info-panel"), $("transcript-panel")].find((item) => item.classList.contains("open"));
+  if (!panel) return false;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeDrawers();
+    return true;
+  }
+  if (event.key !== "Tab") return false;
+  const controls = [...panel.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter((item) => !item.hidden);
+  if (!controls.length) return false;
+  const first = controls[0];
+  const last = controls[controls.length - 1];
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  return false;
 }
 function contactsExpanded() {
   const panel = $("contact-panel");
@@ -1791,14 +2769,22 @@ function toggleContacts({ mobileOpen = false } = {}) {
   const mobile = window.matchMedia("(max-width: 820px)").matches;
   if (mobile) {
     const open = mobileOpen || !panel.classList.contains("open");
+    if (open) state.contactReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     panel.classList.toggle("open", open);
+    panel.setAttribute("aria-hidden", String(!open));
+    panel.inert = !open;
     syncContactToggleState(open);
     if (open) window.setTimeout(() => $("close-contacts")?.focus(), 0);
-    else $("open-stage-contacts")?.focus();
+    else {
+      state.contactReturnFocus?.focus?.();
+      state.contactReturnFocus = null;
+    }
     return open;
   }
   const collapsed = $("chat-app").classList.toggle("sidebar-collapsed");
   const expanded = !collapsed;
+  panel.setAttribute("aria-hidden", String(collapsed));
+  panel.inert = collapsed;
   syncContactToggleState(expanded);
   $("open-stage-contacts")?.focus();
   return expanded;
@@ -1809,6 +2795,7 @@ function openSettings(tab = "models") {
   if (tab === "history") storageBytes().then((bytes) => { $("storage-usage").textContent = `当前浏览器记录约占 ${formatBytes(bytes)}。`; });
   const activeThread = currentThread();
   $("auto-summary-enabled").checked = state.autoSummaryEnabled;
+  $("history-retention").value = String(state.historyRetentionDays);
   $("summary-last-updated").textContent = activeThread?.summaryUpdatedAt ? `最近更新：${new Date(activeThread.summaryUpdatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}` : "尚未生成摘要";
   $("provider-select").value = state.provider || $("provider-select").value;
   $("model-id").value = state.model || $("model-id").value;
@@ -1817,9 +2804,34 @@ function openSettings(tab = "models") {
 }
 function openFeedback(messageId = "") {
   state.feedbackMessageId = messageId;
-  const message = currentThread()?.messages.find((item) => item.id === messageId);
-  $("feedback-context").textContent = message ? `将附带 ${message.communicationChannel === "text" ? "文字通讯" : "面对面"}中的本条回复及其请求编号。` : "将附带当前一问一答和不含密钥的请求诊断。";
+  $("feedback-include-context").checked = true;
+  renderFeedbackContextPreview();
   $("feedback-dialog").showModal();
+}
+function feedbackContextSelection() {
+  const thread = currentThread() || { messages: [] };
+  const target = thread.messages.find((message) => message.id === state.feedbackMessageId) || [...thread.messages].reverse().find((message) => message.role === "assistant") || null;
+  const targetIndex = target ? thread.messages.indexOf(target) : thread.messages.length;
+  const userMessage = [...thread.messages.slice(0, targetIndex)].reverse().find((message) => message.role === "user") || [...thread.messages].reverse().find((message) => message.role === "user") || {};
+  const latest = state.latest.get(state.selected) || {};
+  const userBlocks = wireBlocks(normalizeBlocks(userMessage.contentBlocks, userMessage.communicationChannel || thread.channel || "text", userMessage.content || ""));
+  const assistantBlocks = wireBlocks(normalizeBlocks(target?.contentBlocks, target?.communicationChannel || thread.channel || "text", target?.content || ""));
+  return { thread, target, userMessage, latest, userBlocks, assistantBlocks, chatRequestId: target?.requestId || latest.requestId || userMessage.requestId || null };
+}
+function renderFeedbackContextPreview() {
+  const include = $("feedback-include-context").checked;
+  const { target, userMessage, userBlocks, assistantBlocks } = feedbackContextSelection();
+  $("feedback-context-preview").hidden = !include;
+  if (!include) {
+    $("feedback-context").textContent = "不会附带对话、角色、模型或请求诊断，只提交你填写的反馈正文与可选 QQ。";
+    return;
+  }
+  $("feedback-context").textContent = target ? `将附带 ${target.communicationChannel === "text" ? "文字通讯" : "面对面"}中的相关一问一答及请求编号。` : "将附带当前一问一答和请求编号；服务端会按编号关联内部诊断。";
+  const preview = [
+    userMessage.content || userBlocks.map((block) => block.text || `〔表情〕${block.caption || "表情"}`).join("\n"),
+    assistantBlocks.map((block) => block.text || `〔表情〕${block.caption || "表情"}`).join("\n"),
+  ].filter(Boolean);
+  $("feedback-context-preview-text").textContent = preview.length ? preview.map((text, index) => `${index ? "角色" : "你"}：${text}`).join("\n\n") : "当前没有可附带的对话内容。";
 }
 async function submitFeedback(event) {
   event.preventDefault();
@@ -1831,17 +2843,12 @@ async function submitFeedback(event) {
     submitButton.textContent = "正在提交…";
   }
   showError("feedback-error", "");
-  const thread = currentThread() || { messages: [] };
-  const target = thread.messages.find((message) => message.id === state.feedbackMessageId) || [...thread.messages].reverse().find((message) => message.role === "assistant") || null;
-  const targetIndex = target ? thread.messages.indexOf(target) : thread.messages.length;
-  const userMessage = [...thread.messages.slice(0, targetIndex)].reverse().find((message) => message.role === "user") || [...thread.messages].reverse().find((message) => message.role === "user") || {};
-  const latest = state.latest.get(state.selected) || {};
-  const chatRequestId = target?.requestId || latest.requestId || userMessage.requestId || null;
-  const userBlocks = wireBlocks(normalizeBlocks(userMessage.contentBlocks, userMessage.communicationChannel || thread.channel || "text", userMessage.content || ""));
-  const assistantBlocks = wireBlocks(normalizeBlocks(target?.contentBlocks, target?.communicationChannel || thread.channel || "text", target?.content || ""));
+  const { thread, target, userMessage, latest, chatRequestId, userBlocks, assistantBlocks } = feedbackContextSelection();
+  const includeContext = $("feedback-include-context").checked;
   const assistantSpeech = renderBlocksText(assistantBlocks.filter((block) => block.type !== "action"));
   try {
-    const payload = await api("/feedback", { method: "POST", timeoutMs: 20000, body: JSON.stringify({ request_id: id(), chat_request_id: chatRequestId || null, body: $("feedback-body").value, qq: $("feedback-qq").value, turnstile_token: await tokenFor("feedback"), character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: assistantSpeech, user_content_blocks: userBlocks, assistant_content_blocks: assistantBlocks, request_stage: target?.communicationChannel || currentThread()?.channel || "immersive-web", error_code: latest.errorCode || userMessage.errorCode || "", degraded_services: latest.degraded || [], ui_surface: "immersive-web" }) });
+    const contextual = includeContext ? { chat_request_id: chatRequestId || null, character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: assistantSpeech, user_content_blocks: userBlocks, assistant_content_blocks: assistantBlocks, error_code: latest.errorCode || userMessage.errorCode || "" } : {};
+    const payload = await api("/feedback", { method: "POST", timeoutMs: 20000, body: JSON.stringify({ request_id: id(), body: $("feedback-body").value, qq: $("feedback-qq").value, turnstile_token: await tokenFor("feedback"), include_conversation_context: includeContext, request_stage: target?.communicationChannel || thread.channel || "immersive-web", ui_surface: "immersive-web", ...contextual }) });
     $("feedback-dialog").close();
     $("feedback-form").reset();
     toast(`反馈已提交，编号：${payload.feedback_code}`);
@@ -1857,11 +2864,11 @@ async function submitFeedback(event) {
 
 $("character-search").oninput = renderCharacters;
 $("composer").onsubmit = sendMessage;
-$("message-input").oninput = updateInputCount;
-$("action-input").oninput = updateInputCount;
+$("message-input").oninput = () => { updateInputCount(); scheduleDraftSave(); };
+$("action-input").oninput = () => { updateInputCount(); scheduleDraftSave(); };
 $("message-input").onkeydown = (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("composer").requestSubmit(); } };
 $("toggle-action").onclick = () => {
-  if (currentThread()?.channel !== "in_person") return;
+  if (globalRequestBusy() || currentThread()?.channel !== "in_person") return;
   state.actionComposerOpen = !state.actionComposerOpen;
   if (!state.actionComposerOpen) $("action-input").value = "";
   updateComposerAvailability();
@@ -1870,14 +2877,65 @@ $("toggle-action").onclick = () => {
 };
 $("toggle-sticker").onclick = openStickerPicker;
 $("clear-sticker").onclick = clearSelectedSticker;
+$("open-movement-shortcuts").onclick = openMovementShortcuts;
+$("stop-waiting").onclick = () => {
+  const pending = typingStateFor();
+  if (pending && pending.phase === "segment") {
+    cancelPresentationQueue(pending.characterId, pending.requestId);
+    updateTypingPhase(pending.characterId, pending.requestId, "presenting");
+    setRequestStatus(pending.characterId, "已停止分段等待，完整回复已经显示。", pending.requestId);
+    return;
+  }
+  const request = pending ? state.chatRequestByCharacter.get(pending.characterId) : null;
+  if (!request || request.requestId !== pending.requestId) return;
+  $("stop-waiting").disabled = true;
+  setRequestStatus(pending.characterId, "正在停止本地等待……", pending.requestId);
+  request.controller.abort();
+};
+$("new-replies").onclick = () => {
+  $("timeline").scrollTop = $("timeline").scrollHeight;
+  $("new-replies").hidden = true;
+};
+$("timeline").addEventListener("scroll", () => {
+  if (timelineNearBottom()) $("new-replies").hidden = true;
+}, { passive: true });
+$("feedback-include-context").onchange = renderFeedbackContextPreview;
+$("next-onboarding").onclick = advanceOnboarding;
+$("skip-onboarding").onclick = finishOnboarding;
+$("load-more-stickers").onclick = () => { void loadStickers(); };
+document.querySelectorAll("[data-sticker-section]").forEach((button) => {
+  button.onclick = () => { void selectStickerSection(button.dataset.stickerSection); };
+  button.onkeydown = (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const tabs = [...document.querySelectorAll("[data-sticker-section]")];
+    const current = tabs.indexOf(button);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    tabs[next].focus();
+    void selectStickerSection(tabs[next].dataset.stickerSection);
+  };
+});
+$("sticker-search").oninput = () => {
+  window.clearTimeout($("sticker-search").searchTimer);
+  $("sticker-search").searchTimer = window.setTimeout(async () => {
+    if (state.stickerLoadPromise) await state.stickerLoadPromise;
+    state.stickerQuery = $("sticker-search").value.trim();
+    await loadStickers({ reset: true });
+  }, 180);
+};
 $("go-in-person").onclick = openPresenceDialog;
-$("confirm-presence-transition").onclick = async () => { $("presence-dialog").close(); await arriveInPerson(); };
+$("confirm-presence-transition").onclick = async () => {
+  if (globalRequestBusy()) return;
+  $("presence-dialog").close();
+  await arriveInPerson();
+};
 $("stay-on-communicator").onclick = async () => {
+  if (globalRequestBusy()) return;
   $("presence-dialog").close();
   try { await runModeTransition((signal) => transitionPresence("text", state.selected, null, signal), "正在打开通讯器"); } catch (error) { if (error?.name !== "AbortError") showBanner(displayError(error)); }
 };
 $("open-communicator").onclick = async () => {
-  if (state.arrivalPending || typingStateFor()) return;
+  if (globalRequestBusy()) return;
   try { await runModeTransition((signal) => transitionPresence("text", state.selected, null, signal), "正在打开通讯器"); } catch (error) { if (error?.name !== "AbortError") showBanner(displayError(error)); }
 };
 $("open-contacts").onclick = () => toggleContacts({ mobileOpen: true });
@@ -1909,35 +2967,64 @@ $("provider-select").onchange = () => { if (state.provider && state.provider !==
 $("auto-summary-enabled").onchange = async () => {
   state.autoSummaryEnabled = $("auto-summary-enabled").checked;
   await storePut("app_state", { key: "preferences", autoSummaryEnabled: state.autoSummaryEnabled });
-  if (state.autoSummaryEnabled) scheduleAutoSummary(currentThread() || { messages: [], summarizedThroughTurnCount: 0 });
+  if (state.autoSummaryEnabled) toast("将在下一轮仍有模型调用余量时整理连续性摘要");
+};
+$("history-retention").onchange = async () => {
+  state.historyRetentionDays = [30, 90].includes(Number($("history-retention").value)) ? Number($("history-retention").value) : 0;
+  await saveUiPreferences();
+  await pruneExpiredMessages();
+  toast(state.historyRetentionDays ? `将自动清理超过 ${state.historyRetentionDays} 天的本地消息` : "已关闭自动清理");
 };
 document.querySelectorAll("[data-settings-tab]").forEach((button) => { button.onclick = () => openSettings(button.dataset.settingsTab); });
-$("delete-character-history").onclick = async () => { const characterId = $("history-character").value; await storeDelete("threads", characterId); state.threads.delete(characterId); if (characterId === state.selected) { await dbGetThread(characterId); renderAll(); } openSettings("history"); toast("该角色本地历史已删除"); };
-$("clear-all-history").onclick = async () => { if (!window.confirm("确定清空全部 Project Snow 本地历史与世界状态吗？")) return; await storeClear("threads"); await storeClear("app_state"); state.threads.clear(); state.worldPackage = ""; if (state.selected) { await dbGetThread(state.selected); await resolvePresence(); } renderAll(); openSettings("history"); toast("全部本地历史已清空"); };
-document.querySelectorAll("[data-close-dialog]").forEach((button) => { button.onclick = () => $(button.dataset.closeDialog).close(); });
+$("delete-character-history").onclick = async () => { if (globalRequestBusy()) return; const characterId = $("history-character").value; await deleteMessagesForCharacter(characterId); await storeDelete("threads", characterId); state.threads.delete(characterId); if (characterId === state.selected) { await dbGetThread(characterId); renderAll(); } openSettings("history"); toast("该角色本地历史已删除"); };
+$("clear-all-history").onclick = async () => { if (globalRequestBusy()) return; if (!window.confirm("确定清空全部 Project Snow 本地历史与世界状态吗？")) return; await storeClear("threads"); await storeClear("messages"); await storeClear("app_state"); state.threads.clear(); state.worldPackage = ""; state.drafts.clear(); state.pinnedCharacters.clear(); state.favoriteStickerIds.clear(); state.favoriteStickers.clear(); state.recentStickerIds = []; if (state.selected) { await dbGetThread(state.selected); await resolvePresence(); } renderAll(); openSettings("history"); toast("全部本地历史已清空"); };
+document.querySelectorAll("[data-close-dialog]").forEach((button) => {
+  if (!button.getAttribute("aria-label")) button.setAttribute("aria-label", "关闭对话框");
+  button.onclick = () => $(button.dataset.closeDialog).close();
+});
+$("sticker-picker").addEventListener("close", () => $("toggle-sticker").setAttribute("aria-expanded", "false"));
 window.addEventListener("keydown", (event) => {
+  if (trapDrawerFocus(event)) return;
   if (event.key.toLocaleLowerCase() === "h" && currentThread()?.channel === "in_person" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
     const hidden = $("in-person-surface").classList.toggle("ui-hidden");
     $("restore-stage-ui").hidden = !hidden;
   }
-  if (event.code === "Space" && currentThread()?.channel === "in_person" && !["INPUT", "TEXTAREA", "BUTTON"].includes(document.activeElement?.tagName)) {
-    event.preventDefault();
-    finishTypewriter();
-  }
 });
-$("stage-dialogue").addEventListener("click", finishTypewriter);
+
+$("character-list").addEventListener("keydown", (event) => {
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  const options = [...$("character-list").querySelectorAll("[data-character]")];
+  if (!options.length) return;
+  event.preventDefault();
+  const current = options.indexOf(document.activeElement);
+  const target = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 : Math.max(0, Math.min(options.length - 1, current + (event.key === "ArrowDown" ? 1 : -1)));
+  options[target].focus();
+});
+$("character-search").addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown") return;
+  const first = $("character-list").querySelector("[data-character]");
+  if (first) { event.preventDefault(); first.focus(); }
+});
 
 async function boot() {
   await openDB();
   await migrateBrowserState();
+  await pruneExpiredMessages();
   await loadConfig();
-  void loadStickers();
   await showExperienceNoticeIfNeeded();
   await loadCharacters();
   $("connection-status").textContent = "服务已连接";
-  syncContactToggleState();
+  const contactsOpen = contactsExpanded();
+  syncContactToggleState(contactsOpen);
+  $("contact-panel").setAttribute("aria-hidden", String(!contactsOpen));
+  $("contact-panel").inert = !contactsOpen;
+  $("info-panel").inert = true;
+  $("transcript-panel").inert = true;
   $("auto-summary-enabled").checked = state.autoSummaryEnabled;
   updateComposerAvailability();
+  restoreDraft();
+  renderOnboarding();
+  if (!state.storageAvailable) showBanner("浏览器未开放本地存储，本次聊天不会保存；仍可继续使用。 ");
 }
 boot().catch((error) => {
   $("connection-status").textContent = "连接失败";

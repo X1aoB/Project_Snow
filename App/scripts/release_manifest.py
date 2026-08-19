@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import UTC, datetime
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -12,6 +13,7 @@ from typing import Any
 
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REVISION_PATTERN = re.compile(
     r'^revision(?:\s*:\s*str)?\s*=\s*["\']([^"\']+)["\']', re.MULTILINE
 )
@@ -19,6 +21,24 @@ DOWN_REVISION_PATTERN = re.compile(
     r'^down_revision(?:\s*:\s*(?:str\s*\|\s*None|Union\[[^\]]+\]))?\s*=\s*(.+)$',
     re.MULTILINE,
 )
+
+RUNTIME_CONFIGURATION_PATHS = (
+    "compose.prod.yml",
+    "infra/Caddyfile",
+    "infra/egress-squid.conf",
+    "infra/neo4j-entrypoint.sh",
+    "infra/postgres/postgresql.conf",
+    "infra/public-api.Dockerfile",
+    "requirements-public.txt",
+)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def read_public_versions(app_root: Path) -> tuple[str, str, str, str]:
@@ -44,6 +64,53 @@ def read_public_versions(app_root: Path) -> tuple[str, str, str, str]:
             "public environment must define application, data, avatar media and sticker versions"
         )
     return app_version, data_version, media_version, sticker_version
+
+
+def read_release_artifacts(
+    app_root: Path,
+    *,
+    data_version: str,
+    media_version: str,
+    sticker_version: str,
+) -> dict[str, dict[str, str]]:
+    index_path = app_root / "config" / "public_release_artifacts.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    if not isinstance(index, dict) or set(index) != {"schema_version", "artifacts"}:
+        raise ValueError("public release artifact index has unexpected fields")
+    if index.get("schema_version") != "project-snow-release-artifacts-1":
+        raise ValueError("unsupported public release artifact index")
+    artifacts = index.get("artifacts")
+    if not isinstance(artifacts, dict) or set(artifacts) != {"data", "avatar", "sticker"}:
+        raise ValueError("public release artifact index must bind data, avatar and sticker")
+
+    expected_versions = {
+        "data": data_version,
+        "avatar": media_version,
+        "sticker": sticker_version,
+    }
+    normalized: dict[str, dict[str, str]] = {}
+    for kind, expected_version in expected_versions.items():
+        entry = artifacts.get(kind)
+        expected_fields = {"version", "manifest_sha256"}
+        if kind != "data":
+            expected_fields.add("checksums_sha256")
+        if not isinstance(entry, dict) or set(entry) != expected_fields:
+            raise ValueError(f"{kind} release artifact binding has unexpected fields")
+        version = str(entry.get("version") or "")
+        manifest_sha256 = str(entry.get("manifest_sha256") or "")
+        if version != expected_version or not SHA256_PATTERN.fullmatch(manifest_sha256):
+            raise ValueError(f"{kind} release artifact binding is invalid")
+        normalized_entry = {
+            "version": version,
+            "manifest_sha256": manifest_sha256,
+        }
+        if kind != "data":
+            checksums_sha256 = str(entry.get("checksums_sha256") or "")
+            if not SHA256_PATTERN.fullmatch(checksums_sha256):
+                raise ValueError(f"{kind} checksum binding is invalid")
+            normalized_entry["checksums_sha256"] = checksums_sha256
+        normalized[kind] = normalized_entry
+    return normalized
 
 
 def migration_heads(versions_directory: Path) -> list[str]:
@@ -83,6 +150,12 @@ def create_manifest(
         if not DIGEST_PATTERN.fullmatch(digest):
             raise ValueError("image digests must use sha256:<64 lowercase hexadecimal characters>")
     app_version, data_version, media_version, sticker_version = read_public_versions(app_root)
+    release_artifacts = read_release_artifacts(
+        app_root,
+        data_version=data_version,
+        media_version=media_version,
+        sticker_version=sticker_version,
+    )
     return {
         "schema_version": "project-snow-release-1",
         "commit_sha": commit_sha,
@@ -90,9 +163,14 @@ def create_manifest(
         "data_version": data_version,
         "media_version": media_version,
         "sticker_version": sticker_version,
+        "release_artifacts": release_artifacts,
         "migration_heads": migration_heads(app_root / "migrations" / "versions"),
         "application": {"image": public_image, "digest": public_digest},
         "embedding": {"image": embedding_image, "digest": embedding_digest},
+        "configuration_sha256": {
+            relative_path: _sha256_file(app_root / relative_path)
+            for relative_path in RUNTIME_CONFIGURATION_PATHS
+        },
         "generated_at": datetime.now(UTC).isoformat(),
     }
 

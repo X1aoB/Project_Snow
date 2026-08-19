@@ -27,6 +27,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
     chat_stream_release: threading.Event | None = None
     arrival_started: threading.Event | None = None
     arrival_release: threading.Event | None = None
+    feedback_payload: dict[str, object] | None = None
+    chat_attempts: dict[str, int] = {}
+    presence_resolve_count = 0
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -47,7 +50,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     "app_version": "e2e",
                     "data_version": "fixture",
                     "turnstile_site_key": "",
-                    "experience_notice_version": "0.8",
+                    "experience_notice_version": "0.9",
                     "analyst_avatar": {
                         "asset_id": "analyst-default",
                         "thumbnail_src": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
@@ -61,6 +64,18 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     },
                     "arrival_reaction_probability": 0.5,
                     "automatic_summary": {"default_enabled": True},
+                    "movement_catalog": [
+                        {
+                            "location_id": "commercial_street",
+                            "display_name": "商业街",
+                            "activity_name": "一起逛街",
+                        },
+                        {
+                            "location_id": "base_lounge",
+                            "display_name": "休息区",
+                            "activity_name": "喝茶聊天",
+                        },
+                    ],
                     "providers": [{"provider_id": "openai", "display_name": "OpenAI"}],
                     "source_links": {
                         "project_snow": "https://github.com/X1aoB/Project_Snow",
@@ -159,6 +174,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             self._json({"models": ["gpt-e2e"]})
             return
         if self.path == "/public/v1/presence/resolve":
+            type(self).presence_resolve_count += 1
             self._json(
                 {
                     "request_id": payload.get("request_id"),
@@ -235,6 +251,18 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             meta_packet = (
                 f'event: meta\ndata: {json.dumps({"request_id": payload.get("request_id"), "character_id": payload.get("character_id"), "provider": "openai", "model": "gpt-e2e", "communication_channel": channel}, ensure_ascii=False)}\n\n'
             ).encode()
+            request_id = str(payload.get("request_id") or "")
+            if payload.get("message") == "断流恢复测试":
+                attempts = type(self).chat_attempts
+                attempts[request_id] = attempts.get(request_id, 0) + 1
+                if attempts[request_id] == 1:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                    self.send_header("Content-Length", str(len(meta_packet)))
+                    self.end_headers()
+                    self.wfile.write(meta_packet)
+                    self.wfile.flush()
+                    return
             if payload.get("message") == "多段测试":
                 blocks = [
                     {"type": "message", "text": "第一段"},
@@ -244,8 +272,10 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                         "asset_id": "fixture-sticker",
                         "caption": "收到",
                         "src": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+                        "display_src": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=#display",
                         "thumbnail_src": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
-                        "animated": False,
+                        "animated": True,
+                        "display_animated": True,
                     },
                 ] if channel == "text" else [
                     {"type": "action", "text": "凯茜娅抬起手。"},
@@ -269,14 +299,14 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 remaining_packets = "".join(
                     (*delta_packets,
                      'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
-                     f'event: done\ndata: {json.dumps({"truncated": False, "degraded_services": [], "communication_channel": channel, "content_blocks": blocks}, ensure_ascii=False)}\n\n')
+                     f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks}, ensure_ascii=False)}\n\n')
                 ).encode()
             else:
                 remaining_packets = "".join(
                     (
                         'event: delta\ndata: {"text":"晚上好，分析员。"}\n\n',
                         'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
-                        f'event: done\ndata: {json.dumps({"truncated": False, "degraded_services": [], "communication_channel": channel, "content_blocks": [{"type": block_type, "text": "晚上好，分析员。"}]}, ensure_ascii=False)}\n\n',
+                        f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": [{"type": block_type, "text": "晚上好，分析员。"}]}, ensure_ascii=False)}\n\n',
                     )
                 ).encode()
             self.send_response(200)
@@ -293,6 +323,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
             return
         if self.path == "/public/v1/feedback":
+            type(self).feedback_payload = payload
             self._json({"feedback_code": "SNOW-E2E", "suppressed": False})
             return
         self._json({"detail": {"code": "not_found"}}, status=404)
@@ -318,6 +349,9 @@ class PublicFrontendE2ETests(TestCase):
         PublicFrontendHandler.chat_stream_release = None
         PublicFrontendHandler.arrival_started = None
         PublicFrontendHandler.arrival_release = None
+        PublicFrontendHandler.feedback_payload = None
+        PublicFrontendHandler.chat_attempts = {}
+        PublicFrontendHandler.presence_resolve_count = 0
 
     def tearDown(self) -> None:
         for gate in (
@@ -506,10 +540,48 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator("#stage-speech .typing-indicator").count(), 0)
             browser.close()
 
-    def test_desktop_mobile_and_narrow_layouts_do_not_overflow(self) -> None:
+    def test_switching_character_keeps_prior_request_in_background_and_defers_presence(self) -> None:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
-            for width, height in ((1280, 800), (390, 844), (320, 720)):
+            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator("#go-in-person-label", has_text="观景区").wait_for(state="visible")
+            self.assertEqual(PublicFrontendHandler.presence_resolve_count, 1)
+            self._configure_model(page)
+
+            PublicFrontendHandler.chat_stream_started = threading.Event()
+            PublicFrontendHandler.chat_stream_release = threading.Event()
+            page.locator("#message-input").fill("后台完成这一轮")
+            page.locator("#send-message").click()
+            self.assertTrue(PublicFrontendHandler.chat_stream_started.wait(timeout=5))
+            page.locator('[data-character="9f5804761c56"]').click()
+            page.locator("#active-character h1", has_text="安卡希雅").wait_for(
+                state="visible"
+            )
+
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
+            self.assertTrue(page.locator("#send-message").is_disabled())
+            self.assertTrue(page.locator("#go-in-person").is_disabled())
+            self.assertTrue(page.locator("#open-movement-shortcuts").is_disabled())
+            self.assertEqual(PublicFrontendHandler.presence_resolve_count, 1)
+
+            PublicFrontendHandler.chat_stream_release.set()
+            page.locator("#request-status").get_by_text("场景已重新读取").wait_for(
+                state="visible"
+            )
+            self.assertEqual(PublicFrontendHandler.presence_resolve_count, 2)
+            self.assertFalse(page.locator("#send-message").is_disabled())
+            self.assertNotIn("晚上好，分析员。", page.locator("#timeline").inner_text())
+            browser.close()
+
+    def test_desktop_200_percent_zoom_mobile_and_narrow_layouts_do_not_overflow(self) -> None:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            # A 1280 CSS-pixel desktop viewport at 200% browser zoom exposes
+            # roughly 640 CSS pixels to layout. Cover that reflow width once,
+            # alongside the physical mobile and narrow-screen breakpoints.
+            for width, height in ((1280, 800), (640, 400), (390, 844), (320, 720)):
                 page = browser.new_page(viewport={"width": width, "height": height})
                 page.goto(self.base_url, wait_until="networkidle")
                 page.locator("#accept-experience-notice").click()
@@ -552,6 +624,405 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator("#open-stage-contacts").get_attribute("aria-expanded"), "true")
             browser.close()
 
+    def test_indexeddb_unavailable_uses_memory_and_chat_still_works(self) -> None:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page()
+            page.add_init_script(
+                """
+                Object.defineProperty(window, "indexedDB", {
+                    configurable: true,
+                    get() {
+                        throw new DOMException("IndexedDB disabled for E2E", "SecurityError");
+                    },
+                });
+                """
+            )
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator("#system-banner").wait_for(state="visible")
+            self.assertIn("本次聊天不会保存", page.locator("#system-banner").inner_text())
+            page.locator("#go-in-person-label", has_text="观景区").wait_for(state="visible")
+            self._configure_model(page)
+            page.locator("#message-input").fill("内存会话仍可聊天")
+            page.locator("#send-message").click()
+            page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(
+                state="visible"
+            )
+            self.assertEqual(page.locator("#timeline .message.user").count(), 1)
+            self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
+            browser.close()
+
+    def test_v090_frontend_contracts_are_non_blocking_and_opt_out_feedback(self) -> None:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+
+            self.assertEqual(page.locator(".stage-dialogue-hint").count(), 0)
+            self.assertIsNone(page.locator("#stage-dialogue").get_attribute("tabindex"))
+            self.assertEqual(
+                page.evaluate("""() => window.__projectSnowTest.escapeHtml(`模型" title="注入'`)"""),
+                "模型&quot; title=&quot;注入&#39;",
+            )
+            request_budget = page.evaluate(
+                """() => {
+                    const requestId = 'de305d54-75b4-431b-adb2-eb6b9e546014';
+                    const message = '当前消息'.repeat(1024);
+                    const statePackage = 's'.repeat(32 * 1024);
+                    const credential = 'k'.repeat(4096);
+                    const history = Array.from({length: 24}, (_, index) => ({
+                        role: index % 2 ? 'assistant' : 'user',
+                        content_blocks: [{type: 'speech', text: '历史消息'.repeat(500)}],
+                    }));
+                    const fitted = window.__projectSnowTest.fitPublicRequestPayload({
+                        request_id: requestId,
+                        credential,
+                        character_id: '25b23cb64398',
+                        message,
+                        content_blocks: [{type: 'speech', text: message}],
+                        recent_history: history,
+                        history_summary: '摘要'.repeat(12000),
+                        state_package: statePackage,
+                    }, {
+                        arrays: [{key: 'recent_history', minimum: 0}],
+                        texts: ['history_summary'],
+                    });
+                    const summarize = window.__projectSnowTest.fitPublicRequestPayload({
+                        request_id: requestId,
+                        credential,
+                        character_id: '25b23cb64398',
+                        turns: history,
+                        previous_summary: '旧摘要'.repeat(12000),
+                        state_package: statePackage,
+                    }, {
+                        arrays: [{key: 'turns', minimum: 2}],
+                        texts: ['previous_summary'],
+                    });
+                    return {
+                        bytes: new TextEncoder().encode(JSON.stringify(fitted)).byteLength,
+                        summarizeBytes: new TextEncoder().encode(JSON.stringify(summarize)).byteLength,
+                        requestId: fitted.request_id,
+                        messagePreserved: fitted.message === message,
+                        statePreserved: fitted.state_package === statePackage,
+                        credentialPreserved: fitted.credential === credential,
+                        historyLength: fitted.recent_history.length,
+                        summarizeTurns: summarize.turns.length,
+                    };
+                }"""
+            )
+            self.assertLessEqual(request_budget["bytes"], 63 * 1024)
+            self.assertLessEqual(request_budget["summarizeBytes"], 63 * 1024)
+            self.assertEqual(request_budget["requestId"], "de305d54-75b4-431b-adb2-eb6b9e546014")
+            self.assertTrue(request_budget["messagePreserved"])
+            self.assertTrue(request_budget["statePreserved"])
+            self.assertTrue(request_budget["credentialPreserved"])
+            self.assertLess(request_budget["historyLength"], 24)
+            self.assertGreaterEqual(request_budget["summarizeTurns"], 2)
+            database = page.evaluate(
+                """async () => {
+                    const request = indexedDB.open('project-snow-public');
+                    const db = await new Promise((resolve, reject) => {
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                    const tx = db.transaction('messages', 'readonly');
+                    return {
+                        version: db.version,
+                        stores: [...db.objectStoreNames],
+                        indexes: [...tx.objectStore('messages').indexNames],
+                    };
+                }"""
+            )
+            self.assertEqual(database["version"], 4)
+            self.assertIn("messages", database["stores"])
+            self.assertIn("by_character_created", database["indexes"])
+            self.assertIn("by_character_segment_created", database["indexes"])
+
+            page.locator("#open-movement-shortcuts").click()
+            page.get_by_role("button", name="商业街一起逛街").click()
+            self.assertEqual(page.locator("#message-input").input_value(), "现在一起去商业街吗？")
+
+            page.locator("#open-info").click()
+            self.assertEqual(page.locator("#info-panel").get_attribute("aria-hidden"), "false")
+            self.assertTrue(page.locator(".chat-panel").evaluate("element => element.inert"))
+            page.locator("#close-info").click()
+            self.assertEqual(page.locator("#info-panel").get_attribute("aria-hidden"), "true")
+            self.assertFalse(page.locator(".chat-panel").evaluate("element => element.inert"))
+
+            page.locator("#open-global-feedback").click()
+            self.assertTrue(page.locator("#feedback-include-context").is_checked())
+            page.locator("#feedback-include-context").uncheck()
+            self.assertTrue(page.locator("#feedback-context-preview").is_hidden())
+            page.locator("#feedback-body").fill("不附带对话的测试反馈")
+            page.locator("#feedback-form button[type=submit]").click()
+            page.locator("#feedback-dialog").wait_for(state="hidden")
+            payload = PublicFrontendHandler.feedback_payload or {}
+            self.assertFalse(payload.get("include_conversation_context"))
+            self.assertNotIn("user_message", payload)
+            self.assertNotIn("assistant_answer", payload)
+            self.assertNotIn("chat_request_id", payload)
+
+            self._configure_model(page)
+            PublicFrontendHandler.chat_stream_started = threading.Event()
+            PublicFrontendHandler.chat_stream_release = threading.Event()
+            page.locator("#message-input").fill("停顿测试")
+            page.locator("#send-message").click()
+            self.assertTrue(PublicFrontendHandler.chat_stream_started.wait(timeout=5))
+            page.wait_for_timeout(150)
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
+            page.locator("#timeline .typing-indicator").wait_for(state="visible")
+            bounds = page.evaluate(
+                """() => {
+                    const outer = document.querySelector('#timeline').getBoundingClientRect();
+                    const inner = document.querySelector('#timeline .typing-indicator-bubble').getBoundingClientRect();
+                    return {inside: inner.left >= outer.left && inner.right <= outer.right};
+                }"""
+            )
+            self.assertTrue(bounds["inside"])
+            self.assertTrue(page.locator("#stop-waiting").is_visible())
+            PublicFrontendHandler.chat_stream_release.set()
+            page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
+            browser.close()
+
+    def test_network_recovery_reuses_request_id_without_duplicate_messages(self) -> None:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page()
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#message-input").fill("断流恢复测试")
+            page.locator("#send-message").click()
+            page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible", timeout=8000)
+            self.assertEqual(len(PublicFrontendHandler.chat_attempts), 1)
+            self.assertEqual(next(iter(PublicFrontendHandler.chat_attempts.values())), 2)
+            self.assertEqual(page.locator("#timeline .message.user").count(), 1)
+            self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
+            browser.close()
+
+    def test_reload_recovers_persisted_request_id_without_a_second_generation(self) -> None:
+        fixed_request_id = "de305d54-75b4-431b-adb2-eb6b9e546014"
+        attempts: list[dict[str, object]] = []
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page()
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.evaluate(
+                """async ({requestId}) => {
+                    const request = indexedDB.open('project-snow-public');
+                    const db = await new Promise((resolve, reject) => {
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                    const characterId = '25b23cb64398';
+                    const segmentId = 'persisted-recovery-segment';
+                    const snapshot = {
+                        request_id: requestId,
+                        provider: 'openai',
+                        model: 'gpt-e2e',
+                        character_id: characterId,
+                        message: '刷新恢复测试',
+                        communication_channel: 'text',
+                        content_blocks: [{type: 'message', text: '刷新恢复测试'}],
+                        recent_history: [],
+                        history_summary: '',
+                        state_package: '',
+                        continuity_decision: '',
+                        local_day_key: '2026-08-19',
+                    };
+                    const tx = db.transaction(['threads', 'messages'], 'readwrite');
+                    tx.objectStore('threads').put({
+                        characterId,
+                        channel: 'text',
+                        turnCount: 0,
+                        conversationSegmentId: segmentId,
+                        localDayKey: '2026-08-19',
+                        messageCount: 1,
+                        lastActiveAt: Date.now(),
+                    });
+                    tx.objectStore('messages').put({
+                        id: 'persisted-recovery-user',
+                        characterId,
+                        role: 'user',
+                        content: '刷新恢复测试',
+                        contentBlocks: [{type: 'message', text: '刷新恢复测试'}],
+                        communicationChannel: 'text',
+                        createdAt: Date.now(),
+                        status: 'pending',
+                        requestId,
+                        requestSnapshot: snapshot,
+                        conversationSegmentId: segmentId,
+                    });
+                    await new Promise((resolve, reject) => {
+                        tx.oncomplete = resolve;
+                        tx.onerror = () => reject(tx.error);
+                        tx.onabort = () => reject(tx.error);
+                    });
+                    db.close();
+                }""",
+                {"requestId": fixed_request_id},
+            )
+
+            def fulfill_chat(route) -> None:
+                payload = json.loads(route.request.post_data or "{}")
+                attempts.append(payload)
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream; charset=utf-8",
+                    body="".join(
+                        (
+                            'event: delta\ndata: {"text":"恢复了同一请求。"}\n\n',
+                            "event: done\ndata: "
+                            + json.dumps(
+                                {
+                                    "truncated": False,
+                                    "communication_channel": "text",
+                                    "content_blocks": [
+                                        {"type": "message", "text": "恢复了同一请求。"}
+                                    ],
+                                    "usage": {"provider_calls": 1},
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n\n",
+                        )
+                    ),
+                )
+
+            page.route("**/public/v1/chat/stream", fulfill_chat)
+            page.reload(wait_until="networkidle")
+            retry = page.locator('[data-retry-message="persisted-recovery-user"]')
+            retry.wait_for(state="visible")
+            self.assertIn("生成失败", page.locator('[data-message-id="persisted-recovery-user"] .meta').inner_text())
+            retry.click()
+            page.locator("#timeline").get_by_text("恢复了同一请求。").wait_for(state="visible")
+
+            self.assertEqual(len(attempts), 1)
+            self.assertEqual(attempts[0]["request_id"], fixed_request_id)
+            self.assertEqual(page.locator("#timeline .message.user").count(), 1)
+            self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
+            persisted = page.evaluate(
+                """async () => {
+                    const request = indexedDB.open('project-snow-public');
+                    const db = await new Promise((resolve, reject) => {
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                    const tx = db.transaction('messages', 'readonly');
+                    const stored = tx.objectStore('messages').get('persisted-recovery-user');
+                    return await new Promise((resolve, reject) => {
+                        tx.oncomplete = () => resolve(stored.result || null);
+                        tx.onerror = () => reject(tx.error);
+                    });
+                }"""
+            )
+            self.assertEqual(persisted["status"], "sent")
+            self.assertIsNone(persisted.get("requestSnapshot"))
+            browser.close()
+
+    def test_invalid_world_state_is_cleared_and_chat_retries_once_with_new_id(self) -> None:
+        attempts: list[dict[str, object]] = []
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page()
+
+            def fulfill_chat(route) -> None:
+                payload = json.loads(route.request.post_data or "{}")
+                attempts.append(payload)
+                if len(attempts) == 1:
+                    body = (
+                        "event: error\n"
+                        'data: {"code":"state_subject_mismatch"}\n\n'
+                    )
+                else:
+                    body = "".join(
+                        (
+                            'event: delta\ndata: {"text":"状态已重新建立。"}\n\n',
+                            "event: done\ndata: "
+                            + json.dumps(
+                                {
+                                    "truncated": False,
+                                    "communication_channel": "text",
+                                    "content_blocks": [
+                                        {"type": "message", "text": "状态已重新建立。"}
+                                    ],
+                                    "usage": {"provider_calls": 1},
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n\n",
+                        )
+                    )
+                route.fulfill(
+                    status=200,
+                    content_type="text/event-stream; charset=utf-8",
+                    body=body,
+                )
+
+            page.route("**/public/v1/chat/stream", fulfill_chat)
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator("#go-in-person-label", has_text="观景区").wait_for(state="visible")
+            page.evaluate(
+                """async () => {
+                    const request = indexedDB.open('project-snow-public');
+                    const db = await new Promise((resolve, reject) => {
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                    const tx = db.transaction('threads', 'readwrite');
+                    tx.objectStore('threads').put({
+                        characterId: 'legacy-v3-thread',
+                        statePackage: 'fixture-state.signature',
+                        legacyStatePackage: 'fixture-state.signature',
+                    });
+                    await new Promise((resolve, reject) => {
+                        tx.oncomplete = resolve;
+                        tx.onerror = () => reject(tx.error);
+                    });
+                }"""
+            )
+            self._configure_model(page)
+            page.locator("#message-input").fill("重新建立状态")
+            page.locator("#send-message").click()
+            page.locator("#timeline").get_by_text("状态已重新建立。").wait_for(
+                state="visible"
+            )
+
+            self.assertEqual(len(attempts), 2)
+            self.assertNotEqual(attempts[0]["request_id"], attempts[1]["request_id"])
+            self.assertTrue(attempts[0]["state_package"])
+            self.assertEqual(attempts[1]["state_package"], "")
+            persisted_state = page.evaluate(
+                """async () => {
+                    const request = indexedDB.open('project-snow-public');
+                    const db = await new Promise((resolve, reject) => {
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                    const tx = db.transaction(['app_state', 'threads'], 'readonly');
+                    const world = tx.objectStore('app_state').get('world');
+                    const legacy = tx.objectStore('threads').get('legacy-v3-thread');
+                    return await new Promise((resolve, reject) => {
+                        tx.oncomplete = () => resolve({
+                            world: world.result || null,
+                            legacy: legacy.result || null,
+                        });
+                        tx.onerror = () => reject(tx.error);
+                    });
+                }"""
+            )
+            self.assertIsNone(persisted_state["world"])
+            self.assertNotIn("statePackage", persisted_state["legacy"])
+            self.assertNotIn("legacyStatePackage", persisted_state["legacy"])
+            self.assertEqual(page.locator("#timeline .message.user").count(), 1)
+            self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
+            browser.close()
+
     def test_presentation_queue_shows_between_text_and_face_to_face_segments(self) -> None:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
@@ -567,6 +1038,18 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator("#timeline .typing-indicator").count(), 1)
             page.locator("#timeline").get_by_text("收到").wait_for(state="visible")
             self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
+            sticker_image = page.locator("#timeline .content-sticker img")
+            self.assertEqual(sticker_image.get_attribute("data-animated"), "true")
+            self.assertTrue(
+                (sticker_image.get_attribute("data-animated-src") or "").endswith(
+                    "#display"
+                )
+            )
+            self.assertFalse(
+                (sticker_image.get_attribute("data-static-src") or "").endswith(
+                    "#display"
+                )
+            )
             page.locator("#go-in-person").click()
             page.locator("#confirm-presence-transition").click()
             page.locator("#in-person-surface").wait_for(state="visible")
@@ -628,15 +1111,33 @@ class PublicFrontendE2ETests(TestCase):
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
             page.locator("#open-contacts").click()
+            panel = page.locator("#contact-panel")
+            page.wait_for_function(
+                "() => document.querySelector('#contact-panel')?.classList.contains('open')"
+            )
+            page.wait_for_function(
+                """() => {
+                    const rect = document.querySelector('#contact-panel')?.getBoundingClientRect();
+                    return Boolean(rect && rect.left >= -1 && rect.right <= innerWidth + 1);
+                }"""
+            )
+            self.assertEqual(page.locator("#open-contacts").get_attribute("aria-expanded"), "true")
+            panel_bounds = panel.evaluate(
+                """element => {
+                    const rect = element.getBoundingClientRect();
+                    return {left: rect.left, right: rect.right, viewport: innerWidth};
+                }"""
+            )
+            self.assertGreaterEqual(panel_bounds["left"], -1)
+            self.assertLessEqual(panel_bounds["right"], panel_bounds["viewport"] + 1)
             contacts = page.locator("#character-list")
             contacts.wait_for(state="visible")
             before = contacts.evaluate(
                 "(element) => ({scrollHeight: element.scrollHeight, clientHeight: element.clientHeight})"
             )
-            contacts.hover()
-            page.mouse.wheel(0, 1600)
-            page.wait_for_timeout(100)
-            after = contacts.evaluate("(element) => element.scrollTop")
+            after = contacts.evaluate(
+                "element => { element.scrollTop = element.scrollHeight; return element.scrollTop; }"
+            )
             self.assertGreater(before["scrollHeight"], before["clientHeight"])
             self.assertGreater(after, 0)
             page.locator('[data-character="fixture-21"]').click()

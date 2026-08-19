@@ -7,9 +7,12 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 import hashlib
 import json
+import logging
 import secrets
+import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -58,11 +61,24 @@ from .public_store import (
     PublicStoreUnavailable,
     RateLimitExceeded,
 )
-from .feedback_mailer import FeedbackMailer
-
-
-ANONYMOUS_COOKIE = "snow_anon"
+ANONYMOUS_COOKIE = "__Host-snow_anon"
+DEVELOPMENT_ANONYMOUS_COOKIE = "snow_anon_dev"
 MAX_BODY_BYTES = 64 * 1024
+REQUEST_BODY_TIMEOUT_SECONDS = 10
+LOGGER = logging.getLogger("snow.public")
+
+def _anonymous_cookie_name(settings: PublicSettings) -> str:
+    return DEVELOPMENT_ANONYMOUS_COOKIE if settings.allow_insecure_dev else ANONYMOUS_COOKIE
+
+
+def _allowed_hosts(settings: PublicSettings) -> frozenset[str]:
+    hosts = {
+        str(urlsplit(origin).hostname or "").casefold()
+        for origin in settings.allowed_origins
+    }
+    # Candidate health and acceptance are intentionally loopback-only.
+    hosts.update({"127.0.0.1", "localhost", "::1"})
+    return frozenset(host for host in hosts if host)
 
 
 def _client_ip(request: Request) -> str:
@@ -120,6 +136,17 @@ def _spoken_feedback_text(blocks: list[dict[str, str]], fallback: str, limit: in
     return redact_sensitive_text(spoken or fallback, limit)
 
 
+def _public_security_disposition(exc: PublicSecurityError) -> tuple[str, int]:
+    message = str(exc)
+    if message == "Public state belongs to another anonymous session":
+        return "state_subject_mismatch", 409
+    if message.startswith("State package") or message.startswith("Public state schema"):
+        return "state_invalid", 422
+    if message.startswith("PUBLIC_"):
+        return "security_configuration_unavailable", 503
+    return "credential_invalid", 401
+
+
 def create_app(
     public_settings: PublicSettings | None = None,
     internal_settings: Settings | None = None,
@@ -129,7 +156,6 @@ def create_app(
     public_settings = public_settings or PublicSettings.from_environment()
     internal_settings = internal_settings or Settings.from_environment()
     store = store or PublicStore(public_settings.database_url)
-    feedback_mailer = FeedbackMailer(public_settings, store)
     provider_http = ProviderHTTPPool()
     chat_service = chat_service or PublicChatService(
         internal_settings,
@@ -138,38 +164,43 @@ def create_app(
     )
     if chat_service is not None and getattr(chat_service, "provider_client", None) is None:
         chat_service.provider_client = provider_http
+    # Verify immutable packages before any URL is mounted.  Subsequent calls
+    # return the in-memory snapshot and never re-hash runtime media.
+    media_startup_status = chat_service.media.verify(force=True)
+    sticker_startup_status = chat_service.stickers.verify(force=True)
+    knowledge_review_path = (
+        Path(__file__).resolve().parents[2]
+        / "config"
+        / "public_knowledge"
+        / "data_license_review.json"
+    )
+    knowledge_review: dict[str, Any] | None = None
+    try:
+        candidate_review = json.loads(knowledge_review_path.read_text(encoding="utf-8"))
+        candidate_sources = candidate_review.get("sources")
+        if (
+            candidate_review.get("schema_version") == "project-snow-data-license-review-1"
+            and candidate_review.get("review_status")
+            == "verified_against_bwiki_source_declaration"
+            and candidate_review.get("license") == "CC BY-NC-SA 4.0"
+            and isinstance(candidate_sources, list)
+            and int(candidate_review.get("source_count") or 0) == len(candidate_sources)
+            and candidate_sources
+            and isinstance(candidate_review.get("modifications"), list)
+            and candidate_review.get("modifications")
+        ):
+            knowledge_review = candidate_review
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        knowledge_review = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         if store.engine is not None and public_settings.auto_create_schema:
             store.create_schema()
             store.cleanup()
-        _app.state.feedback_mailer = feedback_mailer
-        stop_mailer = asyncio.Event()
-        mailer_task: asyncio.Task[None] | None = None
-
-        async def mailer_loop() -> None:
-            while not stop_mailer.is_set():
-                try:
-                    await asyncio.to_thread(feedback_mailer.run_once, limit=10)
-                except PublicStoreUnavailable:
-                    # A transient database restart must not permanently stop
-                    # the worker. The next interval will reclaim due rows.
-                    pass
-                try:
-                    await asyncio.wait_for(stop_mailer.wait(), timeout=30)
-                except TimeoutError:
-                    continue
-
-        if feedback_mailer.configured and store.engine is not None:
-            mailer_task = asyncio.create_task(mailer_loop(), name="public-feedback-mailer")
         try:
             yield
         finally:
-            stop_mailer.set()
-            if mailer_task is not None:
-                mailer_task.cancel()
-                await asyncio.gather(mailer_task, return_exceptions=True)
             chat_service.close()
             await provider_http.close()
 
@@ -186,7 +217,31 @@ def create_app(
     app.state.chat_service = chat_service
     app.state.provider_http = provider_http
     chat_jobs: dict[str, asyncio.Task[dict[str, Any]]] = {}
+    active_subject_requests: dict[str, str] = {}
+    active_subject_lock = asyncio.Lock()
     app.state.chat_jobs = chat_jobs
+    app.state.active_subject_requests = active_subject_requests
+
+    async def acquire_subject_generation(subject: str, operation_id: str) -> bool:
+        """Reserve the subject unless this is a reconnect to the same operation."""
+
+        async with active_subject_lock:
+            owner = active_subject_requests.get(subject)
+            if owner and owner != operation_id:
+                raise HTTPException(
+                    status_code=429,
+                    detail={"code": "subject_generation_busy"},
+                    headers={"Retry-After": "2"},
+                )
+            if owner == operation_id:
+                return False
+            active_subject_requests[subject] = operation_id
+            return True
+
+    async def release_subject_generation(subject: str, operation_id: str) -> None:
+        async with active_subject_lock:
+            if active_subject_requests.get(subject) == operation_id:
+                active_subject_requests.pop(subject, None)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(public_settings.allowed_origins),
@@ -200,7 +255,11 @@ def create_app(
         path = request.url.path
         if path.startswith("/api/"):
             return JSONResponse(status_code=404, content={"detail": {"code": "route_not_public"}})
-        anonymous_id = str(request.cookies.get(ANONYMOUS_COOKIE) or "").strip()
+        request_host = str(request.url.hostname or "").casefold().rstrip(".")
+        if request_host not in _allowed_hosts(public_settings):
+            return JSONResponse(status_code=400, content={"detail": {"code": "host_rejected"}})
+        cookie_name = _anonymous_cookie_name(public_settings)
+        anonymous_id = str(request.cookies.get(cookie_name) or "").strip()
         new_cookie = not is_valid_anonymous_id(anonymous_id)
         if new_cookie:
             anonymous_id = new_anonymous_id()
@@ -219,13 +278,51 @@ def create_app(
                 content_length = MAX_BODY_BYTES + 1
             if content_length > MAX_BODY_BYTES:
                 return JSONResponse(status_code=413, content={"detail": {"code": "request_too_large"}})
-            body = await request.body()
-            if len(body) > MAX_BODY_BYTES:
-                return JSONResponse(status_code=413, content={"detail": {"code": "request_too_large"}})
+            chunks: list[bytes] = []
+            received = 0
+            try:
+                async with asyncio.timeout(REQUEST_BODY_TIMEOUT_SECONDS):
+                    async for chunk in request.stream():
+                        received += len(chunk)
+                        if received > MAX_BODY_BYTES:
+                            return JSONResponse(
+                                status_code=413,
+                                content={"detail": {"code": "request_too_large"}},
+                            )
+                        chunks.append(chunk)
+            except TimeoutError:
+                return JSONResponse(
+                    status_code=408,
+                    content={"detail": {"code": "request_read_timeout"}},
+                )
+            # Starlette dependencies may read the body after this middleware.
+            # Cache only the bounded content so they do not consume the stream.
+            request._body = b"".join(chunks)  # type: ignore[attr-defined]
+            ip_subject = daily_ip_fingerprint(public_settings, _client_ip(request))
+            if path == "/public/v1/feedback":
+                ip_limits = [("feedback_ip_hour", "hour", 20), ("feedback_ip_day", "day", 50)]
+            elif path.startswith("/public/v1/byok/"):
+                ip_limits = [("byok_ip_hour", "hour", 30), ("byok_ip_day", "day", 100)]
+            else:
+                ip_limits = [("write_ip_hour", "hour", 240), ("write_ip_day", "day", 1000)]
+            try:
+                store.consume_limits(ip_subject, ip_limits)
+            except RateLimitExceeded as exc:
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": {
+                            "code": "rate_limit_exceeded",
+                            "scope": exc.scope,
+                            "limit": exc.limit,
+                        }
+                    },
+                    headers={"Retry-After": "60"},
+                )
         response = await call_next(request)
-        if new_cookie:
+        if new_cookie and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             response.set_cookie(
-                ANONYMOUS_COOKIE,
+                cookie_name,
                 anonymous_id,
                 max_age=30 * 24 * 60 * 60,
                 httponly=True,
@@ -234,8 +331,13 @@ def create_app(
                 path="/",
             )
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        if not public_settings.allow_insecure_dev:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
     @app.exception_handler(PublicStoreUnavailable)
@@ -257,6 +359,7 @@ def create_app(
                         "provider_id": spec.provider_id,
                         "display_name": spec.display_name,
                         "documentation_url": spec.documentation_url,
+                        "privacy_url": spec.privacy_url,
                     }
                 )
         return {
@@ -275,7 +378,7 @@ def create_app(
                 "history_rounds_per_request": 12,
             },
             "history_policy": "browser_indexeddb_plaintext",
-            "history_schema": "indexeddb-v3",
+            "history_schema": "indexeddb-v4",
             "state_schema": "public-state-2",
             "media_version": public_settings.media_version,
             "media_manifest_url": (
@@ -285,6 +388,21 @@ def create_app(
             "experience_notice_version": public_settings.experience_notice_version,
             "sticker_version": public_settings.sticker_version,
             "sticker_count": int(sticker_status.get("sticker_count") or 0),
+            "privacy_policy": {
+                "version": public_settings.privacy_policy_version,
+                "effective_at": public_settings.privacy_effective_at,
+                "url": "/privacy/",
+            },
+            "attribution_url": public_settings.attribution_url,
+            "max_provider_calls_per_action": public_settings.max_provider_calls_per_action,
+            "movement_catalog": chat_service.movement_catalog(),
+            "feature_flags": {
+                "joint_movement": True,
+                "request_recovery": True,
+                "sticker_display_derivatives": True,
+                "indexeddb_v4": True,
+                "feedback_context_choice": True,
+            },
             # Keep an unreviewed/private package out of the public URL space.
             "sticker_manifest_url": (
                 f"/media/{public_settings.sticker_version}/manifest.json"
@@ -317,8 +435,66 @@ def create_app(
         return {"characters": chat_service.characters(), "count": 22}
 
     @app.get("/public/v1/stickers")
-    def stickers(section: str = "", cursor: int = 0, limit: int = 60) -> dict[str, Any]:
-        return chat_service.stickers.list(section=section, cursor=cursor, limit=limit)
+    def stickers(
+        section: str = "",
+        character_id: str = "",
+        emotion_tag: str = "",
+        candidate_scope: str = "",
+        q: str = "",
+        cursor: int = 0,
+        limit: int = 60,
+    ) -> dict[str, Any]:
+        if candidate_scope not in {"", "generic", "character"}:
+            raise _error("invalid_sticker_candidate_scope", 422)
+        return chat_service.stickers.list(
+            section=section,
+            character_id=character_id,
+            emotion_tag=emotion_tag,
+            candidate_scope=candidate_scope,
+            q=q,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    @app.get("/public/v1/attributions")
+    def attributions() -> dict[str, Any]:
+        return {
+            "schema_version": "project-snow-attribution-1",
+            "license": "CC BY-NC-SA 4.0",
+            "license_url": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+            "license_source_page": "https://wiki.biligame.com/sonw/%E9%A6%96%E9%A1%B5",
+            "license_source_revision_id": "21546",
+            "noncommercial": True,
+            "avatars": chat_service.media.attributions(),
+            "stickers": chat_service.stickers.attributions(),
+            "knowledge_data": {
+                "version": public_settings.data_version,
+                "notice": "Source-page revisions and transformations are recorded in the immutable data release manifest.",
+                "project_source": "https://github.com/X1aoB/Project_Snow",
+                "url": (
+                    "/public/v1/attributions/data" if knowledge_review is not None else None
+                ),
+                "source_count": (
+                    int(knowledge_review.get("source_count") or 0)
+                    if knowledge_review is not None
+                    else 0
+                ),
+                "modifications": (
+                    list(knowledge_review.get("modifications") or [])
+                    if knowledge_review is not None
+                    else []
+                ),
+            },
+        }
+
+    @app.get("/public/v1/attributions/data")
+    def attribution_data() -> JSONResponse:
+        if knowledge_review is None:
+            raise _error("knowledge_attribution_unavailable", 404)
+        return JSONResponse(
+            content=knowledge_review,
+            headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=60"},
+        )
 
     @app.post("/public/v1/byok/session")
     async def byok_session(request: Request, payload: ByokSessionRequest) -> dict[str, Any]:
@@ -384,30 +560,45 @@ def create_app(
         return chat_service.resolve_presence(payload, request.state.subject_hash)
 
     @app.post("/public/v1/presence/transition")
-    def presence_transition(request: Request, payload: PresenceTransitionRequest) -> dict[str, Any]:
+    async def presence_transition(
+        request: Request, payload: PresenceTransitionRequest
+    ) -> dict[str, Any]:
         cache_id = "presence-transition:" + str(payload.request_id)
         request_body = payload.model_dump(mode="json")
-        claim_status, cached = store.claim_request(
-            cache_id,
-            request.state.subject_hash,
-            _request_hash(request_body),
-        )
-        if claim_status == "conflict":
-            raise _error("request_id_conflict", 409)
-        if claim_status == "processing":
-            raise _error("request_in_progress", 409)
-        if claim_status == "completed" and cached is not None:
-            return {**cached, "idempotent_replay": True}
+        subject = request.state.subject_hash
+        owns_subject = await acquire_subject_generation(subject, cache_id)
+        request_claimed = False
         try:
-            result = chat_service.transition_presence(payload, request.state.subject_hash)
+            claim_status, cached = store.claim_request(
+                cache_id,
+                subject,
+                _request_hash(request_body),
+            )
+            request_claimed = claim_status == "claimed"
+            if claim_status == "conflict":
+                raise _error("request_id_conflict", 409)
+            if claim_status == "processing":
+                raise _error("request_in_progress", 409)
+            if claim_status == "completed" and cached is not None:
+                return {**cached, "idempotent_replay": True}
+            result = chat_service.transition_presence(payload, subject)
             store.complete_request(cache_id, result)
             return result
+        except PublicSecurityError:
+            if request_claimed:
+                store.release_request(cache_id)
+            raise
         except ValueError as exc:
-            store.release_request(cache_id)
+            if request_claimed:
+                store.release_request(cache_id)
             raise _error("invalid_presence_transition", 422) from exc
         except Exception:
-            store.release_request(cache_id)
+            if request_claimed:
+                store.release_request(cache_id)
             raise
+        finally:
+            if owns_subject:
+                await release_subject_generation(subject, cache_id)
 
     @app.post("/public/v1/presence/arrival")
     async def presence_arrival(request: Request, payload: PresenceArrivalRequest) -> dict[str, Any]:
@@ -420,21 +611,25 @@ def create_app(
         )
         cache_id = "presence-arrival:" + str(payload.arrival_id)
         request_body = payload.model_dump(mode="json", exclude={"credential"})
-        claim_status, cached = store.claim_request(
-            cache_id,
-            request.state.subject_hash,
-            _request_hash(request_body),
-        )
-        if claim_status == "conflict":
-            raise _error("request_id_conflict", 409)
-        if claim_status == "processing":
-            raise _error("request_in_progress", 409)
-        if claim_status == "completed" and cached is not None:
-            return {**cached, "idempotent_replay": True}
+        subject = request.state.subject_hash
+        owns_subject = await acquire_subject_generation(subject, cache_id)
+        request_claimed = False
         try:
+            claim_status, cached = store.claim_request(
+                cache_id,
+                subject,
+                _request_hash(request_body),
+            )
+            request_claimed = claim_status == "claimed"
+            if claim_status == "conflict":
+                raise _error("request_id_conflict", 409)
+            if claim_status == "processing":
+                raise _error("request_in_progress", 409)
+            if claim_status == "completed" and cached is not None:
+                return {**cached, "idempotent_replay": True}
             prepared = chat_service.prepare_presence_arrival(
                 payload,
-                request.state.subject_hash,
+                subject,
             )
             if prepared["decision"] == "unnoticed":
                 result = {key: value for key, value in prepared.items() if key != "state"}
@@ -451,28 +646,33 @@ def create_app(
                         model_called=False,
                     )
                 else:
-                    try:
-                        result = await chat_service.finish_presence_arrival(
-                            prepared,
-                            payload,
-                            request.state.subject_hash,
-                            spec,
-                            str(claims["api_key"]),
-                        )
-                    except GenerationBusy as exc:
-                        result = chat_service.failed_presence_arrival(
-                            prepared,
-                            str(exc),
-                            model_called=False,
-                        )
+                    # Let GenerationBusy reach the shared 429 handler while
+                    # no response body has started, so every model-backed
+                    # endpoint carries the same Retry-After contract.
+                    result = await chat_service.finish_presence_arrival(
+                        prepared,
+                        payload,
+                        subject,
+                        spec,
+                        str(claims["api_key"]),
+                    )
             store.complete_request(cache_id, result)
             return result
+        except PublicSecurityError:
+            if request_claimed:
+                store.release_request(cache_id)
+            raise
         except ValueError as exc:
-            store.release_request(cache_id)
+            if request_claimed:
+                store.release_request(cache_id)
             raise _error("invalid_presence_request", 422) from exc
         except Exception:
-            store.release_request(cache_id)
+            if request_claimed:
+                store.release_request(cache_id)
             raise
+        finally:
+            if owns_subject:
+                await release_subject_generation(subject, cache_id)
 
     @app.post("/public/v1/chat/stream")
     async def chat_stream(request: Request, payload: ChatRequest):
@@ -497,18 +697,29 @@ def create_app(
         )
         request_body = payload.model_dump(mode="json", exclude={"credential"})
         request_id = str(payload.request_id)
-        claim_status, cached = store.claim_request(
-            request_id,
-            request.state.subject_hash,
-            _request_hash(request_body),
-        )
+        subject = request.state.subject_hash
+        owns_subject = await acquire_subject_generation(subject, request_id)
+        try:
+            claim_status, cached = store.claim_request(
+                request_id,
+                subject,
+                _request_hash(request_body),
+            )
+        except Exception:
+            if owns_subject:
+                await release_subject_generation(subject, request_id)
+            raise
         if claim_status == "conflict":
+            if owns_subject:
+                await release_subject_generation(subject, request_id)
             raise _error("request_id_conflict", 409)
         idempotent_replay = claim_status in {"processing", "completed"}
         result: dict[str, Any] | None = None
         job: asyncio.Task[dict[str, Any]] | None = None
         if claim_status == "completed" and cached is not None:
             result = {**cached, "idempotent_replay": True}
+            if owns_subject:
+                await release_subject_generation(subject, request_id)
         elif claim_status == "processing":
             job = chat_jobs.get(request_id)
             if job is None:
@@ -516,6 +727,8 @@ def create_app(
                 # the process may have restarted).  The durable claim still
                 # prevents a second provider call; the client can retry the
                 # same UUID until the cached terminal result is available.
+                if owns_subject:
+                    await release_subject_generation(subject, request_id)
                 raise _error("request_in_progress", 409)
         else:
             try:
@@ -525,11 +738,29 @@ def create_app(
                 )
             except Exception:
                 store.release_request(request_id)
+                await release_subject_generation(subject, request_id)
                 raise
 
-            async def run_generation() -> dict[str, Any]:
+            unsafe_category = input_safety_category(payload.message)
+            generation_reserved = False
+            if not unsafe_category:
                 try:
-                    unsafe_category = input_safety_category(payload.message)
+                    await chat_service.gate.acquire()
+                    generation_reserved = True
+                except BaseException:
+                    # Admission happens before the StreamingResponse exists so
+                    # queue saturation can carry an HTTP Retry-After header.
+                    # A client disconnect while waiting must also release the
+                    # durable claim and per-subject owner.
+                    store.release_request(request_id)
+                    await release_subject_generation(subject, request_id)
+                    raise
+
+            async def run_generation() -> dict[str, Any]:
+                started_at = time.monotonic()
+                exception_type = ""
+                terminal_stage = "complete"
+                try:
                     if unsafe_category:
                         generated = chat_service.policy_rejection(
                             payload,
@@ -543,8 +774,11 @@ def create_app(
                             request.state.subject_hash,
                             spec,
                             str(claims["api_key"]),
+                            gate_reserved=generation_reserved,
                         )
                 except GenerationBusy as exc:
+                    exception_type = type(exc).__name__
+                    terminal_stage = "generation_queue"
                     generated = {
                         "request_id": request_id,
                         "character_id": payload.character_id,
@@ -558,6 +792,8 @@ def create_app(
                         "diagnostics": {"error_stage": "generation_queue"},
                     }
                 except CharacterUnavailable:
+                    exception_type = "CharacterUnavailable"
+                    terminal_stage = "character_data"
                     generated = {
                         "request_id": request_id,
                         "character_id": payload.character_id,
@@ -570,7 +806,25 @@ def create_app(
                         "terminal_error": "character_unavailable",
                         "diagnostics": {"error_stage": "character_data"},
                     }
-                except Exception:
+                except PublicSecurityError as exc:
+                    exception_type = type(exc).__name__
+                    terminal_stage = "state_validation"
+                    security_code, _security_status = _public_security_disposition(exc)
+                    generated = {
+                        "request_id": request_id,
+                        "character_id": payload.character_id,
+                        "provider": spec.provider_id,
+                        "model": public_model,
+                        "communication_channel": payload.communication_channel,
+                        "answer": "",
+                        "content_blocks": [],
+                        "state_package": "",
+                        "terminal_error": security_code,
+                        "diagnostics": {"error_stage": "state_validation"},
+                    }
+                except Exception as exc:
+                    exception_type = type(exc).__name__
+                    terminal_stage = "generation"
                     generated = {
                         "request_id": request_id,
                         "character_id": payload.character_id,
@@ -585,7 +839,9 @@ def create_app(
                     }
                 try:
                     store.complete_request(request_id, generated)
-                except PublicStoreUnavailable:
+                except PublicStoreUnavailable as exc:
+                    exception_type = type(exc).__name__
+                    terminal_stage = "idempotency_store"
                     # Do not stream a successful answer when the durable
                     # idempotency record cannot be written. Public chat is
                     # intentionally fail-closed while PostgreSQL is down.
@@ -596,13 +852,66 @@ def create_app(
                         "terminal_error": "public_database_unavailable",
                         "diagnostics": {"error_stage": "idempotency_store"},
                     }
+                diagnostics = (
+                    generated.get("diagnostics")
+                    if isinstance(generated.get("diagnostics"), dict)
+                    else {}
+                )
+                timings = diagnostics.get("timings_ms")
+                provider_calls = (
+                    timings.get("provider_http_calls")
+                    if isinstance(timings, dict)
+                    else 0
+                )
+                LOGGER.info(
+                    json.dumps(
+                        {
+                            "event": "public_generation_complete",
+                            "request_id": request_id,
+                            "character_id": payload.character_id,
+                            "stage": terminal_stage,
+                            "exception_type": exception_type or None,
+                            "terminal_error": str(generated.get("terminal_error") or ""),
+                            "elapsed_ms": max(
+                                0, int((time.monotonic() - started_at) * 1000)
+                            ),
+                            "provider_calls": (
+                                provider_calls
+                                if isinstance(provider_calls, int)
+                                and not isinstance(provider_calls, bool)
+                                and provider_calls >= 0
+                                else 0
+                            ),
+                        },
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    )
+                )
                 return generated
 
-            job = asyncio.create_task(run_generation(), name=f"public-chat:{request_id}")
+            async def run_reserved_generation() -> dict[str, Any]:
+                try:
+                    return await run_generation()
+                finally:
+                    if generation_reserved:
+                        chat_service.gate.release()
+
+            try:
+                job = asyncio.create_task(
+                    run_reserved_generation(), name=f"public-chat:{request_id}"
+                )
+            except Exception:
+                if generation_reserved:
+                    chat_service.gate.release()
+                store.release_request(request_id)
+                await release_subject_generation(subject, request_id)
+                raise
             chat_jobs[request_id] = job
 
             def forget_job(completed: asyncio.Task[dict[str, Any]]) -> None:
                 chat_jobs.pop(request_id, None)
+                if active_subject_requests.get(subject) == request_id:
+                    active_subject_requests.pop(subject, None)
                 # Retrieve a possible storage failure so a disconnected SSE
                 # client cannot leave an unobserved task exception behind.
                 if not completed.cancelled():
@@ -634,12 +943,18 @@ def create_app(
                 return
             result_payload = resolved
             if result_payload.get("terminal_error"):
+                terminal_error = str(result_payload["terminal_error"])
                 yield _sse(
                     "error",
                     {
-                        "code": result_payload["terminal_error"],
+                        "code": terminal_error,
                         "retryable": True,
                         "idempotent_replay": idempotent_replay,
+                        **(
+                            {"retry_after_seconds": 2}
+                            if terminal_error.startswith("generation_queue_")
+                            else {}
+                        ),
                     },
                 )
                 return
@@ -671,6 +986,9 @@ def create_app(
                             "caption": str(block.get("caption") or ""),
                             "src": str(block.get("src") or ""),
                             "thumbnail_src": str(block.get("thumbnail_src") or ""),
+                            "display_src": str(block.get("display_src") or ""),
+                            "display_mime_type": str(block.get("display_mime_type") or ""),
+                            "display_animated": bool(block.get("display_animated")),
                             "animated": bool(block.get("animated")),
                         },
                     )
@@ -693,16 +1011,65 @@ def create_app(
                 if result_payload.get("state_event"):
                     state_event_payload["state_event"] = result_payload["state_event"]
                 yield _sse("state", state_event_payload)
+            internal_diagnostics = (
+                result_payload.get("diagnostics")
+                if isinstance(result_payload.get("diagnostics"), dict)
+                else {}
+            )
+            raw_usage = (
+                result_payload.get("usage")
+                if isinstance(result_payload.get("usage"), dict)
+                else {}
+            )
+            safe_usage: dict[str, int] = {}
+            for key in (
+                "input_tokens",
+                "output_tokens",
+                "total_tokens",
+                "prompt_tokens",
+                "completion_tokens",
+            ):
+                value = raw_usage.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    safe_usage[key] = value
+            timings = internal_diagnostics.get("timings_ms")
+            provider_calls = (
+                timings.get("provider_http_calls")
+                if isinstance(timings, dict)
+                else 0
+            )
+            safe_usage["provider_calls"] = (
+                min(public_settings.max_provider_calls_per_action, provider_calls)
+                if isinstance(provider_calls, int)
+                and not isinstance(provider_calls, bool)
+                and provider_calls >= 0
+                else 0
+            )
             yield _sse(
                 "done",
                 {
                     "truncated": bool(result_payload.get("truncated")),
-                    "degraded_services": result_payload.get("degraded_services") or [],
-                    "usage": result_payload.get("usage") or {},
+                    "usage": safe_usage,
                     "safety_category": result_payload.get("safety_category"),
                     "communication_channel": result_payload.get("communication_channel", "text"),
                     "content_blocks": content_blocks,
-                    "diagnostics": result_payload.get("diagnostics") or {},
+                    "validation_disposition": str(
+                        result_payload.get("validation_disposition")
+                        or internal_diagnostics.get("validation_disposition")
+                        or "accepted"
+                    ),
+                    "movement_status": (
+                        result_payload.get("movement_status")
+                        if isinstance(result_payload.get("movement_status"), dict)
+                        else {
+                            "status": str(
+                                internal_diagnostics.get("state_update_status") or "none"
+                            )
+                        }
+                    ),
+                    "recovery_action": str(
+                        result_payload.get("recovery_action") or "none"
+                    ),
                 },
             )
 
@@ -723,31 +1090,40 @@ def create_app(
         )
         cache_id = "chat-summary:" + str(payload.request_id)
         request_body = payload.model_dump(mode="json", exclude={"credential"})
-        claim_status, cached = store.claim_request(
-            cache_id,
-            request.state.subject_hash,
-            _request_hash(request_body),
-        )
-        if claim_status == "conflict":
-            raise _error("request_id_conflict", 409)
-        if claim_status == "processing":
-            raise _error("request_in_progress", 409)
-        if claim_status == "completed" and cached is not None:
-            return {**cached, "idempotent_replay": True}
+        subject = request.state.subject_hash
+        owns_subject = await acquire_subject_generation(subject, cache_id)
+        request_claimed = False
         try:
+            claim_status, cached = store.claim_request(
+                cache_id,
+                subject,
+                _request_hash(request_body),
+            )
+            request_claimed = claim_status == "claimed"
+            if claim_status == "conflict":
+                raise _error("request_id_conflict", 409)
+            if claim_status == "processing":
+                raise _error("request_in_progress", 409)
+            if claim_status == "completed" and cached is not None:
+                return {**cached, "idempotent_replay": True}
             # Summaries are extra model calls and therefore consume the same
             # daily 200-call budget as chat, but deliberately do not touch the
             # hourly 50-round bucket.
-            store.consume_limits(request.state.subject_hash, [("chat_day", "day", 200)])
+            store.consume_limits(subject, [("chat_day", "day", 200)])
             result = await chat_service.summarize(payload, spec, str(claims["api_key"]))
             store.complete_request(cache_id, result)
             return {**result, "idempotent_replay": False}
         except ProviderRequestError as exc:
-            store.release_request(cache_id)
+            if request_claimed:
+                store.release_request(cache_id)
             raise _error(exc.code, exc.status_code) from exc
         except Exception:
-            store.release_request(cache_id)
+            if request_claimed:
+                store.release_request(cache_id)
             raise
+        finally:
+            if owns_subject:
+                await release_subject_generation(subject, cache_id)
 
     @app.post("/public/v1/feedback")
     async def feedback(request: Request, payload: FeedbackRequest) -> dict[str, Any]:
@@ -780,7 +1156,11 @@ def create_app(
         user_message = redact_sensitive_text(payload.user_message, 2000)
         if not user_message and user_blocks:
             user_message = redact_sensitive_text(
-                "\n".join(block["text"] for block in user_blocks),
+                "\n".join(
+                    str(block.get("text") or "")
+                    for block in user_blocks
+                    if str(block.get("text") or "").strip()
+                ),
                 2000,
             )
         context = {
@@ -869,7 +1249,17 @@ def create_app(
         data_ok = all(data_status.get(name) for name in required_data) and (
             public_settings.allow_insecure_dev or manifest_version == public_settings.data_version
         )
-        ready_ok = database_ok and data_ok and not missing
+        media_ok = media_startup_status.get("status") == "ok"
+        stickers_ok = sticker_startup_status.get("status") == "ok"
+        knowledge_ok = knowledge_review is not None
+        ready_ok = (
+            database_ok
+            and data_ok
+            and media_ok
+            and stickers_ok
+            and knowledge_ok
+            and not missing
+        )
         if not ready_ok:
             response.status_code = 503
         return {
@@ -877,6 +1267,9 @@ def create_app(
             "database": "ok" if database_ok else "unavailable",
             "data": "ok" if data_ok else "unavailable",
             "data_artifacts": data_status,
+            "media": "ok" if media_ok else "unavailable",
+            "stickers": "ok" if stickers_ok else "unavailable",
+            "knowledge_attribution": "ok" if knowledge_ok else "unavailable",
             "data_version": public_settings.data_version,
             "manifest_version": manifest_version,
             "missing_configuration": missing,
@@ -910,9 +1303,10 @@ def create_app(
 
     @app.exception_handler(PublicSecurityError)
     async def security_error(_request: Request, exc: PublicSecurityError):
+        code, http_status = _public_security_disposition(exc)
         return JSONResponse(
-            status_code=401,
-            content={"detail": {"code": "credential_invalid", "message": str(exc)}},
+            status_code=http_status,
+            content={"detail": {"code": code}},
         )
 
     @app.exception_handler(ProviderRequestError)
@@ -924,11 +1318,16 @@ def create_app(
         return JSONResponse(
             status_code=429,
             content={"detail": {"code": "rate_limit_exceeded", "scope": exc.scope, "limit": exc.limit}},
+            headers={"Retry-After": "60"},
         )
 
     @app.exception_handler(GenerationBusy)
     async def generation_busy(_request: Request, exc: GenerationBusy):
-        return JSONResponse(status_code=503, content={"detail": {"code": str(exc)}})
+        return JSONResponse(
+            status_code=429,
+            content={"detail": {"code": str(exc), "retry_after_seconds": 2}},
+            headers={"Retry-After": "2"},
+        )
 
     @app.exception_handler(CharacterUnavailable)
     async def character_unavailable(_request: Request, _exc: CharacterUnavailable):
@@ -947,7 +1346,7 @@ def create_app(
     frontend_path = app_root / "public_frontend"
     shared_design_path = app_root / "frontend" / "shared"
     immersive_assets_path = app_root / "frontend" / "assets" / "immersive"
-    if public_settings.media_root.is_dir():
+    if public_settings.media_root.is_dir() and media_startup_status.get("status") == "ok":
         app.mount(
             f"/media/{public_settings.media_version}",
             StaticFiles(directory=public_settings.media_root, html=False),
@@ -955,7 +1354,7 @@ def create_app(
         )
     if (
         public_settings.sticker_root.is_dir()
-        and chat_service.stickers.verify().get("status") == "ok"
+        and sticker_startup_status.get("status") == "ok"
     ):
         app.mount(
             f"/media/{public_settings.sticker_version}",

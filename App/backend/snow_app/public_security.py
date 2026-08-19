@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import hmac
 import json
+import ipaddress
 import re
 import secrets
 import unicodedata
@@ -130,7 +131,15 @@ def open_byok_credential(
 def sign_state(settings: PublicSettings, payload: dict[str, Any]) -> str:
     if not settings.state_hmac_key:
         raise PublicSecurityError("PUBLIC_STATE_HMAC_KEY is not configured")
-    body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    signed_payload = dict(payload)
+    if settings.state_key_id:
+        signed_payload["state_key_id"] = settings.state_key_id
+    body = json.dumps(
+        signed_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
     signature = hmac.new(settings.state_hmac_key, body, hashlib.sha256).digest()
     return f"{_b64encode(body)}.{_b64encode(signature)}"
 
@@ -146,15 +155,31 @@ def verify_state(settings: PublicSettings, token: str | None) -> dict[str, Any]:
         signature = _b64decode(encoded_signature)
     except Exception as exc:
         raise PublicSecurityError("State package is malformed") from exc
-    expected = hmac.new(settings.state_hmac_key, body, hashlib.sha256).digest()
-    if not hmac.compare_digest(signature, expected):
-        raise PublicSecurityError("State package signature is invalid")
     try:
         payload = json.loads(body)
     except json.JSONDecodeError as exc:
         raise PublicSecurityError("State package is malformed") from exc
     if not isinstance(payload, dict):
         raise PublicSecurityError("State package must contain an object")
+    # ``_key_id`` was used by an unreleased rotation prototype.  Continue to
+    # accept it so a staged candidate can always be rolled forward safely.
+    key_id = str(payload.get("state_key_id") or payload.get("_key_id") or "")
+    candidate_keys: list[bytes] = []
+    if not key_id or key_id == settings.state_key_id:
+        candidate_keys.append(settings.state_hmac_key)
+    if (
+        settings.state_hmac_previous_key
+        and (not key_id or key_id == settings.state_previous_key_id)
+    ):
+        candidate_keys.append(settings.state_hmac_previous_key)
+    if not candidate_keys or not any(
+        hmac.compare_digest(
+            signature,
+            hmac.new(candidate_key, body, hashlib.sha256).digest(),
+        )
+        for candidate_key in candidate_keys
+    ):
+        raise PublicSecurityError("State package signature is invalid")
     return payload
 
 
@@ -191,7 +216,12 @@ async def verify_turnstile(
     action: str,
 ) -> bool:
     if settings.allow_insecure_dev and token == "development-bypass":
-        return True
+        if remote_ip == "testclient":
+            return True
+        try:
+            return ipaddress.ip_address(remote_ip).is_loopback
+        except ValueError:
+            return False
     if not settings.turnstile_secret or not token:
         return False
     try:
@@ -210,7 +240,27 @@ async def verify_turnstile(
     if not bool(payload.get("success")):
         return False
     returned_action = str(payload.get("action") or "")
-    return not returned_action or returned_action == action
+    returned_hostname = str(payload.get("hostname") or "").casefold().rstrip(".")
+    if not returned_action or not hmac.compare_digest(returned_action, action):
+        return False
+    if not returned_hostname or not hmac.compare_digest(
+        returned_hostname,
+        settings.turnstile_hostname.casefold().rstrip("."),
+    ):
+        return False
+    challenge_timestamp = str(payload.get("challenge_ts") or "").strip()
+    if not challenge_timestamp:
+        return False
+    try:
+        challenged_at = datetime.fromisoformat(challenge_timestamp.replace("Z", "+00:00"))
+        if challenged_at.tzinfo is None:
+            challenged_at = challenged_at.replace(tzinfo=UTC)
+        age = datetime.now(UTC) - challenged_at.astimezone(UTC)
+    except ValueError:
+        return False
+    return timedelta(seconds=-30) <= age <= timedelta(
+        seconds=settings.turnstile_max_age_seconds
+    )
 
 
 _UNSAFE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (

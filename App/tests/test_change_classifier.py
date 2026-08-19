@@ -36,6 +36,22 @@ class ChangeClassifierTests(TestCase):
         self.assertTrue(result["deploy"])
         self.assertFalse(result["app_image"])
 
+    def test_release_artifact_digest_index_is_a_deployment_change(self) -> None:
+        result = classify(["App/config/public_release_artifacts.json"])
+        self.assertTrue(result["deploy"])
+        self.assertFalse(result["app_image"])
+
+    def test_root_release_helpers_are_deployment_changes(self) -> None:
+        for path in (
+            "App/scripts/bootstrap-release-runner.ps1",
+            "App/scripts/bootstrap_release_host.py",
+            "App/scripts/install_release_archive.py",
+        ):
+            with self.subTest(path=path):
+                result = classify([path])
+                self.assertTrue(result["deploy"])
+                self.assertFalse(result["app_image"])
+
     def test_promotion_script_is_a_deployment_change(self) -> None:
         result = classify(["App/scripts/promote.ps1"])
         self.assertTrue(result["deploy"])

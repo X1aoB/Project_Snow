@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from hashlib import sha256
+from hashlib import sha1, sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -9,10 +9,47 @@ from unittest import TestCase
 from PIL import Image
 
 from backend.snow_app.public_media import PublicMediaCatalog
-from scripts.build_avatar_media_release import build_release
+from scripts.build_avatar_media_release import _source_sha1_matches, build_release
+
+
+def _provenance(name: str = "测试.png") -> dict[str, object]:
+    return {
+        "file_page_url": f"https://wiki.biligame.com/sonw/%E6%96%87%E4%BB%B6:{name}",
+        "source_image_url": "https://patchwiki.biligame.com/images/sonw/test.png",
+        "source_revision_id": "12345",
+        "source_revision_timestamp": "2026-08-19T00:00:00Z",
+        "source_uploader": "WikiUser",
+        "source_sha1": "a" * 40,
+        "original_sha1": "a" * 40,
+        "original_sha256": "b" * 64,
+        "license": "CC BY-NC-SA 4.0",
+        "license_version": "4.0",
+        "license_status": "verified_site_policy_no_page_exception",
+        "license_source_page": "https://wiki.biligame.com/sonw/%E9%A6%96%E9%A1%B5",
+        "license_source_url": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+        "license_source_revision_id": "21546",
+        "transformations": ["square crop", "WebP conversion"],
+    }
+
+
+def _release_manifest(characters: list[dict], analyst: dict | None = None) -> dict:
+    return {
+        "schema_version": "project-snow-avatar-media-3",
+        "media_version": "test-avatar",
+        "private_candidate": False,
+        "license_review_status": "verified_public_release",
+        "characters": characters,
+        **({"analyst": analyst} if analyst is not None else {}),
+    }
 
 
 class PublicMediaCatalogTests(TestCase):
+    def test_mediawiki_source_sha1_gate_rejects_corrupted_bytes(self) -> None:
+        content = b"reviewed-avatar-source"
+        declared = sha1(content).hexdigest()
+        self.assertTrue(_source_sha1_matches(content, declared))
+        self.assertFalse(_source_sha1_matches(content + b"tampered", declared))
+
     @staticmethod
     def _write_analyst_release(root: Path, *, license_status: str = "verified_explicit") -> None:
         avatar_root = root / "avatars"
@@ -37,9 +74,7 @@ class PublicMediaCatalogTests(TestCase):
             "thumbnail_sha256": sha256(files[0].read_bytes()).hexdigest(),
             "stage_path": f"avatars/{character_id}-200.webp",
             "stage_sha256": sha256(files[1].read_bytes()).hexdigest(),
-            "source_page": "https://example.invalid/source",
-            "license": "CC BY-NC-SA",
-            "license_version": "version unspecified by source",
+            **_provenance(),
         }
         analyst = {
             "asset_id": "analyst-default",
@@ -48,17 +83,11 @@ class PublicMediaCatalogTests(TestCase):
             "thumbnail_sha256": sha256(files[2].read_bytes()).hexdigest(),
             "stage_path": "analyst/analyst-default-200.webp",
             "stage_sha256": sha256(files[3].read_bytes()).hexdigest(),
-            "source_page": "https://wiki.biligame.com/sonw/%E6%96%87%E4%BB%B6:%E5%88%86%E6%9E%90%E5%91%98%E5%A4%B4%E5%83%8F.png",
-            "source_url": "https://patchwiki.biligame.com/images/sonw/1/14/test.png",
+            **_provenance("%E5%88%86%E6%9E%90%E5%91%98%E5%A4%B4%E5%83%8F.png"),
             "source_revision_id": "6667",
-            "license": "CC BY-NC-SA 4.0",
-            "license_version": "4.0",
             "license_status": license_status,
-            "license_source_page": "https://wiki.biligame.com/sonw/%E9%A6%96%E9%A1%B5",
-            "license_source_url": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
-            "license_source_revision_id": "21546",
         }
-        manifest = {"media_version": "test-avatar", "character_count": 1, "characters": [row], "analyst": analyst}
+        manifest = _release_manifest([row], analyst)
         manifest_path = root / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
         checksum_paths = [manifest_path, *files]
@@ -88,13 +117,11 @@ class PublicMediaCatalogTests(TestCase):
                         "thumbnail_sha256": sha256((avatar_root / f"{character_id}-96.webp").read_bytes()).hexdigest(),
                         "stage_path": f"avatars/{character_id}-200.webp",
                         "stage_sha256": sha256((avatar_root / f"{character_id}-200.webp").read_bytes()).hexdigest(),
-                        "source_page": "https://example.invalid/source",
-                        "license": "CC BY-NC-SA",
-                        "license_version": "version unspecified by source",
+                        **_provenance(),
                     }
                 )
             (root / "manifest.json").write_text(
-                json.dumps({"media_version": "test-avatar", "characters": rows}),
+                json.dumps(_release_manifest(rows)),
                 encoding="utf-8",
             )
             checksum_paths = [root / "manifest.json", *sorted(avatar_root.glob("*.webp"))]
@@ -170,6 +197,32 @@ class PublicMediaCatalogTests(TestCase):
             self.assertTrue(analyst["src"].endswith("analyst-default-200.webp"))
             self.assertEqual(analyst["license_version"], "4.0")
             self.assertEqual(analyst["license_source_revision_id"], "21546")
+
+    def test_avatar_manifest_rejects_inconsistent_source_sha1_evidence(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_analyst_release(root)
+            manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+            manifest["characters"][0]["source_sha1"] = "0" * 40
+            (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            checksum_paths = [
+                root / "manifest.json",
+                *sorted((root / "avatars").glob("*.webp")),
+                *sorted((root / "analyst").glob("*.webp")),
+            ]
+            (root / "SHA256SUMS").write_text(
+                "".join(
+                    f"{sha256(path.read_bytes()).hexdigest()}  {path.relative_to(root).as_posix()}\n"
+                    for path in checksum_paths
+                ),
+                encoding="utf-8",
+            )
+            catalog = PublicMediaCatalog(
+                root, "test-avatar", ("a" * 12,), require_analyst=True
+            )
+            status = catalog.verify(force=True)
+            self.assertEqual(status["status"], "unavailable")
+            self.assertIn("character_license_unverified:" + "a" * 12, status["errors"])
 
     def test_unverified_analyst_license_hides_url_and_degrades_package(self) -> None:
         with TemporaryDirectory() as directory:

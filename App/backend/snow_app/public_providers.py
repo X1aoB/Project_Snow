@@ -65,19 +65,45 @@ class ProviderSpec:
     display_name: str
     base_url: str
     documentation_url: str
+    privacy_url: str
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
-    "openai": ProviderSpec("openai", "OpenAI", "https://api.openai.com/v1", "https://platform.openai.com/docs"),
-    "deepseek": ProviderSpec("deepseek", "DeepSeek", "https://api.deepseek.com/v1", "https://api-docs.deepseek.com/"),
+    "openai": ProviderSpec(
+        "openai",
+        "OpenAI",
+        "https://api.openai.com/v1",
+        "https://platform.openai.com/docs",
+        "https://openai.com/policies/privacy-policy/",
+    ),
+    "deepseek": ProviderSpec(
+        "deepseek",
+        "DeepSeek",
+        "https://api.deepseek.com/v1",
+        "https://api-docs.deepseek.com/",
+        "https://cdn.deepseek.com/policies/zh-CN/deepseek-privacy-policy.html",
+    ),
     "dashscope": ProviderSpec(
         "dashscope",
         "阿里云百炼",
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "https://help.aliyun.com/zh/model-studio/",
+        "https://www.alibabacloud.com/help/en/legal/latest/privacy-policy",
     ),
-    "zhipu": ProviderSpec("zhipu", "智谱", "https://open.bigmodel.cn/api/paas/v4", "https://open.bigmodel.cn/dev/api"),
-    "moonshot": ProviderSpec("moonshot", "Moonshot", "https://api.moonshot.cn/v1", "https://platform.moonshot.cn/docs"),
+    "zhipu": ProviderSpec(
+        "zhipu",
+        "智谱",
+        "https://open.bigmodel.cn/api/paas/v4",
+        "https://open.bigmodel.cn/dev/api",
+        "https://docs.bigmodel.cn/cn/terms/privacy-policy",
+    ),
+    "moonshot": ProviderSpec(
+        "moonshot",
+        "Moonshot",
+        "https://api.moonshot.cn/v1",
+        "https://platform.moonshot.cn/docs",
+        "https://platform.kimi.com/docs/agreement/userprivacy",
+    ),
 }
 
 

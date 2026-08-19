@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from datetime import UTC, datetime
-from hashlib import sha256
+from hashlib import sha1, sha256
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -17,11 +18,30 @@ REGISTRY_PATH = APP_ROOT / "backend" / "snow_app" / "mvp_character_registry.json
 DEFAULT_SOURCE_ROOT = APP_ROOT / "frontend" / "assets" / "characters"
 DEFAULT_ANALYST_SOURCE_ROOT = APP_ROOT / "frontend" / "assets" / "analyst"
 DEFAULT_OUTPUT_ROOT = APP_ROOT / "media" / "releases"
-DEFAULT_VERSION = "2026.08.17.avatar.2"
+DEFAULT_VERSION = "2026.08.19.avatar.1"
 
 
 def _digest(content: bytes) -> str:
     return sha256(content).hexdigest()
+
+
+def _base36(number: int) -> str:
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+    output = ""
+    while number:
+        number, remainder = divmod(number, 36)
+        output = alphabet[remainder] + output
+    return output or "0"
+
+
+def _source_sha1_matches(content: bytes, declared: str) -> bool:
+    digest = sha1(content).hexdigest()
+    normalized = str(declared or "").casefold().strip()
+    if re.fullmatch(r"[0-9a-f]{40}", normalized):
+        return normalized == digest
+    if re.fullmatch(r"[0-9a-z]{1,31}", normalized):
+        return normalized.lstrip("0") == _base36(int(digest, 16)).lstrip("0")
+    return False
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -46,6 +66,55 @@ def _webp(source: Path, size: int, focus_x: int, focus_y: int) -> bytes:
         return output.getvalue()
 
 
+def _validated_source(source: dict[str, Any], source_path: Path, identity: str) -> dict[str, Any]:
+    """Fail closed unless a fixed Wiki file revision and license were audited."""
+    if not bool(source.get("publishable")):
+        raise ValueError(f"avatar is not marked publishable: {identity}")
+    if str(source.get("license_status") or "").casefold() not in {
+        "verified",
+        "verified_explicit",
+        "verified_site_policy_no_page_exception",
+    }:
+        raise ValueError(f"avatar license review is incomplete: {identity}")
+    required = {
+        "file_page_url": str(source.get("file_page_url") or source.get("source_page") or ""),
+        "source_image_url": str(source.get("source_image_url") or source.get("source_url") or ""),
+        "source_revision_id": str(source.get("source_revision_id") or ""),
+        "source_revision_timestamp": str(source.get("source_revision_timestamp") or ""),
+        "source_uploader": str(source.get("source_uploader") or source.get("source_author") or ""),
+        "source_sha1": str(source.get("source_sha1") or "").casefold(),
+        "original_sha1": str(source.get("original_sha1") or "").casefold(),
+        "original_sha256": str(source.get("original_sha256") or "").casefold(),
+        "license_source_revision_id": str(source.get("license_source_revision_id") or ""),
+    }
+    if not required["file_page_url"].startswith("https://wiki.biligame.com/sonw/"):
+        raise ValueError(f"avatar file page is missing: {identity}")
+    if not required["source_image_url"].startswith("https://"):
+        raise ValueError(f"avatar source image URL is missing: {identity}")
+    if not required["source_revision_id"].isdigit() or not required["source_revision_timestamp"]:
+        raise ValueError(f"avatar source revision is missing: {identity}")
+    if required["source_uploader"].casefold() in {"", "unknown", "未知"}:
+        raise ValueError(f"avatar source uploader is missing: {identity}")
+    if not required["license_source_revision_id"].isdigit():
+        raise ValueError(f"avatar license source revision is missing: {identity}")
+    if str(source.get("license") or "").strip() != "CC BY-NC-SA 4.0":
+        raise ValueError(f"avatar license must be recorded explicitly: {identity}")
+    if str(source.get("license_version") or "").strip() != "4.0":
+        raise ValueError(f"avatar license version is missing: {identity}")
+    if not str(source.get("license_source_page") or "").startswith("https://wiki.biligame.com/"):
+        raise ValueError(f"avatar license source page is missing: {identity}")
+    if str(source.get("license_source_url") or "") != "https://creativecommons.org/licenses/by-nc-sa/4.0/":
+        raise ValueError(f"avatar license source URL is missing: {identity}")
+    content = source_path.read_bytes()
+    if not _source_sha1_matches(content, required["source_sha1"]):
+        raise ValueError(f"avatar MediaWiki SHA1 mismatch: {identity}")
+    if sha1(content).hexdigest() != required["original_sha1"]:
+        raise ValueError(f"avatar source SHA1 mismatch: {identity}")
+    if _digest(content) != required["original_sha256"]:
+        raise ValueError(f"avatar source SHA256 mismatch: {identity}")
+    return {**source, **required}
+
+
 def _load_verified_analyst_source(source_root: Path) -> tuple[dict[str, Any], Path]:
     metadata_path = source_root / "analyst.json"
     source_path = source_root / "analyst-default.png"
@@ -54,26 +123,7 @@ def _load_verified_analyst_source(source_root: Path) -> tuple[dict[str, Any], Pa
             f"analyst source is incomplete: {metadata_path} and {source_path}"
         )
     source = json.loads(metadata_path.read_text(encoding="utf-8"))
-    if not bool(source.get("publishable")):
-        raise ValueError("analyst avatar is not marked publishable")
-    license_status = str(source.get("license_status") or "").casefold()
-    if license_status not in {
-        "verified",
-        "verified_explicit",
-        "verified_site_policy_no_page_exception",
-    }:
-        raise ValueError("analyst avatar license review is incomplete")
-    if str(source.get("license") or "").strip() != "CC BY-NC-SA 4.0":
-        raise ValueError("analyst avatar license must be recorded explicitly")
-    if str(source.get("license_version") or "").strip() != "4.0":
-        raise ValueError("analyst avatar license version is missing")
-    if not str(source.get("license_source_page") or "").startswith("https://wiki.biligame.com/"):
-        raise ValueError("analyst avatar license source page is missing")
-    if str(source.get("license_source_url") or "") != "https://creativecommons.org/licenses/by-nc-sa/4.0/":
-        raise ValueError("analyst avatar license source URL is missing")
-    if not str(source.get("license_source_revision_id") or "").strip():
-        raise ValueError("analyst avatar license source revision is missing")
-    return source, source_path
+    return _validated_source(source, source_path, "analyst-default"), source_path
 
 
 def build_release(
@@ -117,8 +167,7 @@ def build_release(
         source_path = source_root / f"{character_id}.png"
         if not source_path.is_file():
             raise FileNotFoundError(source_path)
-        if not bool(source.get("publishable")):
-            raise ValueError(f"avatar is not marked publishable: {character_id}")
+        source = _validated_source(source, source_path, character_id)
 
         original_content = source_path.read_bytes()
         focus_x = int(source.get("portrait_focus_x") or 50)
@@ -136,6 +185,7 @@ def build_release(
             {
                 "character_id": character_id,
                 "character_name": str(character["display_name"]),
+                "original_sha1": sha1(original_content).hexdigest(),
                 "original_sha256": _digest(original_content),
                 "original_width": source_width,
                 "original_height": source_height,
@@ -152,12 +202,25 @@ def build_release(
                 "portrait_scale": float(source.get("portrait_scale") or 1.0),
                 "portrait_focus_x": focus_x,
                 "portrait_focus_y": focus_y,
-                "source_page": str(source.get("source_page") or ""),
-                "source_revision_id": source.get("source_revision_id") or "unknown",
-                "source_author": source.get("source_author") or "unknown",
-                "license": "CC BY-NC-SA",
-                "license_version": "version unspecified by source",
-                "release_basis": "private_acceptance_user_approved",
+                "file_page_url": str(source.get("file_page_url") or ""),
+                "source_image_url": str(source.get("source_image_url") or ""),
+                "source_revision_id": str(source.get("source_revision_id") or ""),
+                "source_revision_timestamp": str(source.get("source_revision_timestamp") or ""),
+                "source_uploader": str(source.get("source_uploader") or ""),
+                "source_sha1": str(source.get("source_sha1") or ""),
+                "license": "CC BY-NC-SA 4.0",
+                "license_version": "4.0",
+                "license_status": str(source.get("license_status") or ""),
+                "license_source_page": str(source.get("license_source_page") or ""),
+                "license_source_url": str(source.get("license_source_url") or ""),
+                "license_source_revision_id": str(source.get("license_source_revision_id") or ""),
+                "license_verification_note": str(source.get("license_verification_note") or ""),
+                "transformations": [
+                    "square crop using the recorded portrait focus",
+                    "96x96 WebP quality 88",
+                    "200x200 WebP quality 88",
+                ],
+                "release_basis": "verified_public_release",
             }
         )
 
@@ -176,6 +239,7 @@ def build_release(
     analyst_row = {
         "asset_id": str(analyst_source.get("asset_id") or "analyst-default"),
         "display_name": str(analyst_source.get("display_name") or "分析员（默认头像）"),
+        "original_sha1": sha1(analyst_original).hexdigest(),
         "original_sha256": _digest(analyst_original),
         "original_width": analyst_width,
         "original_height": analyst_height,
@@ -192,10 +256,12 @@ def build_release(
         "portrait_scale": float(analyst_source.get("portrait_scale") or 1.0),
         "portrait_focus_x": analyst_focus_x,
         "portrait_focus_y": analyst_focus_y,
-        "source_page": str(analyst_source.get("source_page") or ""),
-        "source_url": str(analyst_source.get("source_url") or ""),
+        "file_page_url": str(analyst_source.get("file_page_url") or ""),
+        "source_image_url": str(analyst_source.get("source_image_url") or ""),
         "source_revision_id": analyst_source.get("source_revision_id") or "unknown",
-        "source_fetched_at": analyst_source.get("source_fetched_at") or "",
+        "source_revision_timestamp": str(analyst_source.get("source_revision_timestamp") or ""),
+        "source_uploader": str(analyst_source.get("source_uploader") or ""),
+        "source_sha1": str(analyst_source.get("source_sha1") or ""),
         "license": str(analyst_source.get("license") or ""),
         "license_version": str(analyst_source.get("license_version") or ""),
         "license_status": license_status,
@@ -203,17 +269,23 @@ def build_release(
         "license_source_url": str(analyst_source.get("license_source_url") or ""),
         "license_source_revision_id": str(analyst_source.get("license_source_revision_id") or ""),
         "license_verification_note": str(analyst_source.get("license_verification_note") or ""),
-        "release_basis": str(analyst_source.get("release_basis") or "private_acceptance_user_approved"),
-        "public_release_review_required": bool(analyst_source.get("public_release_review_required", True)),
+        "transformations": [
+            "square crop using the recorded portrait focus",
+            "96x96 WebP quality 88",
+            "200x200 WebP quality 88",
+        ],
+        "release_basis": "verified_public_release",
     }
 
     manifest = {
-        "schema_version": "project-snow-avatar-media-2",
+        "schema_version": "project-snow-avatar-media-3",
         "media_version": version,
         "generated_at": datetime.now(UTC).isoformat(),
         "character_count": len(manifest_rows),
-        "release_basis": "private_acceptance_user_approved",
-        "public_release_review_required": True,
+        "release_basis": "verified_public_release",
+        "private_candidate": False,
+        "license_review_status": "verified_public_release",
+        "license_policy": "CC BY-NC-SA 4.0 site policy at fixed revision; every file page was checked for exceptions.",
         "characters": manifest_rows,
         "analyst": analyst_row,
     }

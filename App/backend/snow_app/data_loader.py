@@ -87,6 +87,7 @@ def load_qdrant(
     api_key: str,
     *,
     client: Any | None = None,
+    activate: bool = False,
 ) -> dict[str, Any]:
     manifest = verify_data_release(release_root, version)
     dimension = int((manifest.get("statistics") or {}).get("vector_dimension") or 0)
@@ -115,70 +116,90 @@ def load_qdrant(
             ),
             None,
         )
-        if previous_collection == collection:
-            collection_state = _raise_for_status(client.get(f"/collections/{collection}")).json()
-            points_count = int(((collection_state.get("result") or {}).get("points_count") or 0))
-            if points_count != expected_count:
-                raise RuntimeError("active Qdrant collection does not match its release manifest")
-            return {
-                "alias": alias,
-                "collection": collection,
-                "previous_collection": previous_collection,
-                "points": points_count,
-                "dimension": dimension,
-                "reused": True,
-            }
-        delete_response = client.delete(f"/collections/{collection}")
-        if delete_response.status_code not in {200, 404}:
-            delete_response.raise_for_status()
-        _raise_for_status(
-            client.put(
-                f"/collections/{collection}",
-                json={"vectors": {"size": dimension, "distance": "Cosine"}},
+        collection_response = client.get(f"/collections/{collection}")
+        reused = collection_response.status_code == 200
+        if reused:
+            collection_state = _raise_for_status(collection_response).json()
+            uploaded = int(
+                ((collection_state.get("result") or {}).get("points_count") or 0)
             )
-        )
-        uploaded = 0
-        for point_batch in batches(_qdrant_points(release_root), 128):
+            if uploaded != expected_count:
+                if previous_collection == collection:
+                    raise RuntimeError(
+                        "active Qdrant collection does not match its release manifest"
+                    )
+                _raise_for_status(client.delete(f"/collections/{collection}"))
+                reused = False
+        elif collection_response.status_code != 404:
+            collection_response.raise_for_status()
+
+        if not reused:
             _raise_for_status(
                 client.put(
-                    f"/collections/{collection}/points",
-                    params={"wait": "true"},
-                    json={"points": point_batch},
+                    f"/collections/{collection}",
+                    json={"vectors": {"size": dimension, "distance": "Cosine"}},
                 )
             )
-            uploaded += len(point_batch)
-        if uploaded != expected_count:
-            raise DataReleaseError("Qdrant upload count does not match release manifest")
-        collection_state = _raise_for_status(client.get(f"/collections/{collection}")).json()
-        points_count = int(((collection_state.get("result") or {}).get("points_count") or 0))
-        if points_count != expected_count:
-            raise RuntimeError("Qdrant collection count verification failed")
-        actions: list[dict[str, Any]] = []
-        if previous_collection:
-            actions.append({"delete_alias": {"alias_name": alias}})
-        actions.append({"create_alias": {"collection_name": collection, "alias_name": alias}})
-        _raise_for_status(client.post("/collections/aliases", json={"actions": actions}))
+            uploaded = 0
+            for point_batch in batches(_qdrant_points(release_root), 128):
+                _raise_for_status(
+                    client.put(
+                        f"/collections/{collection}/points",
+                        params={"wait": "true"},
+                        json={"points": point_batch},
+                    )
+                )
+                uploaded += len(point_batch)
+            if uploaded != expected_count:
+                raise DataReleaseError(
+                    "Qdrant upload count does not match release manifest"
+                )
+            collection_state = _raise_for_status(
+                client.get(f"/collections/{collection}")
+            ).json()
+            points_count = int(
+                ((collection_state.get("result") or {}).get("points_count") or 0)
+            )
+            if points_count != expected_count:
+                raise RuntimeError("Qdrant collection count verification failed")
 
-        keep = {collection}
-        if previous_collection:
-            keep.add(previous_collection)
-        collections_response = _raise_for_status(client.get("/collections")).json()
-        collections = ((collections_response.get("result") or {}).get("collections") or [])
-        prefix = f"{alias}__"
+        if activate and previous_collection != collection:
+            actions: list[dict[str, Any]] = []
+            if previous_collection:
+                actions.append({"delete_alias": {"alias_name": alias}})
+            actions.append(
+                {"create_alias": {"collection_name": collection, "alias_name": alias}}
+            )
+            _raise_for_status(
+                client.post("/collections/aliases", json={"actions": actions})
+            )
+
         cleanup_failures: list[str] = []
-        for item in collections:
-            name = str(item.get("name") or "")
-            if name.startswith(prefix) and name not in keep:
-                try:
-                    _raise_for_status(client.delete(f"/collections/{name}"))
-                except Exception:
-                    cleanup_failures.append(name)
+        if activate:
+            keep = {collection}
+            if previous_collection:
+                keep.add(previous_collection)
+            collections_response = _raise_for_status(client.get("/collections")).json()
+            collections = (
+                (collections_response.get("result") or {}).get("collections") or []
+            )
+            prefix = f"{alias}__"
+            for item in collections:
+                name = str(item.get("name") or "")
+                if name.startswith(prefix) and name not in keep:
+                    try:
+                        _raise_for_status(client.delete(f"/collections/{name}"))
+                    except Exception:
+                        cleanup_failures.append(name)
         return {
             "alias": alias,
             "collection": collection,
             "previous_collection": previous_collection,
+            "active_collection": collection if activate else previous_collection,
             "points": uploaded,
             "dimension": dimension,
+            "activated": activate,
+            "reused": reused,
             "cleanup_failures": cleanup_failures,
         }
     finally:
@@ -216,6 +237,27 @@ def _neo4j_edge(version: str, edge: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _activate_neo4j_dataset(
+    session: Any, version: str, previous_version: str | None
+) -> str:
+    session.run(
+        "MERGE (pointer:SnowDatasetPointer {name: 'active'}) "
+        "SET pointer.version = $version, pointer.updated_at = datetime()",
+        version=version,
+    ).consume()
+    keep_versions = [value for value in (version, previous_version) if value]
+    cleanup_status = "ok"
+    try:
+        session.run(
+            "MATCH (node:SnowEntity) WHERE NOT node.dataset_version IN $keep_versions "
+            "DETACH DELETE node",
+            keep_versions=keep_versions,
+        ).consume()
+    except Exception:
+        cleanup_status = "deferred"
+    return cleanup_status
+
+
 def load_neo4j(
     release_root: Path,
     version: str,
@@ -224,6 +266,7 @@ def load_neo4j(
     password: str,
     *,
     driver: Any | None = None,
+    activate: bool = False,
 ) -> dict[str, Any]:
     manifest = verify_data_release(release_root, version)
     statistics = manifest.get("statistics") or {}
@@ -237,30 +280,6 @@ def load_neo4j(
     try:
         driver.verify_connectivity()
         with driver.session() as session:
-            previous_row = session.run(
-                "MATCH (pointer:SnowDatasetPointer {name: 'active'}) RETURN pointer.version AS version"
-            ).single()
-            previous_version = str(previous_row["version"]) if previous_row and previous_row.get("version") else None
-            if previous_version == version:
-                node_row = session.run(
-                    "MATCH (node:SnowEntity {dataset_version: $version}) RETURN count(node) AS count",
-                    version=version,
-                ).single()
-                edge_row = session.run(
-                    "MATCH ()-[edge:SNOW_RELATION {dataset_version: $version}]->() RETURN count(edge) AS count",
-                    version=version,
-                ).single()
-                node_count = int(node_row["count"]) if node_row else 0
-                edge_count = int(edge_row["count"]) if edge_row else 0
-                if node_count != expected_nodes or edge_count != expected_edges:
-                    raise RuntimeError("active Neo4j dataset does not match its release manifest")
-                return {
-                    "active_version": version,
-                    "previous_version": previous_version,
-                    "nodes": node_count,
-                    "edges": edge_count,
-                    "reused": True,
-                }
             session.run(
                 "CREATE CONSTRAINT snow_dataset_pointer_name IF NOT EXISTS "
                 "FOR (pointer:SnowDatasetPointer) REQUIRE pointer.name IS UNIQUE"
@@ -269,6 +288,40 @@ def load_neo4j(
                 "CREATE CONSTRAINT snow_entity_dataset_key IF NOT EXISTS "
                 "FOR (node:SnowEntity) REQUIRE node.dataset_key IS UNIQUE"
             ).consume()
+            previous_row = session.run(
+                "MATCH (pointer:SnowDatasetPointer {name: 'active'}) RETURN pointer.version AS version"
+            ).single()
+            previous_version = str(previous_row["version"]) if previous_row and previous_row.get("version") else None
+            node_row = session.run(
+                "MATCH (node:SnowEntity {dataset_version: $version}) RETURN count(node) AS count",
+                version=version,
+            ).single()
+            edge_row = session.run(
+                "MATCH ()-[edge:SNOW_RELATION {dataset_version: $version}]->() RETURN count(edge) AS count",
+                version=version,
+            ).single()
+            node_count = int(node_row["count"]) if node_row else 0
+            edge_count = int(edge_row["count"]) if edge_row else 0
+            reused = node_count == expected_nodes and edge_count == expected_edges
+            if reused:
+                cleanup_status = (
+                    _activate_neo4j_dataset(session, version, previous_version)
+                    if activate
+                    else "not_requested"
+                )
+                return {
+                    "dataset_version": version,
+                    "active_version": version if activate else previous_version,
+                    "previous_version": previous_version,
+                    "nodes": node_count,
+                    "edges": edge_count,
+                    "activated": activate,
+                    "cleanup_status": cleanup_status,
+                    "reused": True,
+                }
+            if node_count or edge_count:
+                if previous_version == version:
+                    raise RuntimeError("active Neo4j dataset does not match its release manifest")
             session.run(
                 "MATCH (node:SnowEntity {dataset_version: $version}) DETACH DELETE node",
                 version=version,
@@ -309,27 +362,32 @@ def load_neo4j(
                     edges=edge_batch,
                 ).consume()
                 edge_count += len(edge_batch)
-            session.run(
-                "MERGE (pointer:SnowDatasetPointer {name: 'active'}) "
-                "SET pointer.version = $version, pointer.updated_at = datetime()",
+            verified_node_row = session.run(
+                "MATCH (node:SnowEntity {dataset_version: $version}) RETURN count(node) AS count",
                 version=version,
-            ).consume()
-            keep_versions = [value for value in (version, previous_version) if value]
-            cleanup_status = "ok"
-            try:
-                session.run(
-                    "MATCH (node:SnowEntity) WHERE NOT node.dataset_version IN $keep_versions "
-                    "DETACH DELETE node",
-                    keep_versions=keep_versions,
-                ).consume()
-            except Exception:
-                cleanup_status = "deferred"
+            ).single()
+            verified_edge_row = session.run(
+                "MATCH ()-[edge:SNOW_RELATION {dataset_version: $version}]->() RETURN count(edge) AS count",
+                version=version,
+            ).single()
+            verified_nodes = int(verified_node_row["count"]) if verified_node_row else 0
+            verified_edges = int(verified_edge_row["count"]) if verified_edge_row else 0
+            if verified_nodes != expected_nodes or verified_edges != expected_edges:
+                raise RuntimeError("Neo4j dataset count verification failed")
+            cleanup_status = (
+                _activate_neo4j_dataset(session, version, previous_version)
+                if activate
+                else "not_requested"
+            )
         return {
-            "active_version": version,
+            "dataset_version": version,
+            "active_version": version if activate else previous_version,
             "previous_version": previous_version,
             "nodes": node_count,
             "edges": edge_count,
+            "activated": activate,
             "cleanup_status": cleanup_status,
+            "reused": False,
         }
     finally:
         if owned_driver:
@@ -341,9 +399,18 @@ def main() -> int:
     parser.add_argument(
         "--release-root",
         type=Path,
-        default=Path(os.getenv("APP_RUNTIME") or "/srv/project-snow/data/current"),
+        default=Path(
+            os.getenv("PUBLIC_DATA_ROOT")
+            or os.getenv("APP_RUNTIME")
+            or "/srv/project-snow/data/current"
+        ),
     )
     parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument(
+        "--activate",
+        action="store_true",
+        help="manually switch legacy Qdrant/Neo4j serving pointers after staging",
+    )
     args = parser.parse_args()
     settings = PublicSettings.from_environment()
     manifest = verify_data_release(args.release_root, settings.data_version)
@@ -358,6 +425,7 @@ def main() -> int:
         settings.qdrant_url,
         settings.qdrant_collection,
         settings.qdrant_api_key,
+        activate=args.activate,
     )
     neo4j = load_neo4j(
         args.release_root,
@@ -365,8 +433,19 @@ def main() -> int:
         settings.neo4j_uri,
         settings.neo4j_user,
         settings.neo4j_password,
+        activate=args.activate,
     )
-    print(json.dumps({"status": "ok", "data_version": settings.data_version, "qdrant": qdrant, "neo4j": neo4j}))
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "data_version": settings.data_version,
+                "activation_requested": args.activate,
+                "qdrant": qdrant,
+                "neo4j": neo4j,
+            }
+        )
+    )
     return 0
 
 

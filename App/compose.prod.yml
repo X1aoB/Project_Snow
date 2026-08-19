@@ -1,5 +1,12 @@
 name: project-snow-public
 
+# Transitional compatibility gate: remove the legacy outbound network only in
+# a later immutable release after both colour manifests are 0.9.x or newer and
+# no 0.8.x rollback snapshot remains. Public APIs must never join this network.
+x-legacy-outbound-retirement:
+  gate: both-colour-manifests-at-least-0.9
+  scope: egress-proxy-only
+
 x-logging: &bounded-logging
   driver: json-file
   options:
@@ -11,18 +18,20 @@ x-api: &api
   restart: unless-stopped
   env_file: ${PUBLIC_ENV_FILE:-/etc/project-snow/public.env}
   environment:
-    DATA_ROOT: /srv/project-snow/data/current
-    APP_RUNTIME: /srv/project-snow/data/current
+    # Every colour is pinned to one verified immutable data release. Never
+    # resolve the mutable current symlink inside a staged or rollback API.
+    PUBLIC_DATA_ROOT: ${PUBLIC_DATA_ROOT:?Set a verified immutable data release root}
+    DATA_ROOT: ${PUBLIC_DATA_ROOT:?Set a verified immutable data release root}
+    APP_RUNTIME: ${PUBLIC_DATA_ROOT:?Set a verified immutable data release root}
     PUBLIC_DATABASE_URL_FILE: /run/project-snow-secrets/public_database_url
     TURNSTILE_SECRET_FILE: /run/project-snow-secrets/turnstile_secret
     PUBLIC_CREDENTIAL_KEY_FILE: /run/project-snow-secrets/public_credential_key
     PUBLIC_STATE_HMAC_KEY_FILE: /run/project-snow-secrets/public_state_hmac_key
+    PUBLIC_STATE_HMAC_PREVIOUS_KEY_FILE: /run/project-snow-secrets/public_state_hmac_previous_key
     PUBLIC_IP_HMAC_KEY_FILE: /run/project-snow-secrets/public_ip_hmac_key
     PUBLIC_QQ_KEY_FILE: /run/project-snow-secrets/public_qq_key
-    PUBLIC_ADMIN_TOKEN_FILE: /run/project-snow-secrets/public_admin_token
     NEO4J_PASSWORD_FILE: /run/project-snow-secrets/neo4j_password
     QDRANT_API_KEY_FILE: /run/project-snow-secrets/qdrant_api_key
-    PUBLIC_FEEDBACK_SMTP_PASSWORD_FILE: /run/project-snow-secrets/feedback_smtp_password
     HTTPS_PROXY: http://egress-proxy:3128
     NO_PROXY: postgres,qdrant,neo4j,embedding,localhost,127.0.0.1
     PUBLIC_TRUST_PROXY_HEADERS: "true"
@@ -32,7 +41,15 @@ x-api: &api
   volumes:
     - /srv/project-snow/data:/srv/project-snow/data:ro
     - /srv/project-snow/media:/srv/project-snow/media:ro
-    - /etc/project-snow/secrets:/run/host-secrets:ro
+    - /etc/project-snow/secrets/public_database_url:/run/host-secrets/public_database_url:ro
+    - /etc/project-snow/secrets/turnstile_secret:/run/host-secrets/turnstile_secret:ro
+    - /etc/project-snow/secrets/public_credential_key:/run/host-secrets/public_credential_key:ro
+    - /etc/project-snow/secrets/public_state_hmac_key:/run/host-secrets/public_state_hmac_key:ro
+    - ${PUBLIC_STATE_HMAC_PREVIOUS_KEY_SOURCE:-/etc/project-snow/secrets/public_state_hmac_key}:/run/host-secrets/public_state_hmac_previous_key:ro
+    - /etc/project-snow/secrets/public_ip_hmac_key:/run/host-secrets/public_ip_hmac_key:ro
+    - /etc/project-snow/secrets/public_qq_key:/run/host-secrets/public_qq_key:ro
+    - /etc/project-snow/secrets/neo4j_password:/run/host-secrets/neo4j_password:ro
+    - /etc/project-snow/secrets/qdrant_api_key:/run/host-secrets/qdrant_api_key:ro
   cpus: 2
   mem_limit: 1536m
   pids_limit: 256
@@ -47,7 +64,7 @@ x-api: &api
       condition: service_healthy
     embedding:
       condition: service_healthy
-  networks: [app, data, outbound]
+  networks: [app, data, egress-client]
 
 services:
   public-api-blue:
@@ -66,12 +83,61 @@ services:
       - "127.0.0.1:18082:8000"
 
   admin:
-    <<: *api
-    command: ["python", "-m", "uvicorn", "backend.snow_app.admin_main:app", "--host", "0.0.0.0", "--port", "19090"]
+    image: ${PUBLIC_API_IMAGE:?Set immutable PUBLIC_API_IMAGE digest}
+    restart: unless-stopped
+    command: ["python", "-m", "uvicorn", "backend.snow_app.admin_main:app", "--host", "0.0.0.0", "--port", "19090", "--no-access-log"]
+    env_file: ${PUBLIC_ENV_FILE:-/etc/project-snow/public.env}
+    environment:
+      PUBLIC_DATABASE_URL_FILE: /run/project-snow-secrets/public_database_url
+      PUBLIC_QQ_KEY_FILE: /run/project-snow-secrets/public_qq_key
+      PUBLIC_ADMIN_TOKEN_FILE: /run/project-snow-secrets/public_admin_token
+    volumes:
+      - /etc/project-snow/secrets/public_database_url:/run/host-secrets/public_database_url:ro
+      - /etc/project-snow/secrets/public_qq_key:/run/host-secrets/public_qq_key:ro
+      - /etc/project-snow/secrets/public_admin_token:/run/host-secrets/public_admin_token:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /run/project-snow-secrets:rw,noexec,nosuid,size=1m,mode=0700
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    logging: *bounded-logging
     ports:
       - "127.0.0.1:19090:19090"
     profiles: [admin]
     networks: [data, management]
+
+  feedback-mailer:
+    image: ${PUBLIC_API_IMAGE:?Set immutable PUBLIC_API_IMAGE digest}
+    restart: unless-stopped
+    command: ["python", "-m", "backend.snow_app.feedback_worker"]
+    env_file: ${PUBLIC_MAILER_ENV_FILE:-/etc/project-snow/feedback-mailer.env}
+    environment:
+      # Never let the SMTP-capable worker inherit the application database
+      # role. It constructs a DSN from this dedicated password and fixed
+      # non-secret connection coordinates.
+      PUBLIC_DATABASE_URL: ""
+      PUBLIC_DATABASE_URL_FILE: ""
+      PUBLIC_DATABASE_PASSWORD_FILE: /run/project-snow-secrets/feedback_mailer_database_password
+      PUBLIC_DATABASE_USER: project_snow_feedback_mailer
+      PUBLIC_DATABASE_HOST: postgres
+      PUBLIC_DATABASE_PORT: "5432"
+      PUBLIC_DATABASE_NAME: project_snow
+      PUBLIC_FEEDBACK_SMTP_PASSWORD_FILE: /run/project-snow-secrets/feedback_smtp_password
+    volumes:
+      - /etc/project-snow/secrets/feedback_mailer_database_password:/run/host-secrets/feedback_mailer_database_password:ro
+      - /etc/project-snow/secrets/feedback_smtp_password:/run/host-secrets/feedback_smtp_password:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /run/project-snow-secrets:rw,noexec,nosuid,size=1m,mode=0700
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    logging: *bounded-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [data, mailer-uplink]
 
   caddy:
     image: ${CADDY_IMAGE:?Set immutable CADDY_IMAGE digest}
@@ -86,7 +152,7 @@ services:
     read_only: true
     tmpfs: ["/config:rw,nosuid,size=16m", "/data:rw,nosuid,size=16m"]
     logging: *bounded-logging
-    networks: [edge, app]
+    networks: [edge-client, app]
 
   cloudflared:
     image: ${CLOUDFLARED_IMAGE:?Set immutable CLOUDFLARED_IMAGE digest}
@@ -99,8 +165,7 @@ services:
     mem_limit: 256m
     logging: *bounded-logging
     depends_on: [caddy]
-    networks: [edge]
-    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks: [edge-client, tunnel-uplink]
 
   postgres:
     image: ${POSTGRES_IMAGE:?Set immutable POSTGRES_IMAGE digest}
@@ -114,6 +179,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - /etc/project-snow/secrets/postgres_password:/run/secrets/postgres_password:ro
+      - /etc/project-snow/secrets/feedback_mailer_database_password:/run/secrets/feedback_mailer_database_password:ro
     cpus: 2
     mem_limit: 2560m
     shm_size: 512m
@@ -188,7 +254,9 @@ services:
     read_only: true
     tmpfs: ["/var/log/squid:rw,nosuid,size=16m,uid=13,gid=13,mode=0750", "/var/spool/squid:rw,nosuid,size=16m", "/run:rw,nosuid,size=4m"]
     logging: *bounded-logging
-    networks: [outbound]
+    # During the 0.8 -> 0.9 blue/green transition, the proxy alone straddles
+    # the legacy network used by the old API and the new split egress planes.
+    networks: [egress-client, egress-uplink, outbound]
 
 volumes:
   postgres_data:
@@ -196,10 +264,19 @@ volumes:
   neo4j_data:
 
 networks:
-  edge:
+  edge-client:
+    internal: true
+  tunnel-uplink:
   app:
     internal: true
   data:
     internal: true
+  egress-client:
+    internal: true
+  egress-uplink:
+  # Migration-only compatibility for the inactive 0.8.x rollback colour.
+  # The x-legacy-outbound-retirement gate above defines when this is removed.
   outbound:
   management:
+    internal: true
+  mailer-uplink:

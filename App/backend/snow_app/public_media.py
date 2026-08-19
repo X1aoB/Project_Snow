@@ -5,11 +5,32 @@ from __future__ import annotations
 import json
 import re
 import threading
-import time
 from collections.abc import Iterable
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
+
+
+def _base36(number: int) -> str:
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+    output = ""
+    while number:
+        number, remainder = divmod(number, 36)
+        output = alphabet[remainder] + output
+    return output or "0"
+
+
+def _sha1_evidence_matches(source_sha1: str, original_sha1: str) -> bool:
+    source = str(source_sha1 or "").casefold().strip()
+    original = str(original_sha1 or "").casefold().strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", original):
+        return False
+    if re.fullmatch(r"[0-9a-f]{40}", source):
+        return source == original
+    if re.fullmatch(r"[0-9a-z]{1,31}", source):
+        return source.lstrip("0") == _base36(int(original, 16)).lstrip("0")
+    return False
 
 
 class PublicMediaCatalog:
@@ -28,7 +49,6 @@ class PublicMediaCatalog:
         self.expected_character_ids = frozenset(str(value) for value in expected_character_ids)
         self.require_analyst = bool(require_analyst)
         self._lock = threading.RLock()
-        self._cached_at = 0.0
         self._cached_status: dict[str, Any] | None = None
         self._cached_manifest: dict[str, Any] | None = None
 
@@ -98,15 +118,8 @@ class PublicMediaCatalog:
         return verified_files
 
     @staticmethod
-    def _analyst_license_is_verified(item: dict[str, Any]) -> bool:
-        """Require auditable license evidence before exposing the analyst URL.
-
-        The Wiki's global notice is acceptable only when the manifest records
-        the exact notice URL/revision and explicitly says that the file page
-        has no overriding exception.  A missing or guessed license must keep
-        the independent asset out of the public catalog.
-        """
-
+    def _license_is_verified(item: dict[str, Any]) -> bool:
+        """Require fixed Wiki and license evidence for every public portrait."""
         status = str(item.get("license_status") or "").casefold().strip()
         if status not in {
             "verified",
@@ -116,21 +129,41 @@ class PublicMediaCatalog:
             return False
         license_name = str(item.get("license") or "").casefold()
         license_version = str(item.get("license_version") or "").strip()
-        source_page = str(item.get("license_source_page") or "").strip()
-        source_url = str(item.get("license_source_url") or "").strip()
-        source_revision = str(item.get("license_source_revision_id") or "").strip()
+        license_page = str(item.get("license_source_page") or "").strip()
+        license_url = str(item.get("license_source_url") or "").strip()
+        license_revision = str(item.get("license_source_revision_id") or "").strip()
+        file_page = str(item.get("file_page_url") or item.get("source_page") or "").strip()
+        source_url = str(item.get("source_image_url") or item.get("source_url") or "").strip()
+        source_revision = str(item.get("source_revision_id") or "").strip()
+        source_timestamp = str(item.get("source_revision_timestamp") or "").strip()
+        source_uploader = str(item.get("source_uploader") or item.get("source_author") or "").strip()
+        original_sha1 = str(item.get("original_sha1") or "").casefold().strip()
+        source_sha1 = str(item.get("source_sha1") or "").casefold().strip()
+        original_sha256 = str(item.get("original_sha256") or "").casefold().strip()
+        transformations = item.get("transformations")
         return (
             "cc by-nc-sa" in license_name
             and license_version == "4.0"
-            and source_page.startswith("https://wiki.biligame.com/")
-            and source_url == "https://creativecommons.org/licenses/by-nc-sa/4.0/"
-            and bool(source_revision)
+            and license_page.startswith("https://wiki.biligame.com/")
+            and license_url == "https://creativecommons.org/licenses/by-nc-sa/4.0/"
+            and license_revision.isdigit()
+            and file_page.startswith("https://wiki.biligame.com/sonw/")
+            and "/文件:" in unquote(file_page)
+            and source_url.startswith("https://")
+            and source_revision.isdigit()
+            and bool(source_timestamp)
+            and source_uploader.casefold() not in {"", "unknown", "未知"}
+            and _sha1_evidence_matches(source_sha1, original_sha1)
+            and bool(re.fullmatch(r"[0-9a-f]{64}", original_sha256))
+            and isinstance(transformations, list)
+            and bool(transformations)
         )
 
     def verify(self, *, force: bool = False) -> dict[str, Any]:
-        now = time.monotonic()
         with self._lock:
-            if not force and self._cached_status is not None and now - self._cached_at < 30:
+            # Release directories are immutable.  Full hashing is intentionally
+            # a startup/deploy boundary, not work repeated by /config polling.
+            if not force and self._cached_status is not None:
                 return dict(self._cached_status)
 
             errors: list[str] = []
@@ -149,6 +182,12 @@ class PublicMediaCatalog:
             manifest_version = str(manifest.get("media_version") or "")
             if manifest and manifest_version != self.version:
                 errors.append("media_version_mismatch")
+            if manifest and str(manifest.get("schema_version") or "") != "project-snow-avatar-media-3":
+                errors.append("schema_version_mismatch")
+            if manifest and manifest.get("private_candidate") is not False:
+                errors.append("license_review_incomplete")
+            if manifest and str(manifest.get("license_review_status") or "") != "verified_public_release":
+                errors.append("license_review_status_invalid")
 
             # SHA256SUMS is part of the release boundary, rather than merely
             # a convenience for the download script.  Verifying its manifest
@@ -216,6 +255,8 @@ class PublicMediaCatalog:
                     errors.append("character_entry_duplicate")
                     continue
                 indexed[character_id] = item
+                if not self._license_is_verified(item):
+                    errors.append(f"character_license_unverified:{character_id}")
                 verified_files += self._verify_asset_entry(
                     character_id,
                     item,
@@ -232,7 +273,7 @@ class PublicMediaCatalog:
                 analyst_id = str(analyst_item.get("asset_id") or "analyst-default")
                 if analyst_id != "analyst-default":
                     errors.append("analyst_asset_id_invalid")
-                if not self._analyst_license_is_verified(analyst_item):
+                if not self._license_is_verified(analyst_item):
                     errors.append("analyst_license_unverified")
                 verified_files += self._verify_asset_entry(
                     analyst_id,
@@ -292,7 +333,6 @@ class PublicMediaCatalog:
                 "unexpected_character_ids": unexpected,
                 "errors": errors[:24],
             }
-            self._cached_at = now
             self._cached_status = status
             self._cached_manifest = manifest if manifest else None
             return dict(status)
@@ -319,11 +359,15 @@ class PublicMediaCatalog:
             "portrait_scale": float(item.get("portrait_scale") or 1.0),
             "portrait_focus_x": int(item.get("portrait_focus_x") or 50),
             "portrait_focus_y": int(item.get("portrait_focus_y") or 50),
-            "source_page": str(item.get("source_page") or ""),
+            "source_page": str(item.get("file_page_url") or item.get("source_page") or ""),
             "license": str(item.get("license") or "CC BY-NC-SA"),
             "license_version": str(
                 item.get("license_version") or "version unspecified by source"
             ),
+            "license_source_page": str(item.get("license_source_page") or ""),
+            "license_source_revision_id": str(item.get("license_source_revision_id") or ""),
+            "source_revision_id": str(item.get("source_revision_id") or ""),
+            "source_uploader": str(item.get("source_uploader") or item.get("source_author") or ""),
         }
 
     def analyst_avatar(self) -> dict[str, Any] | None:
@@ -342,8 +386,8 @@ class PublicMediaCatalog:
             "portrait_scale": float(item.get("portrait_scale") or 1.0),
             "portrait_focus_x": int(item.get("portrait_focus_x") or 50),
             "portrait_focus_y": int(item.get("portrait_focus_y") or 50),
-            "source_page": str(item.get("source_page") or ""),
-            "source_url": str(item.get("source_url") or ""),
+            "source_page": str(item.get("file_page_url") or item.get("source_page") or ""),
+            "source_url": str(item.get("source_image_url") or item.get("source_url") or ""),
             "source_revision_id": str(item.get("source_revision_id") or ""),
             "license": str(item.get("license") or ""),
             "license_version": str(item.get("license_version") or ""),
@@ -352,3 +396,61 @@ class PublicMediaCatalog:
             "license_source_url": str(item.get("license_source_url") or ""),
             "license_source_revision_id": str(item.get("license_source_revision_id") or ""),
         }
+
+    def attributions(self) -> list[dict[str, Any]]:
+        status = self.verify()
+        if status["status"] != "ok" or self._cached_manifest is None:
+            return []
+        entries = [
+            value
+            for value in self._cached_manifest.get("characters") or []
+            if isinstance(value, dict)
+        ]
+        analyst = self._cached_manifest.get("analyst")
+        if isinstance(analyst, dict):
+            entries.append(analyst)
+        prefix = f"/media/{self.version}/"
+        return [
+            {
+                "package_version": self.version,
+                "asset_id": str(item.get("character_id") or item.get("asset_id") or ""),
+                "display_name": str(item.get("character_name") or item.get("display_name") or ""),
+                "preview_url": prefix + str(item.get("thumbnail_path") or "").lstrip("/"),
+                "file_page_url": str(item.get("file_page_url") or item.get("source_page") or ""),
+                "source_image_url": str(
+                    item.get("source_image_url") or item.get("source_url") or ""
+                ),
+                "source_revision_id": str(item.get("source_revision_id") or ""),
+                "source_revision_timestamp": str(
+                    item.get("source_revision_timestamp") or ""
+                ),
+                "source_uploader": str(item.get("source_uploader") or item.get("source_author") or ""),
+                "creator": "源页未提供",
+                "source_sha1": str(item.get("source_sha1") or ""),
+                "original_sha1": str(item.get("original_sha1") or ""),
+                "source_sha256": str(item.get("original_sha256") or ""),
+                "original_sha256": str(item.get("original_sha256") or ""),
+                "thumbnail_sha256": str(item.get("thumbnail_sha256") or ""),
+                "stage_sha256": str(item.get("stage_sha256") or ""),
+                "dimensions": {
+                    "source": {
+                        "width": int(item.get("original_width") or 0),
+                        "height": int(item.get("original_height") or 0),
+                    },
+                    "thumbnail": {
+                        "width": int(item.get("thumbnail_width") or 0),
+                        "height": int(item.get("thumbnail_height") or 0),
+                    },
+                    "stage": {
+                        "width": int(item.get("stage_width") or 0),
+                        "height": int(item.get("stage_height") or 0),
+                    },
+                },
+                "license": str(item.get("license") or ""),
+                "license_version": str(item.get("license_version") or ""),
+                "license_source_page": str(item.get("license_source_page") or ""),
+                "license_source_revision_id": str(item.get("license_source_revision_id") or ""),
+                "modifications": list(item.get("transformations") or []),
+            }
+            for item in entries
+        ]

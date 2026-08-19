@@ -1,0 +1,5 @@
+# Project Snow's SSH account can request only the root-owned, argument-validating
+# release runner.  It never receives the Docker socket or a general root shell.
+Defaults!/usr/local/sbin/project-snow-release env_reset
+Defaults!/usr/local/sbin/project-snow-release secure_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+deploy ALL=(root) NOPASSWD: /usr/local/sbin/project-snow-release

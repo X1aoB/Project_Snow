@@ -1,0 +1,19 @@
+{
+  "schema_version": "project-snow-release-artifacts-1",
+  "artifacts": {
+    "data": {
+      "version": "2026.08.19.1",
+      "manifest_sha256": "46046a61d6747a2cb1b5e1d27caa5e2bf6a1e8cc3cc1e5995bc499093a68d90b"
+    },
+    "avatar": {
+      "version": "2026.08.19.avatar.1",
+      "manifest_sha256": "258fdb3efeca4792d87f39803defa4f7a525af69fca30539142e6458e958c6fa",
+      "checksums_sha256": "a8a9686fe799539b96e74610bff1719fdd135ceb54fb2427e55ae4067d7ff3f3"
+    },
+    "sticker": {
+      "version": "2026.08.19.sticker.1",
+      "manifest_sha256": "6ed54ffbb6feffb7ecf145074a574ae45ecc37a6b04a63220a4c08a2616bb2d1",
+      "checksums_sha256": "5f3cfc032396883853932768bfef5d6a43851fcc1d650abe387a66e90d5947e5"
+    }
+  }
+}

@@ -6,6 +6,7 @@ import os
 import base64
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 try:
     from dotenv import load_dotenv
@@ -32,6 +33,33 @@ def _secret_value(name: str, default: str = "") -> str:
         except OSError:
             return default
     return str(os.getenv(name) or default).strip()
+
+
+def _public_database_url() -> str:
+    """Return either the full API DSN or a least-privilege component DSN.
+
+    Public API and admin containers receive a root-owned full DSN. Narrow
+    workers receive only a password plus non-secret connection components so
+    they cannot inherit the application's database role by accident.
+    """
+
+    configured = _secret_value("PUBLIC_DATABASE_URL")
+    if configured:
+        return configured
+    password = _secret_value("PUBLIC_DATABASE_PASSWORD")
+    if not password:
+        return ""
+    user = str(os.getenv("PUBLIC_DATABASE_USER") or "project_snow").strip()
+    host = str(os.getenv("PUBLIC_DATABASE_HOST") or "postgres").strip()
+    port = str(os.getenv("PUBLIC_DATABASE_PORT") or "5432").strip()
+    database = str(os.getenv("PUBLIC_DATABASE_NAME") or "project_snow").strip()
+    if not user or not host or not database or not port.isdigit():
+        return ""
+    return (
+        "postgresql+psycopg://"
+        f"{quote(user, safe='')}:{quote(password, safe='')}@"
+        f"{host}:{port}/{quote(database, safe='')}"
+    )
 
 
 def _decode_32_byte_key(value: str) -> bytes | None:
@@ -138,11 +166,11 @@ class PublicSettings:
     neo4j_password: str
     auto_create_schema: bool = False
     trust_proxy_headers: bool = False
-    media_version: str = "2026.08.17.avatar.2"
+    media_version: str = "2026.08.19.avatar.1"
     media_root: Path = Path("/srv/project-snow/media/current")
-    experience_notice_version: str = "0.8"
+    experience_notice_version: str = "0.9"
     arrival_probability: float = 0.5
-    sticker_version: str = "2026.08.18.sticker.1"
+    sticker_version: str = "2026.08.19.sticker.1"
     sticker_root: Path = Path("/srv/project-snow/media/stickers/current")
     feedback_email_to: str = "admin@xiaob.dev"
     feedback_email_from: str = ""
@@ -150,6 +178,15 @@ class PublicSettings:
     feedback_smtp_port: int = 465
     feedback_smtp_username: str = ""
     feedback_smtp_password: str = ""
+    state_hmac_previous_key: bytes | None = None
+    state_key_id: str = "2026-08-19"
+    state_previous_key_id: str = ""
+    turnstile_hostname: str = "snow.xiaob.dev"
+    turnstile_max_age_seconds: int = 300
+    privacy_policy_version: str = "0.9"
+    privacy_effective_at: str = "2026-08-19"
+    attribution_url: str = "/public/v1/attributions"
+    max_provider_calls_per_action: int = 2
 
     @classmethod
     def from_environment(cls) -> "PublicSettings":
@@ -178,10 +215,22 @@ class PublicSettings:
             feedback_smtp_port = int(os.getenv("PUBLIC_FEEDBACK_SMTP_PORT", "465"))
         except (TypeError, ValueError):
             feedback_smtp_port = 465
+        try:
+            turnstile_max_age_seconds = int(
+                os.getenv("PUBLIC_TURNSTILE_MAX_AGE_SECONDS", "300")
+            )
+        except (TypeError, ValueError):
+            turnstile_max_age_seconds = 300
+        try:
+            max_provider_calls_per_action = int(
+                os.getenv("PUBLIC_MAX_PROVIDER_CALLS_PER_ACTION", "2")
+            )
+        except (TypeError, ValueError):
+            max_provider_calls_per_action = 2
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "0.8.4"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "0.9.0"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
-            database_url=_secret_value("PUBLIC_DATABASE_URL"),
+            database_url=_public_database_url(),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),
             development_origins=development_origins,
             turnstile_site_key=os.getenv("TURNSTILE_SITE_KEY", ""),
@@ -202,15 +251,15 @@ class PublicSettings:
             neo4j_password=_secret_value("NEO4J_PASSWORD"),
             auto_create_schema=os.getenv("PUBLIC_AUTO_CREATE_SCHEMA", "false").casefold() == "true",
             trust_proxy_headers=os.getenv("PUBLIC_TRUST_PROXY_HEADERS", "false").casefold() == "true",
-            media_version=os.getenv("PUBLIC_MEDIA_VERSION", "2026.08.17.avatar.2").strip(),
+            media_version=os.getenv("PUBLIC_MEDIA_VERSION", "2026.08.19.avatar.1").strip(),
             media_root=Path(
                 os.getenv("PUBLIC_MEDIA_ROOT", "/srv/project-snow/media/current")
             ).resolve(),
             experience_notice_version=os.getenv(
-                "PUBLIC_EXPERIENCE_NOTICE_VERSION", "0.8"
+                "PUBLIC_EXPERIENCE_NOTICE_VERSION", "0.9"
             ).strip(),
             arrival_probability=max(0.0, min(1.0, arrival_probability)),
-            sticker_version=os.getenv("PUBLIC_STICKER_VERSION", "2026.08.18.sticker.1").strip(),
+            sticker_version=os.getenv("PUBLIC_STICKER_VERSION", "2026.08.19.sticker.1").strip(),
             sticker_root=Path(
                 os.getenv("PUBLIC_STICKER_ROOT", "/srv/project-snow/media/stickers/current")
             ).resolve(),
@@ -220,6 +269,21 @@ class PublicSettings:
             feedback_smtp_port=feedback_smtp_port,
             feedback_smtp_username=os.getenv("PUBLIC_FEEDBACK_SMTP_USERNAME", "").strip(),
             feedback_smtp_password=_secret_value("PUBLIC_FEEDBACK_SMTP_PASSWORD"),
+            state_hmac_previous_key=_decode_32_byte_key(
+                _secret_value("PUBLIC_STATE_HMAC_PREVIOUS_KEY")
+            ),
+            state_key_id=os.getenv("PUBLIC_STATE_KEY_ID", "2026-08-19").strip(),
+            state_previous_key_id=os.getenv("PUBLIC_STATE_PREVIOUS_KEY_ID", "").strip(),
+            turnstile_hostname=os.getenv("PUBLIC_TURNSTILE_HOSTNAME", "snow.xiaob.dev").strip(),
+            turnstile_max_age_seconds=max(60, min(600, turnstile_max_age_seconds)),
+            privacy_policy_version=os.getenv("PUBLIC_PRIVACY_POLICY_VERSION", "0.9").strip(),
+            privacy_effective_at=os.getenv(
+                "PUBLIC_PRIVACY_EFFECTIVE_AT", "2026-08-19"
+            ).strip(),
+            attribution_url=os.getenv(
+                "PUBLIC_ATTRIBUTION_URL", "/public/v1/attributions"
+            ).strip(),
+            max_provider_calls_per_action=max(1, min(2, max_provider_calls_per_action)),
         )
 
     @property
@@ -234,13 +298,14 @@ class PublicSettings:
         missing = []
         for name, value in (
             ("PUBLIC_DATABASE_URL", self.database_url),
+            ("TURNSTILE_SITE_KEY", self.turnstile_site_key),
             ("TURNSTILE_SECRET", self.turnstile_secret),
             ("PUBLIC_CREDENTIAL_KEY", self.credential_key),
             ("PUBLIC_STATE_HMAC_KEY", self.state_hmac_key),
             ("PUBLIC_IP_HMAC_KEY", self.ip_hmac_key),
             ("PUBLIC_QQ_KEY", self.qq_key),
-            ("PUBLIC_ADMIN_TOKEN", self.admin_token),
             ("QDRANT_API_KEY", self.qdrant_api_key),
+            ("NEO4J_PASSWORD", self.neo4j_password),
         ):
             if not value:
                 missing.append(name)

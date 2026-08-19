@@ -12,9 +12,11 @@ for name in \
   turnstile_secret \
   public_credential_key \
   public_state_hmac_key \
+  public_state_hmac_previous_key \
   public_ip_hmac_key \
   public_qq_key \
   public_admin_token \
+  feedback_mailer_database_password \
   feedback_smtp_password \
   neo4j_password \
   qdrant_api_key
