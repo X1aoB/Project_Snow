@@ -251,6 +251,63 @@ ufw logging low
 ufw --force enable
 ufw status | grep -Fx 'Status: active' >/dev/null
 
+# Enabling UFW after Docker has started can replace the packet-filter rules
+# Docker uses for loopback-only published ports.  Live restore keeps the
+# running containers available while one daemon restart rebuilds those rules.
+[ "$(docker info --format '{{.LiveRestoreEnabled}}')" = true ] || {
+  echo 'Docker live restore must be enabled before firewall reconciliation.' >&2
+  exit 78
+}
+systemctl restart docker
+docker_ready=0
+docker_attempt=0
+while [ "$docker_attempt" -lt 30 ]; do
+  if docker info >/dev/null 2>&1; then
+    docker_ready=1
+    break
+  fi
+  docker_attempt=$((docker_attempt + 1))
+  sleep 1
+done
+if [ "$docker_ready" -ne 1 ]; then
+  echo 'Docker did not recover after firewall reconciliation.' >&2
+  exit 78
+fi
+ufw status | grep -Fx 'Status: active' >/dev/null || {
+  echo 'UFW became inactive during Docker firewall reconciliation.' >&2
+  exit 78
+}
+
+# Keep Docker after UFW on future boots as well as repairing the current boot.
+docker_unit_dir=/etc/systemd/system/docker.service.d
+docker_ufw_dropin="$docker_unit_dir/20-project-snow-after-ufw.conf"
+[ ! -L "$docker_unit_dir" ] || { echo 'Docker systemd drop-in directory must not be a symlink.' >&2; exit 66; }
+install -o root -g root -m 0755 -d "$docker_unit_dir"
+secure_existing_file "$docker_ufw_dropin"
+docker_ufw_dropin_tmp="$(mktemp "$docker_unit_dir/.20-project-snow-after-ufw.XXXXXX")"
+cat > "$docker_ufw_dropin_tmp" <<'EOF'
+[Unit]
+Wants=ufw.service
+After=ufw.service
+EOF
+chown root:root "$docker_ufw_dropin_tmp"
+chmod 0644 "$docker_ufw_dropin_tmp"
+mv -f -- "$docker_ufw_dropin_tmp" "$docker_ufw_dropin"
+systemctl daemon-reload
+
+docker_reconcile_marker=/run/project-snow-docker-after-firewall
+if [ -e "$docker_reconcile_marker" ] || [ -L "$docker_reconcile_marker" ]; then
+  [ -f "$docker_reconcile_marker" ] && [ ! -L "$docker_reconcile_marker" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$docker_reconcile_marker")" = 0:0:600:1 ] || {
+      echo 'Docker firewall reconciliation marker is not a root-only regular file.' >&2
+      exit 66
+    }
+fi
+docker_reconcile_marker_tmp="$(mktemp /run/.project-snow-docker-after-firewall.XXXXXX)"
+chown root:root "$docker_reconcile_marker_tmp"
+chmod 0600 "$docker_reconcile_marker_tmp"
+mv -f -- "$docker_reconcile_marker_tmp" "$docker_reconcile_marker"
+
 secure_existing_file /etc/fail2ban/jail.d/project-snow-sshd.local
 cat > /etc/fail2ban/jail.d/project-snow-sshd.local <<'EOF'
 [sshd]

@@ -534,6 +534,7 @@ candidate_config_binding_tmp="$(mktemp "$colour_config_binding.candidate.XXXXXX"
 candidate_config_root="$configuration_release_root/$sha"
 candidate_config_tmp=""
 candidate_public_env=""
+docker_reconcile_marker_tmp=""
 public_env_path="$public_env_root/public-$sha.env"
 cleanup() {
   [ -z "${candidate_env:-}" ] || rm -f "$candidate_env"
@@ -542,6 +543,7 @@ cleanup() {
   [ -z "${candidate_config_binding_tmp:-}" ] || rm -f "$candidate_config_binding_tmp"
   [ -z "${candidate_config_tmp:-}" ] || rm -rf -- "$candidate_config_tmp"
   [ -z "${candidate_public_env:-}" ] || rm -f "$candidate_public_env"
+  [ -z "${docker_reconcile_marker_tmp:-}" ] || rm -f -- "$docker_reconcile_marker_tmp"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -764,6 +766,177 @@ if [ "$ready" -ne 1 ]; then
   exit 73
 fi
 compose exec -T "$service" python /app/public_smoke.py http://127.0.0.1:8000 --mode internal
+
+candidate_port=18081
+if [ "$colour" = green ]; then
+  candidate_port=18082
+fi
+candidate_loopback_endpoint="http://127.0.0.1:$candidate_port/public/v1/health/live"
+candidate_container_id="$(compose ps -q "$service" 2>/dev/null || true)"
+print_candidate_diagnostics() {
+  if printf '%s\n' "$candidate_container_id" | grep -Eq '^[0-9a-f]{12,64}$'; then
+    docker inspect "$candidate_container_id" 2>/dev/null | jq '.[0] | {
+      status: .State.Status,
+      running: .State.Running,
+      health: (.State.Health.Status // "none"),
+      exit_code: .State.ExitCode,
+      restart_count: .RestartCount,
+      port_bindings: .HostConfig.PortBindings
+    }' >&2 || true
+  fi
+}
+candidate_binding_is_exact() {
+  printf '%s\n' "$candidate_container_id" | grep -Eq '^[0-9a-f]{12,64}$' &&
+    docker inspect "$candidate_container_id" 2>/dev/null |
+      jq -e --arg port "$candidate_port" '
+        length == 1 and
+        ((.[0].HostConfig.PortBindings["8000/tcp"] // []) | length == 1) and
+        (.[0].HostConfig.PortBindings["8000/tcp"][0].HostIp == "127.0.0.1") and
+        (.[0].HostConfig.PortBindings["8000/tcp"][0].HostPort == $port) and
+        ((.[0].NetworkSettings.Ports["8000/tcp"] // []) | length == 1) and
+        (.[0].NetworkSettings.Ports["8000/tcp"][0].HostIp == "127.0.0.1") and
+        (.[0].NetworkSettings.Ports["8000/tcp"][0].HostPort == $port)
+      ' >/dev/null
+}
+wait_for_candidate_loopback() {
+  candidate_loopback_attempt=0
+  while [ "$candidate_loopback_attempt" -lt 10 ]; do
+    if /usr/bin/curl -q --noproxy '*' --fail --silent --show-error --max-time 5 \
+         -H 'Host: snow.xiaob.dev' "$candidate_loopback_endpoint" 2>/dev/null |
+       jq -e --arg version "$candidate_app_version" \
+         '.status == "ok" and .version == $version' >/dev/null 2>&1; then
+      return 0
+    fi
+    candidate_loopback_attempt=$((candidate_loopback_attempt + 1))
+    sleep 1
+  done
+  return 1
+}
+active_container_is_ready() {
+  docker inspect "$active_container_id" 2>/dev/null |
+    jq -e 'length == 1 and .[0].State.Running == true' >/dev/null &&
+    docker exec "$active_container_id" python -c \
+      "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/public/v1/health/ready', timeout=2).read()" \
+      >/dev/null 2>&1
+}
+wait_for_active_container() {
+  active_ready_limit="$1"
+  active_ready_attempt=0
+  while [ "$active_ready_attempt" -lt "$active_ready_limit" ]; do
+    if active_container_is_ready; then
+      return 0
+    fi
+    active_ready_attempt=$((active_ready_attempt + 1))
+    sleep 1
+  done
+  return 1
+}
+validate_reconcile_marker() {
+  docker_reconcile_marker=/run/project-snow-docker-after-firewall
+  if [ -e "$docker_reconcile_marker" ] || [ -L "$docker_reconcile_marker" ]; then
+    [ -f "$docker_reconcile_marker" ] && [ ! -L "$docker_reconcile_marker" ] &&
+      [ "$(stat -c %u:%g:%a:%h "$docker_reconcile_marker")" = 0:0:600:1 ] || {
+        echo 'Docker firewall reconciliation marker is not a root-only regular file.' >&2
+        return 1
+      }
+  fi
+}
+
+if ! candidate_binding_is_exact; then
+  echo "Staged API does not have the exact loopback binding 127.0.0.1:$candidate_port." >&2
+  print_candidate_diagnostics
+  exit 73
+fi
+
+if ! wait_for_candidate_loopback; then
+  # A migrated host can have correct Docker metadata but no usable published
+  # port after UFW replaced Docker's packet-filter rules. Reconcile only after
+  # proving that the inactive binding is exact and the active container is
+  # healthy; never restart the daemon merely because a volatile marker is absent.
+  ufw status | grep -Fx 'Status: active' >/dev/null || {
+    echo 'UFW must be active before Docker firewall reconciliation.' >&2
+    exit 73
+  }
+  [ "$(docker info --format '{{.LiveRestoreEnabled}}')" = true ] || {
+    echo 'Docker live restore must be enabled before firewall reconciliation.' >&2
+    exit 73
+  }
+  validate_reconcile_marker || exit 73
+  active_service="public-api-$active_colour"
+  active_container_ids="$(docker ps \
+    --filter 'label=com.docker.compose.project=project-snow-public' \
+    --filter "label=com.docker.compose.service=$active_service" \
+    --format '{{.ID}}')"
+  active_container_count="$(printf '%s\n' "$active_container_ids" | awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$active_container_count" -eq 1 ] || {
+    echo "Expected exactly one running container for active service $active_service." >&2
+    exit 73
+  }
+  active_container_id="$(printf '%s\n' "$active_container_ids" | awk 'NF { print; exit }')"
+  printf '%s\n' "$active_container_id" | grep -Eq '^[0-9a-f]{12,64}$' || {
+    echo 'Active container identifier is invalid.' >&2
+    exit 73
+  }
+  wait_for_active_container 5 || {
+    echo 'Active API was not healthy before Docker firewall reconciliation.' >&2
+    exit 73
+  }
+
+  systemctl restart docker
+  docker_ready=0
+  docker_attempt=0
+  while [ "$docker_attempt" -lt 30 ]; do
+    if docker info >/dev/null 2>&1; then
+      docker_ready=1
+      break
+    fi
+    docker_attempt=$((docker_attempt + 1))
+    sleep 1
+  done
+  [ "$docker_ready" -eq 1 ] || {
+    echo 'Docker did not recover after firewall reconciliation.' >&2
+    exit 73
+  }
+  ufw status | grep -Fx 'Status: active' >/dev/null || {
+    echo 'UFW became inactive during Docker firewall reconciliation.' >&2
+    exit 73
+  }
+  wait_for_active_container 15 || {
+    echo 'Active API was not healthy after Docker firewall reconciliation.' >&2
+    exit 73
+  }
+  candidate_reconnect_ready=0
+  candidate_reconnect_attempt=0
+  while [ "$candidate_reconnect_attempt" -lt 15 ]; do
+    candidate_container_id="$(compose ps -q "$service" 2>/dev/null || true)"
+    if candidate_binding_is_exact &&
+       compose exec -T "$service" python -c \
+         "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/public/v1/health/ready', timeout=2).read()" \
+         >/dev/null 2>&1; then
+      candidate_reconnect_ready=1
+      break
+    fi
+    candidate_reconnect_attempt=$((candidate_reconnect_attempt + 1))
+    sleep 1
+  done
+  [ "$candidate_reconnect_ready" -eq 1 ] || {
+    echo 'Staged API did not restore its exact loopback binding and readiness after Docker firewall reconciliation.' >&2
+    print_candidate_diagnostics
+    exit 73
+  }
+  if ! wait_for_candidate_loopback; then
+    echo "Staged API is not reachable through its loopback acceptance port $candidate_port after reconciliation." >&2
+    print_candidate_diagnostics
+    exit 73
+  fi
+
+  docker_reconcile_marker=/run/project-snow-docker-after-firewall
+  docker_reconcile_marker_tmp="$(mktemp /run/.project-snow-docker-after-firewall.XXXXXX)"
+  chown root:root "$docker_reconcile_marker_tmp"
+  chmod 0600 "$docker_reconcile_marker_tmp"
+  mv -f -- "$docker_reconcile_marker_tmp" "$docker_reconcile_marker"
+  docker_reconcile_marker_tmp=""
+fi
 
 if [ -n "$candidate_public_env" ]; then
   sed -i "s|^PUBLIC_ENV_FILE=.*|PUBLIC_ENV_FILE=$public_env_path|" "$candidate_env"
