@@ -27,7 +27,7 @@ WIKI_API = "https://wiki.biligame.com/sonw/api.php"
 LICENSE_SOURCE_PAGE = "https://wiki.biligame.com/sonw/%E9%A6%96%E9%A1%B5"
 LICENSE_SOURCE_URL = "https://creativecommons.org/licenses/by-nc-sa/4.0/"
 STICKER_SOURCE_PAGE = "https://wiki.biligame.com/sonw/%E8%81%8A%E5%A4%A9%E8%A1%A8%E6%83%85"
-USER_AGENT = "ProjectSnow-public-media-review/0.9.0 (contact: admin@xiaob.dev)"
+USER_AGENT = "ProjectSnow-public-media-review/0.9.1 (contact: admin@xiaob.dev)"
 SPECIAL_NOTICE = re.compile(
     r"特殊说明|CC\s*BY|版权声明|许可证|许可协议|禁止转载|版权所有|保留所有权利",
     re.IGNORECASE,
@@ -127,7 +127,7 @@ def review(*, project_root: Path, apply: bool) -> dict[str, Any]:
         gallery = source_pages.get(_title(STICKER_SOURCE_PAGE)) or {}
         home_html_response = session.get(
             LICENSE_SOURCE_PAGE,
-            params={"license-review": "project-snow-0.9.0"},
+            params={"license-review": "project-snow-0.9.1"},
             timeout=30,
         )
         home_html_response.raise_for_status()

@@ -128,9 +128,20 @@ class PublicAPITests(TestCase):
             "park",
         )
         self.assertEqual(
-            service._joint_move_intent("能不能陪我去基地食堂？")[0],
-            "base_canteen",
+            service._joint_move_intent("好不好一起去基地海滩？")[0],
+            "base_beach",
         )
+        self.assertIsNone(service._joint_move_intent("能不能陪我去基地食堂？"))
+        catalog_ids = {item["location_id"] for item in service.movement_catalog()}
+        self.assertEqual(len(catalog_ids), 13)
+        self.assertNotIn("base_canteen", catalog_ids)
+        self.assertTrue({
+            "base_beach",
+            "base_arcade",
+            "base_hot_spring",
+            "base_healing_center",
+            "base_bar",
+        }.issubset(catalog_ids))
         state = {
             "schema_version": "public-state-2",
             "data_version": "test-data",
@@ -228,6 +239,17 @@ class PublicAPITests(TestCase):
         self.assertEqual(target_intent[0], "observation")
         self.assertEqual(target_intent[1]["target_character_id"], target.character_id)
 
+        legacy_canteen_state = json.loads(json.dumps(state))
+        legacy_canteen_state["presence"][target.character_id]["location"] = "基地食堂"
+        canteen_target = service._joint_move_intent(
+            target_message,
+            [],
+            legacy_canteen_state,
+            speaker.character_id,
+        )
+        self.assertEqual(canteen_target[0], "base_canteen")
+        self.assertEqual(canteen_target[1]["resolution"], "target_presence")
+
         continuation = service._joint_move_intent(
             "那就走吧",
             [
@@ -271,6 +293,14 @@ class PublicAPITests(TestCase):
         self.assertFalse(service._joint_move_is_accepted("可以吗？"))
         self.assertFalse(service._joint_move_is_accepted("改天再去吧。"))
         self.assertTrue(service._joint_move_is_accepted("好呀，现在出发。"))
+        self.assertTrue(service._joint_move_is_accepted("好。"))
+        self.assertTrue(service._joint_move_is_accepted("正合我意，这就动身。"))
+        self.assertTrue(service._joint_move_is_accepted("乐意奉陪，就这么定。"))
+        self.assertFalse(service._joint_move_is_accepted("你好，分析员。"))
+        self.assertFalse(service._joint_move_is_accepted("不好吧。"))
+        self.assertFalse(service._joint_move_is_accepted("算了，先不动身。"))
+        self.assertFalse(service._joint_move_is_accepted("好，等会儿再动身吧。"))
+        self.assertFalse(service._joint_move_is_accepted("可以，你可以先去等我。"))
 
     def test_validation_errors_use_standard_code(self) -> None:
         response = self.client.post(
@@ -725,7 +755,7 @@ class PublicAPITests(TestCase):
         self.assertEqual(response.json()["detail"]["code"], "generation_queue_full")
         self.assertEqual(response.json()["detail"]["retry_after_seconds"], 2)
 
-    def test_public_rejects_whole_answer_fallback_and_replays_terminal_error(self) -> None:
+    def test_public_returns_revalidated_empty_output_fallback_and_replays_it(self) -> None:
         credential, _ = self._byok()
         request_id = str(uuid4())
         payload = {
@@ -753,9 +783,10 @@ class PublicAPITests(TestCase):
                 "/public/v1/chat/stream", headers={"Origin": "http://testserver"}, json=payload
             )
         self.assertEqual(first.status_code, 200)
-        self.assertIn('event: error', first.text)
-        self.assertIn('"code":"upstream_invalid_response"', first.text)
-        self.assertNotIn('event: delta', first.text)
+        self.assertNotIn('event: error', first.text)
+        self.assertIn('event: delta', first.text)
+        self.assertIn('event: done', first.text)
+        self.assertIn("我还在接着你刚才的话题", first.text)
         self.assertIn('"idempotent_replay":true', second.text)
         self.assertEqual(chat.call_count, 1)
 

@@ -228,7 +228,7 @@ class PublicSettings:
         except (TypeError, ValueError):
             max_provider_calls_per_action = 2
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "0.9.0"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "0.9.1"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_public_database_url(),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),

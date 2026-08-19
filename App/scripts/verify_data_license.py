@@ -20,7 +20,7 @@ SITE_POLICY_URL = (
     "https://wiki.biligame.com/sonw/index.php?title=%E9%A6%96%E9%A1%B5&oldid=21546"
 )
 LICENSE_URL = "https://creativecommons.org/licenses/by-nc-sa/4.0/"
-USER_AGENT = "ProjectSnow-data-license-review/0.9.0 (contact: admin@xiaob.dev)"
+USER_AGENT = "ProjectSnow-data-license-review/0.9.1 (contact: admin@xiaob.dev)"
 
 
 def _title_from_url(url: str) -> str:

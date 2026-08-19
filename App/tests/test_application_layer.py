@@ -1223,11 +1223,14 @@ class ApplicationLayerTests(unittest.TestCase):
         authoritative_characters = dialogue_characters()
         profiles = self.repository.personas()
         self.assertGreater(len(profiles), 0)
+        profiles_by_character = {profile["character_id"]: profile for profile in profiles}
+        self.assertTrue(set(authoritative_characters).issubset(profiles_by_character))
         for profile in profiles:
             for evidence_ids in profile["evidence"].values():
                 self.assertTrue(set(evidence_ids).issubset(document_ids))
             self.assertEqual(profile["relationship_invariant"]["user_role"], "分析员")
-            self.assertEqual(profile["character_name"], authoritative_characters[profile["character_id"]])
+        for character_id, character_name in authoritative_characters.items():
+            self.assertEqual(profiles_by_character[character_id]["character_name"], character_name)
 
     @pytest.mark.runtime_data
     def test_selectable_characters_are_canonical_dialogue_identities(self) -> None:
@@ -2123,6 +2126,31 @@ class ApplicationLayerTests(unittest.TestCase):
             relationship,
         )
 
+    def test_mvp_midday_greeting_and_template_repetition_are_soft_guarded(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        message = "中午好，辰星。"
+        intents = service._query_intents(message)
+        self.assertEqual(service._question_focus(message, intents), "casual_check_in")
+        context = {
+            "question_focus": "casual_check_in",
+            "session_context": {"turns": [{
+                "user": "中午好，辰星。",
+                "assistant": "中午好，郎君。午间休息的时候能收到你的消息，挺好的……吃过午饭了吗？",
+            }]},
+        }
+        violations = service._repeated_response_violations(
+            "晚上好，郎君。这个时候能有你的消息，挺好的……用过晚饭了吗？",
+            context,
+        )
+        self.assertEqual(violations, ["repeated_response:casual_template"])
+        fallback = service._casual_check_in_fallback({
+            **context,
+            "user_message": message,
+        })
+        self.assertTrue(fallback.startswith(("中午好", "午安")))
+        self.assertNotIn("早安", fallback)
+        self.assertNotIn("午饭", fallback)
+
     @pytest.mark.runtime_data
     def test_mvp_chat_falls_back_when_casual_greeting_invents_current_state(self) -> None:
         service = MVPService(self.settings, self.repository)
@@ -2139,7 +2167,10 @@ class ApplicationLayerTests(unittest.TestCase):
             )
 
         self.assertIn("casual_state_guard", result["response_adjustments"])
-        self.assertEqual(result["answer"], "早安，亲爱的。看到你的消息了，今天想和我聊些什么？")
+        self.assertTrue(result["answer"].startswith("早安"))
+        self.assertNotIn("恒约", result["answer"])
+        self.assertNotIn("嗜睡", result["answer"])
+        self.assertNotIn("吃过", result["answer"])
         self.assertEqual(result["content_blocks"], [{"type": "message", "text": result["answer"]}])
         self.assertEqual(result["citations"], [])
 
@@ -3476,6 +3507,80 @@ class ApplicationLayerTests(unittest.TestCase):
             "",
         )
 
+    def test_mvp_top_level_answer_is_preserved_before_sticker_block(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        blocks = service._normalize_content_blocks(
+            {
+                "answer": "先把这句话好好告诉你。",
+                "content_blocks": [{
+                    "type": "sticker",
+                    "asset_id": "valid_asset_1",
+                    "caption": "开心",
+                }],
+            },
+            "text",
+            "先把这句话好好告诉你。",
+        )
+        self.assertEqual(blocks[0], {"type": "message", "text": "先把这句话好好告诉你。"})
+        self.assertEqual(blocks[1]["type"], "sticker")
+        self.assertEqual(blocks[1]["asset_id"], "valid_asset_1")
+
+    def test_mvp_successful_empty_response_gets_one_controlled_recovery(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        empty = json.dumps({"answer": "", "content_blocks": []}, ensure_ascii=False)
+        recovered = self._communication_model_payload("你好。我在听，想聊什么？", "message")
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_views", return_value={"ca0144ccd81b": {"character_id": "ca0144ccd81b"}}
+        ), patch.object(
+            service,
+            "_call_model",
+            side_effect=[(empty, {"total_tokens": 2}), (recovered, {"total_tokens": 4})],
+        ) as call_model:
+            result = service.chat(
+                "ca0144ccd81b",
+                "你好。",
+                session_id="controlled-empty-recovery-test",
+                communication_channel="text",
+                thinking_decision={"max_provider_http_calls": 2},
+            )
+        self.assertEqual(call_model.call_count, 2)
+        self.assertIn("empty_output_recovery", result["response_adjustments"])
+        self.assertNotIn("empty_model_output_guard", result["response_adjustments"])
+        self.assertEqual(result["answer"], "你好。我在听，想聊什么？")
+        self.assertEqual(result["usage"]["total_tokens"], 6)
+
+    def test_mvp_invalid_sticker_only_recovery_uses_safe_local_reply(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        invalid_sticker = json.dumps({
+            "answer": "",
+            "content_blocks": [{"type": "sticker", "asset_id": "outside_scope"}],
+        }, ensure_ascii=False)
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_views", return_value={"ca0144ccd81b": {"character_id": "ca0144ccd81b"}}
+        ), patch.object(
+            service,
+            "_call_model",
+            side_effect=[(invalid_sticker, {}), (invalid_sticker, {})],
+        ) as call_model:
+            result = service.chat(
+                "ca0144ccd81b",
+                "要不要一起去海滩？",
+                session_id="invalid-sticker-only-recovery-test",
+                communication_channel="text",
+                public_sticker_candidates=[{"asset_id": "allowed_asset"}],
+                public_state_update_catalog=[{
+                    "location_id": "base_beach",
+                    "activity_id": "walking_by_sea_together",
+                    "aliases": ["海滩"],
+                }],
+            )
+        self.assertEqual(call_model.call_count, 2)
+        self.assertIn("empty_model_output_guard", result["response_adjustments"])
+        self.assertEqual(result["validation_disposition"], "safe_fallback")
+        self.assertIn("邀请", result["answer"])
+        self.assertEqual(result["state_updates"], [])
+        self.assertFalse(any(block.get("type") == "sticker" for block in result["content_blocks"]))
+
     def test_mvp_generated_answer_keeps_plain_non_json_fallback(self) -> None:
         service = MVPService(self.settings, self.repository)
         self.assertEqual(
@@ -3533,6 +3638,20 @@ class ApplicationLayerTests(unittest.TestCase):
         answer = service._empty_model_output_fallback(context)
         self.assertIn("接着", answer)
         self.assertNotIn("想先和我说什么", answer)
+
+    def test_mvp_empty_provider_fallback_acknowledges_analyst_sticker(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        answer = service._empty_model_output_fallback({
+            "analyst_content_blocks": [{
+                "type": "sticker",
+                "asset_id": "fixture_sticker",
+                "caption": "开心",
+            }],
+            "question_focus": "general",
+            "user_message": "[分析员发送了表情：开心]",
+        })
+        self.assertIn("开心", answer)
+        self.assertIn("收到了", answer)
 
     def test_mvp_explicit_morso_question_has_persona_context_in_empty_fallback(self) -> None:
         service = MVPService(self.settings, self.repository)

@@ -4557,6 +4557,8 @@ class MVPService:
         greeting_terms = (
             "早安",
             "早上好",
+            "中午好",
+            "午好",
             "午安",
             "下午好",
             "晚上好",
@@ -4760,7 +4762,7 @@ class MVPService:
             "routine_activity": "用户问的是早些时候或通常会做什么。先直接回应训练、休息或当时安排这一选择；不得把当前会话的‘刚才/现在’活动冒充为早上的事实。没有可核实的具体安排时，用自然的条件或习惯表达承接，不要编造日程。",
             "location": "用户问的是地点。第一句必须直接回答地点；若没有当前地点事实，简短说明不确定或用假设表达，不要转答吃饭、任务或旧剧情。",
             "current_condition": "用户问的是当前状态/症状。先给出截至最新资料的状态；如果存在过去到现在的转变，明确区分‘过去’和‘现在’，不能只复述旧设定。",
-            "casual_check_in": "用户是在自然问候或关心今天过得怎么样。先用角色口吻直接接住这句问候，通常只需一两句；不要无端引入恒约、旧剧情、当前行程或‘自从……之后我变得……’这类未经本轮证据支持的状态。",
+            "casual_check_in": "用户是在自然问候或关心今天过得怎么样。先用角色口吻准确接住用户使用的早晨、中午、下午或晚间问候，通常只需一两句；称呼可以自然使用但不必每轮重复。不要套用‘收到你的消息真好＋吃过饭了吗’的固定结构，不强制用餐食问题收尾，并避免复用最近四轮问候的同一对话动作。不要无端引入恒约、旧剧情、当前行程或‘自从……之后我变得……’这类未经本轮证据支持的状态。",
             "relationship_label": "用户问的是关系称谓。先直接回答已经建立的关系，再补充一句情感背景；不要先输出资料检索免责声明。",
             "preference_or_value": "用户问的是喜欢、在意或不喜欢什么。先分别回答对应类别；不得用‘关心分析员’替代具体偏好，也不要把一次性场景硬说成永久喜好。",
             "companion_relationship": "用户问的是当前角色与一名或多名可对话队员的相处和印象。先使用 companion_social_context 的 shared_evidence；没有共同剧情时，可基于目标角色稳定资料用‘我印象里’做谨慎评价；仍无证据时，只生成当前或假设性的普通小互动。可以写逛街、茶话会、吃饭、训练和轻微玩笑，但不得虚构重大任务、伤亡、秘密身份、正式关系、历史原话或主线结局。",
@@ -7336,6 +7338,7 @@ class MVPService:
 
         raw_blocks = generated.get("content_blocks")
         model_sticker_seen = False
+        model_sticker: dict[str, str] | None = None
         if isinstance(raw_blocks, list):
             for item in raw_blocks:
                 if not isinstance(item, dict):
@@ -7349,13 +7352,11 @@ class MVPService:
                     asset_id = str(item.get("asset_id") or "").strip()
                     if not model_sticker_seen and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{5,63}", asset_id):
                         model_sticker_seen = True
-                        blocks.append(
-                            {
-                                "type": "sticker",
-                                "asset_id": asset_id,
-                                "caption": _clean_renderable_text(item.get("caption"))[:120],
-                            }
-                        )
+                        model_sticker = {
+                            "type": "sticker",
+                            "asset_id": asset_id,
+                            "caption": _clean_renderable_text(item.get("caption"))[:120],
+                        }
                     continue
                 text = (
                     _clean_renderable_text(item.get("text"))
@@ -7364,12 +7365,16 @@ class MVPService:
                 )
                 if block_type in allowed and text:
                     append_block(block_type, text)
-        if blocks:
-            return blocks, reclassified
         default_type = "message" if communication_channel == "text" else "speech"
         clean_answer = _clean_renderable_text(answer) if isinstance(answer, str) else ""
-        if clean_answer:
+        # A number of compatible providers return a useful top-level answer
+        # alongside a sticker-only block list. Preserve that prose instead of
+        # letting the metadata block erase it. If verbal blocks already exist,
+        # they remain authoritative and the top-level duplicate is ignored.
+        if clean_answer and not any(block.get("type") != "sticker" for block in blocks):
             append_block(default_type, clean_answer)
+        if model_sticker is not None:
+            blocks.append(model_sticker)
         return blocks, reclassified
 
     @staticmethod
@@ -7531,18 +7536,58 @@ class MVPService:
         if focus == "preference_or_value":
             return "这个问题我愿意认真想想。能明确说的，我会直接告诉你，不拿别的故事来敷衍。"
         if focus == "casual_check_in":
-            return "我在呢。今天想和我聊点什么？"
+            return MVPService._casual_check_in_fallback(context)
         if focus == "current_activity":
             return "我这会儿还算清闲，可以陪你说说话。"
         if focus == "location":
             return "我在基地里，位置不急着说；你是要找我，还是只是随口问问？"
         return "我听着呢。你真正想问的是什么，直接告诉我就好。"
 
-    @staticmethod
-    def _casual_check_in_fallback() -> str:
-        """A fact-free reply when a greeting triggered a lore hallucination."""
+    @classmethod
+    def _casual_check_in_fallback(cls, context: dict[str, Any] | None = None) -> str:
+        """Return a time-correct, fact-free greeting without a fixed scaffold.
 
-        return "早安，分析员。看到你的消息了，今天想和我聊些什么？"
+        The provider can fail before it has produced any usable dialogue, so
+        this fallback deliberately depends only on the user's wording and the
+        bounded conversation supplied with the request.  Rotating by turn
+        count keeps repeated greetings conversational without introducing a
+        random or untestable fact such as what the character just ate.
+        """
+
+        context = context or {}
+        message = _compact(str(context.get("user_message") or ""))
+        if any(term in message for term in ("中午好", "午好", "午安")):
+            variants = (
+                "中午好，分析员。你想说什么就说吧，我在听。",
+                "午安。你来得正好，有什么话想先告诉我？",
+                "中午好。先陪你聊一会儿也不错——今天想从哪里说起？",
+            )
+        elif any(term in message for term in ("晚上好", "晚安")):
+            variants = (
+                "晚上好，分析员。我在呢，今晚想聊些什么？",
+                "晚上好。难得这会儿能安静说话，你先开个头吧。",
+                "晚安之前还能听你说几句，也很好。你现在最想说什么？",
+            )
+        elif any(term in message for term in ("下午好",)):
+            variants = (
+                "下午好，分析员。我在听，想聊什么都可以。",
+                "下午好。你这一声招呼我收到了——接下来想说什么？",
+                "午后好。先不用急着找话题，想到什么就告诉我吧。",
+            )
+        elif any(term in message for term in ("早安", "早上好")):
+            variants = (
+                "早安，分析员。今天想先和我说什么？",
+                "早上好。你来得挺早，有话就慢慢说吧。",
+                "早安。我已经看到你的消息了，今天想从哪里聊起？",
+            )
+        else:
+            variants = (
+                "你好，分析员。我在听，想聊什么都可以。",
+                "我在呢。你今天想先从哪件事说起？",
+                "这声招呼我收到了。接下来想说什么？",
+            )
+        turns = list((context.get("session_context") or {}).get("turns") or [])
+        return variants[len(turns) % len(variants)]
 
     @staticmethod
     def _communication_fallback(communication_channel: str) -> str:
@@ -8558,6 +8603,20 @@ class MVPService:
     def _empty_model_output_fallback(cls, context: dict[str, Any]) -> str:
         """Keep a provider's empty JSON response from rendering a blank turn."""
 
+        analyst_stickers = [
+            item
+            for item in (context.get("analyst_content_blocks") or [])
+            if isinstance(item, dict) and str(item.get("type") or "").casefold() == "sticker"
+        ]
+        if analyst_stickers:
+            caption = _clean_renderable_text(analyst_stickers[0].get("caption"))
+            subject = f"这个‘{caption}’表情" if caption else "这个表情"
+            return f"{subject}我收到了。看样子你是想让我先猜猜你的心情？"
+        if context.get("public_state_update_catalog"):
+            # Do not manufacture consent: this wording contains neither an
+            # immediate acceptance nor a state proposal, so the public state
+            # resolver necessarily leaves both participants where they are.
+            return "我听见你的邀请了。让我先想一想，再认真答你。"
         if (context.get("dual_persona_context") or {}).get("active"):
             return cls._morsos_fallback(context)
         if cls._is_relationship_roster_question(str(context.get("user_message") or "")):
@@ -8577,7 +8636,7 @@ class MVPService:
             return cls._live_scene_fallback(context)
         focus = str(context.get("question_focus") or "general")
         if focus == "casual_check_in":
-            return cls._casual_check_in_fallback()
+            return cls._casual_check_in_fallback(context)
         if focus == "food_or_drink":
             return "我还没决定吃什么。"
         if focus == "current_activity":
@@ -8674,7 +8733,52 @@ class MVPService:
                 continue
             if normalized == previous or SequenceMatcher(None, normalized, previous).ratio() >= 0.9:
                 return ["repeated_response:recent_turn"]
+        if str(context.get("question_focus") or "") == "casual_check_in":
+            current_template = cls._casual_response_template(answer)
+            if len(current_template) >= 12:
+                for turn in recent[-4:]:
+                    previous_template = cls._casual_response_template(
+                        str(turn.get("assistant") or "")
+                    )
+                    if len(previous_template) < 12:
+                        continue
+                    if (
+                        current_template == previous_template
+                        or SequenceMatcher(
+                            None,
+                            current_template,
+                            previous_template,
+                        ).ratio()
+                        >= 0.78
+                    ):
+                        return ["repeated_response:casual_template"]
         return []
+
+    @staticmethod
+    def _casual_response_template(answer: str) -> str:
+        """Normalize only the scaffold of a greeting for soft repetition.
+
+        Time words, direct-address names and meal variants are slots rather
+        than meaningful diversity.  This intentionally runs only for
+        ``casual_check_in`` so ordinary factual answers are not penalized for
+        sharing useful terminology.
+        """
+
+        value = _compact(answer)
+        replacements = (
+            (r"(?:早安|早上好|中午好|午好|午安|下午好|晚上好|晚安|你好)", "<问候>"),
+            (r"(?:分析员|郎君|亲爱的|达令|亲亲|甜心|宝贝)", "<称呼>"),
+            (r"(?:午间休息的?时候|这个时候|这会儿|此刻|现在)", "<时段>"),
+            (r"(?:能收到|能有|看到|收到|等到)(?:你|分析员)?的?消息", "<收到消息>"),
+            (r"(?:挺好的|真好|很好|也很好|让人安心)", "<积极回应>"),
+            (
+                r"(?:吃过|用过|吃了|用了)?(?:早饭|早餐|午饭|午餐|晚饭|晚餐)(?:了)?吗",
+                "<餐食追问>",
+            ),
+        )
+        for pattern, replacement in replacements:
+            value = re.sub(pattern, replacement, value)
+        return re.sub(r"[，。！？!?；;…—\-\s]+", "", value)
 
     @classmethod
     def _narrative_action_repetition_violations(
@@ -9040,6 +9144,34 @@ class MVPService:
         )
 
     @staticmethod
+    def _empty_output_recovery_prompt(original_user_prompt: str) -> str:
+        """Request one compact retry after a *successful* empty response.
+
+        This prompt is used only after the provider returned an HTTP success,
+        so retrying cannot duplicate an uncertain network submission. The
+        shared HTTP-call counter still enforces the public two-call ceiling.
+        """
+
+        try:
+            original_request: Any = json.loads(original_user_prompt)
+        except json.JSONDecodeError:
+            original_request = original_user_prompt
+        return json.dumps(
+            {
+                "task": "recover_empty_dialogue_response",
+                "original_request": original_request,
+                "requirements": (
+                    "上一次成功响应没有可用正文。重新生成一个简短、完整的 JSON 回答，"
+                    "严格遵守 original_request 的 response_contract、交流媒介和角色边界。"
+                    "必须至少返回一个非空 message 或 speech；可以在文字之后附带候选表情，"
+                    "但表情不能代替本轮应有的自然回应。若这是共同出发邀请，只有角色明确愿意"
+                    "立刻行动时才返回 state_updates；不确定时自然回应邀请并保持 state_updates 为空。"
+                ),
+            },
+            ensure_ascii=False,
+        )
+
+    @staticmethod
     def _immersive_boundary_fallback(
         dialogue_boundary: dict[str, Any],
         style_context: dict[str, Any] | None,
@@ -9098,7 +9230,7 @@ class MVPService:
     def _fenny_voice_fallback(context: dict[str, Any]) -> str:
         focus = str(context.get("question_focus") or "general")
         if focus == "casual_check_in":
-            return "哎呀，我只是逗你玩嘛。早安，今天想和我聊点什么？"
+            return "哎呀，我只是逗你玩嘛。" + MVPService._casual_check_in_fallback(context)
         if focus in {"food_or_drink", "current_activity", "location"}:
             return "好啦，别被我吓到。我会好好回答，你慢慢问就是了。"
         return "我没有真的生气，只是和你开个玩笑。你想说什么，直接告诉我吧。"
@@ -9577,6 +9709,7 @@ class MVPService:
         )
         context["user_message"] = message.strip()
         context["analyst_content_blocks"] = normalized_analyst_blocks
+        context["public_state_update_catalog"] = list(public_state_update_catalog or [])
         context["attachment_context"] = list(attachment_context or [])
         # Keep only the compact, evidence-backed direct-address memory in all
         # prompts.  The detailed relationship card remains intent-gated below
@@ -9683,10 +9816,57 @@ class MVPService:
             raise
         generated = _parse_model_json(raw_content)
         answer_text = self._generated_answer(generated, raw_content)
-        has_sticker_output = any(
-            isinstance(item, dict) and str(item.get("type") or "").casefold() == "sticker"
-            for item in (generated.get("content_blocks") or [])
-        )
+
+        def has_valid_sticker_output(payload: dict[str, Any]) -> bool:
+            allowed_ids = {
+                str(item.get("asset_id") or "")
+                for item in (public_sticker_candidates or [])
+                if isinstance(item, dict) and item.get("asset_id")
+            }
+            for item in payload.get("content_blocks") or []:
+                if not isinstance(item, dict) or str(item.get("type") or "").casefold() != "sticker":
+                    continue
+                asset_id = str(item.get("asset_id") or "").strip()
+                if public_sticker_candidates is None:
+                    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{5,63}", asset_id):
+                        return True
+                elif asset_id in allowed_ids:
+                    return True
+            return False
+
+        has_sticker_output = has_valid_sticker_output(generated)
+        empty_output_recovery = False
+        # Only a definite successful-but-empty provider response reaches this
+        # branch. Network errors have already raised and are never replayed.
+        # One compact recovery consumes at most the second provider HTTP call.
+        if not answer_text.strip() and not has_sticker_output:
+            recovery_kwargs = dict(initial_kwargs)
+            recovery_kwargs.pop("user_content", None)
+            recovery_started = time.perf_counter()
+            try:
+                recovery_content, recovery_usage = self._call_model(
+                    system_prompt,
+                    self._empty_output_recovery_prompt(user_prompt),
+                    **recovery_kwargs,
+                )
+                usage = self._merge_usage(usage, recovery_usage)
+                recovery_generated = _parse_model_json(recovery_content)
+                recovery_answer = self._generated_answer(
+                    recovery_generated,
+                    recovery_content,
+                )
+                if recovery_answer.strip() or has_valid_sticker_output(recovery_generated):
+                    generated = recovery_generated
+                    answer_text = recovery_answer
+                    has_sticker_output = has_valid_sticker_output(generated)
+                    empty_output_recovery = True
+            except MVPProviderError:
+                # The initial HTTP success is certain, so a failed final
+                # recovery degrades to a locally guarded answer rather than a
+                # third billed request or a visible empty-turn error.
+                pass
+            finally:
+                self._record_generation_duration("empty_recovery_ms", recovery_started)
         empty_model_output_guard = False
         in_person_blocks_reclassified = False
         in_person_block_rewrite = False
@@ -9761,6 +9941,32 @@ class MVPService:
         address_alias_normalized = False
         relationship_address_normalized = False
         unsupported_quote_sanitized = False
+        if (
+            guardrail_violations
+            and (empty_output_recovery or empty_model_output_guard)
+            and int(self.generation_diagnostics().get("provider_http_calls", 0)) >= 2
+        ):
+            # Empty-output recovery has already consumed the final permitted
+            # provider call. Never attempt a third billed rewrite. Replace a
+            # still-invalid recovery with the locally generated response and
+            # let the normal final hard-guard pass decide whether it is safe.
+            answer_text = self._empty_model_output_fallback(context)
+            generated = {
+                "answer": answer_text,
+                "content_blocks": [{
+                    "type": "message" if active_channel == "text" else "speech",
+                    "text": answer_text,
+                }],
+                "confidence": "low",
+                "narrative_scope": "unknown",
+                "used_document_ids": [],
+                "used_relation_candidate_ids": [],
+                "uncertainties": ["受控恢复仍未通过校验，已使用本地安全回应。"],
+                "citation_notes": ["未进行第三次模型调用。"],
+            }
+            empty_model_output_guard = True
+            guardrail_violations = []
+            initial_in_person_block_violations = set()
         if guardrail_violations:
             guardrail_retried = True
             original_guard_answer = answer_text
@@ -9880,7 +10086,7 @@ class MVPService:
                 item.startswith("unsupported_casual_state_claim:")
                 for item in retry_violations
             ):
-                answer_text = self._casual_check_in_fallback()
+                answer_text = self._casual_check_in_fallback(context)
                 generated = {
                     "answer": answer_text,
                     "content_blocks": [
@@ -10141,7 +10347,11 @@ class MVPService:
                 generated.pop("content_blocks", None)
                 continuity_guard = True
             elif any(item.startswith("repeated_response:") for item in retry_violations):
-                answer_text = self._natural_dialogue_fallback(context)
+                answer_text = (
+                    self._casual_check_in_fallback(context)
+                    if str(context.get("question_focus") or "") == "casual_check_in"
+                    else self._natural_dialogue_fallback(context)
+                )
                 generated = fallback_generated
                 generated["answer"] = answer_text
                 generated.pop("content_blocks", None)
@@ -10475,11 +10685,12 @@ class MVPService:
             content_block_guard_rejected = True
         validation_disposition = (
             "rejected"
-            if content_block_guard_rejected or empty_model_output_guard
+            if content_block_guard_rejected
             else "safe_fallback"
             if deterministic_fallback
             else "normalized"
             if guardrail_retried
+            or empty_output_recovery
             or relationship_repaired
             or latest_state_repaired
             or address_alias_normalized
@@ -10491,7 +10702,7 @@ class MVPService:
         guard_resolution = (
             "unresolved_hard_violation"
             if unresolved_hard_violations
-            else "empty_output"
+            else "safe_fallback"
             if empty_model_output_guard
             else "safe_fallback"
             if deterministic_fallback
@@ -10712,6 +10923,7 @@ class MVPService:
                     ("narrative_action_repetition", narrative_action_guard),
                     ("logistics_evidence_fallback", logistics_guard),
                     ("relationship_roster_guard", relationship_roster_guard),
+                    ("empty_output_recovery", empty_output_recovery),
                     ("empty_model_output_guard", empty_model_output_guard),
                     ("in_person_blocks_reclassified", in_person_blocks_reclassified),
                     ("in_person_block_rewrite", in_person_block_rewrite),

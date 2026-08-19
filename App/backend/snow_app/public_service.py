@@ -72,15 +72,11 @@ class CharacterUnavailable(RuntimeError):
     pass
 
 
-_PUBLIC_WHOLE_ANSWER_FALLBACKS = frozenset(
-    {
-        # Empty provider output has no answer to preserve. Every other
-        # deterministic guard produces a channel-safe, revalidated fallback
-        # and is returned instead of turning a recoverable role issue into a
-        # failed public request.
-        "empty_model_output_guard",
-    }
-)
+# A locally generated answer is exposed only after the MVP has run the same
+# final hard-guard pass as a provider answer.  Recoverable empty/malformed
+# envelopes therefore no longer become a terminal public error merely because
+# the safe fallback replaced the whole answer.
+_PUBLIC_WHOLE_ANSWER_FALLBACKS: frozenset[str] = frozenset()
 
 # Diagnostics exposed through the public idempotency record describe the
 # answer actually shown to the user. State transitions, style-profile lookup,
@@ -88,6 +84,7 @@ _PUBLIC_WHOLE_ANSWER_FALLBACKS = frozenset(
 # provider response look "normalized".
 _PUBLIC_REWRITE_ADJUSTMENTS = frozenset({
     "answer_guardrail_retry",
+    "empty_output_recovery",
     "in_person_block_rewrite",
 })
 _PUBLIC_NORMALIZATION_ADJUSTMENTS = frozenset({
@@ -289,6 +286,10 @@ _CONTROLLED_JOINT_LOCATIONS: dict[str, dict[str, Any]] = {
     },
     "base_canteen": {
         "location": "基地食堂",
+        # Kept only so an older signed state and “去找正在食堂的队员” can be
+        # resolved. It is deliberately absent from the invitation catalog and
+        # cannot be selected by a new direct movement request.
+        "public_invitation": False,
         "explicit_aliases": ("基地食堂", "食堂"),
         "aliases": ("基地食堂", "食堂"),
         "activities": {"eating_together": "和分析员一起用餐"},
@@ -317,6 +318,38 @@ _CONTROLLED_JOINT_LOCATIONS: dict[str, dict[str, Any]] = {
         "aliases": ("资料室", "资料阅览区", "阅览区", "查资料", "看资料"),
         "activities": {"reading_together": "和分析员一起查阅资料"},
     },
+    "base_beach": {
+        "location": "基地海滩",
+        "explicit_aliases": ("基地海滩", "海滩"),
+        "aliases": ("基地海滩", "海滩", "海边"),
+        "activities": {"walking_by_sea_together": "和分析员一起在海滩散步"},
+    },
+    "base_arcade": {
+        "location": "基地游戏厅",
+        "explicit_aliases": ("基地游戏厅", "游戏厅"),
+        "aliases": ("基地游戏厅", "游戏厅", "街机厅", "打游戏"),
+        "activities": {"playing_games_together": "和分析员一起玩游戏"},
+    },
+    "base_hot_spring": {
+        "location": "基地温泉",
+        "explicit_aliases": ("基地温泉", "温泉"),
+        "aliases": ("基地温泉", "温泉", "泡温泉"),
+        "activities": {"relaxing_at_hot_spring": "和分析员一起在温泉放松"},
+    },
+    "base_healing_center": {
+        "location": "基地疗愈中心",
+        "explicit_aliases": ("基地疗愈中心", "疗愈中心"),
+        "aliases": ("基地疗愈中心", "疗愈中心", "治疗中心"),
+        "activities": {"resting_at_healing_center": "和分析员一起在疗愈中心休整"},
+    },
+    "base_bar": {
+        "location": "基地酒吧",
+        "explicit_aliases": ("基地酒吧", "酒吧"),
+        "aliases": ("基地酒吧", "酒吧", "去喝一杯", "坐坐"),
+        # Do not imply alcohol consumption; the destination is a base social
+        # space and the activity remains suitable for every character.
+        "activities": {"chatting_at_bar": "和分析员一起在酒吧坐坐聊天"},
+    },
 }
 _JOINT_MOVE_REQUEST_TERMS = (
     "一起去", "一起出发", "和我去", "陪我去", "跟我去", "带你去", "带你逛", "带你散步",
@@ -331,17 +364,21 @@ _JOINT_MOVE_CONTINUATION_TERMS = (
 _JOINT_MOVE_ACCEPT_TERMS = (
     "可以", "当然", "愿意", "没问题", "走吧", "出发", "陪你", "跟你去", "跟你逛", "和你去",
     "和你逛", "一起去", "我们去", "那就走", "现在走", "这就出发", "马上出发", "现在出发",
-    "好呀", "好啊", "好吧", "行啊", "行吧",
+    "好呀", "好啊", "好吧", "行啊", "行吧", "正合我意", "乐意奉陪", "就这么定",
+    "这就过去", "立即过去", "马上过去", "动身", "这就走", "现在就走",
 )
 _JOINT_MOVE_NEGATIVE_TERMS = (
-    "不去", "不想去", "不想", "不能", "不可以", "没空", "不方便", "拒绝", "下次", "以后", "改天",
-    "稍后", "晚点", "明天", "到时候", "之后再", "有机会", "如果", "假如", "理论上", "也许", "或许",
+    "不去", "不想去", "不想", "不能", "不可以", "不行", "不好", "先不", "还是不", "算了",
+    "没空", "不方便", "拒绝", "下次", "以后", "改天",
+    "稍后", "晚点", "等会", "待会", "一会儿", "过一会", "晚些时候", "你可以先去", "你先去",
+    "我先去", "先去吧", "等我", "明天", "到时候", "之后再",
+    "有机会", "如果", "假如", "理论上", "也许", "或许",
 )
 _JOINT_MOVE_HISTORICAL_TERMS = (
     "去过", "逛过", "曾经", "已经去", "上次去", "以前去",
 )
 _JOINT_MOVE_ANSWER_QUESTION_TERMS = (
-    "要不要", "想不想", "愿不愿意", "能不能", "可不可以", "可以吗", "好吗", "有空吗", "去吗",
+    "要不要", "想不想", "愿不愿意", "能不能", "可不可以", "好不好", "可以吗", "好吗", "有空吗", "去吗",
 )
 
 
@@ -356,7 +393,7 @@ def _joint_move_has_blocker(text: str) -> bool:
     # refusal. Remove only those reviewed question forms before checking true
     # negative, future, conditional, and historical blockers.
     value = str(text or "")
-    for invitation in ("要不要", "想不想", "愿不愿意", "能不能", "可不可以"):
+    for invitation in ("要不要", "想不想", "愿不愿意", "能不能", "可不可以", "好不好"):
         value = value.replace(invitation, "")
     return _contains_any(value, _JOINT_MOVE_NEGATIVE_TERMS + _JOINT_MOVE_HISTORICAL_TERMS)
 
@@ -615,6 +652,8 @@ class PublicChatService:
 
         values: list[dict[str, str]] = []
         for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items():
+            if definition.get("public_invitation") is False:
+                continue
             activities = dict(definition.get("activities") or {})
             activity_id = next(iter(activities), "")
             values.append(
@@ -702,9 +741,13 @@ class PublicChatService:
         # Prefer a named destination over a generic activity. "去商场逛街"
         # therefore resolves to the mall rather than the generic 逛街 alias.
         for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items():
+            if definition.get("public_invitation") is False:
+                continue
             if _contains_any(value, tuple(definition.get("explicit_aliases") or ())):
                 return location_id, {**definition, "resolution": "current_explicit"}
         for location_id, definition in _CONTROLLED_JOINT_LOCATIONS.items():
+            if definition.get("public_invitation") is False:
+                continue
             if _contains_any(value, tuple(definition["aliases"])):
                 return location_id, {**definition, "resolution": "current_activity"}
         return None
@@ -756,7 +799,13 @@ class PublicChatService:
             ("当然", "愿意", "没问题", "走吧", "出发", "现在走", "好呀", "好啊", "好吧", "行啊", "行吧"),
         ):
             return False
-        return _contains_any(value, _JOINT_MOVE_ACCEPT_TERMS)
+        bare_acceptance = bool(
+            re.search(
+                r"(?:^|[，。！？!?；;\s])(?:好|行)(?:呀|啊|的|吧|啦)?(?:[，。！？!?；;\s]|$)",
+                value,
+            )
+        )
+        return bare_acceptance or _contains_any(value, _JOINT_MOVE_ACCEPT_TERMS)
 
     def _apply_joint_movement(
         self,
@@ -1264,6 +1313,22 @@ class PublicChatService:
                 "role_guard_rejected",
                 model_called=True,
                 diagnostics=diagnostics,
+            )
+        # A proactive arrival is not a user-authored chat turn. Do not invent
+        # one from a local empty-output fallback; keep the already-applied
+        # presence transition and let the character remain silent instead.
+        if "empty_model_output_guard" in adjustments:
+            return self.failed_presence_arrival(
+                prepared,
+                "upstream_invalid_response",
+                model_called=True,
+                diagnostics=self._diagnostics(
+                    total_started,
+                    result,
+                    generation_class="rejected",
+                    guard_code="empty_model_output_guard",
+                    error_stage="generation_validation",
+                ),
             )
         rejected_adjustments = sorted(
             set(adjustments).intersection(_PUBLIC_WHOLE_ANSWER_FALLBACKS)

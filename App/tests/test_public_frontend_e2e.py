@@ -28,6 +28,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
     arrival_started: threading.Event | None = None
     arrival_release: threading.Event | None = None
     feedback_payload: dict[str, object] | None = None
+    chat_payloads: list[dict[str, object]] = []
     chat_attempts: dict[str, int] = {}
     presence_resolve_count = 0
 
@@ -246,6 +247,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             )
             return
         if self.path == "/public/v1/chat/stream":
+            type(self).chat_payloads.append(payload)
             channel = payload.get("communication_channel") or "text"
             block_type = "message" if channel == "text" else "speech"
             meta_packet = (
@@ -301,6 +303,16 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                      'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
                      f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks}, ensure_ascii=False)}\n\n')
                 ).encode()
+            elif payload.get("message") == "句界测试":
+                sentence_text = "第一句自然回应。第二句换个角度继续。第三句收住话题。"
+                blocks = [{"type": block_type, "text": sentence_text}]
+                remaining_packets = "".join(
+                    (
+                        f'event: delta\ndata: {json.dumps({"block_index": 0, "block_type": block_type, "text": sentence_text}, ensure_ascii=False)}\n\n',
+                        'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
+                        f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks}, ensure_ascii=False)}\n\n',
+                    )
+                ).encode()
             else:
                 remaining_packets = "".join(
                     (
@@ -350,6 +362,7 @@ class PublicFrontendE2ETests(TestCase):
         PublicFrontendHandler.arrival_started = None
         PublicFrontendHandler.arrival_release = None
         PublicFrontendHandler.feedback_payload = None
+        PublicFrontendHandler.chat_payloads = []
         PublicFrontendHandler.chat_attempts = {}
         PublicFrontendHandler.presence_resolve_count = 0
 
@@ -600,6 +613,23 @@ class PublicFrontendE2ETests(TestCase):
                     )
                 page.goto(f"{self.base_url}/privacy/", wait_until="networkidle")
                 self._assert_no_horizontal_overflow(page)
+                scroll = page.evaluate(
+                    """() => {
+                        const root = document.scrollingElement;
+                        const before = root.scrollTop;
+                        window.scrollTo(0, root.scrollHeight);
+                        return {
+                            before,
+                            after: root.scrollTop,
+                            scrollHeight: root.scrollHeight,
+                            clientHeight: root.clientHeight,
+                            overflowY: getComputedStyle(document.documentElement).overflowY,
+                        };
+                    }"""
+                )
+                self.assertGreater(scroll["scrollHeight"], scroll["clientHeight"])
+                self.assertGreater(scroll["after"], scroll["before"])
+                self.assertEqual(scroll["overflowY"], "auto")
                 page.close()
             browser.close()
 
@@ -620,8 +650,17 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#open-stage-contacts").click()
             self.assertEqual(page.locator("#open-stage-contacts").get_attribute("aria-expanded"), "false")
             self.assertTrue(page.locator("#chat-app").evaluate("element => element.classList.contains('sidebar-collapsed')"))
-            page.locator("#open-stage-contacts").click()
-            self.assertEqual(page.locator("#open-stage-contacts").get_attribute("aria-expanded"), "true")
+            self.assertEqual(page.locator("#open-stage-contacts svg").count(), 1)
+            self.assertNotIn("⌄", page.locator("#open-stage-contacts").inner_text())
+            page.locator("#open-communicator").click()
+            page.locator("#text-surface").wait_for(state="visible")
+            self.assertTrue(page.locator("#open-contacts").is_visible())
+            page.wait_for_function("() => document.activeElement?.id === 'open-contacts'")
+            self.assertTrue(page.locator("#open-contacts").evaluate("element => element === document.activeElement"))
+            self.assertEqual(page.locator("#open-contacts").get_attribute("aria-expanded"), "false")
+            page.locator("#open-contacts").click()
+            self.assertEqual(page.locator("#open-contacts").get_attribute("aria-expanded"), "true")
+            self.assertFalse(page.locator("#chat-app").evaluate("element => element.classList.contains('sidebar-collapsed')"))
             browser.close()
 
     def test_indexeddb_unavailable_uses_memory_and_chat_still_works(self) -> None:
@@ -653,7 +692,7 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
             browser.close()
 
-    def test_v090_frontend_contracts_are_non_blocking_and_opt_out_feedback(self) -> None:
+    def test_v091_frontend_contracts_are_non_blocking_and_opt_out_feedback(self) -> None:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
             page = browser.new_page(viewport={"width": 1280, "height": 800})
@@ -740,9 +779,13 @@ class PublicFrontendE2ETests(TestCase):
             self.assertIn("by_character_created", database["indexes"])
             self.assertIn("by_character_segment_created", database["indexes"])
 
+            page.locator("#message-input").fill("这段主输入框草稿必须保留")
             page.locator("#open-movement-shortcuts").click()
-            page.get_by_role("button", name="商业街一起逛街").click()
-            self.assertEqual(page.locator("#message-input").input_value(), "现在一起去商业街吗？")
+            page.locator('[data-movement-id="commercial_street"]').click()
+            self.assertEqual(page.locator("#movement-invitation").input_value(), "现在一起去商业街吗？")
+            self.assertEqual(page.locator("#message-input").input_value(), "这段主输入框草稿必须保留")
+            self.assertTrue(page.locator("#send-movement-invitation").is_enabled())
+            page.locator('[data-close-dialog="movement-dialog"]').last.click()
 
             page.locator("#open-info").click()
             self.assertEqual(page.locator("#info-panel").get_attribute("aria-hidden"), "false")
@@ -772,6 +815,8 @@ class PublicFrontendE2ETests(TestCase):
             self.assertTrue(PublicFrontendHandler.chat_stream_started.wait(timeout=5))
             page.wait_for_timeout(150)
             self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
+            page.wait_for_timeout(300)
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
             page.locator("#timeline .typing-indicator").wait_for(state="visible")
             bounds = page.evaluate(
                 """() => {
@@ -782,6 +827,14 @@ class PublicFrontendE2ETests(TestCase):
             )
             self.assertTrue(bounds["inside"])
             self.assertTrue(page.locator("#stop-waiting").is_visible())
+            overlap = page.evaluate(
+                """() => {
+                    const feedback = document.querySelector('#floating-feedback').getBoundingClientRect();
+                    const stop = document.querySelector('#stop-waiting').getBoundingClientRect();
+                    return !(feedback.right <= stop.left || stop.right <= feedback.left || feedback.bottom <= stop.top || stop.bottom <= feedback.top);
+                }"""
+            )
+            self.assertFalse(overlap)
             PublicFrontendHandler.chat_stream_release.set()
             page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
             browser.close()
@@ -800,6 +853,39 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(next(iter(PublicFrontendHandler.chat_attempts.values())), 2)
             self.assertEqual(page.locator("#timeline .message.user").count(), 1)
             self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
+            browser.close()
+
+    def test_movement_invitation_requires_explicit_send_and_preserves_main_draft(self) -> None:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#message-input").fill("不要覆盖这段主草稿")
+            page.locator("#open-movement-shortcuts").click()
+            page.locator('[data-movement-id="commercial_street"]').click()
+            page.locator("#movement-invitation").fill("现在一起去商业街走走，好吗？")
+            self.assertEqual(page.locator("#message-input").input_value(), "不要覆盖这段主草稿")
+            page.locator("#send-movement-invitation").click()
+            page.locator("#movement-dialog").wait_for(state="hidden")
+            page.locator("#timeline").get_by_text("现在一起去商业街走走，好吗？").wait_for(state="visible")
+            page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
+            self.assertEqual(page.locator("#message-input").input_value(), "不要覆盖这段主草稿")
+            feedback_overlap = page.evaluate(
+                """() => {
+                    const message = document.querySelector('#timeline .message:last-of-type').getBoundingClientRect();
+                    const feedback = document.querySelector('#floating-feedback').getBoundingClientRect();
+                    return !(message.right <= feedback.left || feedback.right <= message.left || message.bottom <= feedback.top || feedback.bottom <= message.top);
+                }"""
+            )
+            self.assertFalse(feedback_overlap)
+            sent = PublicFrontendHandler.chat_payloads[-1]
+            self.assertEqual(sent.get("message"), "现在一起去商业街走走，好吗？")
+            self.assertEqual(
+                sent.get("content_blocks"),
+                [{"type": "message", "text": "现在一起去商业街走走，好吗？"}],
+            )
             browser.close()
 
     def test_reload_recovers_persisted_request_id_without_a_second_generation(self) -> None:
@@ -1050,6 +1136,14 @@ class PublicFrontendE2ETests(TestCase):
                     "#display"
                 )
             )
+            page.locator("#message-input").fill("句界测试")
+            page.locator("#send-message").click()
+            page.locator("#timeline").get_by_text("第一句自然回应。").wait_for(state="visible")
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 1)
+            page.locator("#timeline").get_by_text("第二句换个角度继续。").wait_for(state="visible")
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 1)
+            page.locator("#timeline").get_by_text("第三句收住话题。").wait_for(state="visible")
+            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
             page.locator("#go-in-person").click()
             page.locator("#confirm-presence-transition").click()
             page.locator("#in-person-surface").wait_for(state="visible")
@@ -1059,10 +1153,31 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#send-message").click()
             self.assertTrue(PublicFrontendHandler.chat_stream_started.wait(timeout=5))
             page.locator("#stage-speech .typing-indicator").wait_for(state="visible")
+            page.evaluate(
+                """() => {
+                    const speech = document.querySelector('#stage-speech');
+                    const trace = {seenFirst: false, sawTypingAfterFirst: false};
+                    const inspect = () => {
+                        if (speech.textContent.includes('第一句。')) trace.seenFirst = true;
+                        if (trace.seenFirst && speech.querySelector('.typing-indicator')) {
+                            trace.sawTypingAfterFirst = true;
+                        }
+                    };
+                    window.__facePresentationTrace = trace;
+                    window.__facePresentationObserver = new MutationObserver(inspect);
+                    window.__facePresentationObserver.observe(speech, {
+                        childList: true,
+                        characterData: true,
+                        subtree: true,
+                    });
+                    inspect();
+                }"""
+            )
             PublicFrontendHandler.chat_stream_release.set()
             page.locator("#stage-speech").get_by_text("第一句。").wait_for(state="visible")
-            page.locator("#stage-speech .typing-indicator").wait_for(state="visible")
+            page.wait_for_function("() => window.__facePresentationTrace?.sawTypingAfterFirst === true")
             page.locator("#stage-speech").get_by_text("第二句。").wait_for(state="visible")
+            page.evaluate("() => window.__facePresentationObserver?.disconnect()")
             self.assertEqual(page.locator("#stage-narration").inner_text(), "凯茜娅抬起手。")
             browser.close()
 
@@ -1147,4 +1262,26 @@ class PublicFrontendE2ETests(TestCase):
             page.locator('[data-sticker-id="fixture-sticker"]').click()
             self.assertTrue(page.locator("#selected-sticker").is_visible())
             self.assertIn("发送时会单独作为一条消息", page.locator("#selected-sticker").inner_text())
+            page.set_viewport_size({"width": 320, "height": 720})
+            self._assert_no_horizontal_overflow(page)
+            self._assert_visible_controls_do_not_overlap(page, ".composer-row > :not([hidden])")
+            composer_text_fits = page.locator(".composer-row > :not([hidden])").evaluate_all(
+                """elements => elements.every(element => element.scrollWidth <= element.clientWidth + 1)"""
+            )
+            self.assertTrue(composer_text_fits)
+            page.locator("#open-contacts").click()
+            self._configure_model(page)
+            page.locator("#close-contacts").click()
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#in-person-surface").wait_for(state="visible")
+            self.assertEqual(page.locator("#stage-message-feedback").count(), 0)
+            self._assert_no_horizontal_overflow(page)
+            self._assert_visible_controls_do_not_overlap(
+                page,
+                ".scene-hud-actions > button:not([hidden]), .scene-hud-actions > details:not([hidden])",
+            )
+            page.locator("#stage-menu > summary").click()
+            self.assertTrue(page.locator("#stage-open-transcript").is_visible())
+            self.assertTrue(page.locator("#stage-toggle-ui").is_visible())
             browser.close()

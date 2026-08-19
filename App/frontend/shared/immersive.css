@@ -1,18 +1,18 @@
 :root {
   color-scheme: light;
-  --snow-design-version: "0.9.0";
+  --snow-design-version: "0.9.1";
   --sidebar-width: 304px;
   --topbar-height: 80px;
   --character-row-height: 72px;
-  --list-avatar-size: 52px;
-  --active-avatar-size: 56px;
-  --message-avatar-size: 44px;
-  --mobile-message-avatar-size: 40px;
+  --list-avatar-size: 56px;
+  --active-avatar-size: 60px;
+  --message-avatar-size: 48px;
+  --mobile-message-avatar-size: 44px;
   --dialogue-max-width: 980px;
-  --dialogue-avatar-size: 124px;
-  --mobile-dialogue-avatar-size: 88px;
-  --mobile-list-avatar-size: 48px;
-  --mobile-active-avatar-size: 52px;
+  --dialogue-avatar-size: 132px;
+  --mobile-dialogue-avatar-size: 92px;
+  --mobile-list-avatar-size: 50px;
+  --mobile-active-avatar-size: 54px;
   --mobile-sidebar-width: min(336px, 90vw);
   --control-min-size: 44px;
   --control-icon-size: 20px;
@@ -70,6 +70,7 @@ input, textarea, select { min-height: 44px; }
   height: 100%;
   object-fit: cover;
   object-position: var(--portrait-focus-x, 50%) var(--portrait-focus-y, 50%);
+  transform-origin: var(--portrait-focus-x, 50%) var(--portrait-focus-y, 50%);
   transform: scale(var(--portrait-scale, 1));
 }
 .portrait-fallback { font-weight: 760; }

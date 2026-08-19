@@ -6,8 +6,8 @@
     <meta name="referrer" content="same-origin" />
     <meta name="color-scheme" content="light" />
     <title>Project Snow · 沉浸式体验</title>
-    <link rel="stylesheet" href="/shared/immersive.css?v=0.9.0" />
-    <link rel="stylesheet" href="/app.css?v=0.9.0" />
+    <link rel="stylesheet" href="/shared/immersive.css?v=0.9.1" />
+    <link rel="stylesheet" href="/app.css?v=0.9.1" />
   </head>
   <body>
     <div id="chat-app" class="app-shell" data-channel="text">
@@ -15,7 +15,7 @@
         <header class="product-header">
           <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
             <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="version-badge">0.9.0</small></span>
+            <span><strong>Project Snow</strong><small id="version-badge">0.9.1</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
         </header>
@@ -33,7 +33,7 @@
       <main class="chat-panel">
         <section id="text-surface" class="text-surface" aria-label="文字通讯">
           <header class="chat-header">
-            <button id="open-contacts" class="icon-button mobile-only" type="button" aria-label="打开角色列表" aria-expanded="false" aria-controls="contact-panel">☰</button>
+            <button id="open-contacts" class="icon-button contact-toggle" type="button" aria-label="打开角色列表" aria-expanded="false" aria-controls="contact-panel">☰</button>
             <div id="active-character" class="active-character">
               <span class="portrait portrait-text large">?</span><div><h1>选择角色</h1><p>从角色列表开始一段通讯</p></div>
             </div>
@@ -46,6 +46,7 @@
           <section id="timeline" class="timeline" aria-label="文字通讯记录" tabindex="0">
             <div class="empty-conversation"><p>选择一位角色开始通讯。</p></div>
           </section>
+          <button id="floating-feedback" class="floating-feedback" type="button">反馈</button>
           <button id="new-replies" class="new-replies" type="button" hidden>有新回复</button>
           <div id="conversation-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
         </section>
@@ -54,21 +55,23 @@
           <header class="scene-hud">
             <button id="open-stage-contacts" class="scene-character-button" type="button" aria-label="展开或收起角色通讯栏" aria-expanded="true" aria-controls="contact-panel">
               <span id="stage-header-avatar" class="portrait portrait-text">?</span>
-              <span><strong id="stage-character-name">选择角色</strong><small>面对面</small></span><span>⌄</span>
+              <span><strong id="stage-character-name">选择角色</strong><small>面对面</small></span>
+              <span class="sidebar-toggle-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><rect x="3.5" y="4" width="17" height="16" rx="2.5"></rect><path d="M9 4v16"></path><path d="m13 9 3 3-3 3"></path></svg></span>
             </button>
             <div class="scene-location" aria-live="polite">
               <span><strong id="stage-location">场景尚未建立</strong><small id="stage-activity">选择角色后读取当前位置</small></span>
             </div>
             <div class="scene-hud-actions">
               <button id="open-transcript" class="scene-tool-button" type="button">回看</button>
-              <button id="open-communicator" class="scene-tool-button primary" type="button">打开通讯器</button>
+              <button id="open-communicator" class="scene-tool-button primary" type="button"><span class="desktop-label">打开通讯器</span><span class="mobile-label">通讯器</span></button>
               <button id="toggle-stage-ui" class="scene-tool-button icon-only" type="button" aria-label="隐藏界面" title="隐藏界面（H）">◫</button>
-              <button id="stage-message-feedback" class="scene-tool-button icon-only" type="button" aria-label="反馈本条回复" disabled>!</button>
               <details id="stage-menu" class="scene-menu">
                 <summary class="scene-tool-button icon-only" aria-label="菜单">☰</summary>
                 <div class="scene-menu-popover">
                   <button id="stage-open-settings" type="button">配置模型</button>
-                  <button id="stage-open-feedback" type="button">提交反馈</button>
+                  <button id="stage-open-transcript" class="mobile-menu-action" type="button">回看对话</button>
+                  <button id="stage-toggle-ui" class="mobile-menu-action" type="button">隐藏界面</button>
+                  <button id="stage-open-feedback" type="button" disabled>反馈本条回复</button>
                   <a href="/privacy/">隐私与素材</a>
                 </div>
               </details>
@@ -171,10 +174,12 @@
     </dialog>
 
     <dialog id="movement-dialog" class="modal movement-modal">
-      <form method="dialog">
+      <form id="movement-form">
         <header><div><span class="panel-kicker">共同移动</span><h2>一起去哪里？</h2></div><button class="icon-button" type="button" data-close-dialog="movement-dialog" aria-label="关闭地点选择">×</button></header>
-        <p class="modal-context">选择后只会把邀请填入输入框。你仍可修改内容，并由角色在回复中决定是否现在出发。</p>
+        <p class="modal-context">选择地点后可编辑邀请。只有点击“发送邀请”才会发送，由角色在回复中决定是否现在出发。</p>
         <div id="movement-options" class="movement-options"></div>
+        <label class="movement-preview" for="movement-invitation">邀请预览<textarea id="movement-invitation" rows="3" maxlength="240" placeholder="先选择一个地点" disabled></textarea></label>
+        <div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="movement-dialog">取消</button><button id="send-movement-invitation" type="submit" class="primary-button" disabled>发送邀请</button></div>
       </form>
     </dialog>
 
@@ -199,7 +204,6 @@
       <button id="next-onboarding" class="primary-button" type="button">下一步</button>
     </aside>
 
-    <button id="floating-feedback" class="floating-feedback" type="button">反馈</button>
     <dialog id="feedback-dialog" class="modal">
       <form id="feedback-form" method="dialog"><header><div><span class="panel-kicker">反馈</span><h2>告诉我们哪里需要改进</h2></div><button class="icon-button" type="button" data-close-dialog="feedback-dialog">×</button></header><label class="feedback-context-choice"><span><strong>附带相关对话上下文</strong><small>默认开启，可在提交前取消</small></span><input id="feedback-include-context" type="checkbox" checked /></label><p id="feedback-context" class="modal-context">将附带当前一问一答和请求编号；服务端按编号关联内部诊断。</p><details id="feedback-context-preview" class="feedback-context-preview"><summary>预览将附带的内容</summary><pre id="feedback-context-preview-text"></pre></details><label>具体说明<textarea id="feedback-body" rows="5" maxlength="1000" required placeholder="请描述问题、期望表现或复现步骤。"></textarea></label><label>QQ（可选）<input id="feedback-qq" inputmode="numeric" pattern="[0-9]{5,12}" maxlength="12" placeholder="如愿意进一步交流，可留下 QQ" /></label><p class="modal-context">QQ 将加密保存，并随反馈在 30 天后删除。</p><p id="feedback-error" class="form-error" role="alert"></p><div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="feedback-dialog">取消</button><button type="submit" class="primary-button">提交反馈</button></div></form>
     </dialog>
@@ -216,6 +220,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=0.9.0"></script>
+    <script type="module" src="/app.js?v=0.9.1"></script>
   </body>
 </html>

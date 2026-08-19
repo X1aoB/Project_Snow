@@ -2,7 +2,7 @@
 
 The public process exposes only `/public/v1` and the static immersive client. The existing internal `/api/v1`, attachments, voice, agents and workspace are not mounted by `public_main.py`.
 
-The 0.9.0 client uses IndexedDB v4: messages and conversation metadata are stored separately, the first 60 messages are loaded eagerly and older history is paged in 40-message batches. Drafts, pins, recent characters, sticker favourites and presentation queues remain browser-local. If IndexedDB is unavailable, the client falls back to a non-persistent in-memory session instead of blocking chat.
+The 0.9.1 client uses IndexedDB v4: messages and conversation metadata are stored separately, the first 60 messages are loaded eagerly and older history is paged in 40-message batches. Drafts, pins, recent characters, sticker favourites and presentation queues remain browser-local. If IndexedDB is unavailable, the client falls back to a non-persistent in-memory session instead of blocking chat.
 
 One shared signed `public-state-2` world package is stored separately. A v1 package is accepted, completed with the current 22-character presence registry and re-signed as v2. Version 0.9.0 adds optional subject binding and key IDs, accepts the configured previous key during rotation, and preserves backward readability for a 0.8.x rollback. Text messages may contain one manifest-backed sticker after the message text; in-person messages continue to accept `speech` and `action`. Public presence endpoints are:
 
@@ -47,17 +47,17 @@ Keep Cloudflare Access enabled throughout inactive-colour staging and candidate 
 - Public API colours publish no host ports. A successful stage resolves and validates the candidate container's address on the internal `app` bridge; private acceptance forwards a client-local `127.0.0.1` socket to that address through authenticated SSH. There is no candidate listener in the server host namespace, firewall or Cloudflare Tunnel.
 - `127.0.0.1:19090` remains the intended feedback-administration endpoint through an SSH tunnel. This separate legacy path still depends on Docker instantiating a loopback publication for a container whose `data` and `management` networks are internal. On hosts where Moby leaves that runtime mapping empty, the admin endpoint is unavailable; do not attach admin to an uplink network as a workaround. A future control-plane change should use the same root-validated internal-address SSH pattern before operators rely on this endpoint.
 
-The production image runs `fingerprint_public_frontend.py` after copying the client. It creates 16-hex-character SHA-256 filenames for every immersive scene SVG, rewrites the image copy of `app.js` to a fixed scene URL map, then fingerprints `app.js`, `app.css`, `privacy.js` and the shared immersive stylesheet and rewrites only the image's HTML references. HTML and the original development URLs remain `no-store`; fingerprinted files use `public, max-age=31536000, immutable`. The checked-in HTML and JavaScript deliberately retain `?v=0.9.0` and canonical scene paths for direct local development.
+The production image runs `fingerprint_public_frontend.py` after copying the client. It creates 16-hex-character SHA-256 filenames for every immersive scene SVG, rewrites the image copy of `app.js` to a fixed scene URL map, then fingerprints `app.js`, `app.css`, `privacy.js` and the shared immersive stylesheet and rewrites only the image's HTML references. HTML and the original development URLs remain `no-store`; fingerprinted files use `public, max-age=31536000, immutable`. The checked-in HTML and JavaScript deliberately retain `?v=0.9.1` and canonical scene paths for direct local development.
 
 ## One-time least-privilege migration
 
-Older installations made `deploy` a member of the root-equivalent Docker group. Keep Cloudflare Access enabled while changing that boundary. Select the exact CI-passing 0.9.0 main SHA; do not use an uncommitted checkout or a branch name.
+Older installations made `deploy` a member of the root-equivalent Docker group. Keep Cloudflare Access enabled while changing that boundary. Select the exact CI-passing 0.9.1 main SHA; do not use an uncommitted checkout or a branch name.
 
 From the trusted local workspace, use the one-time migration client with the CI release manifest for the same SHA. It creates a Git archive containing only the seven host-preparation files from that exact `origin/main` object and fixes its SHA-256. A host-bootstrap program read from the same Git object is streamed into the digest-pinned CI application image; it opens the uploaded archive without following links, verifies the digest and exact member set, then schedules a host systemd oneshot. The helper container exits before the host unit restarts Docker. The host unit runs the firewall, fail2ban, SSH and Docker preparation and passes the exact SHA into the root-runner bootstrap. Nothing from the old deploy-owned server checkout is executed as root. This is the final authorized use of the deploy account's Docker access:
 
 ```powershell
 & App/scripts/bootstrap-release-runner.ps1 `
-  -Sha <exact-0.9.0-main-sha> `
+  -Sha <exact-0.9.1-main-sha> `
   -ManifestPath <downloaded-CI-release-manifest.json> `
   -SshConfig App/runtime/project-snow-ssh-config
 ```
@@ -66,7 +66,7 @@ The root bootstrap clones the fixed HTTPS origin into a new directory with hooks
 
 ```sh
 /path/to/fresh-exact-sha/App/ops/prepare_debian.sh \
-  --controller-sha <exact-0.9.0-main-sha>
+  --controller-sha <exact-0.9.1-main-sha>
 ```
 
 The previous checkout is retained under `/srv/project-snow/backups/repo-before-root-runner-<UTC timestamp>` with mode `0700`; the script does not stop or recreate running production containers. Existing SSH processes retain their old supplementary group list, so disconnect every deploy session after the script succeeds. Open a fresh connection and require all of these checks before staging or removing Access:

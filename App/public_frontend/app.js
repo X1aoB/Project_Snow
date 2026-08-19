@@ -208,6 +208,21 @@ function formatBytes(bytes) {
 }
 function delay(milliseconds) { return new Promise((resolve) => window.setTimeout(resolve, milliseconds)); }
 function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+function typewriterTiming(value) {
+  const length = plain(value).length;
+  const step = Math.max(1, Math.ceil(length / 90));
+  return { step, duration: Math.ceil(length / step) * 24 + 180 };
+}
+function requestDelay(requestId, salt, minimum, maximum) {
+  const value = `${plain(requestId)}:${plain(salt)}`;
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const span = Math.max(0, maximum - minimum);
+  return minimum + ((hash >>> 0) % (span + 1));
+}
 function normalizedSearch(value) {
   return plain(value).toLocaleLowerCase("zh-CN").replace(/[\s'·-]/g, "");
 }
@@ -885,7 +900,7 @@ async function showExperienceNoticeIfNeeded() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.9.0";
+  $("version-badge").textContent = state.config.app_version || "0.9.1";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
@@ -1147,6 +1162,41 @@ function cancelPresentationQueue(characterId = state.selected, requestId = "") {
   }
   return true;
 }
+function naturalSpeechParts(value) {
+  const text = plain(value).trim();
+  if (!text) return [];
+  const parts = [];
+  let start = 0;
+  const closers = new Set(["”", "’", "」", "』", "】", "》", "）", ")"]);
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    let boundary = /[。！？!?]/.test(character);
+    if (character === "…" && text[index + 1] === "…") {
+      index += 1;
+      boundary = true;
+    }
+    if (!boundary) continue;
+    while (index + 1 < text.length && closers.has(text[index + 1])) index += 1;
+    const part = text.slice(start, index + 1).trim();
+    if (part) parts.push(part);
+    start = index + 1;
+  }
+  const rest = text.slice(start).trim();
+  if (rest) parts.push(rest);
+  if (parts.length < 2) return parts.length ? parts : [text];
+  const merged = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    if ([...part].length < 8 && index + 1 < parts.length) {
+      parts[index + 1] = `${part}${parts[index + 1]}`;
+    } else if ([...part].length < 8 && merged.length) {
+      merged[merged.length - 1] += part;
+    } else {
+      merged.push(part);
+    }
+  }
+  return merged;
+}
 function presentationBlocks(message) {
   const blocks = [];
   for (const block of message?.contentBlocks || []) {
@@ -1155,11 +1205,12 @@ function presentationBlocks(message) {
       blocks.push({ ...block });
       continue;
     }
-    // Blank lines are an explicit presentation boundary.  Punctuation alone
-    // never creates a new bubble or interrupts a typewriter segment.
-    const parts = plain(block.text).split(/(?:\r?\n){2,}/).map((text) => text.trim()).filter(Boolean);
-    for (const text of parts.length ? parts : [plain(block.text).trim()]) {
-      if (text) blocks.push({ type: block.type, text });
+    const paragraphs = plain(block.text).split(/(?:\r?\n){2,}/).map((text) => text.trim()).filter(Boolean);
+    for (const paragraph of paragraphs.length ? paragraphs : [plain(block.text).trim()]) {
+      const parts = ["message", "speech"].includes(block.type) ? naturalSpeechParts(paragraph) : [paragraph];
+      for (const text of parts) {
+        if (text) blocks.push({ type: block.type, text });
+      }
     }
   }
   return blocks;
@@ -1206,6 +1257,9 @@ async function presentAssistantTurn(characterId, requestId, message) {
     timer: 0,
     cancelled: false,
   };
+  const revealCounts = blocks.length <= 4
+    ? blocks.map((_block, index) => index + 1)
+    : [1, 2, 3, blocks.length];
   state.presentationByCharacter.set(characterId, queue);
   if (characterId === state.selected) {
     renderTimeline();
@@ -1216,18 +1270,26 @@ async function presentAssistantTurn(characterId, requestId, message) {
     && message.communicationChannel === "in_person"
     && blocks[0]?.type === "speech"
   ) {
-    await delay(Math.min(1400, plain(blocks[0].text).length * 24 + 180));
+    await delay(typewriterTiming(blocks[0].text).duration);
   }
-  for (let index = 1; index < blocks.length; index += 1) {
+  for (let step = 1; step < revealCounts.length; step += 1) {
     if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
-    const block = blocks[index];
+    const previousCount = revealCounts[step - 1];
+    const visibleCount = revealCounts[step];
+    const revealed = blocks.slice(previousCount, visibleCount);
+    const block = revealed[0];
     updateTypingPhase(characterId, requestId, "segment");
-    const wait = block.type === "sticker" ? 500 : 600;
-    const preload = block.type === "sticker" ? preloadStickerBlock(block) : Promise.resolve();
+    const hasSticker = revealed.some((item) => item.type === "sticker");
+    const wait = hasSticker
+      ? requestDelay(requestId, `sticker:${step}`, 650, 850)
+      : requestDelay(requestId, `segment:${step}`, 750, 1000);
+    const preload = hasSticker
+      ? Promise.all(revealed.filter((item) => item.type === "sticker").map((item) => preloadStickerBlock(item)))
+      : Promise.resolve();
     if (!reducedMotion()) await Promise.all([delay(wait), preload]);
     else await preload;
     if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
-    queue.visibleCount = index + 1;
+    queue.visibleCount = visibleCount;
     updateTypingPhase(characterId, requestId, "presenting");
     if (characterId === state.selected) {
       renderTimeline();
@@ -1237,9 +1299,9 @@ async function presentAssistantTurn(characterId, requestId, message) {
       !reducedMotion()
       && message.communicationChannel === "in_person"
       && block.type === "speech"
-      && index < blocks.length - 1
+      && step < revealCounts.length - 1
     ) {
-      await delay(Math.min(1400, plain(block.text).length * 24 + 180));
+      await delay(typewriterTiming(block.text).duration);
     }
   }
   if (characterId === state.selected) {
@@ -1940,10 +2002,13 @@ function renderTypewriter(text, key) {
     ? previousDisplayed
     : "";
   let index = prefix.length;
+  const { step } = typewriterTiming(value.slice(prefix.length));
   $("stage-speech").textContent = prefix;
   state.typewriter.timer = window.setInterval(() => {
-    index += 1;
-    $("stage-speech").textContent = value.slice(0, index);
+    index += step;
+    const displayed = value.slice(0, index);
+    $("stage-speech").textContent = displayed;
+    state.typewriter.displayedText = displayed;
     if (index >= value.length) {
       window.clearInterval(state.typewriter.timer);
       state.typewriter.timer = 0;
@@ -1970,8 +2035,8 @@ function renderStage() {
     speechNode.classList.add("is-typing");
     speechNode.setAttribute("aria-busy", "true");
     speechNode.innerHTML = typingIndicatorMarkup(characterById(pending.characterId), { includeAvatar: false });
-    $("stage-message-feedback").disabled = true;
-    $("stage-message-feedback").dataset.messageId = "";
+    $("stage-open-feedback").disabled = true;
+    $("stage-open-feedback").dataset.messageId = "";
     return;
   }
   speechNode.classList.remove("is-typing");
@@ -1985,8 +2050,8 @@ function renderStage() {
   $("stage-narration").textContent = actions.join("\n") || plain(state.scene?.character_activity);
   const speech = speeches.join("\n") || "场景已经建立。你可以说些什么，也可以只描述一个动作。";
   renderTypewriter(speech, assistantMessage?.id || `scene:${state.selected}:${state.scene?.visual_key || "generic"}`);
-  $("stage-message-feedback").disabled = !assistantMessage || Boolean(presentationFor()?.messageId === assistantMessage?.id);
-  $("stage-message-feedback").dataset.messageId = assistantMessage?.id || "";
+  $("stage-open-feedback").disabled = !assistantMessage || Boolean(presentationFor()?.messageId === assistantMessage?.id);
+  $("stage-open-feedback").dataset.messageId = assistantMessage?.id || "";
 }
 function renderTranscript() {
   const messages = currentThread()?.messages || [];
@@ -2006,7 +2071,10 @@ function renderScene() {
   preload.src = $("scene-backdrop").src;
   $("stage-location").textContent = scene.character_location || "场景尚未建立";
   $("stage-activity").textContent = scene.character_activity || "选择角色后读取当前位置";
-  $("go-in-person-label").textContent = scene.character_location ? `去见她 · ${scene.character_location}` : "去见她";
+  const presenceLabel = scene.character_location ? `去见她 · ${scene.character_location}` : "去见她";
+  $("go-in-person-label").textContent = presenceLabel;
+  $("go-in-person").setAttribute("aria-label", presenceLabel);
+  $("go-in-person").title = presenceLabel;
   const character = currentCharacter();
   if (character?.avatar?.src) {
     const image = new Image();
@@ -2028,20 +2096,27 @@ function openMovementShortcuts() {
   if (globalRequestBusy()) return;
   const values = movementCatalog();
   const root = $("movement-options");
+  const invitation = $("movement-invitation");
+  invitation.value = "";
+  invitation.disabled = true;
+  $("send-movement-invitation").disabled = true;
+  $("movement-dialog").dataset.locationId = "";
   if (!values.length) {
     root.innerHTML = '<p class="modal-context">地点目录正在准备中，你仍可直接输入自然语言邀请。</p>';
   } else {
     root.innerHTML = values.map((item) => {
       const name = plain(item.display_name || item.name || item.location_name);
-      return `<button type="button" data-movement-name="${escapeHtml(name)}"><strong>${escapeHtml(name)}</strong>${item.activity_name ? `<small>${escapeHtml(item.activity_name)}</small>` : ""}</button>`;
+      return `<button type="button" data-movement-id="${escapeHtml(item.location_id || "")}" data-movement-name="${escapeHtml(name)}" aria-pressed="false"><strong>${escapeHtml(name)}</strong>${item.activity_name ? `<small>${escapeHtml(item.activity_name)}</small>` : ""}</button>`;
     }).join("");
     root.querySelectorAll("[data-movement-name]").forEach((button) => {
       button.onclick = () => {
-        $("message-input").value = `现在一起去${button.dataset.movementName}吗？`;
-        updateInputCount();
-        scheduleDraftSave();
-        $("movement-dialog").close();
-        $("message-input").focus();
+        root.querySelectorAll("[data-movement-name]").forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+        $("movement-dialog").dataset.locationId = button.dataset.movementId || "";
+        invitation.disabled = false;
+        invitation.value = `现在一起去${button.dataset.movementName}吗？`;
+        $("send-movement-invitation").disabled = false;
+        invitation.focus();
+        invitation.setSelectionRange(invitation.value.length, invitation.value.length);
       };
     });
   }
@@ -2058,6 +2133,7 @@ function updateComposerAvailability() {
   $("go-in-person").disabled = !selected || requestPending;
   $("open-communicator").disabled = !selected || requestPending;
   $("open-movement-shortcuts").disabled = !selected || requestPending;
+  $("send-movement-invitation").disabled = !selected || requestPending || !$("movement-invitation").value.trim() || !$("movement-dialog").dataset.locationId;
   $("toggle-sticker").hidden = inPerson;
   $("toggle-action").hidden = !inPerson;
   $("toggle-sticker").disabled = !selected || requestPending || inPerson;
@@ -2075,6 +2151,8 @@ function updateComposerAvailability() {
 }
 async function setChannel(channel, persist = true, targetThread = null) {
   const thread = targetThread || currentThread();
+  const restoreCollapsedSidebarFocus = channel !== "in_person"
+    && $("chat-app").classList.contains("sidebar-collapsed");
   if (thread && thread.characterId === state.selected) await saveDraftNow();
   if (thread && thread.channel !== (channel === "in_person" ? "in_person" : "text")) {
     cancelPresentationQueue(thread.characterId);
@@ -2096,6 +2174,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   renderAll();
   restoreDraft();
   updateComposerAvailability();
+  if (restoreCollapsedSidebarFocus) window.setTimeout(() => $("open-contacts")?.focus(), 0);
 }
 function requestHistory(messages, excludedId = "", segmentId = "") {
   return messages.filter((message) => message.id !== excludedId && !["failed", "pending"].includes(message.status) && (!segmentId || message.conversationSegmentId === segmentId)).slice(-24).map((message) => ({
@@ -2380,7 +2459,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   setRequestStatus(characterId, "", requestId);
   const timing = { shownAt: 0 };
   const typingGate = (async () => {
-    await delay(350);
+    if (!reducedMotion()) await delay(requestDelay(requestId, "initial", 600, 900));
     if (!ownsRequest()) return;
     timing.shownAt = performance.now();
     updateTypingPhase(characterId, requestId, "typing");
@@ -2418,9 +2497,9 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     userMessage.requestSnapshot = null;
     await userPersistence;
     await typingGate;
-    if (timing.shownAt) {
+    if (timing.shownAt && !reducedMotion()) {
       const visibleFor = performance.now() - timing.shownAt;
-      if (visibleFor < 300) await delay(300 - visibleFor);
+      if (visibleFor < 450) await delay(450 - visibleFor);
     }
     userMessage.status = "sent";
     const assistantMessage = normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, communicationChannel: result.returnedChannel, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model } });
@@ -2484,32 +2563,52 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     void flushDeferredPresenceRefresh();
   }
 }
-async function sendMessage(event) {
-  event.preventDefault();
-  if (!state.selected || globalRequestBusy()) return;
-  const blocks = inputBlocks();
+async function submitUserBlocks(blocks, { clearComposer = false, onAccepted = null } = {}) {
+  if (!state.selected || globalRequestBusy()) return false;
   const total = renderBlocksText(blocks).length;
-  if (!blocks.length) return;
-  if (total > 2000) return showBanner("单轮动作与对白合计不能超过 2,000 字。");
+  if (!blocks.length) return false;
+  if (total > 2000) {
+    showBanner("单轮动作与对白合计不能超过 2,000 字。");
+    return false;
+  }
   if (!configured()) {
     openSettings("models");
-    return showError("setup-error", "请先配置当前标签页使用的模型会话。");
+    showError("setup-error", "请先配置当前标签页使用的模型会话。");
+    return false;
   }
   const thread = await dbGetThread(state.selected);
-  if (!(await ensureContinuityDecision(thread))) return;
+  if (!(await ensureContinuityDecision(thread))) return false;
   const userMessage = normalizeMessage({ id: id(), characterId: thread.characterId, role: "user", contentBlocks: blocks, communicationChannel: thread.channel, createdAt: Date.now(), status: "pending", conversationSegmentId: thread.conversationSegmentId });
   thread.messages.push(userMessage);
   thread.messageCount = Number(thread.messageCount || 0) + 1;
-  $("message-input").value = "";
-  $("action-input").value = "";
-  clearSelectedSticker();
-  state.actionComposerOpen = false;
-  state.drafts.set(draftKey(thread.characterId, thread.channel, "message"), "");
-  state.drafts.set(draftKey(thread.characterId, thread.channel, "action"), "");
-  void storePut("app_state", { key: "drafts", values: Object.fromEntries(state.drafts) });
-  $("toggle-sticker").setAttribute("aria-expanded", "false");
-  updateInputCount();
+  onAccepted?.();
+  if (clearComposer) {
+    $("message-input").value = "";
+    $("action-input").value = "";
+    clearSelectedSticker();
+    state.actionComposerOpen = false;
+    state.drafts.set(draftKey(thread.characterId, thread.channel, "message"), "");
+    state.drafts.set(draftKey(thread.characterId, thread.channel, "action"), "");
+    void storePut("app_state", { key: "drafts", values: Object.fromEntries(state.drafts) });
+    $("toggle-sticker").setAttribute("aria-expanded", "false");
+    updateInputCount();
+  }
   await runChat(thread, userMessage);
+  return true;
+}
+async function sendMessage(event) {
+  event.preventDefault();
+  await submitUserBlocks(inputBlocks(), { clearComposer: true });
+}
+async function sendMovementInvitation(event) {
+  event.preventDefault();
+  const invitation = $("movement-invitation").value.trim();
+  if (!invitation || !$("movement-dialog").dataset.locationId) return;
+  const channel = currentThread()?.channel === "in_person" ? "in_person" : "text";
+  await submitUserBlocks(
+    [{ type: channel === "in_person" ? "speech" : "message", text: invitation }],
+    { onAccepted: () => $("movement-dialog").close() },
+  );
 }
 async function retryMessage(messageId) {
   if (globalRequestBusy()) return;
@@ -2762,6 +2861,8 @@ function syncContactToggleState(expanded = contactsExpanded()) {
   const value = String(Boolean(expanded));
   $("open-contacts")?.setAttribute("aria-expanded", value);
   $("open-stage-contacts")?.setAttribute("aria-expanded", value);
+  $("open-contacts")?.setAttribute("aria-label", expanded ? "角色列表已打开" : "打开角色列表");
+  $("open-stage-contacts")?.setAttribute("aria-label", expanded ? "收起角色通讯栏" : "展开角色通讯栏");
   return Boolean(expanded);
 }
 function toggleContacts({ mobileOpen = false } = {}) {
@@ -2783,10 +2884,11 @@ function toggleContacts({ mobileOpen = false } = {}) {
   }
   const collapsed = $("chat-app").classList.toggle("sidebar-collapsed");
   const expanded = !collapsed;
+  const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   panel.setAttribute("aria-hidden", String(collapsed));
   panel.inert = collapsed;
   syncContactToggleState(expanded);
-  $("open-stage-contacts")?.focus();
+  trigger?.focus?.();
   return expanded;
 }
 function openSettings(tab = "models") {
@@ -2878,6 +2980,10 @@ $("toggle-action").onclick = () => {
 $("toggle-sticker").onclick = openStickerPicker;
 $("clear-sticker").onclick = clearSelectedSticker;
 $("open-movement-shortcuts").onclick = openMovementShortcuts;
+$("movement-form").onsubmit = sendMovementInvitation;
+$("movement-invitation").oninput = () => {
+  $("send-movement-invitation").disabled = globalRequestBusy() || !$("movement-invitation").value.trim() || !$("movement-dialog").dataset.locationId;
+};
 $("stop-waiting").onclick = () => {
   const pending = typingStateFor();
   if (pending && pending.phase === "segment") {
@@ -2946,13 +3052,14 @@ $("open-transcript").onclick = () => openDrawer("transcript-panel");
 $("close-info").onclick = $("close-transcript").onclick = $("drawer-scrim").onclick = closeDrawers;
 $("toggle-stage-ui").onclick = () => { $("in-person-surface").classList.add("ui-hidden"); $("restore-stage-ui").hidden = false; };
 $("restore-stage-ui").onclick = () => { $("in-person-surface").classList.remove("ui-hidden"); $("restore-stage-ui").hidden = true; };
-$("stage-message-feedback").onclick = () => openFeedback($("stage-message-feedback").dataset.messageId || "");
 $("open-global-feedback").onclick = $("floating-feedback").onclick = () => openFeedback();
 $("feedback-form").onsubmit = submitFeedback;
 $("open-settings").onclick = () => openSettings("models");
 $("header-config-model").onclick = () => openSettings("models");
 $("stage-open-settings").onclick = () => { $("stage-menu").open = false; openSettings("models"); };
-$("stage-open-feedback").onclick = () => { $("stage-menu").open = false; openFeedback(); };
+$("stage-open-transcript").onclick = () => { $("stage-menu").open = false; openDrawer("transcript-panel"); };
+$("stage-toggle-ui").onclick = () => { $("stage-menu").open = false; $("in-person-surface").classList.add("ui-hidden"); $("restore-stage-ui").hidden = false; };
+$("stage-open-feedback").onclick = () => { const messageId = $("stage-open-feedback").dataset.messageId || ""; if (!messageId) return; $("stage-menu").open = false; openFeedback(messageId); };
 $("discover-models").onclick = discoverModels;
 $("save-model").onclick = saveModelSession;
 $("clear-credential").onclick = () => { clearCredential(); $("api-key").focus(); toast("当前标签页的模型凭证已清除"); };

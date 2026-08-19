@@ -34,7 +34,7 @@ def build(*, config_path: Path, output_root: Path, timeout: float = 30.0) -> dic
     if not source_url.startswith("https://patchwiki.biligame.com/images/sonw/"):
         raise ValueError("analyst source URL must point to the approved Wiki image host")
     output_root.mkdir(parents=True, exist_ok=True)
-    headers = {"User-Agent": "Project-Snow-Analyst-Avatar-Builder/0.9.0"}
+    headers = {"User-Agent": "Project-Snow-Analyst-Avatar-Builder/0.9.1"}
     with httpx.Client(headers=headers, follow_redirects=True, timeout=timeout) as client:
         response = client.get(source_url)
         response.raise_for_status()

@@ -75,7 +75,7 @@ git -C "$fresh_repo" fetch --quiet --force --prune origin \
   '+refs/heads/main:refs/remotes/origin/main'
 if [ -z "$controller_sha" ]; then
   # Fresh provisioning follows the currently verified main tip.  A migration
-  # should pass the exact CI-passing 0.9.0 SHA explicitly.
+  # should pass the exact CI-passing 0.9.1 SHA explicitly.
   controller_sha="$(git -C "$fresh_repo" rev-parse refs/remotes/origin/main)"
 fi
 git -C "$fresh_repo" cat-file -e "$controller_sha^{commit}" 2>/dev/null || {

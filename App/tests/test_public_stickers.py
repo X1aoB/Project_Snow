@@ -182,6 +182,21 @@ class PublicStickerCatalogTests(TestCase):
                 "/media/test-stickers/display/asset123.webp",
             )
             self.assertEqual(blocks[-1]["display_mime_type"], "image/webp")
+            text_only, answer_only, _truncated, _safety = service._public_generation_content(
+                {
+                    "answer": "这段正文必须保留。",
+                    "content_blocks": [
+                        {"type": "sticker", "asset_id": "outside-scope"},
+                    ],
+                },
+                "text",
+                sticker_candidates=[{"asset_id": "asset123"}],
+            )
+            self.assertEqual(answer_only, "这段正文必须保留。")
+            self.assertEqual(
+                text_only,
+                [{"type": "message", "text": "这段正文必须保留。"}],
+            )
 
     def test_invalid_asset_and_path_tampering_are_not_resolvable(self) -> None:
         with TemporaryDirectory() as directory:

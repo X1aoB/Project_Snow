@@ -36,7 +36,7 @@ class FeedbackMailerTests(TestCase):
             subject_hash="subject",
             ip_fingerprint="daily-ip",
             body_text="页面反馈",
-            context={"app_version": "0.9.0", "assistant_answer": "安全回复"},
+            context={"app_version": "0.9.1", "assistant_answer": "安全回复"},
             qq_cipher=encrypted,
         )
         with self.store.begin() as connection:
