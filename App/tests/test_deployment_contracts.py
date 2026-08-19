@@ -67,6 +67,7 @@ class DeploymentContractTests(TestCase):
         )
         self.assertIn("/run/project-snow-secrets:rw,noexec,nosuid,size=1m,mode=0700", compose)
         self.assertIn("PUBLIC_DATABASE_URL_FILE: /run/project-snow-secrets/public_database_url", compose)
+        self.assertIn("apt-get upgrade -y --no-install-recommends", dockerfile)
         self.assertIn("apt-get install -y --no-install-recommends gosu", dockerfile)
         self.assertIn('ENTRYPOINT ["/app/infra/public-entrypoint.sh"]', dockerfile)
         self.assertIn('"--no-access-log"', dockerfile)
