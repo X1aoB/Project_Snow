@@ -535,6 +535,7 @@ candidate_config_root="$configuration_release_root/$sha"
 candidate_config_tmp=""
 candidate_public_env=""
 docker_reconcile_marker_tmp=""
+docker_ufw_dropin_tmp=""
 public_env_path="$public_env_root/public-$sha.env"
 cleanup() {
   [ -z "${candidate_env:-}" ] || rm -f "$candidate_env"
@@ -544,6 +545,7 @@ cleanup() {
   [ -z "${candidate_config_tmp:-}" ] || rm -rf -- "$candidate_config_tmp"
   [ -z "${candidate_public_env:-}" ] || rm -f "$candidate_public_env"
   [ -z "${docker_reconcile_marker_tmp:-}" ] || rm -f -- "$docker_reconcile_marker_tmp"
+  [ -z "${docker_ufw_dropin_tmp:-}" ] || rm -f -- "$docker_ufw_dropin_tmp"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -841,6 +843,33 @@ validate_reconcile_marker() {
       }
   fi
 }
+install_docker_ufw_ordering() {
+  docker_unit_dir=/etc/systemd/system/docker.service.d
+  docker_ufw_dropin="$docker_unit_dir/20-project-snow-after-ufw.conf"
+  [ ! -L "$docker_unit_dir" ] || {
+    echo 'Docker systemd drop-in directory must not be a symlink.' >&2
+    return 1
+  }
+  install -o root -g root -m 0755 -d "$docker_unit_dir"
+  if [ -e "$docker_ufw_dropin" ] || [ -L "$docker_ufw_dropin" ]; then
+    [ -f "$docker_ufw_dropin" ] && [ ! -L "$docker_ufw_dropin" ] &&
+      [ "$(stat -c %u:%g:%a:%h "$docker_ufw_dropin")" = 0:0:644:1 ] || {
+        echo 'Docker UFW ordering drop-in is not a root-owned regular file.' >&2
+        return 1
+      }
+  fi
+  docker_ufw_dropin_tmp="$(mktemp "$docker_unit_dir/.20-project-snow-after-ufw.XXXXXX")"
+  cat > "$docker_ufw_dropin_tmp" <<'PROJECT_SNOW_DOCKER_UFW_ORDER'
+[Unit]
+Wants=ufw.service
+After=ufw.service
+PROJECT_SNOW_DOCKER_UFW_ORDER
+  chown root:root "$docker_ufw_dropin_tmp"
+  chmod 0644 "$docker_ufw_dropin_tmp"
+  mv -f -- "$docker_ufw_dropin_tmp" "$docker_ufw_dropin"
+  docker_ufw_dropin_tmp=""
+  systemctl daemon-reload
+}
 
 if ! candidate_binding_is_exact; then
   echo "Staged API does not have the exact loopback binding 127.0.0.1:$candidate_port." >&2
@@ -882,6 +911,7 @@ if ! wait_for_candidate_loopback; then
     exit 73
   }
 
+  install_docker_ufw_ordering || exit 73
   systemctl restart docker
   docker_ready=0
   docker_attempt=0
