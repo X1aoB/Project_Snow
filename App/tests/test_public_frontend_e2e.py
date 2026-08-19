@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import TestCase, skipUnless
+from unittest.mock import patch
 from urllib.parse import urlparse
 
 RUN_PUBLIC_E2E = os.getenv("RUN_PUBLIC_E2E") == "1"
@@ -20,6 +21,47 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOT = APP_ROOT / "public_frontend"
 SHARED_ROOT = APP_ROOT / "frontend" / "shared"
 IMMERSIVE_ROOT = APP_ROOT / "frontend" / "assets" / "immersive"
+
+
+def _browser_launch_kwargs() -> dict[str, str]:
+    """Select only an explicitly reviewed browser channel for CI.
+
+    Local runs keep Playwright's bundled Chromium. GitHub's hosted runner can
+    use its preinstalled stable Chrome when the browser download CDN is
+    unavailable, without silently accepting arbitrary executable channels.
+    """
+
+    channel = os.getenv("PROJECT_SNOW_PLAYWRIGHT_CHANNEL", "").strip()
+    if not channel:
+        return {}
+    if channel != "chrome":
+        raise ValueError("PROJECT_SNOW_PLAYWRIGHT_CHANNEL must be 'chrome' or empty")
+    return {"channel": channel}
+
+
+def _launch_browser(playwright):
+    return playwright.chromium.launch(**_browser_launch_kwargs())
+
+
+class BrowserLaunchContractTests(TestCase):
+    def test_local_browser_launch_uses_bundled_chromium(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(_browser_launch_kwargs(), {})
+
+    def test_ci_browser_launch_allows_only_preinstalled_chrome(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"PROJECT_SNOW_PLAYWRIGHT_CHANNEL": "chrome"},
+            clear=True,
+        ):
+            self.assertEqual(_browser_launch_kwargs(), {"channel": "chrome"})
+        with patch.dict(
+            os.environ,
+            {"PROJECT_SNOW_PLAYWRIGHT_CHANNEL": "chromium"},
+            clear=True,
+        ):
+            with self.assertRaises(ValueError):
+                _browser_launch_kwargs()
 
 
 class PublicFrontendHandler(BaseHTTPRequestHandler):
@@ -419,7 +461,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_model_discovery_keeps_the_issued_credential(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page()
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
@@ -445,7 +487,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_text_and_in_person_surfaces_share_local_continuity(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page()
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
@@ -491,7 +533,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_waiting_indicators_arrival_dedup_and_reduced_motion(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page(reduced_motion="reduce")
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
@@ -555,7 +597,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_switching_character_keeps_prior_request_in_background_and_defers_presence(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page(viewport={"width": 1280, "height": 800})
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
@@ -590,7 +632,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_desktop_200_percent_zoom_mobile_and_narrow_layouts_do_not_overflow(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             # A 1280 CSS-pixel desktop viewport at 200% browser zoom exposes
             # roughly 640 CSS pixels to layout. Cover that reflow width once,
             # alongside the physical mobile and narrow-screen breakpoints.
@@ -635,7 +677,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_desktop_contacts_toggle_and_exact_pinyin_search(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page(viewport={"width": 1280, "height": 800})
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
@@ -665,7 +707,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_indexeddb_unavailable_uses_memory_and_chat_still_works(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page()
             page.add_init_script(
                 """
@@ -694,7 +736,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_v091_frontend_contracts_are_non_blocking_and_opt_out_feedback(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page(viewport={"width": 1280, "height": 800})
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
@@ -841,7 +883,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_network_recovery_reuses_request_id_without_duplicate_messages(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page()
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
@@ -857,7 +899,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_movement_invitation_requires_explicit_send_and_preserves_main_draft(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page(viewport={"width": 1280, "height": 800})
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
@@ -892,7 +934,7 @@ class PublicFrontendE2ETests(TestCase):
         fixed_request_id = "de305d54-75b4-431b-adb2-eb6b9e546014"
         attempts: list[dict[str, object]] = []
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page()
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
@@ -1013,7 +1055,7 @@ class PublicFrontendE2ETests(TestCase):
     def test_invalid_world_state_is_cleared_and_chat_retries_once_with_new_id(self) -> None:
         attempts: list[dict[str, object]] = []
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page()
 
             def fulfill_chat(route) -> None:
@@ -1111,7 +1153,7 @@ class PublicFrontendE2ETests(TestCase):
 
     def test_presentation_queue_shows_between_text_and_face_to_face_segments(self) -> None:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page()
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
@@ -1201,7 +1243,7 @@ class PublicFrontendE2ETests(TestCase):
             "animated": False,
         }
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch()
+            browser = _launch_browser(playwright)
             page = browser.new_page(viewport={"width": 390, "height": 844})
 
             def fulfill_characters(route) -> None:

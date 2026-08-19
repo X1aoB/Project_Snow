@@ -109,12 +109,22 @@ jobs:
           cache: pip
           cache-dependency-path: App/requirements.txt
       - run: pip install pytest playwright
-      - run: python -m playwright install --with-deps chromium
+      - name: Verify preinstalled Chrome for Playwright
+        run: |
+          command -v google-chrome
+          google-chrome --version
+          python - <<'PY'
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as playwright:
+              browser = playwright.chromium.launch(channel="chrome")
+              browser.close()
+          PY
       - name: Prepare artwork-free UI contract fixture
         run: python scripts/prepare_ci_runtime.py --avatars
       - name: Static and browser UI tests
         env:
           RUN_PUBLIC_E2E: "1"
+          PROJECT_SNOW_PLAYWRIGHT_CHANNEL: chrome
         run: python -m pytest tests/test_ui_v050.py tests/test_public_frontend_e2e.py -q
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
@@ -326,7 +336,16 @@ jobs:
           cache: pip
           cache-dependency-path: App/requirements.txt
       - run: pip install -r requirements.txt
-      - run: python -m playwright install --with-deps chromium
+      - name: Verify preinstalled Chrome for Playwright
+        run: |
+          command -v google-chrome
+          google-chrome --version
+          python - <<'PY'
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as playwright:
+              browser = playwright.chromium.launch(channel="chrome")
+              browser.close()
+          PY
       - name: Prepare generated contract fixtures
         run: python scripts/prepare_ci_runtime.py
       - name: Full portable Python suite
@@ -339,6 +358,7 @@ jobs:
       - name: Isolated public browser suite
         env:
           RUN_PUBLIC_E2E: "1"
+          PROJECT_SNOW_PLAYWRIGHT_CHANNEL: chrome
         run: python -m pytest tests/test_public_frontend_e2e.py -q
       - name: Full private-runtime suite when a release is attached
         if: hashFiles('App/runtime/manifest.json') != ''

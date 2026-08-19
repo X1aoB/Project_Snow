@@ -916,3 +916,17 @@ class DeploymentContractTests(TestCase):
         self.assertIn("PUBLIC_MEDIA_VERSION=2026.08.19.avatar.1", public_env)
         self.assertIn("PUBLIC_STICKER_VERSION=2026.08.19.sticker.1", public_env)
         self.assertIn("@versioned_media path /media/*", caddyfile)
+
+    def test_browser_ci_uses_preinstalled_allowlisted_chrome(self) -> None:
+        workflow = (self.app_root.parent / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        frontend_tests = self.read("tests/test_public_frontend_e2e.py")
+        self.assertNotIn("python -m playwright install", workflow)
+        self.assertEqual(
+            workflow.count("PROJECT_SNOW_PLAYWRIGHT_CHANNEL: chrome"),
+            2,
+        )
+        self.assertEqual(workflow.count("google-chrome --version"), 2)
+        self.assertNotIn("playwright.chromium.launch()", frontend_tests)
+        self.assertEqual(frontend_tests.count("_launch_browser(playwright)"), 15)
