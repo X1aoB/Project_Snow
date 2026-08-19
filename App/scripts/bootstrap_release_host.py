@@ -139,6 +139,10 @@ def _extract_exact_bundle(payload: bytes, destination: Path) -> None:
             source.close()
             if len(data) != member.size:
                 raise BootstrapError(f"host preparation file size changed: {name}")
+            if name in EXECUTABLE_FILES and b"\r" in data:
+                raise BootstrapError(
+                    f"host preparation executable must use LF line endings: {name}"
+                )
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW

@@ -457,6 +457,8 @@ class DeploymentContractTests(TestCase):
         self.assertIn("refs/remotes/origin/main", script)
         self.assertIn("show \"$Sha`:App/scripts/bootstrap_release_host.py\"", script)
         self.assertIn("git @archiveArguments", script)
+        self.assertIn("'core.autocrlf=false'", script)
+        self.assertIn("'core.eol=lf'", script)
         self.assertIn("$hostBootstrapSource | & ssh", script)
         self.assertIn("--pid host", script)
         self.assertIn("docker run --rm -i", script)
@@ -470,6 +472,7 @@ class DeploymentContractTests(TestCase):
         self.assertIn("os.O_NOFOLLOW", host_bootstrap)
         self.assertIn("EXPECTED_FILES", host_bootstrap)
         self.assertIn("host preparation bundle does not match the exact Git archive", host_bootstrap)
+        self.assertIn("host preparation executable must use LF line endings", host_bootstrap)
         self.assertIn("project-snow-prepare-", host_bootstrap)
         self.assertIn('"--no-block", "start"', host_bootstrap)
 

@@ -59,7 +59,15 @@ $bundlePath = Join-Path ([System.IO.Path]::GetTempPath()) "project-snow-host-pre
 $remoteArchive = "/tmp/project-snow-prepare-$Sha-$nonce.tar"
 $uploaded = $false
 try {
-    $archiveArguments = @('-C', $repoRoot, 'archive', '--format=tar', "--output=$bundlePath", $Sha, '--') + $bundlePaths
+    # git archive may otherwise apply the Windows checkout EOL policy to text
+    # members.  The bundle is executed by Debian /bin/sh, so derive it from the
+    # exact Git object with an explicit LF conversion policy.
+    $archiveArguments = @(
+        '-c', 'core.autocrlf=false',
+        '-c', 'core.eol=lf',
+        '-C', $repoRoot,
+        'archive', '--format=tar', "--output=$bundlePath", $Sha, '--'
+    ) + $bundlePaths
     & git @archiveArguments
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $bundlePath -PathType Leaf)) {
         throw 'Could not build the exact-SHA host preparation bundle.'
