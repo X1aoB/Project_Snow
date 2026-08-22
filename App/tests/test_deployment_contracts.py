@@ -997,6 +997,9 @@ printf '%s\n' "$build_status"
         )
         self.assertIn('index("caddy")', script)
         self.assertIn("The dedicated origin backend contains an unexpected endpoint", script)
+        self.assertIn(
+            'backend_origin_ids="$(docker ps --all --no-trunc \\', script
+        )
         stale_cleanup = script.index("remove_verified_stale_origin_network_probes || return 1")
         backend_endpoint_gate = script.index(
             'docker network inspect "$origin_edge_internal_network"', stale_cleanup

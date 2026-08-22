@@ -860,7 +860,7 @@ ensure_caddy_origin_backend() {
       echo 'Caddy is not attached to the dedicated origin backend with its fixed alias.' >&2
       return 1
     }
-  backend_origin_ids="$(docker ps --all \
+  backend_origin_ids="$(docker ps --all --no-trunc \
     --filter label=com.docker.compose.project=project-snow-public \
     --filter label=com.docker.compose.service=origin-edge --quiet)" || return 1
   backend_origin_count="$(printf '%s\n' "$backend_origin_ids" | awk 'NF { count += 1 } END { print count + 0 }')"
