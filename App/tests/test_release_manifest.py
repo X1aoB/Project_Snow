@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest import TestCase
 
 from scripts.release_manifest import create_manifest
+from scripts.install_origin_tls import origin_tls_bundle_sha256
 
 
 class ReleaseManifestTests(TestCase):
@@ -50,6 +51,9 @@ class ReleaseManifestTests(TestCase):
                 "compose.prod.yml",
                 "infra/Caddyfile",
                 "infra/OriginEdge.Caddyfile",
+                "config/origin-edge/origin-cert.pem",
+                "config/origin-edge/aop-ca.pem",
+                "scripts/install_origin_tls.py",
                 "scripts/cloudflare_origin_firewall.py",
                 "ops/project-snow-origin-firewall.service",
                 "ops/project-snow-origin-firewall.timer",
@@ -70,3 +74,45 @@ class ReleaseManifestTests(TestCase):
         for relative_path, recorded_digest in manifest["release_control_sha256"].items():
             actual_digest = sha256((app_root / relative_path).read_bytes()).hexdigest()
             self.assertEqual(recorded_digest, actual_digest, relative_path)
+        tls_binding = manifest["direct_origin_tls"]
+        self.assertEqual(
+            set(tls_binding),
+            {
+                "schema_version",
+                "hostname",
+                "bundle_sha256",
+                "origin_certificate_sha256",
+                "aop_ca_sha256",
+            },
+        )
+        self.assertEqual(tls_binding["schema_version"], "project-snow-origin-tls-1")
+        self.assertEqual(tls_binding["hostname"], "snow.xiaob.dev")
+        for field in (
+            "bundle_sha256",
+            "origin_certificate_sha256",
+            "aop_ca_sha256",
+        ):
+            self.assertRegex(tls_binding[field], r"^[0-9a-f]{64}$", field)
+        self.assertEqual(
+            tls_binding["origin_certificate_sha256"],
+            sha256((app_root / "config/origin-edge/origin-cert.pem").read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            tls_binding["aop_ca_sha256"],
+            sha256((app_root / "config/origin-edge/aop-ca.pem").read_bytes()).hexdigest(),
+        )
+        expected_bundle_identity = sha256(
+            (
+                "project-snow-origin-tls-1\n"
+                "snow.xiaob.dev\n"
+                f"{tls_binding['origin_certificate_sha256']}\n"
+                f"{tls_binding['aop_ca_sha256']}\n"
+            ).encode("ascii")
+        ).hexdigest()
+        self.assertEqual(tls_binding["bundle_sha256"], expected_bundle_identity)
+        self.assertEqual(
+            tls_binding["bundle_sha256"],
+            origin_tls_bundle_sha256(
+                tls_binding["origin_certificate_sha256"], tls_binding["aop_ca_sha256"]
+            ),
+        )

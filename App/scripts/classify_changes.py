@@ -66,6 +66,7 @@ EMBEDDING_PATTERNS = (
 
 DEPLOY_PATTERNS = (
     ".github/workflows/**",
+    "App/config/origin-edge/**",
     "App/config/public_release_artifacts.json",
     "App/compose*.yml",
     "App/infra/Caddyfile",
@@ -80,6 +81,7 @@ DEPLOY_PATTERNS = (
     "App/scripts/bootstrap_release_host.py",
     "App/scripts/cloudflare_origin_firewall.py",
     "App/scripts/deploy.ps1",
+    "App/scripts/install_origin_tls.py",
     "App/scripts/install_release_archive.py",
     "App/scripts/promote.ps1",
     "App/scripts/rollback.ps1",

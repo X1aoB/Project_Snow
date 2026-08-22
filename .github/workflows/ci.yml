@@ -210,14 +210,15 @@ jobs:
           QDRANT_IMAGE: qdrant/qdrant@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
           NEO4J_IMAGE: neo4j@sha256:1111111111111111111111111111111111111111111111111111111111111111
           EGRESS_PROXY_IMAGE: ubuntu/squid@sha256:2222222222222222222222222222222222222222222222222222222222222222
+          ORIGIN_TLS_ROOT: /etc/project-snow/origin-edge/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         run: |
           install -m 600 /dev/null /tmp/project-snow-public.env
           docker compose -f compose.prod.yml --profile blue --profile admin config --quiet
       - name: Validate shell and deployment contracts
         run: |
           find App/ops App/infra -name '*.sh' -print0 | xargs -0 -n1 bash -n
-          python -m py_compile App/scripts/bootstrap_release_host.py App/scripts/install_release_archive.py App/scripts/release_manifest.py
-          PYTHONPATH=App python -m pytest App/tests/test_deployment_contracts.py App/tests/test_change_classifier.py App/tests/test_release_manifest.py -q
+          python -m py_compile App/scripts/bootstrap_release_host.py App/scripts/cloudflare_origin_firewall.py App/scripts/install_origin_tls.py App/scripts/install_release_archive.py App/scripts/release_manifest.py
+          PYTHONPATH=App python -m pytest App/tests/test_deployment_contracts.py App/tests/test_change_classifier.py App/tests/test_install_origin_tls.py App/tests/test_origin_firewall.py App/tests/test_release_manifest.py -q
 
   app-image:
     if: >-

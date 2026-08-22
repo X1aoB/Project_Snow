@@ -55,12 +55,82 @@ case "$operation" in
 esac
 
 cleanup_paths=""
+release_signal_status=0
+stage_signal_can_ack=0
+stage_signal_manifest=""
+stage_signal_colour=""
+stage_signal_sha=""
+stage_signal_public=""
+stage_signal_embedding=""
+stage_signal_nonce=""
+stage_signal_child_pid=""
+stage_signal_child_expected=0
+stage_signal_restore_controller=""
+release_signal_child_operation=""
+switch_signal_can_ack=0
+switch_signal_controller_sha=""
+switch_signal_colour=""
+switch_signal_sha=""
+switch_signal_public=""
+switch_signal_embedding=""
+
 cleanup() {
+  cleanup_status=$?
+  trap - EXIT HUP INT QUIT TERM PIPE
+  if [ "$release_signal_status" -ne 0 ] &&
+     [ "$release_signal_child_operation" = switch ] &&
+     [ "$switch_signal_can_ack" -eq 1 ]; then
+    if switch_commit_is_durable; then
+      cleanup_status=0
+    else
+      cleanup_status="$release_signal_status"
+    fi
+  elif [ "$release_signal_status" -ne 0 ] && [ "$stage_signal_can_ack" -eq 1 ]; then
+    if stage_commit_is_durable "$stage_signal_manifest" "$stage_signal_colour" \
+      "$stage_signal_sha" "$stage_signal_public" "$stage_signal_embedding" \
+      "$stage_signal_nonce"; then
+      cleanup_status=0
+    else
+      cleanup_status="$release_signal_status"
+      if [ -n "$stage_signal_restore_controller" ]; then
+        if ! checkout_controller "$stage_signal_restore_controller"; then
+          echo 'CRITICAL: interrupted release staging could not restore its exact predecessor controller.' >&2 || true
+        fi
+      fi
+    fi
+  elif [ "$release_signal_status" -ne 0 ] && [ -n "$stage_signal_restore_controller" ]; then
+    cleanup_status="$release_signal_status"
+    if ! checkout_controller "$stage_signal_restore_controller"; then
+      echo 'CRITICAL: interrupted release staging could not restore its exact predecessor controller.' >&2 || true
+    fi
+  fi
   for cleanup_path in $cleanup_paths; do
-    rm -f -- "$cleanup_path"
+    rm -f -- "$cleanup_path" || true
   done
+  exit "$cleanup_status"
 }
-trap cleanup EXIT HUP INT TERM
+
+terminate_release_signal() {
+  release_signal_status="$1"
+  release_signal_name="$2"
+  trap '' HUP INT QUIT TERM PIPE
+  if [ -z "$stage_signal_child_pid" ] && [ "$stage_signal_child_expected" -eq 1 ]; then
+    stage_signal_child_pid="$(jobs -p 2>/dev/null | tail -n 1)" || stage_signal_child_pid=""
+  fi
+  if [ -n "$stage_signal_child_pid" ]; then
+    kill -s "$release_signal_name" "$stage_signal_child_pid" 2>/dev/null || true
+    wait "$stage_signal_child_pid" 2>/dev/null || true
+    stage_signal_child_pid=""
+  fi
+  exit "$release_signal_status"
+}
+
+trap cleanup EXIT
+trap 'terminate_release_signal 129 HUP' HUP
+trap 'terminate_release_signal 130 INT' INT
+trap 'terminate_release_signal 131 QUIT' QUIT
+trap 'terminate_release_signal 143 TERM' TERM
+trap 'terminate_release_signal 141 PIPE' PIPE
 
 require_root_controlled_repo() {
   [ -d "$repo/.git" ] && [ ! -L "$repo" ] && [ ! -L "$repo/.git" ] || {
@@ -136,6 +206,371 @@ current_controller_sha() {
   printf '%s\n' "$controller_sha"
 }
 
+fsync_release_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+path = sys.argv[1]
+flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+if os.path.isdir(path):
+    flags |= getattr(os, "O_DIRECTORY", 0)
+descriptor = os.open(path, flags)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+}
+
+resolve_installed_runner_controller() {
+  runner_target_sha="$1"
+  runner_installed_sha256="$2"
+  runner_current_controller="$3"
+  [ -f "$runner_path" ] && [ ! -L "$runner_path" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$runner_path")" = 0:0:755:1 ] &&
+    [ "$(sha256sum "$runner_path" | awk '{print $1}')" = "$runner_installed_sha256" ] || {
+      echo 'Installed release runner cannot be bound to a trusted controller.' >&2
+      return 1
+    }
+  runner_installed_blob="$(git -C "$repo" hash-object --no-filters "$runner_path")" || return 1
+  runner_history="$(git -C "$repo" rev-list --first-parent "$runner_target_sha")" || return 1
+  runner_current_is_first_parent=0
+  for runner_controller_candidate in $runner_history; do
+    if [ "$runner_controller_candidate" = "$runner_current_controller" ]; then
+      runner_current_is_first_parent=1
+      candidate_runner_blob="$(git -C "$repo" rev-parse \
+        "$runner_controller_candidate:App/ops/project-snow-release" 2>/dev/null)" || return 1
+      if [ "$candidate_runner_blob" = "$runner_installed_blob" ]; then
+        printf '%s\n' "$runner_current_controller"
+        return 0
+      fi
+      break
+    fi
+  done
+  [ "$runner_current_is_first_parent" -eq 1 ] || {
+    echo 'Current release controller is not on the target first-parent history.' >&2
+    return 1
+  }
+  # A current controller whose runner blob differs is an interrupted upgrade:
+  # either target checkout happened before its runner rename, or the parent
+  # restored the predecessor after the runner rename.  Only in this mismatch
+  # state select the nearest exact blob anywhere on target's first-parent line.
+  for runner_controller_candidate in $runner_history; do
+    candidate_runner_blob="$(git -C "$repo" rev-parse \
+      "$runner_controller_candidate:App/ops/project-snow-release" 2>/dev/null)" || continue
+    if [ "$candidate_runner_blob" = "$runner_installed_blob" ]; then
+      printf '%s\n' "$runner_controller_candidate"
+      return 0
+    fi
+  done
+  echo 'Installed release runner has no exact first-parent controller ancestor.' >&2
+  return 1
+}
+
+runner_matches_controller() {
+  bound_controller_sha="$1"
+  printf '%s\n' "$bound_controller_sha" | grep -Eq '^[0-9a-f]{40}$' || return 1
+  [ -f "$runner_path" ] && [ ! -L "$runner_path" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$runner_path" 2>/dev/null || true)" = 0:0:755:1 ] || return 1
+  installed_runner_blob="$(git -C "$repo" hash-object --no-filters "$runner_path")" || return 1
+  controller_runner_blob="$(git -C "$repo" rev-parse \
+    "$bound_controller_sha:App/ops/project-snow-release" 2>/dev/null)" || return 1
+  [ "$installed_runner_blob" = "$controller_runner_blob" ]
+}
+
+live_origin_edge_binding_matches_expected() {
+  durable_live_binding=/srv/project-snow/releases/live-origin-edge-config.json
+  durable_live_env_root=/srv/project-snow/runtime/origin-edge
+  durable_live_origin_present=0
+  durable_live_env=""
+  if [ ! -e "$durable_live_binding" ] && [ ! -L "$durable_live_binding" ]; then
+    return 0
+  fi
+  [ -f "$durable_live_binding" ] && [ ! -L "$durable_live_binding" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$durable_live_binding" 2>/dev/null)" = 0:0:600:1 ] || return 1
+  jq -e '
+    type == "object" and
+    ((keys | sort) == ([
+      "colour", "commit_sha", "configuration_sha256",
+      "live_origin_edge_schema", "origin_edge_env_path",
+      "origin_edge_env_sha256", "root", "schema_version"
+    ] | sort)) and
+    .schema_version == "project-snow-config-snapshot-1" and
+    .live_origin_edge_schema == "project-snow-live-origin-edge-1" and
+    (.colour == "blue" or .colour == "green") and
+    (.commit_sha | type == "string" and test("^[0-9a-f]{40}$")) and
+    (.root == ("/srv/project-snow/releases/configurations/" + .commit_sha)) and
+    (.origin_edge_env_path | type == "string" and
+      test("^/srv/project-snow/runtime/origin-edge/[0-9a-f]{64}\\.compose\\.env$")) and
+    (.origin_edge_env_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+    ((.configuration_sha256 | keys | sort) as $paths |
+      $paths == ([
+        "compose.prod.yml", "infra/Caddyfile", "infra/OriginEdge.Caddyfile",
+        "infra/egress-squid.conf", "infra/neo4j-entrypoint.sh",
+        "infra/postgres/postgresql.conf", "infra/public-api.Dockerfile",
+        "ops/project-snow-origin-firewall.service",
+        "ops/project-snow-origin-firewall.timer", "requirements-public.txt",
+        "scripts/cloudflare_origin_firewall.py"
+      ] | sort) or
+      $paths == ([
+        "compose.prod.yml", "config/origin-edge/aop-ca.pem",
+        "config/origin-edge/origin-cert.pem", "infra/Caddyfile",
+        "infra/OriginEdge.Caddyfile", "infra/egress-squid.conf",
+        "infra/neo4j-entrypoint.sh", "infra/postgres/postgresql.conf",
+        "infra/public-api.Dockerfile", "ops/project-snow-origin-firewall.service",
+        "ops/project-snow-origin-firewall.timer", "requirements-public.txt",
+        "scripts/cloudflare_origin_firewall.py", "scripts/install_origin_tls.py"
+      ] | sort)) and
+    all(.configuration_sha256[];
+      type == "string" and test("^[0-9a-f]{64}$"))
+  ' "$durable_live_binding" >/dev/null || return 1
+  durable_live_sha="$(jq -r '.commit_sha' "$durable_live_binding")" || return 1
+  durable_live_root="$(jq -r '.root' "$durable_live_binding")" || return 1
+  durable_live_env="$(jq -r '.origin_edge_env_path' "$durable_live_binding")" || return 1
+  durable_live_env_sha="$(jq -r '.origin_edge_env_sha256' "$durable_live_binding")" || return 1
+  [ -d "$durable_live_root" ] && [ ! -L "$durable_live_root" ] || return 1
+  [ -d "$durable_live_env_root" ] && [ ! -L "$durable_live_env_root" ] &&
+    [ "$(stat -c %u:%g:%a "$durable_live_env_root" 2>/dev/null)" = 0:0:700 ] || return 1
+  [ -f "$durable_live_env" ] && [ ! -L "$durable_live_env" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$durable_live_env" 2>/dev/null)" = 0:0:600:1 ] &&
+    [ "${durable_live_env##*/}" = "$durable_live_env_sha.compose.env" ] &&
+    [ "$(sha256sum "$durable_live_env" | awk '{print $1}')" = "$durable_live_env_sha" ] || return 1
+  durable_live_paths="$(jq -r '.configuration_sha256 | keys[]' "$durable_live_binding")" || return 1
+  for durable_live_path in $durable_live_paths; do
+    durable_live_expected="$(jq -r --arg path "$durable_live_path" \
+      '.configuration_sha256[$path]' "$durable_live_binding")" || return 1
+    [ -f "$durable_live_root/$durable_live_path" ] &&
+      [ ! -L "$durable_live_root/$durable_live_path" ] &&
+      [ "$(sha256sum "$durable_live_root/$durable_live_path" | awk '{print $1}')" = \
+        "$durable_live_expected" ] || return 1
+  done
+  durable_live_origin_present=1
+}
+
+switch_commit_matches_expected() {
+  [ "$switch_signal_can_ack" -eq 1 ] || return 1
+  printf '%s\n' "$switch_signal_controller_sha" | grep -Eq '^[0-9a-f]{40}$' || return 1
+  printf '%s\n' "$switch_signal_sha" | grep -Eq '^[0-9a-f]{40}$' || return 1
+  for durable_switch_file in \
+    /srv/project-snow/runtime/compose.env \
+    "$active_file" \
+    /srv/project-snow/releases/current-manifest.json \
+    /srv/project-snow/releases/current-config.json \
+    /srv/project-snow/releases/current; do
+    [ -f "$durable_switch_file" ] && [ ! -L "$durable_switch_file" ] &&
+      [ "$(stat -c %u:%g:%a:%h "$durable_switch_file" 2>/dev/null)" = 0:0:600:1 ] || return 1
+  done
+  cmp -s "/srv/project-snow/runtime/colours/$switch_signal_colour.compose.env" \
+    /srv/project-snow/runtime/compose.env || return 1
+  [ "$(cat "$active_file")" = "$switch_signal_colour" ] || return 1
+  [ "$(jq -r '.commit_sha // empty' /srv/project-snow/releases/current-manifest.json)" = \
+    "$switch_signal_sha" ] || return 1
+  [ "$(jq -r '.colour // empty' /srv/project-snow/releases/current-config.json)" = \
+    "$switch_signal_colour" ] &&
+    [ "$(jq -r '.commit_sha // empty' /srv/project-snow/releases/current-config.json)" = \
+      "$switch_signal_sha" ] || return 1
+  durable_switch_extra=""
+  read -r durable_switch_colour durable_switch_sha durable_switch_public \
+    durable_switch_embedding durable_switch_extra < /srv/project-snow/releases/current || return 1
+  [ "$durable_switch_colour" = "$switch_signal_colour" ] &&
+    [ "$durable_switch_sha" = "$switch_signal_sha" ] &&
+    [ "$durable_switch_public" = "$switch_signal_public" ] &&
+    [ "$durable_switch_embedding" = "$switch_signal_embedding" ] &&
+    [ -z "$durable_switch_extra" ] &&
+    runner_matches_controller "$switch_signal_controller_sha" &&
+    live_origin_edge_binding_matches_expected
+}
+
+switch_commit_is_durable() {
+  switch_commit_matches_expected || return 1
+  switch_runtime_identity="$(stat -c %d:%i /srv/project-snow/runtime/compose.env)" || return 1
+  switch_active_identity="$(stat -c %d:%i "$active_file")" || return 1
+  switch_manifest_identity="$(stat -c %d:%i /srv/project-snow/releases/current-manifest.json)" || return 1
+  switch_config_identity="$(stat -c %d:%i /srv/project-snow/releases/current-config.json)" || return 1
+  switch_current_identity="$(stat -c %d:%i /srv/project-snow/releases/current)" || return 1
+  switch_live_origin_present="$durable_live_origin_present"
+  switch_live_binding_identity=""
+  switch_live_env_identity=""
+  if [ "$switch_live_origin_present" -eq 1 ]; then
+    switch_live_binding_identity="$(stat -c %d:%i "$durable_live_binding")" || return 1
+    switch_live_env_identity="$(stat -c %d:%i "$durable_live_env")" || return 1
+  fi
+  for durable_switch_file in \
+    /srv/project-snow/runtime/compose.env \
+    "$active_file" \
+    /srv/project-snow/releases/current-manifest.json \
+    /srv/project-snow/releases/current-config.json \
+    /srv/project-snow/releases/current; do
+    fsync_release_path "$durable_switch_file" || return 1
+  done
+  if [ "$switch_live_origin_present" -eq 1 ]; then
+    fsync_release_path "$durable_live_binding" || return 1
+    fsync_release_path "$durable_live_env" || return 1
+    fsync_release_path /srv/project-snow/runtime/origin-edge || return 1
+  fi
+  fsync_release_path /srv/project-snow/runtime || return 1
+  fsync_release_path /srv/project-snow/releases || return 1
+  [ "$(stat -c %d:%i /srv/project-snow/runtime/compose.env)" = "$switch_runtime_identity" ] &&
+    [ "$(stat -c %d:%i "$active_file")" = "$switch_active_identity" ] &&
+    [ "$(stat -c %d:%i /srv/project-snow/releases/current-manifest.json)" = "$switch_manifest_identity" ] &&
+    [ "$(stat -c %d:%i /srv/project-snow/releases/current-config.json)" = "$switch_config_identity" ] &&
+    [ "$(stat -c %d:%i /srv/project-snow/releases/current)" = "$switch_current_identity" ] || return 1
+  if [ "$switch_live_origin_present" -eq 1 ]; then
+    [ "$(stat -c %d:%i "$durable_live_binding")" = "$switch_live_binding_identity" ] &&
+      [ "$(stat -c %d:%i "$durable_live_env")" = "$switch_live_env_identity" ] || return 1
+  else
+    [ ! -e /srv/project-snow/releases/live-origin-edge-config.json ] &&
+      [ ! -L /srv/project-snow/releases/live-origin-edge-config.json ] || return 1
+  fi
+  switch_commit_matches_expected
+}
+
+stage_configuration_binding_matches_manifest() {
+  stage_config_binding="$1"
+  stage_config_manifest="$2"
+  stage_config_colour="$3"
+  stage_config_sha="$4"
+  stage_config_root="/srv/project-snow/releases/configurations/$stage_config_sha"
+  [ -f "$stage_config_binding" ] && [ ! -L "$stage_config_binding" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$stage_config_binding" 2>/dev/null)" = 0:0:600:1 ] || return 1
+  jq -e --arg colour "$stage_config_colour" --arg sha "$stage_config_sha" \
+    --arg root "$stage_config_root" '
+      type == "object" and
+      .schema_version == "project-snow-config-snapshot-1" and
+      .colour == $colour and .commit_sha == $sha and .root == $root and
+      (.configuration_sha256 | type == "object" and length > 0) and
+      all(.configuration_sha256 | keys[];
+        test("^[0-9A-Za-z._/-]+$") and
+        (startswith("/") | not) and
+        (split("/") | all(. != "" and . != "." and . != ".."))) and
+      all(.configuration_sha256[];
+        type == "string" and test("^[0-9a-f]{64}$"))
+    ' "$stage_config_binding" >/dev/null || return 1
+  stage_binding_hashes="$(jq -cS '.configuration_sha256' "$stage_config_binding")" || return 1
+  stage_manifest_hashes="$(jq -cS '.configuration_sha256' "$stage_config_manifest")" || return 1
+  [ "$stage_binding_hashes" = "$stage_manifest_hashes" ] || return 1
+  [ -d "$stage_config_root" ] && [ ! -L "$stage_config_root" ] || return 1
+  stage_config_paths="$(jq -r '.configuration_sha256 | keys[]' "$stage_config_binding")" || return 1
+  stage_expected_files="$(printf '%s\n' "$stage_config_paths" | LC_ALL=C sort)" || return 1
+  stage_found_files="$(CDPATH= cd -- "$stage_config_root" &&
+    find . -mindepth 1 -type f -printf '%P\n')" || return 1
+  stage_found_files="$(printf '%s\n' "$stage_found_files" | LC_ALL=C sort)" || return 1
+  [ "$stage_found_files" = "$stage_expected_files" ] || return 1
+  stage_unexpected_type="$(find "$stage_config_root" -mindepth 1 \
+    ! -type f ! -type d -print -quit)" || return 1
+  [ -z "$stage_unexpected_type" ] || return 1
+  stage_expected_dirs='.'
+  for stage_config_path in $stage_config_paths; do
+    stage_config_parent="$(dirname "$stage_config_path")" || return 1
+    while [ "$stage_config_parent" != . ]; do
+      stage_expected_dirs="$stage_expected_dirs
+$stage_config_parent"
+      stage_config_parent="$(dirname "$stage_config_parent")" || return 1
+    done
+  done
+  stage_expected_dirs="$(printf '%s\n' "$stage_expected_dirs" |
+    awk 'NF' | LC_ALL=C sort -u)" || return 1
+  stage_found_dirs="$(CDPATH= cd -- "$stage_config_root" &&
+    { printf '%s\n' .; find . -mindepth 1 -type d -printf '%P\n'; })" || return 1
+  stage_found_dirs="$(printf '%s\n' "$stage_found_dirs" |
+    awk 'NF' | LC_ALL=C sort -u)" || return 1
+  [ "$stage_found_dirs" = "$stage_expected_dirs" ] || return 1
+  stage_config_file_state=''
+  for stage_config_path in $stage_config_paths; do
+    stage_config_file="$stage_config_root/$stage_config_path"
+    stage_config_metadata="$(stat -c %d:%i:%u:%g:%a:%h "$stage_config_file" 2>/dev/null)" || return 1
+    case "$stage_config_metadata" in *:0:0:444:1) ;; *) return 1 ;; esac
+    stage_config_digest="$(sha256sum "$stage_config_file" | awk '{print $1}')" || return 1
+    stage_config_expected="$(jq -r --arg path "$stage_config_path" \
+      '.configuration_sha256[$path]' "$stage_config_binding")" || return 1
+    [ "$stage_config_digest" = "$stage_config_expected" ] || return 1
+    stage_config_file_state="$stage_config_file_state$stage_config_path|$stage_config_metadata|$stage_config_digest;"
+  done
+  stage_config_dir_state=''
+  for stage_config_dir in $stage_expected_dirs; do
+    if [ "$stage_config_dir" = . ]; then
+      stage_config_directory="$stage_config_root"
+    else
+      stage_config_directory="$stage_config_root/$stage_config_dir"
+    fi
+    stage_config_metadata="$(stat -c %d:%i:%u:%g:%a "$stage_config_directory" 2>/dev/null)" || return 1
+    case "$stage_config_metadata" in *:0:0:555) ;; *) return 1 ;; esac
+    stage_config_dir_state="$stage_config_dir_state$stage_config_dir|$stage_config_metadata;"
+  done
+}
+
+stage_configuration_binding_is_durable() {
+  durable_config_binding="$1"
+  durable_config_manifest="$2"
+  durable_config_colour="$3"
+  durable_config_sha="$4"
+  stage_configuration_binding_matches_manifest "$durable_config_binding" \
+    "$durable_config_manifest" "$durable_config_colour" "$durable_config_sha" || return 1
+  durable_config_binding_identity="$(stat -c %d:%i "$durable_config_binding")" || return 1
+  durable_config_file_state="$stage_config_file_state"
+  durable_config_dir_state="$stage_config_dir_state"
+  fsync_release_path "$durable_config_binding" || return 1
+  for durable_config_path in $stage_config_paths; do
+    fsync_release_path "$stage_config_root/$durable_config_path" || return 1
+  done
+  durable_config_dirs="$(find "$stage_config_root" -depth -type d -print)" || return 1
+  for durable_config_dir in $durable_config_dirs; do
+    fsync_release_path "$durable_config_dir" || return 1
+  done
+  fsync_release_path /srv/project-snow/releases/configurations || return 1
+  fsync_release_path "$colour_root" || return 1
+  [ "$(stat -c %d:%i "$durable_config_binding")" = "$durable_config_binding_identity" ] || return 1
+  stage_configuration_binding_matches_manifest "$durable_config_binding" \
+    "$durable_config_manifest" "$durable_config_colour" "$durable_config_sha" || return 1
+  [ "$stage_config_file_state" = "$durable_config_file_state" ] &&
+    [ "$stage_config_dir_state" = "$durable_config_dir_state" ]
+}
+
+stage_commit_is_durable() {
+  durable_manifest="$1"
+  durable_colour="$2"
+  durable_sha="$3"
+  durable_public="$4"
+  durable_embedding="$5"
+  durable_nonce="$6"
+  durable_marker="$colour_root/$durable_colour"
+  durable_receipt="$colour_root/$durable_colour-stage-receipt"
+  # A child killed after rename but before its own directory fsync can leave a
+  # visible marker.  The root runner must make that entry durable itself before
+  # accepting a non-zero child result as an exact committed stage.
+  fsync_release_path "$colour_root" || return 1
+  durable_runner_sha="$(jq -r '.release_control_sha256["ops/project-snow-release"] // empty' \
+    "$durable_manifest")" || return 1
+  printf '%s\n' "$durable_runner_sha" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  printf '%s\n' "$durable_nonce" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  [ "$(git -C "$repo" rev-parse HEAD 2>/dev/null)" = "$durable_sha" ] &&
+    [ -f "$runner_path" ] && [ ! -L "$runner_path" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$runner_path" 2>/dev/null || true)" = 0:0:755:1 ] &&
+    [ "$(sha256sum "$runner_path" | awk '{print $1}')" = "$durable_runner_sha" ] &&
+    [ -f "$durable_marker" ] && [ ! -L "$durable_marker" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$durable_marker" 2>/dev/null || true)" = 0:0:600:1 ] &&
+    [ "$(wc -l < "$durable_marker")" -eq 1 ] &&
+    [ -f "$durable_receipt" ] && [ ! -L "$durable_receipt" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$durable_receipt" 2>/dev/null || true)" = 0:0:600:1 ] &&
+    [ "$(wc -l < "$durable_receipt")" -eq 1 ] || return 1
+  durable_extra=""
+  read -r marker_colour marker_sha marker_public marker_embedding durable_extra < "$durable_marker" || return 1
+  receipt_extra=""
+  read -r receipt_schema receipt_nonce receipt_colour receipt_sha \
+    receipt_public receipt_embedding receipt_extra < "$durable_receipt" || return 1
+  [ "$marker_colour" = "$durable_colour" ] && [ "$marker_sha" = "$durable_sha" ] &&
+    [ "$marker_public" = "$durable_public" ] &&
+    [ "$marker_embedding" = "$durable_embedding" ] && [ -z "$durable_extra" ] &&
+    [ "$receipt_schema" = project-snow-stage-receipt-1 ] &&
+    [ "$receipt_nonce" = "$durable_nonce" ] &&
+    [ "$receipt_colour" = "$durable_colour" ] && [ "$receipt_sha" = "$durable_sha" ] &&
+    [ "$receipt_public" = "$durable_public" ] &&
+    [ "$receipt_embedding" = "$durable_embedding" ] && [ -z "$receipt_extra" ] &&
+    stage_configuration_binding_is_durable "$colour_root/$durable_colour-config.json" \
+      "$durable_manifest" "$durable_colour" "$durable_sha"
+}
+
 copy_inbox_manifest() {
   manifest_source="$1"
   manifest_destination="$2"
@@ -199,6 +634,15 @@ validate_release_manifest() {
       (.release_control_sha256["ops/project-snow-release"] |
         type == "string" and test("^[0-9a-f]{64}$")) and
       (.release_control_sha256["ops/project-snow-release.sudoers"] |
+        type == "string" and test("^[0-9a-f]{64}$")) and
+      (.direct_origin_tls | type == "object" and length == 5) and
+      .direct_origin_tls.schema_version == "project-snow-origin-tls-1" and
+      .direct_origin_tls.hostname == "snow.xiaob.dev" and
+      (.direct_origin_tls.bundle_sha256 |
+        type == "string" and test("^[0-9a-f]{64}$")) and
+      (.direct_origin_tls.origin_certificate_sha256 |
+        type == "string" and test("^[0-9a-f]{64}$")) and
+      (.direct_origin_tls.aop_ca_sha256 |
         type == "string" and test("^[0-9a-f]{64}$"))
     ' "$manifest_path" >/dev/null || {
       echo 'The uploaded release manifest has an invalid identity.' >&2
@@ -315,35 +759,72 @@ run_stage() {
 
   fetch_main
   previous_controller="$(current_controller_sha)"
-  checkout_controller "$requested_sha"
+  previous_runner_sha256="$(sha256sum "$runner_path" | awk '{print $1}')"
+  printf '%s\n' "$previous_runner_sha256" | grep -Eq '^[0-9a-f]{64}$' || {
+    echo 'Installed release runner has no valid predecessor digest.' >&2
+    exit 71
+  }
+  previous_runner_controller="$(resolve_installed_runner_controller \
+    "$requested_sha" "$previous_runner_sha256" "$previous_controller")" || {
+      echo 'Installed release runner has no trusted predecessor controller.' >&2
+      exit 71
+    }
+  stage_signal_restore_controller="$previous_runner_controller"
+  checkout_controller "$requested_sha" || {
+    checkout_controller "$previous_runner_controller" || true
+    exit 71
+  }
   if ! validate_release_manifest "$manifest_copy" "$requested_sha" ||
      ! install_manifest_releases "$manifest_copy"; then
-    checkout_controller "$previous_controller" || true
+    checkout_controller "$previous_runner_controller" || true
     exit 71
   fi
   public_image="$expected_public_image@$(jq -r '.application.digest' "$manifest_copy")"
   embedding_image="$expected_embedding_image@$(jq -r '.embedding.digest' "$manifest_copy")"
-  previous_runner_sha256="$(sha256sum "$runner_path" | awk '{print $1}')"
-  printf '%s\n' "$previous_runner_sha256" | grep -Eq '^[0-9a-f]{64}$' || {
-    checkout_controller "$previous_controller" || true
-    echo 'Installed release runner has no valid predecessor digest.' >&2
+  stage_attempt_nonce="$(python3 -c 'import secrets; print(secrets.token_hex(32))')" || {
+    checkout_controller "$previous_runner_controller" || true
     exit 71
   }
-  if ! (
-    cd "$app_root"
-    /usr/bin/env -i \
+  printf '%s\n' "$stage_attempt_nonce" | grep -Eq '^[0-9a-f]{64}$' || {
+    checkout_controller "$previous_runner_controller" || true
+    exit 71
+  }
+  stage_signal_manifest="$manifest_copy"
+  stage_signal_colour="$colour"
+  stage_signal_sha="$requested_sha"
+  stage_signal_public="$public_image"
+  stage_signal_embedding="$embedding_image"
+  stage_signal_nonce="$stage_attempt_nonce"
+  stage_signal_can_ack=1
+  release_signal_child_operation=stage
+  stage_signal_child_expected=1
+  (
+    cd "$app_root" || exit 70
+    exec /usr/bin/env -i \
       HOME=/root USER=root LOGNAME=root \
       PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       PROJECT_SNOW_RELEASE_MANIFEST="$manifest_copy" \
-      PROJECT_SNOW_RELEASE_PREVIOUS_CONTROLLER_SHA="$previous_controller" \
+      PROJECT_SNOW_RELEASE_PREVIOUS_CONTROLLER_SHA="$previous_runner_controller" \
       PROJECT_SNOW_RELEASE_PREVIOUS_RUNNER_SHA256="$previous_runner_sha256" \
+      PROJECT_SNOW_RELEASE_ATTEMPT_NONCE="$stage_attempt_nonce" \
       PUBLIC_API_IMAGE="$public_image" \
       EMBEDDING_IMAGE="$embedding_image" \
       ./ops/deploy.sh "$colour" "$requested_sha"
-  ); then
-    checkout_controller "$previous_controller" || true
-    echo 'Release staging failed; the previous trusted controller was restored.' >&2
-    exit 72
+  ) &
+  stage_signal_child_pid=$!
+  stage_child_status=0
+  wait "$stage_signal_child_pid" || stage_child_status=$?
+  stage_signal_child_pid=""
+  stage_signal_child_expected=0
+  if [ "$stage_child_status" -ne 0 ]; then
+    if stage_commit_is_durable "$manifest_copy" "$colour" "$requested_sha" \
+      "$public_image" "$embedding_image" "$stage_attempt_nonce"; then
+      echo 'Release staging exited after its exact durable commit; retaining the target controller.' >&2
+    else
+      checkout_controller "$previous_runner_controller" || true
+      echo 'Release staging failed; the installed runner controller was restored.' >&2
+      exit 72
+    fi
   fi
   rm -f -- "$manifest_source"
   for installed_coordinate in \
@@ -359,6 +840,10 @@ run_switch() {
   switch_operation="$1"
   fetch_main
   controller_sha="$(current_controller_sha)"
+  runner_matches_controller "$controller_sha" || {
+    echo 'Installed release runner is not bound to the checked-out controller; repeat exact stage before switching traffic.' >&2
+    exit 78
+  }
   marker="$colour_root/$colour"
   [ -r "$marker" ] && [ ! -L "$marker" ] || {
     echo "No staged release marker exists for $colour." >&2
@@ -370,16 +855,36 @@ run_switch() {
     exit 67
   }
   printf '%s\n' "$controller_sha" | grep -Eq '^[0-9a-f]{40}$' || exit 67
-  if [ "$switch_operation" = promote ]; then
-    (cd "$app_root" && ./ops/promote.sh "$colour" "$requested_sha")
-  else
+  switch_signal_controller_sha="$controller_sha"
+  switch_signal_colour="$colour"
+  switch_signal_sha="$requested_sha"
+  switch_signal_public="$marker_public"
+  switch_signal_embedding="$marker_embedding"
+  switch_signal_can_ack=1
+  release_signal_child_operation=switch
+  stage_signal_child_expected=1
+  (
+    cd "$app_root" || exit 70
+    if [ "$switch_operation" = promote ]; then
+      exec ./ops/promote.sh "$colour" "$requested_sha"
+    fi
     # This flag cannot be inherited or supplied by the SSH caller because the
     # runner re-executes under an empty environment.  The rollback path uses it
     # only to require an unauthenticated Cloudflare Access gate before a
     # compatibility smoke against a legacy edge snapshot.
-    (cd "$app_root" && PROJECT_SNOW_ROLLBACK_MODE=1 \
-      ./ops/rollback.sh "$colour" "$requested_sha")
+    exec /usr/bin/env PROJECT_SNOW_ROLLBACK_MODE=1 \
+      ./ops/rollback.sh "$colour" "$requested_sha"
+  ) &
+  stage_signal_child_pid=$!
+  switch_child_status=0
+  wait "$stage_signal_child_pid" || switch_child_status=$?
+  stage_signal_child_pid=""
+  stage_signal_child_expected=0
+  if [ "$switch_child_status" -eq 0 ]; then
+    switch_commit_is_durable || return 74
+    return 0
   fi
+  return "$switch_child_status"
 }
 
 verified_version_array() {
@@ -533,6 +1038,10 @@ run_status() {
      [ "$(stat -c %u:%g:%a:%h "$runner_path" 2>/dev/null || true)" = 0:0:755:1 ]; then
     release_runner_sha256="$(sha256sum "$runner_path" | awk '{print $1}')"
   fi
+  runner_controller_binding=false
+  if runner_matches_controller "$controller_sha"; then
+    runner_controller_binding=true
+  fi
   data_versions="$(verified_version_array data /srv/project-snow/data/releases)"
   avatar_versions="$(verified_version_array avatar /srv/project-snow/media/releases)"
   sticker_versions="$(verified_version_array sticker /srv/project-snow/media/stickers/releases)"
@@ -540,6 +1049,7 @@ run_status() {
     --arg controller_sha "$controller_sha" \
     --arg active_colour "$active_colour" \
     --arg release_runner_sha256 "$release_runner_sha256" \
+    --argjson runner_controller_binding "$runner_controller_binding" \
     --argjson deploy_has_docker_group "$docker_group" \
     --argjson deploy_can_access_docker "$docker_access" \
     --argjson deploy_process_has_docker_socket_group "$deploy_process_docker_group" \
@@ -552,6 +1062,7 @@ run_status() {
     --argjson sticker_versions "$sticker_versions" \
     '{controller_sha: $controller_sha, active_colour: $active_colour,
       release_runner_sha256: $release_runner_sha256,
+      runner_controller_binding: $runner_controller_binding,
       deploy_has_docker_group: $deploy_has_docker_group,
       deploy_can_access_docker: $deploy_can_access_docker,
       deploy_process_has_docker_socket_group: $deploy_process_has_docker_socket_group,

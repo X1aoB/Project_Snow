@@ -159,9 +159,9 @@ services:
     dns: ["127.0.0.1"]
     volumes:
       - ./infra/OriginEdge.Caddyfile:/etc/caddy/OriginEdge.Caddyfile:ro
-      - /etc/project-snow/origin-edge/origin-cert.pem:/run/project-snow-origin/origin-cert.pem:ro
-      - /etc/project-snow/origin-edge/origin-key.pem:/run/project-snow-origin/origin-key.pem:ro
-      - /etc/project-snow/origin-edge/aop-ca.pem:/run/project-snow-origin/aop-ca.pem:ro
+      - ${ORIGIN_TLS_ROOT:?Set verified immutable origin TLS root}/origin-cert.pem:/run/project-snow-origin/origin-cert.pem:ro
+      - ${ORIGIN_TLS_ROOT:?Set verified immutable origin TLS root}/origin-key.pem:/run/project-snow-origin/origin-key.pem:ro
+      - ${ORIGIN_TLS_ROOT:?Set verified immutable origin TLS root}/aop-ca.pem:/run/project-snow-origin/aop-ca.pem:ro
     ports:
       - "443:8443/tcp"
     cpus: 0.5

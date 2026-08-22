@@ -24,6 +24,7 @@ public_env_source="${PROJECT_SNOW_PUBLIC_ENV:-/etc/project-snow/public.env}"
 public_env_root="/srv/project-snow/runtime"
 current_env="${PROJECT_SNOW_COMPOSE_ENV:-/srv/project-snow/runtime/compose.env}"
 release_manifest="${PROJECT_SNOW_RELEASE_MANIFEST:-}"
+release_attempt_nonce="${PROJECT_SNOW_RELEASE_ATTEMPT_NONCE:-}"
 current_marker="/srv/project-snow/releases/current"
 current_manifest="/srv/project-snow/releases/current-manifest.json"
 active_file="/srv/project-snow/releases/active-colour"
@@ -33,6 +34,7 @@ configuration_release_root="/srv/project-snow/releases/configurations"
 colour_env="$colour_env_root/$colour.compose.env"
 colour_manifest="$colour_release_root/$colour-manifest.json"
 colour_marker="$colour_release_root/$colour"
+colour_receipt="$colour_release_root/$colour-stage-receipt"
 colour_config_binding="$colour_release_root/$colour-config.json"
 release_runner_path=/usr/local/sbin/project-snow-release
 release_sudoers_path=/etc/sudoers.d/project-snow-release
@@ -40,8 +42,14 @@ legacy_release_controller_sha=c4796bbdda5557666afaaeb708ed34864456acc2
 runner_upgrade_new=""
 runner_upgrade_backup=""
 runner_upgrade_previous_sha256=""
+runner_upgrade_target_sha256=""
+runner_upgrade_marker_identity=""
+runner_upgrade_marker_synced=0
+runner_upgrade_receipt_identity=""
+runner_upgrade_receipt_synced=0
 runner_upgrade_installed=0
 runner_upgrade_committed=0
+stage_publication_recovery_failed=0
 
 base_configuration_paths="compose.prod.yml
 infra/Caddyfile
@@ -50,7 +58,14 @@ infra/neo4j-entrypoint.sh
 infra/postgres/postgresql.conf
 infra/public-api.Dockerfile
 requirements-public.txt"
+legacy_direct_origin_configuration_paths="infra/OriginEdge.Caddyfile
+scripts/cloudflare_origin_firewall.py
+ops/project-snow-origin-firewall.service
+ops/project-snow-origin-firewall.timer"
 direct_origin_configuration_paths="infra/OriginEdge.Caddyfile
+config/origin-edge/origin-cert.pem
+config/origin-edge/aop-ca.pem
+scripts/install_origin_tls.py
 scripts/cloudflare_origin_firewall.py
 ops/project-snow-origin-firewall.service
 ops/project-snow-origin-firewall.timer"
@@ -100,7 +115,7 @@ validate_release_control_contract() {
       echo 'Runner self-upgrade is not executing from the exact root-controlled target checkout.' >&2
       return 1
     }
-  release_control_count="$(jq -r '.release_control_sha256 | if type == "object" then length else 0 end' "$release_manifest")"
+  release_control_count="$(jq -r '.release_control_sha256 | if type == "object" then length else 0 end' "$release_manifest")" || return 1
   [ "$release_control_count" -eq 2 ] || {
     echo 'Release manifest has an unexpected release-control binding.' >&2
     return 1
@@ -110,7 +125,7 @@ validate_release_control_contract() {
     "ops/project-snow-release.sudoers|100644"; do
     release_control_path="${release_control_spec%%|*}"
     release_control_mode="${release_control_spec#*|}"
-    expected_release_control_sha="$(jq -r --arg path "$release_control_path" '.release_control_sha256[$path] // empty' "$release_manifest")"
+    expected_release_control_sha="$(jq -r --arg path "$release_control_path" '.release_control_sha256[$path] // empty' "$release_manifest")" || return 1
     printf '%s\n' "$expected_release_control_sha" | grep -Eq '^[0-9a-f]{64}$' || {
       echo "Release manifest has no valid release-control hash for $release_control_path." >&2
       return 1
@@ -123,8 +138,8 @@ validate_release_control_contract() {
         return 1
       }
     git -C "$release_repository" cat-file -e "$sha:App/$release_control_path" 2>/dev/null || return 1
-    exact_blob_sha="$(git -C "$release_repository" cat-file blob "$sha:App/$release_control_path" | sha256sum | awk '{print $1}')"
-    worktree_sha="$(sha256sum "$release_repository/App/$release_control_path" | awk '{print $1}')"
+    exact_blob_sha="$(git -C "$release_repository" cat-file blob "$sha:App/$release_control_path" | sha256sum | awk '{print $1}')" || return 1
+    worktree_sha="$(sha256sum "$release_repository/App/$release_control_path" | awk '{print $1}')" || return 1
     [ "$exact_blob_sha" = "$expected_release_control_sha" ] &&
       [ "$worktree_sha" = "$expected_release_control_sha" ] || {
         echo "Release-control file does not match the exact target Git blob: $release_control_path" >&2
@@ -136,8 +151,8 @@ validate_release_control_contract() {
       echo 'Installed release runner must be a root-owned mode-0755 single regular file.' >&2
       return 1
     }
-  installed_runner_sha="$(sha256sum "$release_runner_path" | awk '{print $1}')"
-  target_runner_sha="$(jq -r '.release_control_sha256["ops/project-snow-release"]' "$release_manifest")"
+  installed_runner_sha="$(sha256sum "$release_runner_path" | awk '{print $1}')" || return 1
+  target_runner_sha="$(jq -r '.release_control_sha256["ops/project-snow-release"]' "$release_manifest")" || return 1
   predecessor_controller_sha="${PROJECT_SNOW_RELEASE_PREVIOUS_CONTROLLER_SHA:-}"
   predecessor_runner_sha="${PROJECT_SNOW_RELEASE_PREVIOUS_RUNNER_SHA256:-}"
   if [ "$installed_runner_sha" = "$target_runner_sha" ]; then
@@ -152,7 +167,7 @@ validate_release_control_contract() {
           return 1
         }
     legacy_runner_sha="$(git -C "$release_repository" cat-file blob \
-      "$legacy_release_controller_sha:App/ops/project-snow-release" | sha256sum | awk '{print $1}')"
+      "$legacy_release_controller_sha:App/ops/project-snow-release" | sha256sum | awk '{print $1}')" || return 1
     [ "$installed_runner_sha" = "$legacy_runner_sha" ] || {
       echo 'Installed release runner is neither the declared predecessor nor the exact c479 compatibility runner.' >&2
       return 1
@@ -170,14 +185,14 @@ validate_release_control_contract() {
           return 1
         }
     exact_predecessor_runner_sha="$(git -C "$release_repository" cat-file blob \
-      "$predecessor_controller_sha:App/ops/project-snow-release" | sha256sum | awk '{print $1}')"
+      "$predecessor_controller_sha:App/ops/project-snow-release" | sha256sum | awk '{print $1}')" || return 1
     [ "$predecessor_runner_sha" = "$exact_predecessor_runner_sha" ] &&
       [ "$installed_runner_sha" = "$predecessor_runner_sha" ] || {
         echo 'Installed release runner does not match the exact declared predecessor Git blob.' >&2
         return 1
       }
   fi
-  expected_sudoers_sha="$(jq -r '.release_control_sha256["ops/project-snow-release.sudoers"]' "$release_manifest")"
+  expected_sudoers_sha="$(jq -r '.release_control_sha256["ops/project-snow-release.sudoers"]' "$release_manifest")" || return 1
   [ -f "$release_sudoers_path" ] && [ ! -L "$release_sudoers_path" ] &&
     [ "$(stat -c %u:%g:%a:%h "$release_sudoers_path")" = 0:0:440:1 ] &&
     [ "$(sha256sum "$release_sudoers_path" | awk '{print $1}')" = "$expected_sudoers_sha" ] &&
@@ -208,6 +223,7 @@ verify_new_release_runner_status() {
     --arg sha "$sha" --arg runner_sha "$expected_runner_sha" '
       .controller_sha == $sha and
       .release_runner_sha256 == $runner_sha and
+      .runner_controller_binding == true and
       .deploy_has_docker_group == false and
       .deploy_can_access_docker == false and
       .deploy_process_has_docker_socket_group == false and
@@ -223,45 +239,56 @@ verify_new_release_runner_status() {
 
 install_verified_release_runner() {
   validate_release_control_contract || return 1
-  expected_runner_sha="$(jq -r '.release_control_sha256["ops/project-snow-release"]' "$release_manifest")"
+  expected_runner_sha="$(jq -r '.release_control_sha256["ops/project-snow-release"]' "$release_manifest")" || return 1
+  printf '%s\n' "$expected_runner_sha" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  runner_upgrade_target_sha256="$expected_runner_sha"
   expected_runner_blob="$(git -C "$release_repository" rev-parse "$sha:App/ops/project-snow-release")" || return 1
-  runner_upgrade_new="$(mktemp /usr/local/sbin/.project-snow-release.new.XXXXXX)"
-  git -C "$release_repository" cat-file blob "$sha:App/ops/project-snow-release" > "$runner_upgrade_new"
-  chown root:root "$runner_upgrade_new"
-  chmod 0755 "$runner_upgrade_new"
+  runner_upgrade_new="$(mktemp /usr/local/sbin/.project-snow-release.new.XXXXXX)" || return 1
+  git -C "$release_repository" cat-file blob "$sha:App/ops/project-snow-release" > "$runner_upgrade_new" || return 1
+  chown root:root "$runner_upgrade_new" || return 1
+  chmod 0755 "$runner_upgrade_new" || return 1
   /bin/sh -n "$runner_upgrade_new" || {
     echo 'The exact target release runner failed shell syntax validation.' >&2
     return 1
   }
-  [ "$(sha256sum "$runner_upgrade_new" | awk '{print $1}')" = "$expected_runner_sha" ] &&
-    [ "$(git -C "$release_repository" hash-object "$runner_upgrade_new")" = "$expected_runner_blob" ] || {
+  prepared_runner_sha="$(sha256sum "$runner_upgrade_new" | awk '{print $1}')" || return 1
+  prepared_runner_blob="$(git -C "$release_repository" hash-object "$runner_upgrade_new")" || return 1
+  [ "$prepared_runner_sha" = "$expected_runner_sha" ] &&
+    [ "$prepared_runner_blob" = "$expected_runner_blob" ] || {
       echo 'Prepared release runner does not match the exact target Git blob and manifest.' >&2
       return 1
     }
-  fsync_release_path "$runner_upgrade_new"
+  prepared_runner_metadata="$(stat -c %u:%g:%a:%h "$runner_upgrade_new")" || return 1
+  [ "$prepared_runner_metadata" = 0:0:755:1 ] || return 1
+  fsync_release_path "$runner_upgrade_new" || return 1
   if verify_installed_release_runner "$expected_runner_sha"; then
-    rm -f -- "$runner_upgrade_new"
+    rm -f -- "$runner_upgrade_new" || return 1
     runner_upgrade_new=""
-    verify_new_release_runner_status "$expected_runner_sha"
-    return
+    verify_new_release_runner_status "$expected_runner_sha" || return 1
+    return 0
   fi
-  runner_upgrade_previous_sha256="$(sha256sum "$release_runner_path" | awk '{print $1}')"
-  runner_upgrade_backup="$(mktemp /usr/local/sbin/.project-snow-release.rollback.XXXXXX)"
-  install -o root -g root -m 0755 "$release_runner_path" "$runner_upgrade_backup"
-  [ "$(sha256sum "$runner_upgrade_backup" | awk '{print $1}')" = "$runner_upgrade_previous_sha256" ] || {
-    echo 'Could not create an exact rollback copy of the installed release runner.' >&2
-    return 1
-  }
-  fsync_release_path "$runner_upgrade_backup"
+  runner_upgrade_previous_sha256="$(sha256sum "$release_runner_path" | awk '{print $1}')" || return 1
+  printf '%s\n' "$runner_upgrade_previous_sha256" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  runner_upgrade_backup="$(mktemp /usr/local/sbin/.project-snow-release.rollback.XXXXXX)" || return 1
+  install -o root -g root -m 0755 "$release_runner_path" "$runner_upgrade_backup" || return 1
+  backup_runner_sha="$(sha256sum "$runner_upgrade_backup" | awk '{print $1}')" || return 1
+  [ "$backup_runner_sha" = "$runner_upgrade_previous_sha256" ] || {
+      echo 'Could not create an exact rollback copy of the installed release runner.' >&2
+      return 1
+    }
+  backup_runner_metadata="$(stat -c %u:%g:%a:%h "$runner_upgrade_backup")" || return 1
+  [ "$backup_runner_metadata" = 0:0:755:1 ] || return 1
+  fsync_release_path "$runner_upgrade_backup" || return 1
   runner_upgrade_installed=1
-  mv -f -- "$runner_upgrade_new" "$release_runner_path"
+  mv -f -- "$runner_upgrade_new" "$release_runner_path" || return 1
   runner_upgrade_new=""
-  fsync_release_path /usr/local/sbin
+  fsync_release_path /usr/local/sbin || return 1
   verify_installed_release_runner "$expected_runner_sha" || {
     echo 'Atomic release runner installation failed its ownership or digest check.' >&2
     return 1
   }
-  verify_new_release_runner_status "$expected_runner_sha"
+  verify_new_release_runner_status "$expected_runner_sha" || return 1
+  return 0
 }
 
 restore_release_runner_if_pending() {
@@ -284,14 +311,122 @@ restore_release_runner_if_pending() {
   runner_upgrade_installed=0
 }
 
+release_receipt_matches_attempt() {
+  [ -n "$release_attempt_nonce" ] || return 0
+  [ "$runner_upgrade_receipt_synced" -eq 1 ] &&
+    [ -n "$runner_upgrade_receipt_identity" ] &&
+    [ -f "$colour_receipt" ] && [ ! -L "$colour_receipt" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$colour_receipt" 2>/dev/null || true)" = 0:0:600:1 ] &&
+    [ "$(stat -c %d:%i "$colour_receipt" 2>/dev/null || true)" = "$runner_upgrade_receipt_identity" ] &&
+    [ "$(wc -l < "$colour_receipt")" -eq 1 ] || return 1
+  receipt_extra=""
+  read -r receipt_schema receipt_nonce receipt_colour receipt_sha \
+    receipt_public receipt_embedding receipt_extra < "$colour_receipt" || return 1
+  [ "$receipt_schema" = project-snow-stage-receipt-1 ] &&
+    [ "$receipt_nonce" = "$release_attempt_nonce" ] &&
+    [ "$receipt_colour" = "$colour" ] && [ "$receipt_sha" = "$sha" ] &&
+    [ "$receipt_public" = "$PUBLIC_API_IMAGE" ] &&
+    [ "$receipt_embedding" = "$EMBEDDING_IMAGE" ] && [ -z "$receipt_extra" ]
+}
+
 release_runner_commit_is_durable() {
-  [ "$runner_upgrade_installed" -eq 1 ] &&
+  [ -n "$runner_upgrade_target_sha256" ] &&
+    [ -n "$runner_upgrade_marker_identity" ] &&
+    [ "$runner_upgrade_marker_synced" -eq 1 ] &&
+    verify_installed_release_runner "$runner_upgrade_target_sha256" &&
     [ -f "$colour_marker" ] && [ ! -L "$colour_marker" ] &&
-    [ "$(stat -c %u:%g:%a:%h "$colour_marker" 2>/dev/null || true)" = 0:0:600:1 ] || return 1
-  read -r durable_colour durable_sha durable_public durable_embedding < "$colour_marker" || return 1
+    [ "$(stat -c %u:%g:%a:%h "$colour_marker" 2>/dev/null || true)" = 0:0:600:1 ] &&
+    [ "$(stat -c %d:%i "$colour_marker" 2>/dev/null || true)" = "$runner_upgrade_marker_identity" ] &&
+    [ "$(wc -l < "$colour_marker")" -eq 1 ] || return 1
+  durable_extra=""
+  read -r durable_colour durable_sha durable_public durable_embedding durable_extra < "$colour_marker" || return 1
   [ "$durable_colour" = "$colour" ] && [ "$durable_sha" = "$sha" ] &&
     [ "$durable_public" = "$PUBLIC_API_IMAGE" ] &&
-    [ "$durable_embedding" = "$EMBEDDING_IMAGE" ]
+    [ "$durable_embedding" = "$EMBEDDING_IMAGE" ] && [ -z "$durable_extra" ] &&
+    release_receipt_matches_attempt
+}
+
+restore_stage_signal_traps() {
+  trap 'exit 129' HUP || return 1
+  trap 'exit 130' INT || return 1
+  trap 'exit 131' QUIT || return 1
+  trap 'exit 143' TERM || return 1
+  trap 'exit 141' PIPE || return 1
+}
+
+rollback_visible_stage_publication() {
+  stage_rollback_ok=1
+  if [ "$receipt_published" -eq 1 ]; then
+    if [ -n "$previous_colour_receipt_backup" ]; then
+      mv -f -- "$previous_colour_receipt_backup" "$colour_receipt" || stage_rollback_ok=0
+      [ "$stage_rollback_ok" -ne 1 ] || previous_colour_receipt_backup=""
+    else
+      rm -f -- "$colour_receipt" || stage_rollback_ok=0
+    fi
+  fi
+  if [ -n "$previous_colour_marker_backup" ]; then
+    mv -f -- "$previous_colour_marker_backup" "$colour_marker" || stage_rollback_ok=0
+    [ "$stage_rollback_ok" -ne 1 ] || previous_colour_marker_backup=""
+  else
+    rm -f -- "$colour_marker" || stage_rollback_ok=0
+  fi
+  if [ "$stage_rollback_ok" -eq 1 ]; then
+    fsync_release_path "$colour_release_root" || stage_rollback_ok=0
+  fi
+  if [ "$stage_rollback_ok" -ne 1 ]; then
+    stage_publication_recovery_failed=1
+    return 1
+  fi
+  return 0
+}
+
+commit_colour_marker() {
+  # No catchable signal may land between the marker-directory fsync and the two
+  # in-memory commit flags.  If the fsync fails, put back the prior visible
+  # marker (or remove a first-stage marker), fsync that rollback, and fail
+  # without ever declaring the runner transaction committed.
+  trap '' HUP INT QUIT TERM PIPE || return 1
+  if ! mv -f -- "$candidate_marker" "$colour_marker"; then
+    restore_stage_signal_traps || return 1
+    return 1
+  fi
+  if ! fsync_release_path "$colour_release_root"; then
+    receipt_published=0
+    rollback_visible_stage_publication || true
+    restore_stage_signal_traps || return 1
+    if [ "$stage_publication_recovery_failed" -eq 1 ]; then
+      echo "CRITICAL: failed to durably roll back an unsynced colour marker; root-only recovery files were preserved under $colour_release_root." >&2
+    else
+      echo 'Colour marker directory fsync failed; the prior marker was restored.' >&2
+    fi
+    return 1
+  fi
+  if [ -n "$release_attempt_nonce" ]; then
+    receipt_published=0
+    if ! mv -f -- "$candidate_receipt" "$colour_receipt"; then
+      rollback_visible_stage_publication || true
+      restore_stage_signal_traps || return 1
+      return 1
+    fi
+    receipt_published=1
+    if ! fsync_release_path "$colour_release_root"; then
+      rollback_visible_stage_publication || true
+      restore_stage_signal_traps || return 1
+      if [ "$stage_publication_recovery_failed" -eq 1 ]; then
+        echo "CRITICAL: failed to durably roll back an unsynced stage receipt; root-only recovery files were preserved under $colour_release_root." >&2
+      else
+        echo 'Stage receipt directory fsync failed; the prior marker and receipt were restored.' >&2
+      fi
+      return 1
+    fi
+    runner_upgrade_receipt_synced=1
+    candidate_receipt=""
+  fi
+  runner_upgrade_marker_synced=1
+  runner_upgrade_committed=1
+  candidate_marker=""
+  restore_stage_signal_traps || return 1
+  return 0
 }
 
 configuration_paths_for_root() {
@@ -309,7 +444,17 @@ configuration_paths_for_root() {
   done
   case "$direct_origin_path_count" in
     0) ;;
-    4) printf '%s\n' "$direct_origin_configuration_paths" ;;
+    4)
+      for legacy_direct_origin_path in $legacy_direct_origin_configuration_paths; do
+        [ -f "$paths_root/$legacy_direct_origin_path" ] &&
+          [ ! -L "$paths_root/$legacy_direct_origin_path" ] || {
+            echo "Legacy direct-origin configuration snapshot is incomplete under $paths_root." >&2
+            return 1
+          }
+      done
+      printf '%s\n' "$legacy_direct_origin_configuration_paths"
+      ;;
+    7) printf '%s\n' "$direct_origin_configuration_paths" ;;
     *) echo "Direct-origin configuration snapshot is incomplete under $paths_root." >&2; return 1 ;;
   esac
 }
@@ -403,6 +548,101 @@ verify_snapshot_against_manifest() {
   done
 }
 
+seal_configuration_snapshot() {
+  seal_root="$1"
+  case "$seal_root" in
+    "$configuration_release_root"/[0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
+    *) echo 'Configuration snapshot root is outside the immutable release namespace.' >&2; return 1 ;;
+  esac
+  seal_sha="${seal_root##*/}"
+  printf '%s\n' "$seal_sha" | grep -Eq '^[0-9a-f]{40}$' || return 1
+  [ -d "$seal_root" ] && [ ! -L "$seal_root" ] || return 1
+  seal_paths="$(configuration_paths_for_root "$seal_root")" || return 1
+  seal_expected_files="$(printf '%s\n' "$seal_paths" | LC_ALL=C sort)" || return 1
+  seal_found_files="$(CDPATH= cd -- "$seal_root" &&
+    find . -mindepth 1 -type f -printf '%P\n')" || return 1
+  seal_found_files="$(printf '%s\n' "$seal_found_files" | LC_ALL=C sort)" || return 1
+  [ "$seal_found_files" = "$seal_expected_files" ] || {
+    echo 'Configuration snapshot contains an unexpected file set.' >&2
+    return 1
+  }
+  seal_unexpected_type="$(find "$seal_root" -mindepth 1 ! -type f ! -type d -print -quit)" || return 1
+  [ -z "$seal_unexpected_type" ] || {
+    echo 'Configuration snapshot contains a link or unsupported filesystem object.' >&2
+    return 1
+  }
+  seal_expected_dirs='.'
+  for seal_path in $seal_paths; do
+    seal_parent="$(dirname "$seal_path")" || return 1
+    while [ "$seal_parent" != . ]; do
+      seal_expected_dirs="$seal_expected_dirs
+$seal_parent"
+      seal_parent="$(dirname "$seal_parent")" || return 1
+    done
+  done
+  seal_expected_dirs="$(printf '%s\n' "$seal_expected_dirs" | awk 'NF' | LC_ALL=C sort -u)" || return 1
+  seal_found_dirs="$(CDPATH= cd -- "$seal_root" &&
+    { printf '%s\n' .; find . -mindepth 1 -type d -printf '%P\n'; })" || return 1
+  seal_found_dirs="$(printf '%s\n' "$seal_found_dirs" | awk 'NF' | LC_ALL=C sort -u)" || return 1
+  [ "$seal_found_dirs" = "$seal_expected_dirs" ] || {
+    echo 'Configuration snapshot contains an unexpected directory set.' >&2
+    return 1
+  }
+
+  seal_file_state=''
+  for seal_path in $seal_paths; do
+    seal_file="$seal_root/$seal_path"
+    seal_metadata="$(stat -c %d:%i:%u:%g:%a:%h "$seal_file" 2>/dev/null)" || return 1
+    case "$seal_metadata" in *:0:0:444:1) ;; *) return 1 ;; esac
+    seal_digest="$(sha256sum "$seal_file" | awk '{print $1}')" || return 1
+    printf '%s\n' "$seal_digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
+    seal_file_state="$seal_file_state$seal_path|$seal_metadata|$seal_digest;"
+  done
+  seal_dir_state=''
+  for seal_dir in $seal_expected_dirs; do
+    if [ "$seal_dir" = . ]; then
+      seal_directory="$seal_root"
+    else
+      seal_directory="$seal_root/$seal_dir"
+    fi
+    seal_metadata="$(stat -c %d:%i:%u:%g:%a "$seal_directory" 2>/dev/null)" || return 1
+    case "$seal_metadata" in *:0:0:555) ;; *) return 1 ;; esac
+    seal_dir_state="$seal_dir_state$seal_dir|$seal_metadata;"
+  done
+
+  for seal_path in $seal_paths; do
+    fsync_release_path "$seal_root/$seal_path" || return 1
+  done
+  seal_depth_dirs="$(find "$seal_root" -depth -type d -print)" || return 1
+  for seal_directory in $seal_depth_dirs; do
+    fsync_release_path "$seal_directory" || return 1
+  done
+  fsync_release_path "$configuration_release_root" || return 1
+
+  seal_after_file_state=''
+  for seal_path in $seal_paths; do
+    seal_file="$seal_root/$seal_path"
+    seal_metadata="$(stat -c %d:%i:%u:%g:%a:%h "$seal_file" 2>/dev/null)" || return 1
+    seal_digest="$(sha256sum "$seal_file" | awk '{print $1}')" || return 1
+    seal_after_file_state="$seal_after_file_state$seal_path|$seal_metadata|$seal_digest;"
+  done
+  seal_after_dir_state=''
+  for seal_dir in $seal_expected_dirs; do
+    if [ "$seal_dir" = . ]; then
+      seal_directory="$seal_root"
+    else
+      seal_directory="$seal_root/$seal_dir"
+    fi
+    seal_metadata="$(stat -c %d:%i:%u:%g:%a "$seal_directory" 2>/dev/null)" || return 1
+    seal_after_dir_state="$seal_after_dir_state$seal_dir|$seal_metadata;"
+  done
+  [ "$seal_after_file_state" = "$seal_file_state" ] &&
+    [ "$seal_after_dir_state" = "$seal_dir_state" ] || {
+      echo 'Configuration snapshot changed while its durable identity was sealed.' >&2
+      return 1
+    }
+}
+
 install_direct_origin_firewall() {
   firewall_config_root="$1"
   [ -f "$firewall_config_root/infra/OriginEdge.Caddyfile" ] || return 0
@@ -458,6 +698,42 @@ install_direct_origin_firewall() {
   systemctl is-enabled --quiet project-snow-origin-firewall.service
   systemctl is-enabled --quiet project-snow-origin-firewall.timer
   systemctl is-active --quiet project-snow-origin-firewall.timer
+}
+
+install_direct_origin_tls() {
+  tls_config_root="$1"
+  tls_schema="$(jq -r '.direct_origin_tls.schema_version // empty' "$release_manifest")" || return 1
+  tls_hostname="$(jq -r '.direct_origin_tls.hostname // empty' "$release_manifest")" || return 1
+  tls_bundle_sha="$(jq -r '.direct_origin_tls.bundle_sha256 // empty' "$release_manifest")" || return 1
+  tls_origin_cert_sha="$(jq -r '.direct_origin_tls.origin_certificate_sha256 // empty' "$release_manifest")" || return 1
+  tls_aop_ca_sha="$(jq -r '.direct_origin_tls.aop_ca_sha256 // empty' "$release_manifest")" || return 1
+  [ "$tls_schema" = project-snow-origin-tls-1 ] &&
+    [ "$tls_hostname" = snow.xiaob.dev ] || {
+      echo 'Release manifest has an invalid direct-origin TLS identity.' >&2
+      return 1
+    }
+  for tls_sha in "$tls_bundle_sha" "$tls_origin_cert_sha" "$tls_aop_ca_sha"; do
+    printf '%s\n' "$tls_sha" | grep -Eq '^[0-9a-f]{64}$' || {
+      echo 'Release manifest has an invalid direct-origin TLS hash.' >&2
+      return 1
+    }
+  done
+  tls_installer="$tls_config_root/scripts/install_origin_tls.py"
+  [ -f "$tls_installer" ] && [ ! -L "$tls_installer" ] || {
+    echo 'The Git-bound origin TLS installer is missing.' >&2
+    return 1
+  }
+  installed_tls_root="$(python3 "$tls_installer" \
+    --release-sha "$sha" \
+    --bundle-sha256 "$tls_bundle_sha" \
+    --origin-cert-sha256 "$tls_origin_cert_sha" \
+    --aop-ca-sha256 "$tls_aop_ca_sha")" || return 1
+  expected_tls_root="/etc/project-snow/origin-edge/releases/$tls_bundle_sha"
+  [ "$installed_tls_root" = "$expected_tls_root" ] || {
+    echo 'Origin TLS installer returned an unexpected destination.' >&2
+    return 1
+  }
+  printf '%s\n' "$installed_tls_root"
 }
 
 validate_mailer_env() {
@@ -684,6 +960,11 @@ if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
   echo 'Release commit SHA must be 40 lowercase hexadecimal characters.' >&2
   exit 65
 fi
+if [ -n "$release_attempt_nonce" ] &&
+   ! printf '%s\n' "$release_attempt_nonce" | grep -Eq '^[0-9a-f]{64}$'; then
+  echo 'Release stage attempt nonce is malformed.' >&2
+  exit 65
+fi
 if [ -z "$release_manifest" ] || [ ! -r "$release_manifest" ]; then
   echo 'A readable verified release manifest is required.' >&2
   exit 71
@@ -718,6 +999,22 @@ fi
   echo 'Release manifest embedding image does not match EMBEDDING_IMAGE.' >&2
   exit 71
 }
+direct_origin_tls_count="$(jq -r '.direct_origin_tls | if type == "object" then length else 0 end' "$release_manifest")"
+[ "$direct_origin_tls_count" -eq 5 ] &&
+  [ "$(jq -r '.direct_origin_tls.schema_version // empty' "$release_manifest")" = project-snow-origin-tls-1 ] &&
+  [ "$(jq -r '.direct_origin_tls.hostname // empty' "$release_manifest")" = snow.xiaob.dev ] || {
+    echo 'Release manifest has an incomplete direct-origin TLS binding.' >&2
+    exit 71
+  }
+for direct_origin_tls_hash in \
+  "$(jq -r '.direct_origin_tls.bundle_sha256 // empty' "$release_manifest")" \
+  "$(jq -r '.direct_origin_tls.origin_certificate_sha256 // empty' "$release_manifest")" \
+  "$(jq -r '.direct_origin_tls.aop_ca_sha256 // empty' "$release_manifest")"; do
+  printf '%s\n' "$direct_origin_tls_hash" | grep -Eq '^[0-9a-f]{64}$' || {
+    echo 'Release manifest has an invalid direct-origin TLS binding.' >&2
+    exit 71
+  }
+done
 for configuration_path in $configuration_paths; do
   expected_configuration_sha="$(jq -r --arg path "$configuration_path" '.configuration_sha256[$path] // empty' "$release_manifest")"
   printf '%s\n' "$expected_configuration_sha" | grep -Eq '^[0-9a-f]{64}$' || {
@@ -844,7 +1141,16 @@ if [ -n "$active_colour" ]; then
         fi
       done
       case "$bootstrap_direct_count" in
-        0|4) ;;
+        0|7) ;;
+        4)
+          for bootstrap_legacy_path in $legacy_direct_origin_configuration_paths; do
+            git -C "$repository_root" cat-file -e \
+              "$bootstrap_marker_sha:App/$bootstrap_legacy_path" 2>/dev/null || {
+                echo 'Recorded rollback commit has a mixed legacy direct-origin configuration bundle.' >&2
+                exit 69
+              }
+          done
+          ;;
         *) echo 'Recorded rollback commit has an incomplete direct-origin configuration bundle.' >&2; exit 69 ;;
       esac
       git -C "$repository_root" archive "$bootstrap_marker_sha" -- $bootstrap_archive_paths |
@@ -874,6 +1180,10 @@ if [ -n "$active_colour" ]; then
         mv -- "$bootstrap_tmp" "$bootstrap_config_root"
         bootstrap_tmp=""
       fi
+      seal_configuration_snapshot "$bootstrap_config_root" || {
+        echo 'Rollback configuration snapshot could not be durably sealed.' >&2
+        exit 69
+      }
       create_config_binding "$active_colour" "$bootstrap_marker_sha" \
         "$bootstrap_config_root" "$bootstrap_binding_tmp"
       mv -f -- "$bootstrap_binding_tmp" "$bootstrap_config_binding"
@@ -883,40 +1193,63 @@ if [ -n "$active_colour" ]; then
   validate_config_binding "$bootstrap_config_binding" "$active_colour" "$bootstrap_marker_sha" || exit 69
 fi
 
-candidate_env="$(mktemp "$colour_env.candidate.XXXXXX")"
-candidate_manifest="$(mktemp "$colour_manifest.candidate.XXXXXX")"
-candidate_marker="$(mktemp "$colour_marker.candidate.XXXXXX")"
-candidate_config_binding_tmp="$(mktemp "$colour_config_binding.candidate.XXXXXX")"
+candidate_env="$(mktemp "$colour_env.candidate.XXXXXX")" || exit 78
+candidate_manifest="$(mktemp "$colour_manifest.candidate.XXXXXX")" || exit 78
+candidate_marker="$(mktemp "$colour_marker.candidate.XXXXXX")" || exit 78
+runner_upgrade_marker_identity="$(stat -c %d:%i "$candidate_marker")" || exit 78
+printf '%s\n' "$runner_upgrade_marker_identity" | grep -Eq '^[0-9]+:[0-9]+$' || exit 78
+candidate_receipt=""
+if [ -n "$release_attempt_nonce" ]; then
+  candidate_receipt="$(mktemp "$colour_receipt.candidate.XXXXXX")" || exit 78
+  runner_upgrade_receipt_identity="$(stat -c %d:%i "$candidate_receipt")" || exit 78
+  printf '%s\n' "$runner_upgrade_receipt_identity" | grep -Eq '^[0-9]+:[0-9]+$' || exit 78
+fi
+candidate_config_binding_tmp="$(mktemp "$colour_config_binding.candidate.XXXXXX")" || exit 78
 candidate_config_root="$configuration_release_root/$sha"
 candidate_config_tmp=""
 candidate_public_env=""
+previous_colour_marker_backup=""
+previous_colour_receipt_backup=""
+receipt_published=0
 public_env_path="$public_env_root/public-$sha.env"
 cleanup() {
   cleanup_status=$?
-  trap - EXIT HUP INT TERM
+  trap - EXIT HUP INT QUIT TERM PIPE
   if release_runner_commit_is_durable; then
     runner_upgrade_committed=1
+    # The marker rename is the application-stage commit point.  The old c479
+    # parent runner cannot inspect it, so a signal or closed output pipe after
+    # this exact attempt committed must be acknowledged as success; otherwise
+    # the parent would restore the old controller while leaving the new runner.
+    cleanup_status=0
   fi
   if ! restore_release_runner_if_pending; then
     echo 'CRITICAL: release runner rollback failed; root recovery is required before another release action.' >&2
     exit 78
   fi
-  [ -z "${runner_upgrade_new:-}" ] || rm -f -- "$runner_upgrade_new"
+  [ -z "${runner_upgrade_new:-}" ] || rm -f -- "$runner_upgrade_new" || true
   if [ "$runner_upgrade_committed" -eq 1 ]; then
-    [ -z "${runner_upgrade_backup:-}" ] || rm -f -- "$runner_upgrade_backup"
+    [ -z "${runner_upgrade_backup:-}" ] || rm -f -- "$runner_upgrade_backup" || true
   fi
-  [ -z "${candidate_env:-}" ] || rm -f "$candidate_env"
-  [ -z "${candidate_manifest:-}" ] || rm -f "$candidate_manifest"
-  [ -z "${candidate_marker:-}" ] || rm -f "$candidate_marker"
-  [ -z "${candidate_config_binding_tmp:-}" ] || rm -f "$candidate_config_binding_tmp"
-  [ -z "${candidate_config_tmp:-}" ] || rm -rf -- "$candidate_config_tmp"
-  [ -z "${candidate_public_env:-}" ] || rm -f "$candidate_public_env"
+  [ -z "${candidate_env:-}" ] || rm -f "$candidate_env" || true
+  [ -z "${candidate_manifest:-}" ] || rm -f "$candidate_manifest" || true
+  [ -z "${candidate_marker:-}" ] || rm -f "$candidate_marker" || true
+  [ -z "${candidate_receipt:-}" ] || rm -f "$candidate_receipt" || true
+  [ -z "${candidate_config_binding_tmp:-}" ] || rm -f "$candidate_config_binding_tmp" || true
+  [ -z "${candidate_config_tmp:-}" ] || rm -rf -- "$candidate_config_tmp" || true
+  [ -z "${candidate_public_env:-}" ] || rm -f "$candidate_public_env" || true
+  if [ "$stage_publication_recovery_failed" -ne 1 ]; then
+    [ -z "${previous_colour_marker_backup:-}" ] || rm -f "$previous_colour_marker_backup" || true
+    [ -z "${previous_colour_receipt_backup:-}" ] || rm -f "$previous_colour_receipt_backup" || true
+  fi
   exit "$cleanup_status"
 }
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
+trap 'exit 131' QUIT
 trap 'exit 143' TERM
+trap 'exit 141' PIPE
 
 cat "$static_env" > "$candidate_env"
 printf '\nPUBLIC_API_IMAGE=%s\nEMBEDDING_IMAGE=%s\n' "$PUBLIC_API_IMAGE" "$EMBEDDING_IMAGE" >> "$candidate_env"
@@ -1007,8 +1340,20 @@ else
   mv -- "$candidate_config_tmp" "$candidate_config_root"
   candidate_config_tmp=""
 fi
+seal_configuration_snapshot "$candidate_config_root" || {
+  echo "Configuration snapshot for $sha could not be durably sealed." >&2
+  exit 71
+}
 create_config_binding "$colour" "$sha" "$candidate_config_root" "$candidate_config_binding_tmp"
 validate_config_binding "$candidate_config_binding_tmp" "$colour" "$sha" || exit 71
+
+candidate_origin_tls_root="$(install_direct_origin_tls "$candidate_config_root")" || {
+  echo 'Direct-origin TLS material could not be installed from the exact release inputs.' >&2
+  exit 72
+}
+sed -i '/^ORIGIN_TLS_ROOT=/d' "$candidate_env"
+printf 'ORIGIN_TLS_ROOT=%s\n' "$candidate_origin_tls_root" >> "$candidate_env"
+chmod 0600 "$candidate_env"
 
 if [ -n "$candidate_media_root" ]; then
   candidate_public_env="$(mktemp "$public_env_root/public-$sha.candidate.XXXXXX")"
@@ -1254,36 +1599,82 @@ install_direct_origin_firewall "$candidate_config_root" || {
   exit 73
 }
 
+# Finish and fsync every candidate before replacing the runner.  The remaining
+# publication steps are same-filesystem renames followed by parent-directory
+# fsyncs, with the colour marker deliberately last as the commit record.
+if [ -n "$candidate_public_env" ]; then
+  sed -i "s|^PUBLIC_ENV_FILE=.*|PUBLIC_ENV_FILE=$public_env_path|" "$candidate_env" || exit 78
+  fsync_release_path "$candidate_public_env" || exit 78
+fi
+printf '%s\n' "$colour $sha $PUBLIC_API_IMAGE $EMBEDDING_IMAGE" > "$candidate_marker" || exit 78
+chmod 0600 "$candidate_marker" || exit 78
+fsync_release_path "$candidate_marker" || exit 78
+if [ -n "$release_attempt_nonce" ]; then
+  printf '%s\n' "project-snow-stage-receipt-1 $release_attempt_nonce $colour $sha $PUBLIC_API_IMAGE $EMBEDDING_IMAGE" > "$candidate_receipt" || exit 78
+  chmod 0600 "$candidate_receipt" || exit 78
+  fsync_release_path "$candidate_receipt" || exit 78
+fi
+if [ -n "$release_manifest" ]; then
+  cp -- "$release_manifest" "$candidate_manifest" || exit 78
+  chmod 0600 "$candidate_manifest" || exit 78
+  fsync_release_path "$candidate_manifest" || exit 78
+fi
+fsync_release_path "$candidate_env" || exit 78
+fsync_release_path "$candidate_config_binding_tmp" || exit 78
+
+# Keep a same-directory copy only to undo a visible marker rename if the
+# subsequent directory fsync fails.  It is never used as a successful binding.
+if [ -e "$colour_marker" ] || [ -L "$colour_marker" ]; then
+  [ -f "$colour_marker" ] && [ ! -L "$colour_marker" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$colour_marker" 2>/dev/null || true)" = 0:0:600:1 ] || {
+      echo 'Existing colour marker is unsafe and cannot be transactionally replaced.' >&2
+      exit 78
+    }
+  previous_colour_marker_backup="$(mktemp "$colour_marker.rollback.XXXXXX")" || exit 78
+  cp -- "$colour_marker" "$previous_colour_marker_backup" || exit 78
+  chmod 0600 "$previous_colour_marker_backup" || exit 78
+  [ "$(stat -c %u:%g:%a:%h "$previous_colour_marker_backup" 2>/dev/null || true)" = 0:0:600:1 ] || exit 78
+  fsync_release_path "$previous_colour_marker_backup" || exit 78
+fi
+if [ -n "$release_attempt_nonce" ] &&
+   { [ -e "$colour_receipt" ] || [ -L "$colour_receipt" ]; }; then
+  [ -f "$colour_receipt" ] && [ ! -L "$colour_receipt" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$colour_receipt" 2>/dev/null || true)" = 0:0:600:1 ] || {
+      echo 'Existing stage receipt is unsafe and cannot be transactionally replaced.' >&2
+      exit 78
+    }
+  previous_colour_receipt_backup="$(mktemp "$colour_receipt.rollback.XXXXXX")" || exit 78
+  cp -- "$colour_receipt" "$previous_colour_receipt_backup" || exit 78
+  chmod 0600 "$previous_colour_receipt_backup" || exit 78
+  [ "$(stat -c %u:%g:%a:%h "$previous_colour_receipt_backup" 2>/dev/null || true)" = 0:0:600:1 ] || exit 78
+  fsync_release_path "$previous_colour_receipt_backup" || exit 78
+fi
+
 # Upgrade only after the candidate and first firewall update have passed, but
 # before the durable colour binding is committed.  A normal failure after the
-# atomic rename restores the exact predecessor from the same filesystem.
+# atomic runner rename restores the exact predecessor from the same filesystem.
 install_verified_release_runner || {
   echo 'Exact release runner self-upgrade failed.' >&2
   exit 78
 }
 
 if [ -n "$candidate_public_env" ]; then
-  sed -i "s|^PUBLIC_ENV_FILE=.*|PUBLIC_ENV_FILE=$public_env_path|" "$candidate_env"
-  mv -f "$candidate_public_env" "$public_env_path"
+  mv -f -- "$candidate_public_env" "$public_env_path" || exit 78
   candidate_public_env=""
+  fsync_release_path "$public_env_root" || exit 78
 fi
-printf '%s\n' "$colour $sha $PUBLIC_API_IMAGE $EMBEDDING_IMAGE" > "$candidate_marker"
-chmod 0600 "$candidate_marker"
-if [ -n "$release_manifest" ]; then
-  cp "$release_manifest" "$candidate_manifest"
-  chmod 0600 "$candidate_manifest"
-fi
-mv -f "$candidate_env" "$colour_env"
+mv -f -- "$candidate_env" "$colour_env" || exit 78
 candidate_env=""
+fsync_release_path "$colour_env_root" || exit 78
 if [ -n "$release_manifest" ]; then
-  mv -f "$candidate_manifest" "$colour_manifest"
+  mv -f -- "$candidate_manifest" "$colour_manifest" || exit 78
   candidate_manifest=""
 fi
-mv -f "$candidate_config_binding_tmp" "$colour_config_binding"
+mv -f -- "$candidate_config_binding_tmp" "$colour_config_binding" || exit 78
 candidate_config_binding_tmp=""
-mv -f "$candidate_marker" "$colour_marker"
-candidate_marker=""
-runner_upgrade_committed=1
+fsync_release_path "$colour_release_root" || exit 78
+
+commit_colour_marker || exit 78
 
 printf '%s\n' "Staged $colour $sha without changing active traffic."
 printf '%s\n' "Private acceptance target: $candidate_internal_ip:8000 (SSH tunnel only)"

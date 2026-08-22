@@ -26,6 +26,9 @@ RUNTIME_CONFIGURATION_PATHS = (
     "compose.prod.yml",
     "infra/Caddyfile",
     "infra/OriginEdge.Caddyfile",
+    "config/origin-edge/origin-cert.pem",
+    "config/origin-edge/aop-ca.pem",
+    "scripts/install_origin_tls.py",
     "scripts/cloudflare_origin_firewall.py",
     "ops/project-snow-origin-firewall.service",
     "ops/project-snow-origin-firewall.timer",
@@ -41,6 +44,11 @@ RELEASE_CONTROL_PATHS = (
     "ops/project-snow-release.sudoers",
 )
 
+ORIGIN_TLS_SCHEMA = "project-snow-origin-tls-1"
+ORIGIN_TLS_HOSTNAME = "snow.xiaob.dev"
+ORIGIN_CERTIFICATE_PATH = "config/origin-edge/origin-cert.pem"
+AOP_CA_PATH = "config/origin-edge/aop-ca.pem"
+
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -48,6 +56,36 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _public_certificate_sha256(path: Path, label: str) -> str:
+    payload = path.read_bytes()
+    if b"PRIVATE KEY" in payload:
+        raise ValueError(f"{label} must never contain private key material")
+    if (
+        payload.count(b"-----BEGIN CERTIFICATE-----") != 1
+        or payload.count(b"-----END CERTIFICATE-----") != 1
+    ):
+        raise ValueError(f"{label} must contain exactly one PEM certificate")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def read_origin_tls_binding(app_root: Path) -> dict[str, str]:
+    origin_certificate_sha256 = _public_certificate_sha256(
+        app_root / ORIGIN_CERTIFICATE_PATH, "origin certificate"
+    )
+    aop_ca_sha256 = _public_certificate_sha256(app_root / AOP_CA_PATH, "AOP CA")
+    identity_payload = (
+        f"{ORIGIN_TLS_SCHEMA}\n{ORIGIN_TLS_HOSTNAME}\n"
+        f"{origin_certificate_sha256}\n{aop_ca_sha256}\n"
+    ).encode("ascii")
+    return {
+        "schema_version": ORIGIN_TLS_SCHEMA,
+        "hostname": ORIGIN_TLS_HOSTNAME,
+        "bundle_sha256": hashlib.sha256(identity_payload).hexdigest(),
+        "origin_certificate_sha256": origin_certificate_sha256,
+        "aop_ca_sha256": aop_ca_sha256,
+    }
 
 
 def read_public_versions(app_root: Path) -> tuple[str, str, str, str]:
@@ -184,6 +222,7 @@ def create_manifest(
             relative_path: _sha256_file(app_root / relative_path)
             for relative_path in RELEASE_CONTROL_PATHS
         },
+        "direct_origin_tls": read_origin_tls_binding(app_root),
         "generated_at": datetime.now(UTC).isoformat(),
     }
 

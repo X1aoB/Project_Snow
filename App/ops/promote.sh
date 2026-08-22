@@ -9,6 +9,40 @@ expected_sha="${2:-}"
 case "$colour" in blue|green) ;; *) exit 64 ;; esac
 rollback_mode="${PROJECT_SNOW_ROLLBACK_MODE:-0}"
 case "$rollback_mode" in 0|1) ;; *) echo 'Invalid internal rollback mode.' >&2; exit 64 ;; esac
+
+# Keep this gate inside the target checkout as well as in the root release
+# runner.  The predecessor runner may survive a power loss after checking out
+# a newer controller but before atomically installing that controller's runner;
+# in that state it must not be able to dispatch this script to switch traffic.
+release_repository=/srv/project-snow/repo
+release_runner_path=/usr/local/sbin/project-snow-release
+
+require_runner_controller_binding() {
+  [ -d "$release_repository/.git" ] && [ ! -L "$release_repository" ] &&
+    [ ! -L "$release_repository/.git" ] || return 1
+  [ -f "$release_runner_path" ] && [ ! -L "$release_runner_path" ] || return 1
+  release_runner_metadata="$(stat -c %u:%g:%a:%h "$release_runner_path" 2>/dev/null)" || return 1
+  [ "$release_runner_metadata" = 0:0:755:1 ] || return 1
+
+  release_controller_sha="$(git -C "$release_repository" rev-parse --verify HEAD 2>/dev/null)" || return 1
+  printf '%s\n' "$release_controller_sha" | grep -Eq '^[0-9a-f]{40}$' || return 1
+  release_controller_entry="$(git -C "$release_repository" ls-tree \
+    "$release_controller_sha" -- App/ops/project-snow-release 2>/dev/null)" || return 1
+  set -- $release_controller_entry
+  [ "$#" -eq 4 ] && [ "$1" = 100755 ] && [ "$2" = blob ] &&
+    [ "$4" = App/ops/project-snow-release ] || return 1
+  release_controller_runner_blob="$3"
+  printf '%s\n' "$release_controller_runner_blob" | grep -Eq '^[0-9a-f]{40}$' || return 1
+  release_installed_runner_blob="$(git -C "$release_repository" hash-object --no-filters \
+    "$release_runner_path" 2>/dev/null)" || return 1
+  [ "$release_installed_runner_blob" = "$release_controller_runner_blob" ] || return 1
+}
+
+require_runner_controller_binding || {
+  echo 'Installed release runner is not bound to the checked-out controller; repeat exact stage before switching traffic.' >&2
+  exit 78
+}
+
 access_policy_file=/etc/project-snow/access-denied-status
 access_denied_status=''
 if [ -e "$access_policy_file" ]; then
@@ -29,6 +63,23 @@ is_immutable_image() {
   printf '%s\n' "$1" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$'
 }
 
+fsync_promote_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+path = sys.argv[1]
+flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+if os.path.isdir(path):
+    flags |= getattr(os, "O_DIRECTORY", 0)
+descriptor = os.open(path, flags)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+}
+
 runtime_root="/srv/project-snow/runtime"
 colour_env="$runtime_root/colours/$colour.compose.env"
 colour_release_root="/srv/project-snow/releases/colours"
@@ -40,6 +91,9 @@ current_env="${PROJECT_SNOW_COMPOSE_ENV:-$runtime_root/compose.env}"
 current_manifest="/srv/project-snow/releases/current-manifest.json"
 current_config_binding="/srv/project-snow/releases/current-config.json"
 active_file="/srv/project-snow/releases/active-colour"
+release_current="/srv/project-snow/releases/current"
+live_origin_edge_binding="/srv/project-snow/releases/live-origin-edge-config.json"
+live_origin_edge_env_root="$runtime_root/origin-edge"
 service="public-api-$colour"
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 smoke_script="$script_dir/../infra/public_smoke.py"
@@ -55,7 +109,14 @@ infra/neo4j-entrypoint.sh
 infra/postgres/postgresql.conf
 infra/public-api.Dockerfile
 requirements-public.txt"
+legacy_direct_origin_configuration_paths="infra/OriginEdge.Caddyfile
+scripts/cloudflare_origin_firewall.py
+ops/project-snow-origin-firewall.service
+ops/project-snow-origin-firewall.timer"
 direct_origin_configuration_paths="infra/OriginEdge.Caddyfile
+config/origin-edge/origin-cert.pem
+config/origin-edge/aop-ca.pem
+scripts/install_origin_tls.py
 scripts/cloudflare_origin_firewall.py
 ops/project-snow-origin-firewall.service
 ops/project-snow-origin-firewall.timer"
@@ -75,7 +136,17 @@ configuration_paths_for_root() {
   done
   case "$direct_origin_path_count" in
     0) ;;
-    4) printf '%s\n' "$direct_origin_configuration_paths" ;;
+    4)
+      for legacy_direct_origin_path in $legacy_direct_origin_configuration_paths; do
+        [ -f "$paths_root/$legacy_direct_origin_path" ] &&
+          [ ! -L "$paths_root/$legacy_direct_origin_path" ] || {
+            echo "Legacy direct-origin configuration snapshot is incomplete under $paths_root." >&2
+            return 1
+          }
+      done
+      printf '%s\n' "$legacy_direct_origin_configuration_paths"
+      ;;
+    7) printf '%s\n' "$direct_origin_configuration_paths" ;;
     *) echo "Direct-origin configuration snapshot is incomplete under $paths_root." >&2; return 1 ;;
   esac
 }
@@ -117,6 +188,100 @@ validate_config_binding() {
       return 1
     }
   done
+}
+
+validate_live_origin_edge_binding() {
+  live_binding_file="$1"
+  [ -f "$live_binding_file" ] && [ ! -L "$live_binding_file" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$live_binding_file" 2>/dev/null)" = 0:0:600:1 ] || {
+      echo 'Live origin-edge binding must be a root-owned mode-0600 single regular file.' >&2
+      return 1
+    }
+  jq -e '
+    type == "object" and
+    ((keys | sort) == ([
+      "colour", "commit_sha", "configuration_sha256",
+      "live_origin_edge_schema", "origin_edge_env_path",
+      "origin_edge_env_sha256", "root", "schema_version"
+    ] | sort)) and
+    .schema_version == "project-snow-config-snapshot-1" and
+    .live_origin_edge_schema == "project-snow-live-origin-edge-1" and
+    (.colour == "blue" or .colour == "green") and
+    (.commit_sha | type == "string" and test("^[0-9a-f]{40}$")) and
+    (.origin_edge_env_path | type == "string" and
+      test("^/srv/project-snow/runtime/origin-edge/[0-9a-f]{64}\\.compose\\.env$")) and
+    (.origin_edge_env_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
+  ' "$live_binding_file" >/dev/null || {
+    echo 'Live origin-edge binding has an invalid schema or identity.' >&2
+    return 1
+  }
+  live_binding_colour="$(jq -r '.colour' "$live_binding_file")" || return 1
+  live_binding_sha="$(jq -r '.commit_sha' "$live_binding_file")" || return 1
+  live_binding_config_root="$(jq -r '.root' "$live_binding_file")" || return 1
+  live_binding_env="$(jq -r '.origin_edge_env_path' "$live_binding_file")" || return 1
+  live_binding_env_sha="$(jq -r '.origin_edge_env_sha256' "$live_binding_file")" || return 1
+  validate_config_binding "$live_binding_file" "$live_binding_colour" \
+    "$live_binding_sha" || return 1
+  [ "$live_binding_config_root" = "$configuration_release_root/$live_binding_sha" ] || return 1
+  [ -d "$live_origin_edge_env_root" ] && [ ! -L "$live_origin_edge_env_root" ] &&
+    [ "$(stat -c %u:%g:%a "$live_origin_edge_env_root" 2>/dev/null)" = 0:0:700 ] || {
+      echo 'Live origin-edge environment root must be a root-owned mode-0700 directory.' >&2
+      return 1
+    }
+  [ -f "$live_binding_env" ] && [ ! -L "$live_binding_env" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$live_binding_env" 2>/dev/null)" = 0:0:600:1 ] || {
+      echo 'Live origin-edge environment must be a root-owned mode-0600 single regular file.' >&2
+      return 1
+    }
+  live_binding_env_basename="${live_binding_env##*/}"
+  [ "$live_binding_env_basename" = "$live_binding_env_sha.compose.env" ] &&
+    [ "$(sha256sum "$live_binding_env" | awk '{print $1}')" = "$live_binding_env_sha" ] || {
+      echo 'Live origin-edge environment hash does not match its immutable binding.' >&2
+      return 1
+    }
+}
+
+load_live_origin_edge_binding() {
+  live_origin_edge_binding_loaded=0
+  if [ ! -e "$live_origin_edge_binding" ] && [ ! -L "$live_origin_edge_binding" ]; then
+    return 0
+  fi
+  validate_live_origin_edge_binding "$live_origin_edge_binding" || return 1
+  origin_edge_retained_env="$live_binding_env"
+  origin_edge_retained_config_root="$live_binding_config_root"
+  origin_edge_retained_colour="$live_binding_colour"
+  live_origin_edge_binding_loaded=1
+}
+
+origin_context_config_binding() {
+  context_env="$1"
+  context_config_root="$2"
+  context_colour="$3"
+  if [ "$context_config_root" = "$colour_config_root" ] &&
+     [ "$context_colour" = "$colour" ]; then
+    printf '%s\n' "$colour_config_binding"
+    return 0
+  fi
+  if [ "$context_config_root" = "$previous_config_root" ] &&
+     [ "$context_colour" = "$previous_colour" ]; then
+    printf '%s\n' "$previous_config_binding"
+    return 0
+  fi
+  if [ -n "$origin_edge_replacement_restore_binding" ] &&
+     [ "$context_config_root" = "$origin_edge_replacement_restore_config_root" ] &&
+     [ "$context_colour" = "$origin_edge_replacement_restore_colour" ]; then
+    printf '%s\n' "$origin_edge_replacement_restore_binding"
+    return 0
+  fi
+  if [ "$live_origin_edge_binding_loaded" -eq 1 ] &&
+     [ "$context_env" = "$origin_edge_retained_env" ] &&
+     [ "$context_config_root" = "$origin_edge_retained_config_root" ] &&
+     [ "$context_colour" = "$origin_edge_retained_colour" ]; then
+    printf '%s\n' "$live_origin_edge_binding"
+    return 0
+  fi
+  echo 'No exact immutable configuration binding exists for the running origin-edge.' >&2
+  return 1
 }
 
 validate_mailer_env() {
@@ -179,7 +344,18 @@ validate_mailer_env() {
 
 verify_cloudflare_access_restored() (
   probe_headers="$(mktemp /tmp/project-snow-access-probe.XXXXXX)"
-  trap 'rm -f -- "$probe_headers"' EXIT HUP INT TERM
+  cleanup_access_probe() {
+    access_probe_status=$?
+    trap - EXIT HUP INT QUIT TERM PIPE
+    rm -f -- "$probe_headers" || true
+    exit "$access_probe_status"
+  }
+  trap cleanup_access_probe EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 131' QUIT
+  trap 'exit 143' TERM
+  trap 'exit 141' PIPE
   probe_status="$(/usr/bin/curl -q --silent --show-error \
     --connect-timeout 5 --max-time 15 --max-redirs 0 --noproxy '*' \
     --proto '=https' --tlsv1.2 \
@@ -420,6 +596,62 @@ if [ "$target_has_origin_edge" -eq 1 ] && [ "$target_has_cloudflared" -ne 1 ]; t
   exit 69
 fi
 
+origin_edge_replacement_active=0
+origin_edge_replacement_restore_env=""
+origin_edge_replacement_restore_config_root=""
+origin_edge_replacement_restore_colour=""
+origin_edge_replacement_restore_binding=""
+origin_edge_replacement_target_env=""
+origin_edge_replacement_target_config_root=""
+origin_edge_replacement_target_colour=""
+origin_edge_overlay_env=""
+origin_edge_overlay_config_root=""
+origin_edge_overlay_colour=""
+origin_edge_retained_env=""
+origin_edge_retained_config_root=""
+origin_edge_retained_colour=""
+origin_edge_prestart_failure_preserve=0
+origin_edge_tunnel_retain=0
+promote_signal_phase=pre-switch
+promote_signal_handling=0
+
+require_running_cloudflared_fallback() {
+  fallback_tunnel_ids="$(docker ps \
+    --filter label=com.docker.compose.project=project-snow-public \
+    --filter label=com.docker.compose.service=cloudflared \
+    --filter status=running --quiet)" || return 1
+  fallback_tunnel_count="$(printf '%s\n' "$fallback_tunnel_ids" |
+    awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$fallback_tunnel_count" -eq 1 ] || {
+    echo 'A controlled origin-edge replacement requires exactly one running Tunnel fallback.' >&2
+    return 1
+  }
+  fallback_tunnel_id="$(printf '%s\n' "$fallback_tunnel_ids" | awk 'NF { print; exit }')"
+  fallback_tunnel_document="$(docker inspect "$fallback_tunnel_id")" || return 1
+  printf '%s\n' "$fallback_tunnel_document" | jq -e '
+    length == 1 and
+    .[0].State.Running == true and
+    .[0].State.Paused == false and
+    .[0].State.Restarting == false and
+    .[0].State.Dead == false and
+    .[0].Config.Labels["com.docker.compose.project"] == "project-snow-public" and
+    .[0].Config.Labels["com.docker.compose.service"] == "cloudflared" and
+    (.[0].Config.Image | test("@sha256:[0-9a-f]{64}$")) and
+    .[0].Config.Cmd == ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"] and
+    (((.[0].NetworkSettings.Networks // {}) | keys | sort) ==
+      (["project-snow-public_edge-client", "project-snow-public_tunnel-uplink"] | sort)) and
+    ((.[0].Mounts // []) |
+      map({Type, Source, Destination, RW}) | sort_by(.Destination)) ==
+      ([
+        {Type: "bind", Source: "/etc/project-snow/cloudflared/config.yml", Destination: "/etc/cloudflared/config.yml", RW: false},
+        {Type: "bind", Source: "/etc/project-snow/cloudflared/credentials.json", Destination: "/etc/cloudflared/credentials.json", RW: false}
+      ] | sort_by(.Destination))
+  ' >/dev/null || {
+    echo 'The running Tunnel fallback violates its exact identity, mount or network boundary.' >&2
+    return 1
+  }
+}
+
 origin_firewall_binary=/usr/local/sbin/project-snow-origin-firewall
 run_origin_firewall() {
   firewall_action="$1"
@@ -432,11 +664,66 @@ run_origin_firewall() {
   "$origin_firewall_binary" "$firewall_action"
 }
 
+origin_tls_root_for_env() {
+  origin_env="$1"
+  origin_config_root="$2"
+  [ -f "$origin_env" ] && [ ! -L "$origin_env" ] || {
+    echo 'Origin TLS environment binding is missing or unsafe.' >&2
+    return 1
+  }
+  origin_tls_root_count="$(sed -n '/^ORIGIN_TLS_ROOT=/p' "$origin_env" | awk 'END { print NR + 0 }')"
+  case "$origin_tls_root_count" in
+    1)
+      origin_tls_root="$(sed -n 's/^ORIGIN_TLS_ROOT=//p' "$origin_env")"
+      printf '%s\n' "$origin_tls_root" |
+        grep -Eq '^/etc/project-snow/origin-edge/releases/[0-9a-f]{64}$' || {
+          echo 'Origin TLS environment root is not an immutable managed path.' >&2
+          return 1
+        }
+      ;;
+    0)
+      legacy_origin_compose="$origin_config_root/compose.prod.yml"
+      [ -f "$legacy_origin_compose" ] && [ ! -L "$legacy_origin_compose" ] || return 1
+      grep -Fq -- '- /etc/project-snow/origin-edge/origin-cert.pem:/run/project-snow-origin/origin-cert.pem:ro' \
+        "$legacy_origin_compose" &&
+        grep -Fq -- '- /etc/project-snow/origin-edge/origin-key.pem:/run/project-snow-origin/origin-key.pem:ro' \
+          "$legacy_origin_compose" &&
+        grep -Fq -- '- /etc/project-snow/origin-edge/aop-ca.pem:/run/project-snow-origin/aop-ca.pem:ro' \
+          "$legacy_origin_compose" &&
+        ! grep -Fq 'ORIGIN_TLS_ROOT' "$legacy_origin_compose" || {
+          echo 'Legacy origin TLS mounts are not the exact fixed read-only layout.' >&2
+          return 1
+        }
+      origin_tls_root=/etc/project-snow/origin-edge
+      ;;
+    *)
+      echo 'Origin TLS environment contains more than one root binding.' >&2
+      return 1
+      ;;
+  esac
+  printf '%s\n' "$origin_tls_root"
+}
+
 validate_origin_edge_material() {
-  for origin_material in \
-    /etc/project-snow/origin-edge/origin-cert.pem \
-    /etc/project-snow/origin-edge/origin-key.pem \
-    /etc/project-snow/origin-edge/aop-ca.pem; do
+  origin_material_env="$1"
+  origin_material_config_root="$2"
+  origin_tls_root="$(origin_tls_root_for_env "$origin_material_env" \
+    "$origin_material_config_root")" || return 1
+  [ -d "$origin_tls_root" ] && [ ! -L "$origin_tls_root" ] &&
+    [ "$(stat -c %u:%g:%a "$origin_tls_root")" = 0:0:700 ] || {
+      echo 'Origin TLS bundle directory must be root-owned with mode 0700.' >&2
+      return 1
+    }
+  origin_material_paths="$origin_tls_root/origin-cert.pem
+$origin_tls_root/origin-key.pem
+$origin_tls_root/aop-ca.pem"
+  case "$origin_tls_root" in
+    /etc/project-snow/origin-edge/releases/*)
+      origin_material_paths="$origin_material_paths
+    $origin_tls_root/metadata.json"
+      ;;
+  esac
+  for origin_material in $origin_material_paths; do
     [ -f "$origin_material" ] && [ ! -L "$origin_material" ] &&
       [ -s "$origin_material" ] &&
       [ "$(stat -c %u:%a:%h "$origin_material")" = 0:400:1 ] || {
@@ -612,6 +899,19 @@ validate_origin_edge_container() {
   inspected_config_root="$2"
   inspected_colour="$3"
   inspected_running="$4"
+  inspected_caddy_image_count="$(awk -F= '$1 == "CADDY_IMAGE" { count += 1 } END { print count + 0 }' \
+    "$inspected_env")" || return 1
+  [ "$inspected_caddy_image_count" -eq 1 ] || {
+    echo 'Origin-edge environment must contain exactly one CADDY_IMAGE binding.' >&2
+    return 1
+  }
+  inspected_caddy_image="$(sed -n 's/^CADDY_IMAGE=//p' "$inspected_env")" || return 1
+  is_immutable_image "$inspected_caddy_image" || {
+    echo 'Origin-edge Caddy image is not an immutable digest.' >&2
+    return 1
+  }
+  inspected_tls_root="$(origin_tls_root_for_env "$inspected_env" \
+    "$inspected_config_root")" || return 1
   validate_origin_edge_network || return 1
   resolve_running_origin_caddy "$inspected_env" "$inspected_config_root" "$inspected_colour" || return 1
   inspected_container_ids="$(
@@ -636,12 +936,17 @@ validate_origin_edge_container() {
     --arg project project-snow-public \
     --arg internal_network "$origin_edge_internal_network" \
     --arg uplink_network "$origin_edge_network" \
+    --arg tls_root "$inspected_tls_root" \
+    --arg caddy_image "$inspected_caddy_image" \
+    --arg caddy_config "$inspected_config_root/infra/OriginEdge.Caddyfile" \
     --argjson expected_running "$inspected_running" '
       length == 1 and
       .[0].State.Running == $expected_running and
       .[0].State.Paused == false and
       .[0].Config.Labels["com.docker.compose.project"] == $project and
       .[0].Config.Labels["com.docker.compose.service"] == "origin-edge" and
+      .[0].Config.Image == $caddy_image and
+      .[0].Config.Cmd == ["caddy", "run", "--config", "/etc/caddy/OriginEdge.Caddyfile", "--adapter", "caddyfile"] and
       (((.[0].NetworkSettings.Networks // {}) | keys | sort) ==
         ([$internal_network, $uplink_network] | sort)) and
       ((.[0].HostConfig.PortBindings // {}) | keys) == ["8443/tcp"] and
@@ -661,7 +966,17 @@ validate_origin_edge_container() {
           (.HostIp == "" or .HostIp == "0.0.0.0" or .HostIp == "::")))) and
       .[0].HostConfig.ReadonlyRootfs == true and
       ((.[0].HostConfig.CapDrop // []) | index("ALL")) != null and
-      ((.[0].HostConfig.SecurityOpt // []) | index("no-new-privileges:true")) != null
+      ((.[0].HostConfig.SecurityOpt // []) | index("no-new-privileges:true")) != null and
+      ((.[0].Mounts // []) |
+        map(select(.Type == "bind" or .Type == "volume")) |
+        map({Type, Source, Destination, RW}) |
+        sort_by(.Destination)) ==
+        ([
+          {Type: "bind", Source: $caddy_config, Destination: "/etc/caddy/OriginEdge.Caddyfile", RW: false},
+          {Type: "bind", Source: ($tls_root + "/aop-ca.pem"), Destination: "/run/project-snow-origin/aop-ca.pem", RW: false},
+          {Type: "bind", Source: ($tls_root + "/origin-cert.pem"), Destination: "/run/project-snow-origin/origin-cert.pem", RW: false},
+          {Type: "bind", Source: ($tls_root + "/origin-key.pem"), Destination: "/run/project-snow-origin/origin-key.pem", RW: false}
+        ] | sort_by(.Destination))
     ' >/dev/null || {
       echo 'Origin-edge container violates its expected state, exact network, port or hardening policy.' >&2
       return 1
@@ -887,10 +1202,207 @@ validate_running_origin_edge_caddy() {
         caddy validate --config /etc/caddy/OriginEdge.Caddyfile --adapter caddyfile
 }
 
+running_origin_edge_matches_snapshot() {
+  matching_env="$1"
+  matching_config_root="$2"
+  matching_colour="$3"
+  validate_origin_edge_material "$matching_env" "$matching_config_root" || return 1
+  ensure_caddy_origin_backend "$matching_env" "$matching_config_root" "$matching_colour" || return 1
+  validate_origin_edge_container "$matching_env" "$matching_config_root" "$matching_colour" true || return 1
+  validate_running_origin_edge_caddy "$matching_env" "$matching_config_root" "$matching_colour"
+}
+
+persist_live_origin_edge_binding() {
+  persist_env="$1"
+  persist_config_root="$2"
+  persist_colour="$3"
+  running_origin_edge_matches_snapshot "$persist_env" "$persist_config_root" \
+    "$persist_colour" || return 1
+  persist_source_binding="$(origin_context_config_binding "$persist_env" \
+    "$persist_config_root" "$persist_colour")" || return 1
+  [ -f "$persist_source_binding" ] && [ ! -L "$persist_source_binding" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$persist_source_binding" 2>/dev/null)" = 0:0:600:1 ] || {
+      echo 'Origin-edge configuration source binding is not an exact root-owned file.' >&2
+      return 1
+    }
+  persist_sha="$(jq -r '.commit_sha // empty' "$persist_source_binding")" || return 1
+  printf '%s\n' "$persist_sha" | grep -Eq '^[0-9a-f]{40}$' || return 1
+  validate_config_binding "$persist_source_binding" "$persist_colour" "$persist_sha" || return 1
+  [ "$(jq -r '.root' "$persist_source_binding")" = "$persist_config_root" ] || return 1
+
+  if [ -e "$live_origin_edge_env_root" ] || [ -L "$live_origin_edge_env_root" ]; then
+    [ -d "$live_origin_edge_env_root" ] && [ ! -L "$live_origin_edge_env_root" ] &&
+      [ "$(stat -c %u:%g:%a "$live_origin_edge_env_root" 2>/dev/null)" = 0:0:700 ] || {
+        echo 'Refusing to adopt a mutable live origin-edge environment root.' >&2
+        return 1
+      }
+  else
+    install -o root -g root -m 0700 -d "$live_origin_edge_env_root" || return 1
+    fsync_promote_path "$runtime_root" || return 1
+  fi
+  persist_env_sha="$(sha256sum "$persist_env" | awk '{print $1}')" || return 1
+  printf '%s\n' "$persist_env_sha" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  persist_immutable_env="$live_origin_edge_env_root/$persist_env_sha.compose.env"
+  if [ -e "$persist_immutable_env" ] || [ -L "$persist_immutable_env" ]; then
+    [ -f "$persist_immutable_env" ] && [ ! -L "$persist_immutable_env" ] &&
+      [ "$(stat -c %u:%g:%a:%h "$persist_immutable_env" 2>/dev/null)" = 0:0:600:1 ] &&
+      [ "$(sha256sum "$persist_immutable_env" | awk '{print $1}')" = "$persist_env_sha" ] || {
+        echo 'Existing immutable live origin-edge environment has an invalid identity.' >&2
+        return 1
+      }
+  else
+    live_origin_env_tmp="$(mktemp "$persist_immutable_env.candidate.XXXXXX")" || return 1
+    cp -- "$persist_env" "$live_origin_env_tmp" || return 1
+    chown root:root "$live_origin_env_tmp" || return 1
+    chmod 0600 "$live_origin_env_tmp" || return 1
+    [ "$(sha256sum "$live_origin_env_tmp" | awk '{print $1}')" = "$persist_env_sha" ] || return 1
+    fsync_promote_path "$live_origin_env_tmp" || return 1
+    mv -f -- "$live_origin_env_tmp" "$persist_immutable_env" || return 1
+    live_origin_env_tmp=""
+    fsync_promote_path "$live_origin_edge_env_root" || return 1
+  fi
+  fsync_promote_path "$persist_immutable_env" || return 1
+  fsync_promote_path "$live_origin_edge_env_root" || return 1
+
+  live_origin_binding_tmp="$(mktemp "$live_origin_edge_binding.promote.XXXXXX")" || return 1
+  jq --arg live_schema project-snow-live-origin-edge-1 \
+    --arg env_path "$persist_immutable_env" \
+    --arg env_sha "$persist_env_sha" '
+      del(.live_origin_edge_schema, .origin_edge_env_path, .origin_edge_env_sha256) |
+      . + {
+        live_origin_edge_schema: $live_schema,
+        origin_edge_env_path: $env_path,
+        origin_edge_env_sha256: $env_sha
+      }
+    ' "$persist_source_binding" > "$live_origin_binding_tmp" || return 1
+  chown root:root "$live_origin_binding_tmp" || return 1
+  chmod 0600 "$live_origin_binding_tmp" || return 1
+  fsync_promote_path "$live_origin_binding_tmp" || return 1
+  validate_live_origin_edge_binding "$live_origin_binding_tmp" || return 1
+  trap '' HUP INT QUIT TERM PIPE || return 1
+  if ! mv -f -- "$live_origin_binding_tmp" "$live_origin_edge_binding"; then
+    [ "$promote_signal_handling" -eq 1 ] || restore_promote_signal_traps || true
+    return 1
+  fi
+  live_origin_binding_tmp=""
+  if ! fsync_promote_path /srv/project-snow/releases ||
+     ! validate_live_origin_edge_binding "$live_origin_edge_binding"; then
+    [ "$promote_signal_handling" -eq 1 ] || restore_promote_signal_traps || true
+    return 1
+  fi
+  origin_edge_retained_env="$persist_immutable_env"
+  origin_edge_retained_config_root="$persist_config_root"
+  origin_edge_retained_colour="$persist_colour"
+  live_origin_edge_binding_loaded=1
+  if [ "$promote_signal_handling" -ne 1 ]; then
+    restore_promote_signal_traps || return 1
+  fi
+}
+
+discover_running_origin_edge_binding() {
+  load_live_origin_edge_binding || return 1
+  discover_origin_ids="$(docker ps \
+    --filter label=com.docker.compose.project=project-snow-public \
+    --filter label=com.docker.compose.service=origin-edge \
+    --filter status=running --quiet)" || return 1
+  discover_origin_count="$(printf '%s\n' "$discover_origin_ids" |
+    awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$discover_origin_count" -le 1 ] || {
+    echo 'More than one running origin-edge exists for the production project.' >&2
+    return 1
+  }
+  [ "$discover_origin_count" -eq 1 ] || return 0
+  if [ "$live_origin_edge_binding_loaded" -eq 1 ]; then
+    running_origin_edge_matches_snapshot "$origin_edge_retained_env" \
+      "$origin_edge_retained_config_root" "$origin_edge_retained_colour" || {
+        echo 'The running origin-edge does not match its durable live binding.' >&2
+        return 1
+      }
+    return 0
+  fi
+  if [ "$target_has_origin_edge" -eq 1 ] &&
+     running_origin_edge_matches_snapshot "$colour_env" "$colour_config_root" "$colour"; then
+    persist_live_origin_edge_binding "$colour_env" "$colour_config_root" "$colour" || return 1
+    return 0
+  fi
+  if [ "$previous_has_origin_edge" -eq 1 ] &&
+     running_origin_edge_matches_snapshot "$previous_env" "$previous_config_root" "$previous_colour"; then
+    persist_live_origin_edge_binding "$previous_env" "$previous_config_root" "$previous_colour" || return 1
+    return 0
+  fi
+  echo 'A running origin-edge has no exact durable recovery binding; refusing traffic mutation.' >&2
+  return 1
+}
+
+remove_snapshot_origin_edge_if_present() {
+  remove_env="$1"
+  remove_config_root="$2"
+  remove_colour="$3"
+  remove_origin_ids="$(
+    SNOW_UPSTREAM="public-api-$remove_colour:8000" \
+      docker compose --env-file "$remove_env" -f "$remove_config_root/compose.prod.yml" \
+        --profile "$remove_colour" ps --all --quiet origin-edge
+  )" || return 1
+  remove_origin_count="$(printf '%s\n' "$remove_origin_ids" |
+    awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$remove_origin_count" -le 1 ] || return 1
+  [ "$remove_origin_count" -eq 1 ] || return 0
+  SNOW_UPSTREAM="public-api-$remove_colour:8000" \
+    docker compose --env-file "$remove_env" -f "$remove_config_root/compose.prod.yml" \
+      --profile "$remove_colour" stop origin-edge || return 1
+  SNOW_UPSTREAM="public-api-$remove_colour:8000" \
+    docker compose --env-file "$remove_env" -f "$remove_config_root/compose.prod.yml" \
+      --profile "$remove_colour" rm -f origin-edge
+}
+
+begin_origin_edge_replacement() {
+  replacement_target_env="$1"
+  replacement_target_config_root="$2"
+  replacement_target_colour="$3"
+  replacement_restore_env="$4"
+  replacement_restore_config_root="$5"
+  replacement_restore_colour="$6"
+  running_origin_edge_matches_snapshot "$replacement_restore_env" \
+    "$replacement_restore_config_root" "$replacement_restore_colour" || {
+      echo 'The running origin-edge matches neither the target nor the exact previous snapshot.' >&2
+      return 1
+    }
+
+  # From this point a failed Tunnel gate must leave the known-good running
+  # direct listener untouched.  Only after its exact recovery coordinates are
+  # recorded may the controlled stop/remove window begin.
+  origin_edge_prestart_failure_preserve=1
+  require_running_cloudflared_fallback || return 1
+  persist_live_origin_edge_binding "$replacement_restore_env" \
+    "$replacement_restore_config_root" "$replacement_restore_colour" || return 1
+  origin_edge_tunnel_retain=1
+  origin_edge_replacement_restore_env="$origin_edge_retained_env"
+  origin_edge_replacement_restore_config_root="$origin_edge_retained_config_root"
+  origin_edge_replacement_restore_colour="$origin_edge_retained_colour"
+  origin_edge_replacement_restore_binding="$(mktemp \
+    "$live_origin_edge_binding.restore.XXXXXX")" || return 1
+  cp -- "$live_origin_edge_binding" "$origin_edge_replacement_restore_binding" || return 1
+  chown root:root "$origin_edge_replacement_restore_binding" || return 1
+  chmod 0600 "$origin_edge_replacement_restore_binding" || return 1
+  fsync_promote_path "$origin_edge_replacement_restore_binding" || return 1
+  fsync_promote_path /srv/project-snow/releases || return 1
+  validate_live_origin_edge_binding "$origin_edge_replacement_restore_binding" || return 1
+  origin_edge_replacement_target_env="$replacement_target_env"
+  origin_edge_replacement_target_config_root="$replacement_target_config_root"
+  origin_edge_replacement_target_colour="$replacement_target_colour"
+  origin_edge_replacement_active=1
+  promote_signal_phase=switching
+  origin_edge_prestart_failure_preserve=0
+  remove_snapshot_origin_edge_if_present "$replacement_restore_env" \
+    "$replacement_restore_config_root" "$replacement_restore_colour" || return 1
+  require_running_cloudflared_fallback
+}
+
 prepare_or_retain_origin_edge() {
   prepare_env="$1"
   prepare_config_root="$2"
   prepare_colour="$3"
+  origin_edge_prestart_failure_preserve=0
   validate_docker_dns_security_floor || return 1
   origin_uplink_exists=0
   origin_backend_exists=0
@@ -924,11 +1436,53 @@ prepare_or_retain_origin_edge() {
     existing_origin_id="$(printf '%s\n' "$existing_origin_ids" | awk 'NF { print; exit }')"
     existing_origin_running="$(docker inspect --format '{{.State.Running}}' "$existing_origin_id")" || return 1
     if [ "$existing_origin_running" = true ]; then
-      ensure_caddy_origin_backend "$prepare_env" "$prepare_config_root" "$prepare_colour" || return 1
-      validate_origin_edge_container "$prepare_env" "$prepare_config_root" "$prepare_colour" true || return 1
-      validate_running_origin_edge_caddy "$prepare_env" "$prepare_config_root" "$prepare_colour" || return 1
-      origin_edge_prestart_mode=retain
-      return 0
+      if running_origin_edge_matches_snapshot "$prepare_env" "$prepare_config_root" \
+        "$prepare_colour"; then
+        persist_live_origin_edge_binding "$prepare_env" "$prepare_config_root" \
+          "$prepare_colour" || return 1
+        origin_edge_prestart_mode=retain
+        return 0
+      fi
+      if [ -n "$origin_edge_retained_env" ] &&
+         running_origin_edge_matches_snapshot "$origin_edge_retained_env" \
+           "$origin_edge_retained_config_root" "$origin_edge_retained_colour"; then
+        prepare_tls_root="$(origin_tls_root_for_env "$prepare_env" \
+          "$prepare_config_root")" || return 1
+        if [ "$rollback_mode" = 1 ] ||
+           [ "$prepare_tls_root" = /etc/project-snow/origin-edge ]; then
+          origin_edge_overlay_env="$origin_edge_retained_env"
+          origin_edge_overlay_config_root="$origin_edge_retained_config_root"
+          origin_edge_overlay_colour="$origin_edge_retained_colour"
+          origin_edge_prestart_mode=overlay
+          return 0
+        fi
+        begin_origin_edge_replacement "$prepare_env" "$prepare_config_root" \
+          "$prepare_colour" "$origin_edge_retained_env" \
+          "$origin_edge_retained_config_root" "$origin_edge_retained_colour" || return 1
+      elif [ "$previous_has_origin_edge" -eq 1 ] &&
+         running_origin_edge_matches_snapshot "$previous_env" "$previous_config_root" \
+           "$previous_colour"; then
+        prepare_tls_root="$(origin_tls_root_for_env "$prepare_env" \
+          "$prepare_config_root")" || return 1
+        if [ "$rollback_mode" = 1 ] ||
+           [ "$prepare_tls_root" = /etc/project-snow/origin-edge ]; then
+          # Application rollback is not an edge-route rollback.  Keep the
+          # independently live listener and only move its Caddy backend.
+          persist_live_origin_edge_binding "$previous_env" "$previous_config_root" \
+            "$previous_colour" || return 1
+          origin_edge_overlay_env="$origin_edge_retained_env"
+          origin_edge_overlay_config_root="$origin_edge_retained_config_root"
+          origin_edge_overlay_colour="$origin_edge_retained_colour"
+          origin_edge_prestart_mode=overlay
+          return 0
+        fi
+        begin_origin_edge_replacement "$prepare_env" "$prepare_config_root" \
+          "$prepare_colour" "$previous_env" "$previous_config_root" \
+          "$previous_colour" || return 1
+      else
+        echo 'The running origin-edge matches neither the target nor an exact durable recovery snapshot.' >&2
+        return 1
+      fi
     fi
   fi
   SNOW_UPSTREAM="public-api-$prepare_colour:8000" \
@@ -951,6 +1505,46 @@ probe_prepared_origin_edge() {
   validate_origin_edge_container "$prepared_env" "$prepared_config_root" "$prepared_colour" false
 }
 
+restore_replaced_origin_edge() {
+  [ "$origin_edge_replacement_active" -eq 1 ] || return 0
+  require_running_cloudflared_fallback || return 1
+  remove_snapshot_origin_edge_if_present "$origin_edge_replacement_target_env" \
+    "$origin_edge_replacement_target_config_root" \
+    "$origin_edge_replacement_target_colour" || return 1
+  validate_origin_edge_material "$origin_edge_replacement_restore_env" \
+    "$origin_edge_replacement_restore_config_root" || return 1
+  SNOW_UPSTREAM="public-api-$origin_edge_replacement_restore_colour:8000" \
+    docker compose --env-file "$origin_edge_replacement_restore_env" \
+      -f "$origin_edge_replacement_restore_config_root/compose.prod.yml" \
+      --profile "$origin_edge_replacement_restore_colour" \
+      up --no-start --no-deps --force-recreate origin-edge || return 1
+  ensure_caddy_origin_backend "$origin_edge_replacement_restore_env" \
+    "$origin_edge_replacement_restore_config_root" \
+    "$origin_edge_replacement_restore_colour" || return 1
+  validate_origin_edge_container "$origin_edge_replacement_restore_env" \
+    "$origin_edge_replacement_restore_config_root" \
+    "$origin_edge_replacement_restore_colour" false || return 1
+  run_origin_firewall restore || return 1
+  probe_prepared_origin_edge "$origin_edge_replacement_restore_env" \
+    "$origin_edge_replacement_restore_config_root" \
+    "$origin_edge_replacement_restore_colour" || return 1
+  SNOW_UPSTREAM="public-api-$origin_edge_replacement_restore_colour:8000" \
+    docker compose --env-file "$origin_edge_replacement_restore_env" \
+      -f "$origin_edge_replacement_restore_config_root/compose.prod.yml" \
+      --profile "$origin_edge_replacement_restore_colour" start origin-edge || return 1
+  validate_origin_edge_container "$origin_edge_replacement_restore_env" \
+    "$origin_edge_replacement_restore_config_root" \
+    "$origin_edge_replacement_restore_colour" true || return 1
+  validate_running_origin_edge_caddy "$origin_edge_replacement_restore_env" \
+    "$origin_edge_replacement_restore_config_root" \
+    "$origin_edge_replacement_restore_colour" || return 1
+  persist_live_origin_edge_binding "$origin_edge_replacement_restore_env" \
+    "$origin_edge_replacement_restore_config_root" \
+    "$origin_edge_replacement_restore_colour" || return 1
+  require_running_cloudflared_fallback || return 1
+  origin_edge_replacement_active=0
+}
+
 switch_edge() {
   edge_env="$1"
   edge_config_root="$2"
@@ -960,16 +1554,25 @@ switch_edge() {
   edge_origin_mode="$6"
   edge_start_origin=0
   edge_retain_origin=0
+  edge_retain_tunnel=0
+  edge_runtime_env="$edge_env"
+  edge_runtime_config_root="$edge_config_root"
+  edge_runtime_colour="$edge_colour"
   set -- caddy
   if service_list_has "$edge_service_list" origin-edge && [ "$edge_allow_origin" -eq 1 ]; then
-    validate_origin_edge_material || return 1
     case "$edge_origin_mode" in
       start)
-        validate_origin_edge_container "$edge_env" "$edge_config_root" "$edge_colour" false || return 1
         edge_start_origin=1
         ;;
       retain)
-        validate_origin_edge_container "$edge_env" "$edge_config_root" "$edge_colour" true || return 1
+        edge_retain_origin=1
+        ;;
+      overlay)
+        edge_runtime_env="$origin_edge_overlay_env"
+        edge_runtime_config_root="$origin_edge_overlay_config_root"
+        edge_runtime_colour="$origin_edge_overlay_colour"
+        [ -n "$edge_runtime_env" ] && [ -n "$edge_runtime_config_root" ] &&
+          [ -n "$edge_runtime_colour" ] || return 1
         edge_retain_origin=1
         ;;
       *)
@@ -977,11 +1580,25 @@ switch_edge() {
         return 1
         ;;
     esac
+    validate_origin_edge_material "$edge_runtime_env" "$edge_runtime_config_root" || return 1
+    if [ "$edge_start_origin" -eq 1 ]; then
+      validate_origin_edge_container "$edge_runtime_env" "$edge_runtime_config_root" \
+        "$edge_runtime_colour" false || return 1
+    else
+      validate_origin_edge_container "$edge_runtime_env" "$edge_runtime_config_root" \
+        "$edge_runtime_colour" true || return 1
+    fi
   fi
   if service_list_has "$edge_service_list" cloudflared; then
-    set -- "$@" cloudflared
+    if [ "$origin_edge_tunnel_retain" -eq 1 ]; then
+      require_running_cloudflared_fallback || return 1
+      edge_retain_tunnel=1
+    else
+      set -- "$@" cloudflared
+    fi
   fi
-  [ "$edge_start_origin" -eq 1 ] || [ "$edge_retain_origin" -eq 1 ] || [ "$#" -gt 1 ] || {
+  [ "$edge_start_origin" -eq 1 ] || [ "$edge_retain_origin" -eq 1 ] ||
+    [ "$edge_retain_tunnel" -eq 1 ] || [ "$#" -gt 1 ] || {
     echo 'No permitted edge ingress remains after fail-closed filtering.' >&2
     return 1
   }
@@ -1002,16 +1619,45 @@ switch_edge() {
      [ "$edge_running_origin_count" -eq 1 ]; then
     ensure_caddy_origin_backend "$edge_env" "$edge_config_root" "$edge_colour" || return 1
   fi
+  if [ "$edge_running_origin_count" -eq 1 ] &&
+     [ "$edge_start_origin" -ne 1 ] && [ "$edge_retain_origin" -ne 1 ]; then
+    [ "$live_origin_edge_binding_loaded" -eq 1 ] &&
+      [ -n "$origin_edge_retained_env" ] &&
+      running_origin_edge_matches_snapshot "$origin_edge_retained_env" \
+        "$origin_edge_retained_config_root" "$origin_edge_retained_colour" || {
+          echo 'The retained origin-edge has no valid durable live binding.' >&2
+          return 1
+        }
+  fi
   if [ "$edge_start_origin" -eq 1 ]; then
-    validate_origin_edge_container "$edge_env" "$edge_config_root" "$edge_colour" false || return 1
+    validate_origin_edge_container "$edge_runtime_env" "$edge_runtime_config_root" \
+      "$edge_runtime_colour" false || return 1
     SNOW_UPSTREAM="public-api-$edge_colour:8000" \
       docker compose --env-file "$edge_env" -f "$edge_config_root/compose.prod.yml" --profile "$edge_colour" \
         start origin-edge || return 1
-    validate_origin_edge_container "$edge_env" "$edge_config_root" "$edge_colour" true || return 1
-    validate_running_origin_edge_caddy "$edge_env" "$edge_config_root" "$edge_colour"
+    validate_origin_edge_container "$edge_runtime_env" "$edge_runtime_config_root" \
+      "$edge_runtime_colour" true || return 1
+    validate_running_origin_edge_caddy "$edge_runtime_env" "$edge_runtime_config_root" \
+      "$edge_runtime_colour" || return 1
+    if ! persist_live_origin_edge_binding "$edge_runtime_env" \
+      "$edge_runtime_config_root" "$edge_runtime_colour"; then
+      echo 'Could not publish the exact live origin-edge recovery binding.' >&2
+      remove_snapshot_origin_edge_if_present "$edge_runtime_env" \
+        "$edge_runtime_config_root" "$edge_runtime_colour" || true
+      return 1
+    fi
   elif [ "$edge_retain_origin" -eq 1 ]; then
-    validate_origin_edge_container "$edge_env" "$edge_config_root" "$edge_colour" true || return 1
-    validate_running_origin_edge_caddy "$edge_env" "$edge_config_root" "$edge_colour"
+    validate_origin_edge_container "$edge_runtime_env" "$edge_runtime_config_root" \
+      "$edge_runtime_colour" true || return 1
+    validate_running_origin_edge_caddy "$edge_runtime_env" "$edge_runtime_config_root" \
+      "$edge_runtime_colour" || return 1
+    validate_live_origin_edge_binding "$live_origin_edge_binding" || return 1
+    [ "$edge_runtime_env" = "$origin_edge_retained_env" ] &&
+      [ "$edge_runtime_config_root" = "$origin_edge_retained_config_root" ] &&
+      [ "$edge_runtime_colour" = "$origin_edge_retained_colour" ] || return 1
+  fi
+  if [ "$edge_retain_tunnel" -eq 1 ]; then
+    require_running_cloudflared_fallback
   fi
 }
 
@@ -1037,17 +1683,105 @@ stop_known_origin_edge() {
 # Prepare all marker files before changing traffic. The final renames are
 # same-filesystem operations and leave the previous colour available.
 origin_probe_container=""
+live_origin_binding_tmp=""
+live_origin_env_tmp=""
+previous_state_backup=""
+previous_active_backup=""
+previous_manifest_backup=""
+previous_config_backup=""
+previous_current_backup=""
+promoted_restore_tmp=""
+promoted_state_recovery_failed=0
 state_tmp="$(mktemp "$runtime_root/compose.env.promote.XXXXXX")"
 active_tmp="$(mktemp "$active_file.promote.XXXXXX")"
 manifest_tmp="$(mktemp "$current_manifest.promote.XXXXXX")"
 config_tmp="$(mktemp "$current_config_binding.promote.XXXXXX")"
+current_tmp="$(mktemp "$release_current.promote.XXXXXX")"
+
+create_promoted_state_backup() {
+  backup_source="$1"
+  backup_template="$2"
+  if [ ! -e "$backup_source" ] && [ ! -L "$backup_source" ]; then
+    printf '%s\n' absent
+    return 0
+  fi
+  [ -f "$backup_source" ] && [ ! -L "$backup_source" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$backup_source" 2>/dev/null)" = 0:0:600:1 ] || {
+      echo "Promoted state source is not an exact root-owned file: $backup_source" >&2
+      return 1
+    }
+  promoted_backup_tmp="$(mktemp "$backup_template")" || return 1
+  cp -- "$backup_source" "$promoted_backup_tmp" || return 1
+  chown root:root "$promoted_backup_tmp" || return 1
+  chmod 0600 "$promoted_backup_tmp" || return 1
+  fsync_promote_path "$promoted_backup_tmp" || return 1
+  printf '%s\n' "$promoted_backup_tmp"
+}
+
 cleanup() {
+  promote_cleanup_status=$?
+  trap - EXIT HUP INT QUIT TERM PIPE
   if [ -n "${origin_probe_container:-}" ]; then
     docker rm -f "$origin_probe_container" >/dev/null 2>&1 || true
   fi
-  rm -f "${state_tmp:-}" "${active_tmp:-}" "${manifest_tmp:-}" "${config_tmp:-}"
+  rm -f "${state_tmp:-}" "${active_tmp:-}" "${manifest_tmp:-}" \
+    "${config_tmp:-}" "${current_tmp:-}" "${live_origin_binding_tmp:-}" \
+    "${live_origin_env_tmp:-}" "${promoted_restore_tmp:-}" || true
+  if [ "${promoted_state_recovery_failed:-0}" -ne 1 ]; then
+    for promoted_backup in "${previous_state_backup:-}" "${previous_active_backup:-}" \
+      "${previous_manifest_backup:-}" "${previous_config_backup:-}" \
+      "${previous_current_backup:-}"; do
+      case "$promoted_backup" in ''|absent) ;; *) rm -f -- "$promoted_backup" || true ;; esac
+    done
+  else
+    for promoted_backup in "${previous_state_backup:-}" "${previous_active_backup:-}" \
+      "${previous_manifest_backup:-}" "${previous_config_backup:-}" \
+      "${previous_current_backup:-}"; do
+      case "$promoted_backup" in
+        ''|absent) ;;
+        *) echo "CRITICAL: preserved previous promoted-state backup at $promoted_backup" >&2 || true ;;
+      esac
+    done
+  fi
+  if [ "${origin_edge_replacement_active:-0}" -ne 1 ]; then
+    rm -f "${origin_edge_replacement_restore_binding:-}" || true
+  elif [ -n "${origin_edge_replacement_restore_binding:-}" ]; then
+    echo "CRITICAL: preserved exact origin-edge recovery binding at $origin_edge_replacement_restore_binding" >&2 || true
+  fi
+  exit "$promote_cleanup_status"
 }
-trap cleanup EXIT HUP INT TERM
+
+terminate_promote_signal() {
+  promote_signal_status="$1"
+  promote_signal_handling=1
+  trap '' HUP INT QUIT TERM PIPE
+  case "$promote_signal_phase" in
+    committed)
+      exit 0
+      ;;
+    switching)
+      echo 'Promotion was interrupted after traffic mutation began; restoring the previous runtime.' >&2 || true
+      if ! restore_previous_runtime; then
+        echo 'CRITICAL: interrupted promotion could not fully restore the previous runtime.' >&2 || true
+      fi
+      exit "$promote_signal_status"
+      ;;
+    *)
+      exit "$promote_signal_status"
+      ;;
+  esac
+}
+
+restore_promote_signal_traps() {
+  trap 'terminate_promote_signal 129' HUP || return 1
+  trap 'terminate_promote_signal 130' INT || return 1
+  trap 'terminate_promote_signal 131' QUIT || return 1
+  trap 'terminate_promote_signal 143' TERM || return 1
+  trap 'terminate_promote_signal 141' PIPE || return 1
+}
+
+trap cleanup EXIT
+restore_promote_signal_traps || exit 78
 cp "$colour_env" "$state_tmp"
 chmod 0600 "$state_tmp"
 printf '%s\n' "$colour" > "$active_tmp"
@@ -1061,15 +1795,43 @@ else
 fi
 cp "$colour_config_binding" "$config_tmp"
 chmod 0600 "$config_tmp"
+printf '%s\n' "$colour $marker_sha $marker_app_image $marker_embedding_image" > "$current_tmp"
+chmod 0600 "$current_tmp"
+for promote_candidate in "$state_tmp" "$active_tmp" "$config_tmp" "$current_tmp"; do
+  fsync_promote_path "$promote_candidate" || exit 78
+done
+if [ -n "$manifest_tmp" ]; then
+  fsync_promote_path "$manifest_tmp" || exit 78
+fi
+previous_state_backup="$(create_promoted_state_backup "$current_env" \
+  "$current_env.previous.XXXXXX")" || exit 78
+previous_active_backup="$(create_promoted_state_backup "$active_file" \
+  "$active_file.previous.XXXXXX")" || exit 78
+previous_manifest_backup="$(create_promoted_state_backup "$current_manifest" \
+  "$current_manifest.previous.XXXXXX")" || exit 78
+previous_config_backup="$(create_promoted_state_backup "$current_config_binding" \
+  "$current_config_binding.previous.XXXXXX")" || exit 78
+previous_current_backup="$(create_promoted_state_backup "$release_current" \
+  "$release_current.previous.XXXXXX")" || exit 78
+fsync_promote_path "$runtime_root" || exit 78
+fsync_promote_path /srv/project-snow/releases || exit 78
 
 restore_previous_runtime() {
   restore_failed=0
   previous_edge_switched=0
   previous_allow_origin=1
   previous_origin_mode=none
-  if [ "$previous_has_origin_edge" -eq 1 ]; then
+  if [ "$origin_edge_replacement_active" -eq 1 ]; then
+    if ! restore_replaced_origin_edge; then
+      echo 'CRITICAL: the exact pre-upgrade origin-edge could not be restored; Tunnel remains the only permitted ingress.' >&2
+      previous_allow_origin=0
+      restore_failed=1
+      stop_known_origin_edge || true
+    fi
+  fi
+  if [ "$previous_has_origin_edge" -eq 1 ] && [ "$restore_failed" -eq 0 ]; then
     origin_edge_prestart_mode=none
-    if ! validate_origin_edge_material ||
+    if ! validate_origin_edge_material "$previous_env" "$previous_config_root" ||
        ! prepare_or_retain_origin_edge "$previous_env" "$previous_config_root" "$previous_colour"; then
       echo 'CRITICAL: previous origin-edge could not pass its retained-runtime or stopped pre-start gate; keeping public 443 fail-closed.' >&2
       previous_allow_origin=0
@@ -1150,15 +1912,21 @@ restore_previous_runtime() {
   [ "$restore_failed" -eq 0 ]
 }
 
+if ! discover_running_origin_edge_binding; then
+  echo 'Could not establish an exact durable binding for the live origin-edge.' >&2
+  exit 72
+fi
+
 target_allow_origin=1
 target_origin_mode=none
 if [ "$target_has_origin_edge" -eq 1 ]; then
   origin_edge_prestart_mode=none
-  if ! validate_origin_edge_material ||
+  origin_edge_prestart_failure_preserve=1
+  if ! validate_origin_edge_material "$colour_env" "$colour_config_root" ||
      ! prepare_or_retain_origin_edge "$colour_env" "$colour_config_root" "$colour"; then
     echo 'Target origin-edge could not pass its retained-runtime or stopped pre-start gate; public 443 was not started.' >&2
     target_allow_origin=0
-    if ! stop_known_origin_edge; then
+    if [ "$origin_edge_prestart_failure_preserve" -ne 1 ] && ! stop_known_origin_edge; then
       echo 'Could not stop origin-edge after the target pre-start gate failed.' >&2
       restore_previous_runtime || exit 74
       exit 72
@@ -1201,6 +1969,7 @@ if [ "$target_has_origin_edge" -eq 1 ] && [ "$target_allow_origin" -eq 1 ] &&
   fi
 fi
 
+promote_signal_phase=switching
 if ! switch_edge "$colour_env" "$colour_config_root" "$colour" \
   "$target_services" "$target_allow_origin" "$target_origin_mode"; then
   echo 'Edge switch failed; restoring the previous edge configuration snapshot.' >&2
@@ -1257,17 +2026,115 @@ if ! previous_compose stop "$previous_service"; then
   exit 73
 fi
 
-mv -f "$state_tmp" "$current_env"
-state_tmp=""
-mv -f "$active_tmp" "$active_file"
-active_tmp=""
-if [ -n "$manifest_tmp" ]; then
-  mv -f "$manifest_tmp" "$current_manifest"
-  manifest_tmp=""
+restore_promoted_file() {
+  promoted_file_backup="$1"
+  promoted_file_destination="$2"
+  if [ "$promoted_file_backup" = absent ]; then
+    [ ! -d "$promoted_file_destination" ] || return 1
+    rm -f -- "$promoted_file_destination" || return 1
+    return 0
+  fi
+  [ -f "$promoted_file_backup" ] && [ ! -L "$promoted_file_backup" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$promoted_file_backup" 2>/dev/null)" = 0:0:600:1 ] || return 1
+  promoted_restore_tmp="$(mktemp "$promoted_file_destination.restore.XXXXXX")" || return 1
+  cp -- "$promoted_file_backup" "$promoted_restore_tmp" || return 1
+  chown root:root "$promoted_restore_tmp" || return 1
+  chmod 0600 "$promoted_restore_tmp" || return 1
+  fsync_promote_path "$promoted_restore_tmp" || return 1
+  mv -f -- "$promoted_restore_tmp" "$promoted_file_destination" || return 1
+  promoted_restore_tmp=""
+}
+
+promoted_file_matches_backup() {
+  promoted_match_backup="$1"
+  promoted_match_destination="$2"
+  if [ "$promoted_match_backup" = absent ]; then
+    [ ! -e "$promoted_match_destination" ] && [ ! -L "$promoted_match_destination" ]
+    return
+  fi
+  [ -f "$promoted_match_destination" ] && [ ! -L "$promoted_match_destination" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$promoted_match_destination" 2>/dev/null)" = 0:0:600:1 ] &&
+    cmp -s "$promoted_match_backup" "$promoted_match_destination"
+}
+
+restore_previous_promoted_state() {
+  promoted_restore_failed=0
+  restore_promoted_file "$previous_state_backup" "$current_env" || promoted_restore_failed=1
+  restore_promoted_file "$previous_active_backup" "$active_file" || promoted_restore_failed=1
+  restore_promoted_file "$previous_manifest_backup" "$current_manifest" || promoted_restore_failed=1
+  restore_promoted_file "$previous_config_backup" "$current_config_binding" || promoted_restore_failed=1
+  restore_promoted_file "$previous_current_backup" "$release_current" || promoted_restore_failed=1
+  fsync_promote_path "$runtime_root" || promoted_restore_failed=1
+  fsync_promote_path /srv/project-snow/releases || promoted_restore_failed=1
+  promoted_file_matches_backup "$previous_state_backup" "$current_env" || promoted_restore_failed=1
+  promoted_file_matches_backup "$previous_active_backup" "$active_file" || promoted_restore_failed=1
+  promoted_file_matches_backup "$previous_manifest_backup" "$current_manifest" || promoted_restore_failed=1
+  promoted_file_matches_backup "$previous_config_backup" "$current_config_binding" || promoted_restore_failed=1
+  promoted_file_matches_backup "$previous_current_backup" "$release_current" || promoted_restore_failed=1
+  if [ "$promoted_restore_failed" -ne 0 ]; then
+    promoted_state_recovery_failed=1
+    echo 'CRITICAL: previous promoted-state metadata could not be restored exactly.' >&2
+    return 1
+  fi
+}
+
+commit_promoted_state() {
+  trap '' HUP INT QUIT TERM PIPE || return 1
+  promoted_commit_failed=0
+  if ! mv -f "$state_tmp" "$current_env"; then
+    promoted_commit_failed=1
+  else
+    state_tmp=""
+  fi
+  if [ "$promoted_commit_failed" -eq 0 ]; then
+    if ! mv -f "$active_tmp" "$active_file"; then
+      promoted_commit_failed=1
+    else
+      active_tmp=""
+    fi
+  fi
+  if [ "$promoted_commit_failed" -eq 0 ] && [ -n "$manifest_tmp" ]; then
+    if ! mv -f "$manifest_tmp" "$current_manifest"; then
+      promoted_commit_failed=1
+    else
+      manifest_tmp=""
+    fi
+  fi
+  if [ "$promoted_commit_failed" -eq 0 ]; then
+    if ! mv -f "$config_tmp" "$current_config_binding"; then
+      promoted_commit_failed=1
+    else
+      config_tmp=""
+    fi
+  fi
+  if [ "$promoted_commit_failed" -eq 0 ]; then
+    if ! mv -f "$current_tmp" "$release_current"; then
+      promoted_commit_failed=1
+    else
+      current_tmp=""
+    fi
+  fi
+  if [ "$promoted_commit_failed" -eq 0 ]; then
+    fsync_promote_path "$runtime_root" || promoted_commit_failed=1
+  fi
+  if [ "$promoted_commit_failed" -eq 0 ]; then
+    fsync_promote_path /srv/project-snow/releases || promoted_commit_failed=1
+  fi
+  if [ "$promoted_commit_failed" -ne 0 ]; then
+    restore_previous_promoted_state || true
+    restore_promote_signal_traps || true
+    return 1
+  fi
+  promote_signal_phase=committed
+  origin_edge_replacement_active=0
+  origin_edge_tunnel_retain=0
+  restore_promote_signal_traps
+}
+
+if ! commit_promoted_state; then
+  echo 'Promotion state publication failed; restoring the previous runtime.' >&2
+  restore_previous_runtime || exit 74
+  exit 73
 fi
-mv -f "$config_tmp" "$current_config_binding"
-config_tmp=""
-printf '%s\n' "$colour $marker_sha $marker_app_image $marker_embedding_image" > /srv/project-snow/releases/current
-chmod 0600 /srv/project-snow/releases/current
 
 printf '%s\n' "Promoted $colour $marker_sha. Cloudflare Access and MyWebsite settings were not changed."

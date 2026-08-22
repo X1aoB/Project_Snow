@@ -248,6 +248,10 @@ __marimo__/
 
 # Local credentials and certificates.  Store only redacted/example files in Git.
 *.pem
+!App/config/origin-edge/
+App/config/origin-edge/*
+!App/config/origin-edge/origin-cert.pem
+!App/config/origin-edge/aop-ca.pem
 *.p12
 *.pfx
 *.keystore

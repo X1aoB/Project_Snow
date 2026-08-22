@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from unittest import TestCase
 
@@ -12,6 +15,24 @@ class DeploymentContractTests(TestCase):
 
     def read(self, relative: str) -> str:
         return (self.app_root / relative).read_text(encoding="utf-8")
+
+    def run_posix_shell(self, script: str, *arguments: str) -> subprocess.CompletedProcess[str]:
+        candidates = (
+            "C:/Program Files/Git/bin/bash.exe",
+            shutil.which("sh"),
+            shutil.which("bash"),
+        )
+        shell = next((Path(candidate) for candidate in candidates if candidate and Path(candidate).is_file()), None)
+        self.assertIsNotNone(shell, "A POSIX shell is required for deployment contract tests.")
+        with tempfile.TemporaryDirectory() as temporary_root:
+            script_path = Path(temporary_root) / "contract.sh"
+            script_path.write_text(script, encoding="utf-8", newline="\n")
+            return subprocess.run(
+                [str(shell), str(script_path), *arguments],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
 
     def test_neo4j_uses_file_backed_auth(self) -> None:
         compose = self.read("compose.prod.yml")
@@ -180,7 +201,10 @@ class DeploymentContractTests(TestCase):
         self.assertIn("security_opt: [\"no-new-privileges:true\"]", origin_edge)
         self.assertIn("read_only: true", origin_edge)
         for material in ("origin-cert.pem", "origin-key.pem", "aop-ca.pem"):
-            self.assertIn(f"/etc/project-snow/origin-edge/{material}", origin_edge)
+            self.assertIn(
+                f"${{ORIGIN_TLS_ROOT:?Set verified immutable origin TLS root}}/{material}",
+                origin_edge,
+            )
             self.assertIn(f"/run/project-snow-origin/{material}:ro", origin_edge)
 
         self.assertIn("auto_https off", origin_caddyfile)
@@ -218,7 +242,7 @@ class DeploymentContractTests(TestCase):
         smoke = script.index("/app/public_smoke.py")
         acceptance_target = script.index("candidate_app_network=project-snow-public_app")
         acceptance_smoke = script.index('candidate_internal_endpoint=')
-        stage_env = script.index('mv -f "$candidate_env" "$colour_env"')
+        stage_env = script.index('mv -f -- "$candidate_env" "$colour_env"')
         self.assertLess(verify_data, load_data)
         self.assertLess(dependency_probe, load_data)
         self.assertLess(load_data, start_api)
@@ -450,18 +474,21 @@ class DeploymentContractTests(TestCase):
         )
         self.assertLess(restore, restore_edge)
         firewall_update = script.index("run_origin_firewall update")
-        firewall_restore = script.index("run_origin_firewall restore")
+        restore_runtime_start = script.index("restore_previous_runtime() {")
         target_origin_prepare = script.index(
             'prepare_or_retain_origin_edge "$colour_env" "$colour_config_root" "$colour"'
         )
         previous_origin_prepare = script.index(
-            'prepare_or_retain_origin_edge "$previous_env" "$previous_config_root" "$previous_colour"'
+            'prepare_or_retain_origin_edge "$previous_env" "$previous_config_root" "$previous_colour"',
+            restore_runtime_start,
         )
+        firewall_restore = script.index("run_origin_firewall restore", previous_origin_prepare)
         target_origin_probe = script.index(
             'probe_prepared_origin_edge "$colour_env" "$colour_config_root" "$colour"'
         )
         previous_origin_probe = script.index(
-            'probe_prepared_origin_edge "$previous_env" "$previous_config_root" "$previous_colour"'
+            'probe_prepared_origin_edge "$previous_env" "$previous_config_root" "$previous_colour"',
+            firewall_restore,
         )
         self.assertLess(target_origin_prepare, firewall_update)
         self.assertLess(previous_origin_prepare, firewall_restore)
@@ -505,6 +532,16 @@ class DeploymentContractTests(TestCase):
         self.assertIn('keys) == ["8443/tcp"]', script)
         self.assertIn('HostPort == "443"', script)
         self.assertIn('.[0].HostConfig.Dns == ["127.0.0.1"]', script)
+        self.assertIn('.[0].Config.Image == $caddy_image', script)
+        self.assertIn(
+            '.[0].Config.Cmd == ["caddy", "run", "--config", "/etc/caddy/OriginEdge.Caddyfile", "--adapter", "caddyfile"]',
+            script,
+        )
+        self.assertIn(
+            '{Type: "bind", Source: $caddy_config, Destination: "/etc/caddy/OriginEdge.Caddyfile", RW: false}',
+            script,
+        )
+        self.assertIn('map(select(.Type == "bind" or .Type == "volume"))', script)
         self.assertIn("NetworkSettings.Ports", script)
         self.assertIn("($containers | length) == 1", script)
         self.assertIn("($containers | has($container_id))", script)
@@ -560,7 +597,7 @@ class DeploymentContractTests(TestCase):
         )
         retained_runtime = script.index('if [ "$existing_origin_running" = true ]; then')
         retained_caddy_validation = script.index(
-            'validate_running_origin_edge_caddy "$prepare_env" "$prepare_config_root" "$prepare_colour"',
+            'running_origin_edge_matches_snapshot "$prepare_env" "$prepare_config_root"',
             retained_runtime,
         )
         retained_return = script.index("return 0", retained_runtime)
@@ -605,8 +642,25 @@ class DeploymentContractTests(TestCase):
             line for line in script.splitlines() if "cloudflared" in line
         )
         self.assertNotIn("stop_snapshot_service", cloudflared_lines)
-        self.assertEqual(script.count("previous_allow_origin=0"), 3)
-        self.assertEqual(script.count("target_allow_origin=0"), 3)
+        for previous_fail_closed_message in (
+            "the exact pre-upgrade origin-edge could not be restored",
+            "previous origin-edge could not pass its retained-runtime or stopped pre-start gate",
+            "failed to restore the last-known-good origin firewall",
+            "previous origin-edge failed its post-firewall no-secret network isolation probe",
+        ):
+            failure_message = script.index(previous_fail_closed_message)
+            fail_closed_assignment = script.index(
+                "previous_allow_origin=0", failure_message
+            )
+            self.assertLess(fail_closed_assignment - failure_message, 600)
+        for target_fail_closed_message in (
+            "Target origin-edge could not pass its retained-runtime or stopped pre-start gate",
+            "Rollback could not restore the last-known-good origin firewall",
+            "Target origin-edge failed its post-firewall no-secret network isolation probe",
+        ):
+            failure_message = script.index(target_fail_closed_message)
+            fail_closed_assignment = script.index("target_allow_origin=0", failure_message)
+            self.assertLess(fail_closed_assignment - failure_message, 600)
         self.assertIn(
             "previous origin-edge could not pass its retained-runtime or stopped pre-start gate; keeping public 443 fail-closed",
             script,
@@ -632,6 +686,385 @@ class DeploymentContractTests(TestCase):
             "Cloudflare Access and MyWebsite settings were not changed", script
         )
         self.assertNotIn("cloudflared tunnel route dns", script)
+
+    def test_origin_edge_bundle_replacement_requires_and_retains_tunnel_fallback(self) -> None:
+        script = self.read("ops/promote.sh")
+        begin_start = script.index("begin_origin_edge_replacement() {")
+        begin_end = script.index("\n}\n\nprepare_or_retain_origin_edge()", begin_start) + 2
+        begin = script[begin_start:begin_end]
+        tunnel_gate = begin.index("require_running_cloudflared_fallback")
+        persistent_recovery = begin.index("persist_live_origin_edge_binding")
+        recovery_binding = begin.index("origin_edge_replacement_restore_env=")
+        mutation_phase = begin.index("promote_signal_phase=switching")
+        remove_old = begin.index("remove_snapshot_origin_edge_if_present")
+        self.assertLess(tunnel_gate, recovery_binding)
+        self.assertLess(tunnel_gate, persistent_recovery)
+        self.assertLess(persistent_recovery, recovery_binding)
+        self.assertLess(recovery_binding, mutation_phase)
+        self.assertLess(mutation_phase, remove_old)
+        self.assertIn("origin_edge_prestart_failure_preserve=1", begin)
+        self.assertIn("origin_edge_tunnel_retain=1", begin)
+
+        prepare_start = script.index("prepare_or_retain_origin_edge() {")
+        prepare_end = script.index("\n}\n\nprobe_prepared_origin_edge()", prepare_start)
+        prepare = script[prepare_start:prepare_end]
+        overlay_mode = prepare.index("origin_edge_prestart_mode=overlay")
+        replacement = prepare.index("begin_origin_edge_replacement")
+        self.assertLess(overlay_mode, replacement)
+        self.assertIn('[ "$rollback_mode" = 1 ]', prepare)
+        self.assertIn('[ "$prepare_tls_root" = /etc/project-snow/origin-edge ]', prepare)
+
+        restore_start = script.index("restore_replaced_origin_edge() {")
+        restore_end = script.index("\n}\n\nswitch_edge()", restore_start) + 2
+        restore = script[restore_start:restore_end]
+        remove_target = restore.index("remove_snapshot_origin_edge_if_present")
+        recreate_old = restore.index("up --no-start --no-deps --force-recreate origin-edge")
+        firewall = restore.index("run_origin_firewall restore")
+        probe = restore.index("probe_prepared_origin_edge")
+        start_old = restore.index("start origin-edge")
+        final_tunnel = restore.rindex("require_running_cloudflared_fallback")
+        self.assertLess(remove_target, recreate_old)
+        self.assertLess(recreate_old, firewall)
+        self.assertLess(firewall, probe)
+        self.assertLess(probe, start_old)
+        self.assertLess(start_old, final_tunnel)
+        self.assertIn("origin_edge_replacement_active=0", restore)
+
+        switch_start = script.index("switch_edge() {")
+        switch_end = script.index("\n}\n\nstop_snapshot_service()", switch_start)
+        switch = script[switch_start:switch_end]
+        self.assertIn('if [ "$origin_edge_tunnel_retain" -eq 1 ]; then', switch)
+        self.assertIn("overlay)", switch)
+        self.assertIn('edge_runtime_env="$origin_edge_overlay_env"', switch)
+        self.assertIn("edge_retain_tunnel=1", switch)
+        self.assertIn('set -- "$@" cloudflared', switch)
+        self.assertIn("require_running_cloudflared_fallback", switch)
+        self.assertIn("project-snow-public_edge-client", script)
+        self.assertIn("project-snow-public_tunnel-uplink", script)
+        for legacy_mount in (
+            "/etc/project-snow/origin-edge/origin-cert.pem:/run/project-snow-origin/origin-cert.pem:ro",
+            "/etc/project-snow/origin-edge/origin-key.pem:/run/project-snow-origin/origin-key.pem:ro",
+            "/etc/project-snow/origin-edge/aop-ca.pem:/run/project-snow-origin/aop-ca.pem:ro",
+        ):
+            self.assertIn(legacy_mount, script)
+
+        harness = f"""\
+set -u
+gate_mode=$1
+log_file=$2
+test_root=${{log_file%/*}}
+previous_has_origin_edge=1
+previous_env=previous.env
+previous_config_root=previous-config
+previous_colour=blue
+origin_edge_prestart_failure_preserve=0
+origin_edge_tunnel_retain=0
+origin_edge_replacement_active=0
+origin_edge_replacement_restore_env=
+origin_edge_replacement_restore_config_root=
+origin_edge_replacement_restore_colour=
+origin_edge_replacement_restore_binding=
+origin_edge_replacement_target_env=
+origin_edge_replacement_target_config_root=
+origin_edge_replacement_target_colour=
+promote_signal_phase=pre-switch
+live_origin_edge_binding="$test_root/live-origin-edge-config.json"
+running_origin_edge_matches_snapshot() {{ printf '%s\n' match >> "$log_file"; }}
+require_running_cloudflared_fallback() {{
+  printf '%s\n' tunnel >> "$log_file"
+  [ "$gate_mode" = pass ]
+}}
+persist_live_origin_edge_binding() {{
+  printf '%s\n' persist >> "$log_file"
+  printf '%s\n' live > "$live_origin_edge_binding"
+  origin_edge_retained_env="$1"
+  origin_edge_retained_config_root="$2"
+  origin_edge_retained_colour="$3"
+}}
+chown() {{ :; }}
+chmod() {{ :; }}
+fsync_promote_path() {{ :; }}
+validate_live_origin_edge_binding() {{ :; }}
+remove_snapshot_origin_edge_if_present() {{ printf '%s\n' remove >> "$log_file"; }}
+{begin}
+begin_status=0
+begin_origin_edge_replacement target.env target-config green \
+  previous.env previous-config blue || begin_status=$?
+printf '%s:%s:%s:%s\n' "$origin_edge_replacement_active" \
+  "$origin_edge_prestart_failure_preserve" "$origin_edge_tunnel_retain" \
+  "$promote_signal_phase"
+exit "$begin_status"
+"""
+        with tempfile.TemporaryDirectory() as temporary_root:
+            log = Path(temporary_root) / "success.log"
+            success = self.run_posix_shell(harness, "pass", log.as_posix())
+            success_log = log.read_text().splitlines()
+        self.assertEqual(success.returncode, 0, success.stderr)
+        self.assertEqual(success.stdout.strip(), "1:0:1:switching")
+        self.assertEqual(success_log, ["match", "tunnel", "persist", "remove", "tunnel"])
+
+        with tempfile.TemporaryDirectory() as temporary_root:
+            log = Path(temporary_root) / "failure.log"
+            failure = self.run_posix_shell(harness, "fail", log.as_posix())
+            failure_log = log.read_text().splitlines()
+        self.assertNotEqual(failure.returncode, 0)
+        self.assertEqual(failure_log, ["match", "tunnel"])
+
+    def test_live_origin_edge_binding_survives_colour_restaging_and_rotation(self) -> None:
+        script = self.read("ops/promote.sh")
+        binding_start = script.index("origin_context_config_binding() {")
+        binding_end = script.index("\n}\n\nvalidate_mailer_env()", binding_start) + 2
+        binding_function = script[binding_start:binding_end]
+        discover_call = script.index("if ! discover_running_origin_edge_binding; then")
+        target_prepare = script.index(
+            'prepare_or_retain_origin_edge "$colour_env" "$colour_config_root" "$colour"'
+        )
+        self.assertLess(discover_call, target_prepare)
+        self.assertIn("/srv/project-snow/releases/live-origin-edge-config.json", script)
+        self.assertIn("/srv/project-snow/runtime/origin-edge", script)
+        self.assertIn("project-snow-live-origin-edge-1", script)
+        self.assertIn('fsync_promote_path "$live_origin_edge_env_root"', script)
+        self.assertIn('fsync_promote_path "$persist_immutable_env"', script)
+        self.assertIn("origin_edge_replacement_restore_binding", script)
+        self.assertIn(
+            'persist_live_origin_edge_binding "$origin_edge_replacement_restore_env"',
+            script,
+        )
+        persist_start = script.index("persist_live_origin_edge_binding() {")
+        persist_end = script.index("\n}\n\ndiscover_running_origin_edge_binding()", persist_start)
+        persist = script[persist_start:persist_end]
+        loaded_assignment = persist.rindex("live_origin_edge_binding_loaded=1")
+        signal_restore = persist.rindex("restore_promote_signal_traps")
+        self.assertLess(loaded_assignment, signal_restore)
+
+        harness = f"""\
+set -u
+colour_env=/runtime/colours/blue.compose.env
+colour_config_root=/config/new
+colour=blue
+colour_config_binding=/releases/blue-config.json
+previous_env=/runtime/colours/green.compose.env
+previous_config_root=/config/legacy
+previous_colour=green
+previous_config_binding=/releases/green-config.json
+live_origin_edge_binding_loaded=1
+live_origin_edge_binding=/releases/live-origin-edge-config.json
+origin_edge_retained_env=/runtime/origin-edge/old.compose.env
+origin_edge_retained_config_root=/config/old
+origin_edge_retained_colour=green
+origin_edge_replacement_restore_binding=
+origin_edge_replacement_restore_config_root=
+origin_edge_replacement_restore_colour=
+{binding_function}
+origin_context_config_binding /runtime/origin-edge/old.compose.env /config/old green
+origin_edge_retained_env=/runtime/origin-edge/new.compose.env
+origin_edge_retained_config_root=/config/new
+origin_edge_retained_colour=blue
+origin_edge_replacement_restore_binding=/releases/old.restore.json
+origin_edge_replacement_restore_config_root=/config/old
+origin_edge_replacement_restore_colour=green
+origin_context_config_binding /runtime/origin-edge/old.compose.env /config/old green
+"""
+        result = self.run_posix_shell(harness)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "/releases/live-origin-edge-config.json",
+                "/releases/old.restore.json",
+            ],
+        )
+
+    def test_promoted_metadata_commit_restores_exact_previous_set_on_fault(self) -> None:
+        script = self.read("ops/promote.sh")
+        restore_start = script.index("restore_promoted_file() {")
+        commit_start = script.index("commit_promoted_state() {", restore_start)
+        commit_end = script.index("\n}\n\nif ! commit_promoted_state", commit_start) + 2
+        transaction = script[restore_start:commit_end]
+        target_switch = script.index(
+            'if ! switch_edge "$colour_env" "$colour_config_root" "$colour"'
+        )
+        switching = script.rindex("promote_signal_phase=switching", 0, target_switch)
+        for backup_assignment in (
+            "previous_state_backup=",
+            "previous_active_backup=",
+            "previous_manifest_backup=",
+            "previous_config_backup=",
+            "previous_current_backup=",
+        ):
+            self.assertLess(script.index(backup_assignment, script.index('origin_probe_container=""')), switching)
+        self.assertIn("restore_previous_promoted_state || true", transaction)
+        self.assertIn('fsync_promote_path "$runtime_root" || promoted_restore_failed=1', transaction)
+        self.assertIn("promoted_state_recovery_failed=1", transaction)
+
+        harness = f"""\
+set -u
+test_root=$1
+failure_mode=$2
+runtime_root="$test_root/runtime"
+release_root="$test_root/releases"
+mkdir -p "$runtime_root" "$release_root"
+current_env="$runtime_root/compose.env"
+active_file="$release_root/active-colour"
+current_manifest="$release_root/current-manifest.json"
+current_config_binding="$release_root/current-config.json"
+release_current="$release_root/current"
+state_tmp="$runtime_root/state.target"
+active_tmp="$release_root/active.target"
+manifest_tmp="$release_root/manifest.target"
+config_tmp="$release_root/config.target"
+current_tmp="$release_root/current.target"
+previous_state_backup="$runtime_root/state.previous"
+previous_active_backup="$release_root/active.previous"
+previous_manifest_backup="$release_root/manifest.previous"
+previous_config_backup="$release_root/config.previous"
+previous_current_backup="$release_root/current.previous"
+for coordinate in \
+  "$current_env|$previous_state_backup|state" \
+  "$active_file|$previous_active_backup|active" \
+  "$current_manifest|$previous_manifest_backup|manifest" \
+  "$current_config_binding|$previous_config_backup|config" \
+  "$release_current|$previous_current_backup|current"; do
+  destination=${{coordinate%%|*}}
+  remainder=${{coordinate#*|}}
+  backup=${{remainder%%|*}}
+  value=${{remainder#*|}}
+  printf 'old-%s\n' "$value" > "$destination"
+  printf 'old-%s\n' "$value" > "$backup"
+done
+printf 'new-state\n' > "$state_tmp"
+printf 'new-active\n' > "$active_tmp"
+printf 'new-manifest\n' > "$manifest_tmp"
+printf 'new-config\n' > "$config_tmp"
+printf 'new-current\n' > "$current_tmp"
+promoted_restore_tmp=
+promoted_state_recovery_failed=0
+promote_signal_phase=switching
+origin_edge_replacement_active=1
+origin_edge_tunnel_retain=1
+restore_promote_signal_traps() {{ :; }}
+chown() {{ :; }}
+stat() {{ printf '%s\n' 0:0:600:1; }}
+mv_call_count=0
+mv() {{
+  mv_call_count=$((mv_call_count + 1))
+  if [ "$failure_mode" = move ] && [ "$mv_call_count" -eq 2 ]; then
+    return 1
+  fi
+  if [ "$failure_mode" = restore ] &&
+     {{ [ "$mv_call_count" -eq 2 ] || [ "$mv_call_count" -eq 3 ]; }}; then
+    return 1
+  fi
+  command mv "$@"
+}}
+fsync_failed=0
+fsync_promote_path() {{
+  if [ "$failure_mode" = fsync ] && [ "$1" = "$runtime_root" ] &&
+     [ "$fsync_failed" -eq 0 ]; then
+    fsync_failed=1
+    return 1
+  fi
+  return 0
+}}
+{transaction}
+commit_status=0
+commit_promoted_state || commit_status=$?
+printf '%s:%s\n' "$commit_status" "$promoted_state_recovery_failed"
+for destination in "$current_env" "$active_file" "$current_manifest" \
+  "$current_config_binding" "$release_current"; do
+  cat "$destination"
+done
+"""
+        for failure_mode in ("move", "fsync"):
+            with self.subTest(failure_mode=failure_mode), tempfile.TemporaryDirectory() as temporary_root:
+                result = self.run_posix_shell(harness, Path(temporary_root).as_posix(), failure_mode)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.splitlines()[0], "1:0")
+            self.assertEqual(
+                result.stdout.splitlines()[1:],
+                ["old-state", "old-active", "old-manifest", "old-config", "old-current"],
+            )
+
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            failed_restore = self.run_posix_shell(harness, root.as_posix(), "restore")
+            backups_remain = all(
+                (root / relative).is_file()
+                for relative in (
+                    "runtime/state.previous",
+                    "releases/active.previous",
+                    "releases/manifest.previous",
+                    "releases/config.previous",
+                    "releases/current.previous",
+                )
+            )
+        self.assertEqual(failed_restore.returncode, 0, failed_restore.stderr)
+        self.assertEqual(failed_restore.stdout.splitlines()[0], "1:1")
+        self.assertTrue(backups_remain)
+
+    def test_promote_signal_restores_after_switch_and_acknowledges_only_commit(self) -> None:
+        script = self.read("ops/promote.sh")
+        cleanup_start = script.index("cleanup() {", script.index('origin_probe_container=""'))
+        control_end_marker = "restore_promote_signal_traps || exit 78"
+        cleanup_end = script.index(control_end_marker, cleanup_start) + len(control_end_marker)
+        signal_control = script[cleanup_start:cleanup_end]
+        self.assertIn("trap cleanup EXIT", signal_control)
+        self.assertIn("terminate_promote_signal 143", signal_control)
+        self.assertIn("restore_previous_runtime", signal_control)
+        self.assertIn("committed)", signal_control)
+        self.assertNotIn("trap cleanup EXIT HUP", script)
+
+        switch_call = script.index(
+            'switch_edge "$colour_env" "$colour_config_root" "$colour"'
+        )
+        switching_phase = script.rindex("promote_signal_phase=switching", 0, switch_call)
+        commit_start = script.index("commit_promoted_state() {")
+        commit_phase = script.index("promote_signal_phase=committed", commit_start)
+        self.assertLess(switching_phase, switch_call)
+        self.assertLess(switch_call, commit_phase)
+        self.assertIn("trap '' HUP INT QUIT TERM PIPE || return 1", script[commit_start:commit_phase])
+        access_start = script.index("verify_cloudflare_access_restored() (")
+        access_end = script.index("\n)", access_start)
+        access_probe = script[access_start:access_end]
+        self.assertIn("trap cleanup_access_probe EXIT", access_probe)
+        self.assertIn("trap 'exit 143' TERM", access_probe)
+
+        harness = f"""\
+set -u
+promote_signal_phase=$1
+test_root=$2
+restore_log="$test_root/restored"
+origin_probe_container=
+state_tmp="$test_root/state.tmp"
+active_tmp="$test_root/active.tmp"
+manifest_tmp="$test_root/manifest.tmp"
+config_tmp="$test_root/config.tmp"
+printf '%s\n' tmp > "$state_tmp"
+restore_previous_runtime() {{ printf '%s\n' restored > "$restore_log"; }}
+{signal_control}
+kill -TERM "$$"
+exit 99
+"""
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            before = self.run_posix_shell(harness, "pre-switch", root.as_posix())
+            before_restored = (root / "restored").exists()
+        self.assertEqual(before.returncode, 143, before.stderr)
+        self.assertFalse(before_restored)
+
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            switching = self.run_posix_shell(harness, "switching", root.as_posix())
+            switching_restored = (root / "restored").is_file()
+        self.assertEqual(switching.returncode, 143, switching.stderr)
+        self.assertTrue(switching_restored)
+
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            committed = self.run_posix_shell(harness, "committed", root.as_posix())
+            committed_restored = (root / "restored").exists()
+        self.assertEqual(committed.returncode, 0, committed.stderr)
+        self.assertFalse(committed_restored)
 
     def test_smoke_separates_internal_full_from_public_minimal(self) -> None:
         smoke = self.read("infra/public_smoke.py")
@@ -725,6 +1158,65 @@ class DeploymentContractTests(TestCase):
         self.assertIn("does not match the trusted CI release binding", script)
         self.assertIn("'-F', $configPath", script)
         self.assertIn("project-snow-ssh-config", script)
+        self.assertIn("OriginPrivateKeyPath", script)
+        self.assertIn("origin-key-$Sha-$originPrivateKeySha256.pem", script)
+        self.assertIn("Get-FileHash -Algorithm SHA256", script)
+        self.assertIn("chmod 0600", script)
+        self.assertIn("rm -f -- '$originPrivateKeyRemotePath'", script)
+
+    def test_origin_tls_delivery_is_exact_private_and_additive(self) -> None:
+        installer = self.read("scripts/install_origin_tls.py")
+        deploy = self.read("ops/deploy.sh")
+        runner = self.read("ops/project-snow-release")
+        promote = self.read("ops/promote.sh")
+        manifest = self.read("scripts/release_manifest.py")
+        compose = self.read("compose.prod.yml")
+        local_deploy = self.read("scripts/deploy.ps1")
+
+        for public_path in (
+            "config/origin-edge/origin-cert.pem",
+            "config/origin-edge/aop-ca.pem",
+        ):
+            self.assertIn(public_path, manifest)
+            self.assertIn(public_path, deploy)
+            self.assertIn(public_path, local_deploy)
+            self.assertNotIn(public_path.replace(".pem", "-key.pem"), manifest)
+        self.assertIn('b"PRIVATE KEY" in payload', manifest)
+        self.assertIn("direct_origin_tls", manifest)
+        self.assertIn("project-snow-origin-tls-1", runner)
+        self.assertIn("install_origin_tls.py", deploy)
+        self.assertIn("/srv/project-snow/inbox", installer)
+        self.assertIn("/etc/project-snow/origin-edge", installer)
+        self.assertNotIn('parser.add_argument("--inbox"', installer)
+        self.assertNotIn('parser.add_argument("--destination-root"', installer)
+
+        for security_gate in (
+            "os.O_NOFOLLOW",
+            "os.O_NONBLOCK",
+            "os.fstat(descriptor)",
+            "stat.S_ISREG",
+            "metadata.st_uid",
+            "metadata.st_gid",
+            "stat.S_IMODE(metadata.st_mode)",
+            "metadata.st_nlink != 1",
+            "metadata.st_size",
+            "hashlib.sha256(payload).hexdigest()",
+            "path.unlink()",
+            "os.rename(candidate, final_bundle)",
+            "os.fsync(descriptor)",
+        ):
+            self.assertIn(security_gate, installer)
+        self.assertIn("origin private key does not match the Git-bound certificate", installer)
+        self.assertIn('"-passin", "pass:"', installer)
+        self.assertIn("one exact origin private key is required", installer)
+        self.assertIn("uploaded origin key differs from the immutable installed key", installer)
+        self.assertIn('mode=0o600', installer)
+        self.assertIn('mode=0o400', installer)
+        self.assertIn("ORIGIN_TLS_ROOT", compose)
+        self.assertIn(
+            "^/etc/project-snow/origin-edge/releases/[0-9a-f]{64}$", promote
+        )
+        self.assertIn("map({Type, Source, Destination, RW})", promote)
 
     def test_deploy_account_has_only_a_root_owned_release_runner(self) -> None:
         runner = self.read("ops/project-snow-release")
@@ -848,6 +1340,28 @@ class DeploymentContractTests(TestCase):
         self.assertIn('/bin/sh -n "$runner_upgrade_new"', deploy)
         self.assertIn('stat -c %u:%g:%a:%h "$release_runner_path"', deploy)
         self.assertIn('mv -f -- "$runner_upgrade_new" "$release_runner_path"', deploy)
+        install_start = deploy.index("install_verified_release_runner() {")
+        install_end = deploy.index(
+            "\n}\n\nrestore_release_runner_if_pending()", install_start
+        )
+        install_body = deploy[install_start:install_end]
+        for explicit_failure in (
+            'expected_runner_sha="$(jq -r',
+            'runner_upgrade_new="$(mktemp /usr/local/sbin/.project-snow-release.new.',
+            '> "$runner_upgrade_new" || return 1',
+            'chown root:root "$runner_upgrade_new" || return 1',
+            'chmod 0755 "$runner_upgrade_new" || return 1',
+            'prepared_runner_sha="$(sha256sum',
+            'prepared_runner_blob="$(git -C "$release_repository" hash-object',
+            'fsync_release_path "$runner_upgrade_new" || return 1',
+            'runner_upgrade_backup="$(mktemp /usr/local/sbin/.project-snow-release.rollback.',
+            'install -o root -g root -m 0755 "$release_runner_path" "$runner_upgrade_backup" || return 1',
+            'fsync_release_path "$runner_upgrade_backup" || return 1',
+            'mv -f -- "$runner_upgrade_new" "$release_runner_path" || return 1',
+            'fsync_release_path /usr/local/sbin || return 1',
+            'verify_new_release_runner_status "$expected_runner_sha" || return 1',
+        ):
+            self.assertIn(explicit_failure, install_body)
         state_set = deploy.index("runner_upgrade_installed=1", deploy.index("install_verified_release_runner()"))
         atomic_replace = deploy.index('mv -f -- "$runner_upgrade_new" "$release_runner_path"')
         self.assertLess(state_set, atomic_replace)
@@ -857,16 +1371,53 @@ class DeploymentContractTests(TestCase):
         self.assertIn("release_runner_commit_is_durable", deploy)
         self.assertIn('stat -c %u:%g:%a:%h "$colour_marker"', deploy)
         self.assertIn('installed_runner_sha" = "$target_runner_sha', deploy)
+        durable_start = deploy.index("release_runner_commit_is_durable() {")
+        durable_end = deploy.index("\n}\n\nrestore_stage_signal_traps()", durable_start)
+        durable_body = deploy[durable_start:durable_end]
+        self.assertIn('[ "$runner_upgrade_marker_synced" -eq 1 ]', durable_body)
+        self.assertIn('= "$runner_upgrade_marker_identity"', durable_body)
 
         firewall_gate = deploy.rindex('install_direct_origin_firewall "$candidate_config_root"')
         upgrade = deploy.rindex("install_verified_release_runner || {")
-        marker = deploy.rindex('mv -f "$candidate_marker" "$colour_marker"')
-        committed = deploy.index("runner_upgrade_committed=1", marker)
+        marker = deploy.rindex("commit_colour_marker || exit 78")
         self.assertLess(firewall_gate, upgrade)
         self.assertLess(upgrade, marker)
-        self.assertLess(marker, committed)
+        marker_start = deploy.index("commit_colour_marker() {")
+        marker_end = deploy.index("\n}\n\nconfiguration_paths_for_root()", marker_start)
+        marker_body = deploy[marker_start:marker_end]
+        marker_rename = marker_body.index('mv -f -- "$candidate_marker" "$colour_marker"')
+        marker_fsync = marker_body.index('fsync_release_path "$colour_release_root"')
+        receipt_rename = marker_body.index('mv -f -- "$candidate_receipt" "$colour_receipt"')
+        receipt_fsync = marker_body.index(
+            'fsync_release_path "$colour_release_root"', receipt_rename
+        )
+        marker_synced = marker_body.index("runner_upgrade_marker_synced=1")
+        marker_committed = marker_body.index("runner_upgrade_committed=1")
+        self.assertLess(marker_rename, marker_fsync)
+        self.assertLess(marker_fsync, receipt_rename)
+        self.assertLess(receipt_rename, receipt_fsync)
+        self.assertLess(receipt_fsync, marker_synced)
+        self.assertLess(marker_synced, marker_committed)
+        self.assertIn("trap '' HUP INT QUIT TERM PIPE || return 1", marker_body)
+        self.assertIn("trap 'exit 131' QUIT || return 1", deploy)
+        self.assertIn("trap 'exit 141' PIPE || return 1", deploy)
+        self.assertIn('mv -f -- "$previous_colour_marker_backup" "$colour_marker"', deploy)
+        self.assertIn('mv -f -- "$previous_colour_receipt_backup" "$colour_receipt"', deploy)
+        self.assertIn("failed to durably roll back an unsynced colour marker", marker_body)
+        for candidate_sync in (
+            'fsync_release_path "$candidate_public_env" || exit 78',
+            'fsync_release_path "$candidate_marker" || exit 78',
+            'fsync_release_path "$candidate_receipt" || exit 78',
+            'fsync_release_path "$candidate_manifest" || exit 78',
+            'fsync_release_path "$candidate_env" || exit 78',
+            'fsync_release_path "$candidate_config_binding_tmp" || exit 78',
+            'fsync_release_path "$colour_env_root" || exit 78',
+            'fsync_release_path "$colour_release_root" || exit 78',
+        ):
+            self.assertIn(candidate_sync, deploy)
         self.assertIn("verify_new_release_runner_status", deploy)
         self.assertIn(".release_runner_sha256 == $runner_sha", deploy)
+        self.assertIn(".runner_controller_binding == true", deploy)
         self.assertIn(".host_safety_preflight == true", deploy)
 
         self.assertIn("PROJECT_SNOW_RELEASE_PREVIOUS_CONTROLLER_SHA", runner)
@@ -891,6 +1442,641 @@ class DeploymentContractTests(TestCase):
         )
         self.assertNotIn("docker", "\n".join(rules).casefold())
         self.assertNotIn("/bin/sh", "\n".join(rules))
+
+    def test_runner_upgrade_acknowledges_only_the_exact_durable_attempt(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        cleanup_start = deploy.index("cleanup() {", deploy.index('candidate_env="$(mktemp'))
+        cleanup_end = deploy.index("\n}\ntrap cleanup EXIT", cleanup_start) + 2
+        cleanup_function = deploy[cleanup_start:cleanup_end]
+        harness = f"""\
+set -u
+durable_case=$1
+failure_case=$2
+release_runner_commit_is_durable() {{ [ "$durable_case" = yes ]; }}
+restore_release_runner_if_pending() {{ return 0; }}
+runner_upgrade_committed=0
+runner_upgrade_new=
+runner_upgrade_backup=
+candidate_env=
+candidate_manifest=
+candidate_marker=
+candidate_receipt=
+candidate_config_binding_tmp=
+candidate_config_tmp=
+candidate_public_env=
+previous_colour_marker_backup=
+previous_colour_receipt_backup=
+stage_publication_recovery_failed=0
+{cleanup_function}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 131' QUIT
+trap 'exit 143' TERM
+trap 'exit 141' PIPE
+case "$failure_case" in
+  hup) kill -HUP "$$"; exit 99 ;;
+  quit) kill -QUIT "$$"; exit 99 ;;
+  term) kill -TERM "$$"; exit 99 ;;
+  pipe) kill -PIPE "$$"; exit 99 ;;
+  *) exit 98 ;;
+esac
+"""
+        durable = self.run_posix_shell(harness, "yes", "term")
+        self.assertEqual(durable.returncode, 0, durable.stderr)
+        not_durable = self.run_posix_shell(harness, "no", "term")
+        self.assertEqual(not_durable.returncode, 143, not_durable.stderr)
+        durable_hup = self.run_posix_shell(harness, "yes", "hup")
+        self.assertEqual(durable_hup.returncode, 0, durable_hup.stderr)
+        not_durable_hup = self.run_posix_shell(harness, "no", "hup")
+        self.assertEqual(not_durable_hup.returncode, 129, not_durable_hup.stderr)
+        durable_quit = self.run_posix_shell(harness, "yes", "quit")
+        self.assertEqual(durable_quit.returncode, 0, durable_quit.stderr)
+        not_durable_quit = self.run_posix_shell(harness, "no", "quit")
+        self.assertEqual(not_durable_quit.returncode, 131, not_durable_quit.stderr)
+        durable_pipe = self.run_posix_shell(harness, "yes", "pipe")
+        self.assertEqual(durable_pipe.returncode, 0, durable_pipe.stderr)
+        not_durable_pipe = self.run_posix_shell(harness, "no", "pipe")
+        self.assertEqual(not_durable_pipe.returncode, 141, not_durable_pipe.stderr)
+
+    def test_unsynced_colour_marker_is_rolled_back_before_runner_failure(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        functions_start = deploy.index("restore_stage_signal_traps() {")
+        functions_end = deploy.index("\n}\n\nconfiguration_paths_for_root()", functions_start) + 2
+        marker_functions = deploy[functions_start:functions_end]
+        harness = f"""\
+set -u
+test_root=$1
+mkdir -p "$test_root"
+colour_release_root="$test_root"
+colour_marker="$test_root/blue"
+candidate_marker="$test_root/blue.candidate"
+previous_colour_marker_backup="$test_root/blue.rollback"
+previous_colour_receipt_backup=
+release_attempt_nonce=
+candidate_receipt=
+colour_receipt="$test_root/blue-stage-receipt"
+receipt_published=0
+stage_publication_recovery_failed=0
+printf '%s\n' old > "$colour_marker"
+printf '%s\n' old > "$previous_colour_marker_backup"
+printf '%s\n' new > "$candidate_marker"
+runner_upgrade_marker_synced=0
+runner_upgrade_committed=0
+sync_calls=0
+fsync_release_path() {{
+  sync_calls=$((sync_calls + 1))
+  [ "$sync_calls" -gt 1 ]
+}}
+{marker_functions}
+if commit_colour_marker; then
+  exit 90
+fi
+[ "$(cat "$colour_marker")" = old ]
+[ "$runner_upgrade_marker_synced" -eq 0 ]
+[ "$runner_upgrade_committed" -eq 0 ]
+[ -z "$previous_colour_marker_backup" ]
+"""
+        with tempfile.TemporaryDirectory() as temporary_root:
+            result = self.run_posix_shell(harness, Path(temporary_root).as_posix())
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unsynced_attempt_receipt_restores_both_prior_records(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        functions_start = deploy.index("restore_stage_signal_traps() {")
+        functions_end = deploy.index("\n}\n\nconfiguration_paths_for_root()", functions_start) + 2
+        marker_functions = deploy[functions_start:functions_end]
+        nonce = "7" * 64
+        harness = f"""\
+set -u
+test_root=$1
+mkdir -p "$test_root"
+colour_release_root="$test_root"
+colour_marker="$test_root/blue"
+colour_receipt="$test_root/blue-stage-receipt"
+candidate_marker="$test_root/blue.candidate"
+candidate_receipt="$test_root/blue-stage-receipt.candidate"
+previous_colour_marker_backup="$test_root/blue.rollback"
+previous_colour_receipt_backup="$test_root/blue-stage-receipt.rollback"
+printf '%s\n' old-marker > "$colour_marker"
+printf '%s\n' old-receipt > "$colour_receipt"
+printf '%s\n' old-marker > "$previous_colour_marker_backup"
+printf '%s\n' old-receipt > "$previous_colour_receipt_backup"
+printf '%s\n' new-marker > "$candidate_marker"
+printf '%s\n' new-receipt > "$candidate_receipt"
+release_attempt_nonce={nonce}
+runner_upgrade_marker_synced=0
+runner_upgrade_receipt_synced=0
+runner_upgrade_committed=0
+stage_publication_recovery_failed=0
+receipt_published=0
+sync_calls=0
+fsync_release_path() {{
+  sync_calls=$((sync_calls + 1))
+  [ "$sync_calls" -ne 2 ]
+}}
+{marker_functions}
+if commit_colour_marker; then
+  exit 90
+fi
+[ "$(cat "$colour_marker")" = old-marker ]
+[ "$(cat "$colour_receipt")" = old-receipt ]
+[ "$runner_upgrade_marker_synced" -eq 0 ]
+[ "$runner_upgrade_receipt_synced" -eq 0 ]
+[ "$runner_upgrade_committed" -eq 0 ]
+[ -z "$previous_colour_marker_backup" ]
+[ -z "$previous_colour_receipt_backup" ]
+"""
+        with tempfile.TemporaryDirectory() as temporary_root:
+            result = self.run_posix_shell(harness, Path(temporary_root).as_posix())
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_failed_marker_recovery_preserves_the_only_root_backup(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        functions_start = deploy.index("restore_stage_signal_traps() {")
+        functions_end = deploy.index("\n}\n\nconfiguration_paths_for_root()", functions_start) + 2
+        marker_functions = deploy[functions_start:functions_end]
+        cleanup_start = deploy.index("cleanup() {", deploy.index('candidate_env="$(mktemp'))
+        cleanup_end = deploy.index("\n}\ntrap cleanup EXIT", cleanup_start) + 2
+        cleanup_function = deploy[cleanup_start:cleanup_end]
+        harness = f"""\
+set -u
+test_root=$1
+mkdir -p "$test_root"
+colour_release_root="$test_root"
+colour_marker="$test_root/blue"
+colour_receipt="$test_root/blue-stage-receipt"
+candidate_marker="$test_root/blue.candidate"
+candidate_receipt=
+previous_colour_marker_backup="$test_root/blue.rollback"
+previous_colour_receipt_backup=
+printf '%s\n' old > "$previous_colour_marker_backup"
+printf '%s\n' new > "$candidate_marker"
+release_attempt_nonce=
+runner_upgrade_marker_synced=0
+runner_upgrade_receipt_synced=0
+runner_upgrade_committed=0
+stage_publication_recovery_failed=0
+receipt_published=0
+mv_calls=0
+mv() {{
+  mv_calls=$((mv_calls + 1))
+  if [ "$mv_calls" -eq 1 ]; then
+    command mv "$@"
+  else
+    return 1
+  fi
+}}
+fsync_release_path() {{ return 1; }}
+{marker_functions}
+if commit_colour_marker; then
+  exit 90
+fi
+[ "$stage_publication_recovery_failed" -eq 1 ]
+[ -f "$previous_colour_marker_backup" ]
+release_runner_commit_is_durable() {{ return 1; }}
+restore_release_runner_if_pending() {{ return 0; }}
+runner_upgrade_new=
+runner_upgrade_backup=
+candidate_env=
+candidate_manifest=
+candidate_config_binding_tmp=
+candidate_config_tmp=
+candidate_public_env=
+{cleanup_function}
+trap cleanup EXIT
+exit 78
+"""
+        with tempfile.TemporaryDirectory() as temporary_root:
+            backup = Path(temporary_root) / "blue.rollback"
+            result = self.run_posix_shell(harness, Path(temporary_root).as_posix())
+            backup_preserved = backup.is_file()
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertTrue(backup_preserved)
+
+    def test_parent_nonzero_fallback_requires_this_attempts_durable_receipt(self) -> None:
+        runner = self.read("ops/project-snow-release")
+        durable_start = runner.index("stage_commit_is_durable() {")
+        durable_end = runner.index("\n}\n\ncopy_inbox_manifest()", durable_start) + 2
+        durable_function = runner[durable_start:durable_end]
+        old_nonce = "1" * 64
+        attempt_nonce = "2" * 64
+        target_runner_sha = "3" * 64
+        target_sha = "4" * 40
+        public_image = f"registry.invalid/public@sha256:{'5' * 64}"
+        embedding_image = f"registry.invalid/embedding@sha256:{'6' * 64}"
+        harness = f"""\
+set -u
+test_root=$1
+mkdir -p "$test_root"
+colour_root="$test_root"
+repo="$test_root/repo"
+runner_path="$test_root/runner"
+manifest="$test_root/manifest.json"
+printf '%s\n' runner > "$runner_path"
+printf '%s\n' manifest > "$manifest"
+printf '%s\n' "blue {target_sha} {public_image} {embedding_image}" > "$colour_root/blue"
+printf '%s\n' "project-snow-stage-receipt-1 {old_nonce} blue {target_sha} {public_image} {embedding_image}" > "$colour_root/blue-stage-receipt"
+fsync_release_path() {{ return 0; }}
+jq() {{ printf '%s\n' {target_runner_sha}; }}
+git() {{ printf '%s\n' {target_sha}; }}
+stat() {{
+  if [ "$3" = "$runner_path" ]; then
+    printf '%s\n' 0:0:755:1
+  else
+    printf '%s\n' 0:0:600:1
+  fi
+}}
+sha256sum() {{ printf '%s  %s\n' {target_runner_sha} "$1"; }}
+stage_configuration_binding_is_durable() {{ return 0; }}
+{durable_function}
+if stage_commit_is_durable "$manifest" blue {target_sha} \
+  {public_image} {embedding_image} {attempt_nonce}; then
+  exit 90
+fi
+printf '%s\n' "project-snow-stage-receipt-1 {attempt_nonce} blue {target_sha} {public_image} {embedding_image}" > "$colour_root/blue-stage-receipt"
+stage_commit_is_durable "$manifest" blue {target_sha} \
+  {public_image} {embedding_image} {attempt_nonce}
+"""
+        with tempfile.TemporaryDirectory() as temporary_root:
+            result = self.run_posix_shell(harness, Path(temporary_root).as_posix())
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_release_runner_term_waits_for_child_and_restores_only_non_durable_stage(self) -> None:
+        runner = self.read("ops/project-snow-release")
+        control_start = runner.index('cleanup_paths=""')
+        control_end = runner.index("\nrequire_root_controlled_repo()", control_start)
+        signal_control = runner[control_start:control_end]
+        run_stage_start = runner.index("run_stage() {")
+        run_stage_end = runner.index("\n}\n\nrun_switch()", run_stage_start)
+        run_stage = runner[run_stage_start:run_stage_end]
+        self.assertIn("stage_signal_child_expected=1", run_stage)
+        self.assertIn("stage_signal_child_pid=$!", run_stage)
+        self.assertIn('wait "$stage_signal_child_pid" || stage_child_status=$?', run_stage)
+        self.assertIn('exec /usr/bin/env -i', run_stage)
+        self.assertIn('stage_signal_restore_controller="$previous_runner_controller"', run_stage)
+        self.assertIn("trap 'terminate_release_signal 143 TERM' TERM", signal_control)
+        self.assertIn("trap 'terminate_release_signal 131 QUIT' QUIT", signal_control)
+        self.assertIn("trap 'terminate_release_signal 141 PIPE' PIPE", signal_control)
+
+        harness = f"""\
+set -u
+durable_case=$1
+test_root=$2
+mkdir -p "$test_root"
+manifest="$test_root/verified-manifest.json"
+checked="$test_root/checked-before-cleanup"
+restored="$test_root/restored-controller"
+printf '%s\n' verified > "$manifest"
+stage_commit_is_durable() {{
+  [ -f "$1" ] || {{ printf '%s\n' deleted > "$checked"; return 1; }}
+  printf '%s\n' present > "$checked"
+  [ "$durable_case" = yes ]
+}}
+checkout_controller() {{ printf '%s\n' "$1" > "$restored"; }}
+{signal_control}
+cleanup_paths="$manifest"
+stage_signal_manifest="$manifest"
+stage_signal_colour=blue
+stage_signal_sha={'a' * 40}
+stage_signal_public=public
+stage_signal_embedding=embedding
+stage_signal_nonce={'b' * 64}
+stage_signal_can_ack=1
+stage_signal_restore_controller={'c' * 40}
+stage_signal_child_expected=1
+parent_pid=$$
+(
+  trap 'exit 143' TERM
+  while :; do sleep 1; done
+) &
+stage_signal_child_pid=$!
+( sleep 0.2; kill -TERM "$parent_pid" ) &
+wait "$stage_signal_child_pid" || true
+exit 99
+"""
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            non_durable = self.run_posix_shell(harness, "no", root.as_posix())
+            non_durable_checked = (root / "checked-before-cleanup").read_text().strip()
+            restored_controller = (root / "restored-controller").read_text().strip()
+            manifest_removed = not (root / "verified-manifest.json").exists()
+        self.assertEqual(non_durable.returncode, 143, non_durable.stderr)
+        self.assertEqual(non_durable_checked, "present")
+        self.assertEqual(restored_controller, "c" * 40)
+        self.assertTrue(manifest_removed)
+
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            durable = self.run_posix_shell(harness, "yes", root.as_posix())
+            durable_checked = (root / "checked-before-cleanup").read_text().strip()
+            restored_exists = (root / "restored-controller").exists()
+            manifest_removed = not (root / "verified-manifest.json").exists()
+        self.assertEqual(durable.returncode, 0, durable.stderr)
+        self.assertEqual(durable_checked, "present")
+        self.assertFalse(restored_exists)
+        self.assertTrue(manifest_removed)
+
+    def test_release_runner_term_forwards_to_switch_and_requires_durable_ack(self) -> None:
+        runner = self.read("ops/project-snow-release")
+        control_start = runner.index('cleanup_paths=""')
+        control_end = runner.index("\nrequire_root_controlled_repo()", control_start)
+        signal_control = runner[control_start:control_end]
+        run_switch_start = runner.index("run_switch() {")
+        run_switch_end = runner.index("\n}\n\nverified_version_array()", run_switch_start)
+        run_switch = runner[run_switch_start:run_switch_end]
+        durable_start = runner.index("switch_commit_matches_expected() {")
+        durable_end = runner.index("\n}\n\nstage_commit_is_durable()", durable_start)
+        durable = runner[durable_start:durable_end]
+        self.assertIn("release_signal_child_operation=switch", run_switch)
+        self.assertIn("stage_signal_child_expected=1", run_switch)
+        self.assertIn("stage_signal_child_pid=$!", run_switch)
+        self.assertIn('wait "$stage_signal_child_pid" || switch_child_status=$?', run_switch)
+        self.assertIn("switch_commit_is_durable || return 74", run_switch)
+        self.assertIn("fsync_release_path /srv/project-snow/releases || return 1", durable)
+        self.assertIn("/srv/project-snow/runtime/compose.env", durable)
+        self.assertIn("/srv/project-snow/releases/current-manifest.json", durable)
+        self.assertIn("/srv/project-snow/releases/current-config.json", durable)
+        self.assertIn('runner_matches_controller "$switch_signal_controller_sha"', durable)
+        self.assertIn("live_origin_edge_binding_matches_expected", durable)
+        self.assertIn('fsync_release_path "$durable_live_binding" || return 1', durable)
+        self.assertIn('fsync_release_path "$durable_live_env" || return 1', durable)
+        self.assertIn("fsync_release_path /srv/project-snow/runtime/origin-edge || return 1", durable)
+
+        harness = f"""\
+set -u
+durable_case=$1
+test_root=$2
+ack_log="$test_root/ack-checked"
+stage_commit_is_durable() {{ return 1; }}
+checkout_controller() {{ return 1; }}
+switch_commit_is_durable() {{
+  printf '%s\n' checked > "$ack_log"
+  [ "$durable_case" = yes ]
+}}
+{signal_control}
+release_signal_child_operation=switch
+switch_signal_can_ack=1
+stage_signal_child_expected=1
+parent_pid=$$
+(
+  if [ "$durable_case" = yes ]; then
+    trap 'exit 0' TERM
+  else
+    trap 'exit 143' TERM
+  fi
+  while :; do sleep 1; done
+) &
+stage_signal_child_pid=$!
+( sleep 0.2; kill -TERM "$parent_pid" ) &
+wait "$stage_signal_child_pid" || true
+exit 99
+"""
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            non_durable = self.run_posix_shell(harness, "no", root.as_posix())
+            non_durable_checked = (root / "ack-checked").is_file()
+        self.assertEqual(non_durable.returncode, 143, non_durable.stderr)
+        self.assertTrue(non_durable_checked)
+
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            durable_result = self.run_posix_shell(harness, "yes", root.as_posix())
+            durable_checked = (root / "ack-checked").is_file()
+        self.assertEqual(durable_result.returncode, 0, durable_result.stderr)
+        self.assertTrue(durable_checked)
+
+    def test_future_runner_retry_preserves_current_or_resolves_exact_predecessor(self) -> None:
+        runner = self.read("ops/project-snow-release")
+        resolver_start = runner.index("resolve_installed_runner_controller() {")
+        resolver_end = runner.index("\n}\n\nstage_commit_is_durable()", resolver_start) + 2
+        resolver = runner[resolver_start:resolver_end]
+        self.assertIn('rev-list --first-parent "$runner_target_sha"', resolver)
+        self.assertNotIn("-- App/ops/project-snow-release", resolver)
+
+        git_candidates = (
+            shutil.which("git"),
+            "C:/Program Files/Git/cmd/git.exe",
+        )
+        git = next((Path(candidate) for candidate in git_candidates if candidate and Path(candidate).is_file()), None)
+        self.assertIsNotNone(git, "Git is required for runner ancestry contract tests.")
+
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            repository = root / "repo"
+            installed_runner = root / "installed-project-snow-release"
+            repository.mkdir()
+
+            def git_run(*arguments: str) -> str:
+                completed = subprocess.run(
+                    [str(git), "-C", str(repository), *arguments],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                return completed.stdout.strip()
+
+            subprocess.run([str(git), "init", str(repository)], check=True, capture_output=True)
+            git_run("config", "user.email", "contracts@example.invalid")
+            git_run("config", "user.name", "Deployment Contracts")
+            git_run("config", "core.autocrlf", "false")
+            runner_path = repository / "App" / "ops" / "project-snow-release"
+            runner_path.parent.mkdir(parents=True)
+            predecessor_payload = b"#!/bin/sh\necho runner-n\n"
+            runner_path.write_bytes(predecessor_payload)
+            git_run("add", "App/ops/project-snow-release")
+            git_run("update-index", "--chmod=+x", "App/ops/project-snow-release")
+            git_run("commit", "-m", "runner n")
+            original_controller = git_run("rev-parse", "HEAD")
+            (repository / "README.md").write_text("intermediate\n", encoding="utf-8")
+            git_run("add", "README.md")
+            git_run("commit", "-m", "intermediate controller")
+            nearest_predecessor = git_run("rev-parse", "HEAD")
+            target_payload = b"#!/bin/sh\necho runner-n-plus-one\n"
+            runner_path.write_bytes(target_payload)
+            git_run("add", "App/ops/project-snow-release")
+            git_run("commit", "-m", "runner n plus one")
+            target = git_run("rev-parse", "HEAD")
+            installed_runner.write_bytes(predecessor_payload)
+            installed_sha = hashlib.sha256(predecessor_payload).hexdigest()
+
+            harness = f"""\
+set -eu
+repo=$1
+runner_path=$2
+stat() {{
+  if [ "$#" -eq 3 ] && [ "$1" = -c ] && [ "$2" = %u:%g:%a:%h ] && [ "$3" = "$runner_path" ]; then
+    printf '%s\n' 0:0:755:1
+  else
+    command stat "$@"
+  fi
+}}
+{resolver}
+resolve_installed_runner_controller "$3" "$4" "$5"
+"""
+            normal = self.run_posix_shell(
+                harness,
+                repository.as_posix(),
+                installed_runner.as_posix(),
+                target,
+                installed_sha,
+                original_controller,
+            )
+            interrupted_retry = self.run_posix_shell(
+                harness,
+                repository.as_posix(),
+                installed_runner.as_posix(),
+                target,
+                installed_sha,
+                target,
+            )
+            installed_runner.write_bytes(target_payload)
+            installed_target_sha = hashlib.sha256(target_payload).hexdigest()
+            runner_advanced_before_controller_restore = self.run_posix_shell(
+                harness,
+                repository.as_posix(),
+                installed_runner.as_posix(),
+                target,
+                installed_target_sha,
+                original_controller,
+            )
+        self.assertEqual(normal.returncode, 0, normal.stderr)
+        self.assertEqual(normal.stdout.strip(), original_controller)
+        self.assertEqual(interrupted_retry.returncode, 0, interrupted_retry.stderr)
+        self.assertEqual(interrupted_retry.stdout.strip(), nearest_predecessor)
+        self.assertEqual(
+            runner_advanced_before_controller_restore.returncode,
+            0,
+            runner_advanced_before_controller_restore.stderr,
+        )
+        self.assertEqual(runner_advanced_before_controller_restore.stdout.strip(), target)
+
+        run_stage_start = runner.index("run_stage() {")
+        run_stage_end = runner.index("\n}\n\nrun_switch()", run_stage_start)
+        run_stage = runner[run_stage_start:run_stage_end]
+        resolver_call = run_stage.index("resolve_installed_runner_controller")
+        target_checkout = run_stage.index('checkout_controller "$requested_sha"')
+        self.assertLess(resolver_call, target_checkout)
+        self.assertIn(
+            'PROJECT_SNOW_RELEASE_PREVIOUS_CONTROLLER_SHA="$previous_runner_controller"',
+            run_stage,
+        )
+        self.assertIn('PROJECT_SNOW_RELEASE_ATTEMPT_NONCE="$stage_attempt_nonce"', run_stage)
+        self.assertNotIn('checkout_controller "$previous_controller"', run_stage)
+        self.assertIn('checkout_controller "$previous_runner_controller"', run_stage)
+        durable_gate = run_stage.index("if stage_commit_is_durable")
+        failure_restore = run_stage.index(
+            'checkout_controller "$previous_runner_controller"', durable_gate
+        )
+        self.assertLess(durable_gate, failure_restore)
+        durable_start = runner.index("stage_commit_is_durable() {")
+        durable_end = runner.index("\n}\n\ncopy_inbox_manifest()", durable_start)
+        durable_body = runner[durable_start:durable_end]
+        self.assertIn('fsync_release_path "$colour_root" || return 1', durable_body)
+
+        binding_start = runner.index("runner_matches_controller() {")
+        binding_end = runner.index("\n}\n\nstage_commit_is_durable()", binding_start)
+        binding_body = runner[binding_start:binding_end]
+        self.assertIn('hash-object --no-filters "$runner_path"', binding_body)
+        self.assertIn('$bound_controller_sha:App/ops/project-snow-release', binding_body)
+        run_switch_start = runner.index("run_switch() {")
+        run_switch_end = runner.index("\n}\n\nverified_version_array()", run_switch_start)
+        run_switch = runner[run_switch_start:run_switch_end]
+        binding_gate = run_switch.index('runner_matches_controller "$controller_sha"')
+        traffic_switch = run_switch.index("./ops/promote.sh")
+        self.assertLess(binding_gate, traffic_switch)
+        self.assertIn("repeat exact stage before switching traffic", run_switch)
+        self.assertIn("runner_controller_binding", runner)
+
+    def test_promote_fails_closed_when_runner_and_checkout_are_not_bound(self) -> None:
+        promote = self.read("ops/promote.sh")
+        gate_start = promote.index("require_runner_controller_binding() {")
+        gate_end = promote.index("\n}\n\nrequire_runner_controller_binding ||", gate_start) + 2
+        gate = promote[gate_start:gate_end]
+        gate_call = promote.index("require_runner_controller_binding ||", gate_end)
+        first_policy_read = promote.index("access_policy_file=", gate_call)
+        first_docker_call = promote.index("docker compose", gate_call)
+
+        self.assertLess(gate_call, first_policy_read)
+        self.assertLess(gate_call, first_docker_call)
+        self.assertIn('stat -c %u:%g:%a:%h "$release_runner_path"', gate)
+        self.assertIn('[ "$release_runner_metadata" = 0:0:755:1 ] || return 1', gate)
+        self.assertIn('git -C "$release_repository" rev-parse --verify HEAD', gate)
+        self.assertIn('git -C "$release_repository" ls-tree', gate)
+        self.assertIn('[ "$1" = 100755 ]', gate)
+        self.assertIn('[ "$2" = blob ]', gate)
+        self.assertIn('hash-object --no-filters', gate)
+        self.assertIn(
+            '[ "$release_installed_runner_blob" = "$release_controller_runner_blob" ] || return 1',
+            gate,
+        )
+        self.assertIn("repeat exact stage before switching traffic", promote[gate_call:first_policy_read])
+
+        git_candidates = (
+            shutil.which("git"),
+            "C:/Program Files/Git/cmd/git.exe",
+        )
+        git = next(
+            (Path(candidate) for candidate in git_candidates if candidate and Path(candidate).is_file()),
+            None,
+        )
+        self.assertIsNotNone(git, "Git is required for promote binding contract tests.")
+
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            repository = root / "repo"
+            installed_runner = root / "installed-project-snow-release"
+            repository.mkdir()
+
+            def git_run(*arguments: str) -> str:
+                completed = subprocess.run(
+                    [str(git), "-C", str(repository), *arguments],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                return completed.stdout.strip()
+
+            subprocess.run([str(git), "init", str(repository)], check=True, capture_output=True)
+            git_run("config", "user.email", "contracts@example.invalid")
+            git_run("config", "user.name", "Deployment Contracts")
+            git_run("config", "core.autocrlf", "false")
+            tracked_runner = repository / "App" / "ops" / "project-snow-release"
+            tracked_runner.parent.mkdir(parents=True)
+            runner_payload = b"#!/bin/sh\necho bound-runner\n"
+            tracked_runner.write_bytes(runner_payload)
+            git_run("add", "App/ops/project-snow-release")
+            git_run("update-index", "--chmod=+x", "App/ops/project-snow-release")
+            git_run("commit", "-m", "bound runner")
+            installed_runner.write_bytes(runner_payload)
+
+            harness = f"""\
+set -u
+release_repository=$1
+release_runner_path=$2
+stat() {{
+  if [ "$#" -ge 3 ] && [ "$1" = -c ] && [ "$2" = %u:%g:%a:%h ] && [ "$3" = "$release_runner_path" ]; then
+    printf '%s\n' 0:0:755:1
+  else
+    command stat "$@"
+  fi
+}}
+{gate}
+require_runner_controller_binding
+"""
+            matching = self.run_posix_shell(
+                harness,
+                repository.as_posix(),
+                installed_runner.as_posix(),
+            )
+            installed_runner.write_bytes(b"#!/bin/sh\necho stale-runner\n")
+            mismatched = self.run_posix_shell(
+                harness,
+                repository.as_posix(),
+                installed_runner.as_posix(),
+            )
+
+        self.assertEqual(matching.returncode, 0, matching.stderr)
+        self.assertNotEqual(mismatched.returncode, 0)
 
     def test_release_archives_are_safely_verified_before_atomic_install(self) -> None:
         runner = self.read("ops/project-snow-release")
@@ -1015,7 +2201,7 @@ class DeploymentContractTests(TestCase):
         self.assertIn("PUBLIC_STICKER_ROOT=%s", script)
         self.assertNotIn("active_sticker_version", script)
         self.assertIn("PUBLIC_ENV_FILE=$public_env_path", script)
-        self.assertIn('mv -f "$candidate_public_env" "$public_env_path"', script)
+        self.assertIn('mv -f -- "$candidate_public_env" "$public_env_path"', script)
 
     def test_candidate_public_env_migrates_legacy_settings_fail_closed(self) -> None:
         script = self.read("ops/deploy.sh")
@@ -1112,6 +2298,19 @@ class DeploymentContractTests(TestCase):
         self.assertIn("Tag reused embedding digest for the current main SHA", release)
         self.assertIn("release_manifest.py", release)
 
+    def test_ci_and_local_validation_include_direct_origin_assets(self) -> None:
+        workflow = (self.app_root.parent / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        validate_all = self.read("scripts/validate_all.ps1")
+        self.assertIn("ORIGIN_TLS_ROOT: /etc/project-snow/origin-edge/releases/", workflow)
+        self.assertIn("App/scripts/install_origin_tls.py", workflow)
+        self.assertIn("App/scripts/cloudflare_origin_firewall.py", workflow)
+        self.assertIn("App/tests/test_install_origin_tls.py", workflow)
+        self.assertIn("App/tests/test_origin_firewall.py", workflow)
+        self.assertIn("$originTlsRootWasSet = Test-Path Env:ORIGIN_TLS_ROOT", validate_all)
+        self.assertIn("Remove-Item Env:ORIGIN_TLS_ROOT", validate_all)
+
     def test_directly_invoked_operations_are_executable_in_git(self) -> None:
         repo_root = self.app_root.parent
         paths = (
@@ -1180,6 +2379,7 @@ class DeploymentContractTests(TestCase):
 
     def test_colour_runtime_configuration_is_hashed_snapshotted_and_fail_closed(self) -> None:
         deploy = self.read("ops/deploy.sh")
+        runner = self.read("ops/project-snow-release")
         promote = self.read("ops/promote.sh")
         for script in (deploy, promote):
             self.assertIn("project-snow-config-snapshot-1", script)
@@ -1188,8 +2388,13 @@ class DeploymentContractTests(TestCase):
             self.assertIn("configuration_paths_for_root()", script)
             self.assertIn('case "$direct_origin_path_count" in', script)
             self.assertIn("    0) ;;", script)
+            self.assertIn("legacy_direct_origin_configuration_paths=", script)
             self.assertIn(
-                "    4) printf '%s\\n' \"$direct_origin_configuration_paths\" ;;",
+                'printf \'%s\\n\' "$legacy_direct_origin_configuration_paths"',
+                script,
+            )
+            self.assertIn(
+                "    7) printf '%s\\n' \"$direct_origin_configuration_paths\" ;;",
                 script,
             )
             self.assertIn('"$binding_expected_count"', script)
@@ -1199,6 +2404,9 @@ class DeploymentContractTests(TestCase):
                 "compose.prod.yml",
                 "infra/Caddyfile",
                 "infra/OriginEdge.Caddyfile",
+                "config/origin-edge/origin-cert.pem",
+                "config/origin-edge/aop-ca.pem",
+                "scripts/install_origin_tls.py",
                 "scripts/cloudflare_origin_firewall.py",
                 "ops/project-snow-origin-firewall.service",
                 "ops/project-snow-origin-firewall.timer",
@@ -1208,7 +2416,9 @@ class DeploymentContractTests(TestCase):
             ):
                 self.assertIn(relative_path, script)
         self.assertIn('case "$bootstrap_direct_count" in', deploy)
-        self.assertIn("        0|4) ;;", deploy)
+        self.assertIn("        0|7) ;;", deploy)
+        self.assertIn("        4)", deploy)
+        self.assertIn("mixed legacy direct-origin configuration bundle", deploy)
         self.assertIn('existing_bootstrap_paths="$(configuration_paths_for_root', deploy)
         self.assertIn('[ "$bootstrap_paths" = "$existing_bootstrap_paths" ]', deploy)
         self.assertIn('-f "$candidate_config_root/compose.prod.yml"', deploy)
@@ -1217,7 +2427,50 @@ class DeploymentContractTests(TestCase):
             deploy,
         )
         self.assertIn(
-            'mv -f "$candidate_config_binding_tmp" "$colour_config_binding"', deploy
+            'mv -f -- "$candidate_config_binding_tmp" "$colour_config_binding"', deploy
+        )
+        self.assertIn("seal_configuration_snapshot()", deploy)
+        self.assertIn('fsync_release_path "$seal_root/$seal_path"', deploy)
+        self.assertIn('find "$seal_root" -depth -type d -print', deploy)
+        self.assertIn('fsync_release_path "$configuration_release_root"', deploy)
+        self.assertIn(
+            '[ "$seal_after_file_state" = "$seal_file_state" ]', deploy
+        )
+        self.assertIn(
+            '[ "$seal_after_dir_state" = "$seal_dir_state" ]', deploy
+        )
+        candidate_seal = deploy.index(
+            'seal_configuration_snapshot "$candidate_config_root"'
+        )
+        candidate_binding = deploy.index(
+            'create_config_binding "$colour" "$sha" "$candidate_config_root"',
+            candidate_seal,
+        )
+        self.assertLess(candidate_seal, candidate_binding)
+        bootstrap_seal = deploy.index(
+            'seal_configuration_snapshot "$bootstrap_config_root"'
+        )
+        bootstrap_binding = deploy.index(
+            'create_config_binding "$active_colour" "$bootstrap_marker_sha"',
+            bootstrap_seal,
+        )
+        self.assertLess(bootstrap_seal, bootstrap_binding)
+        self.assertIn("stage_configuration_binding_is_durable()", runner)
+        self.assertIn('fsync_release_path "$durable_config_binding"', runner)
+        self.assertIn(
+            'fsync_release_path "$stage_config_root/$durable_config_path"', runner
+        )
+        self.assertIn('find "$stage_config_root" -depth -type d -print', runner)
+        self.assertIn(
+            "fsync_release_path /srv/project-snow/releases/configurations", runner
+        )
+        self.assertIn(
+            '[ "$stage_config_file_state" = "$durable_config_file_state" ]',
+            runner,
+        )
+        self.assertIn(
+            '[ "$stage_config_dir_state" = "$durable_config_dir_state" ]',
+            runner,
         )
         self.assertIn('-f "$colour_config_root/compose.prod.yml"', promote)
         self.assertIn(
@@ -1225,6 +2478,76 @@ class DeploymentContractTests(TestCase):
             promote,
         )
         self.assertIn('mv -f "$config_tmp" "$current_config_binding"', promote)
+
+    def test_configuration_snapshot_seal_fails_closed_on_fsync_or_mutation(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        seal_start = deploy.index("seal_configuration_snapshot() {")
+        seal_end = deploy.index(
+            "\n}\n\ninstall_direct_origin_firewall()", seal_start
+        ) + 2
+        seal_function = deploy[seal_start:seal_end]
+        snapshot_sha = "a" * 40
+        harness = f"""\
+set -u
+mode=$1
+test_root=$2
+configuration_release_root="$test_root/configurations"
+seal_root="$configuration_release_root/{snapshot_sha}"
+log="$test_root/fsync.log"
+mkdir -p "$seal_root/infra"
+printf '%s\n' compose > "$seal_root/compose.prod.yml"
+printf '%s\n' caddy > "$seal_root/infra/Caddyfile"
+configuration_paths_for_root() {{
+  printf '%s\n' compose.prod.yml infra/Caddyfile
+}}
+stat() {{
+  case "$2" in
+    *%h*) printf '%s\n' 1:2:0:0:444:1 ;;
+    *) printf '%s\n' 1:3:0:0:555 ;;
+  esac
+}}
+tampered=0
+fsync_release_path() {{
+  printf '%s\n' "$1" >> "$log"
+  if [ "$mode" = parent ] && [ "$1" = "$configuration_release_root" ]; then
+    return 1
+  fi
+  if [ "$mode" = tamper ] && [ "$tampered" -eq 0 ] &&
+     [ "$1" = "$seal_root/infra/Caddyfile" ]; then
+    printf '%s\n' changed >> "$seal_root/infra/Caddyfile"
+    tampered=1
+  fi
+  return 0
+}}
+{seal_function}
+seal_configuration_snapshot "$seal_root"
+"""
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            success = self.run_posix_shell(harness, "success", root.as_posix())
+            sync_log = (root / "fsync.log").read_text(encoding="utf-8")
+        self.assertEqual(success.returncode, 0, success.stderr)
+        compose_sync = sync_log.index(f"/{snapshot_sha}/compose.prod.yml")
+        caddy_sync = sync_log.index(f"/{snapshot_sha}/infra/Caddyfile")
+        nested_dir_sync = sync_log.index(f"/{snapshot_sha}/infra\n")
+        root_dir_sync = sync_log.index(f"/{snapshot_sha}\n", nested_dir_sync)
+        parent_sync = sync_log.rindex("/configurations\n")
+        self.assertLess(compose_sync, nested_dir_sync)
+        self.assertLess(caddy_sync, nested_dir_sync)
+        self.assertLess(nested_dir_sync, root_dir_sync)
+        self.assertLess(root_dir_sync, parent_sync)
+
+        with tempfile.TemporaryDirectory() as temporary_root:
+            parent_failure = self.run_posix_shell(
+                harness, "parent", Path(temporary_root).as_posix()
+            )
+        self.assertNotEqual(parent_failure.returncode, 0)
+
+        with tempfile.TemporaryDirectory() as temporary_root:
+            mutation = self.run_posix_shell(
+                harness, "tamper", Path(temporary_root).as_posix()
+            )
+        self.assertNotEqual(mutation.returncode, 0)
 
     def test_feedback_mailer_secrets_are_preflighted_and_role_password_stays_off_argv(self) -> None:
         deploy = self.read("ops/deploy.sh")

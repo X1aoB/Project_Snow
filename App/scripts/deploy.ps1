@@ -4,6 +4,7 @@ param(
     [string]$DataReleasePath = '',
     [string]$AvatarReleasePath = '',
     [string]$StickerReleasePath = '',
+    [Parameter(Mandatory = $true)][string]$OriginPrivateKeyPath,
     [string]$HostName = 'project-snow-prod',
     [int]$Port = 43556,
     [string]$IdentityFile = "$env:USERPROFILE\.ssh\project_snow_prod_ed25519",
@@ -55,13 +56,37 @@ foreach ($artifactBinding in $artifactBindings) {
         throw "Release manifest has no trusted $($artifactBinding.Kind) SHA256SUMS digest."
     }
 }
-foreach ($configurationPath in @('compose.prod.yml', 'infra/Caddyfile', 'infra/OriginEdge.Caddyfile', 'scripts/cloudflare_origin_firewall.py', 'ops/project-snow-origin-firewall.service', 'ops/project-snow-origin-firewall.timer', 'infra/egress-squid.conf', 'infra/neo4j-entrypoint.sh', 'infra/postgres/postgresql.conf', 'infra/public-api.Dockerfile', 'requirements-public.txt')) {
+foreach ($configurationPath in @('compose.prod.yml', 'infra/Caddyfile', 'infra/OriginEdge.Caddyfile', 'config/origin-edge/origin-cert.pem', 'config/origin-edge/aop-ca.pem', 'scripts/install_origin_tls.py', 'scripts/cloudflare_origin_firewall.py', 'ops/project-snow-origin-firewall.service', 'ops/project-snow-origin-firewall.timer', 'infra/egress-squid.conf', 'infra/neo4j-entrypoint.sh', 'infra/postgres/postgresql.conf', 'infra/public-api.Dockerfile', 'requirements-public.txt')) {
     $configurationHash = [string]$manifest.configuration_sha256.PSObject.Properties[$configurationPath].Value
     if ($configurationHash -notmatch '^[0-9a-f]{64}$') { throw "Release manifest has no valid hash for $configurationPath." }
 }
 foreach ($releaseControlPath in @('ops/project-snow-release', 'ops/project-snow-release.sudoers')) {
     $releaseControlHash = [string]$manifest.release_control_sha256.PSObject.Properties[$releaseControlPath].Value
     if ($releaseControlHash -notmatch '^[0-9a-f]{64}$') { throw "Release manifest has no valid hash for $releaseControlPath." }
+}
+$tlsBinding = $manifest.direct_origin_tls
+if ($null -eq $tlsBinding -or @($tlsBinding.PSObject.Properties).Count -ne 5) {
+    throw 'Release manifest has no exact direct-origin TLS binding.'
+}
+if ([string]$tlsBinding.schema_version -ne 'project-snow-origin-tls-1' -or [string]$tlsBinding.hostname -ne 'snow.xiaob.dev') {
+    throw 'Release manifest has an unexpected direct-origin TLS identity.'
+}
+foreach ($tlsHashName in @('bundle_sha256', 'origin_certificate_sha256', 'aop_ca_sha256')) {
+    if ([string]$tlsBinding.PSObject.Properties[$tlsHashName].Value -notmatch '^[0-9a-f]{64}$') {
+        throw "Release manifest has an invalid direct-origin TLS hash: $tlsHashName."
+    }
+}
+$resolvedOriginPrivateKey = (Resolve-Path -LiteralPath $OriginPrivateKeyPath).Path
+$originPrivateKeyItem = Get-Item -Force -LiteralPath $resolvedOriginPrivateKey
+if ($originPrivateKeyItem.PSIsContainer -or -not [string]::IsNullOrEmpty([string]$originPrivateKeyItem.LinkType)) {
+    throw 'Origin private key must be one local regular file, not a directory or link.'
+}
+if ($originPrivateKeyItem.Length -lt 80 -or $originPrivateKeyItem.Length -gt 65536) {
+    throw 'Origin private key size is outside the accepted range.'
+}
+$originPrivateKeySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedOriginPrivateKey).Hash.ToLowerInvariant()
+if ($originPrivateKeySha256 -notmatch '^[0-9a-f]{64}$') {
+    throw 'Origin private key has no valid exact SHA256.'
 }
 $statusArgs = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName", 'sudo -n /usr/local/sbin/project-snow-release status')
 $statusOutput = & ssh @statusArgs
@@ -142,12 +167,32 @@ foreach ($releaseSpec in $releaseSpecs) {
         if (Test-Path -LiteralPath $archivePath -PathType Leaf) { Remove-Item -LiteralPath $archivePath -Force }
     }
 }
-$manifestRemotePath = "/srv/project-snow/inbox/release-$Sha.json"
-$scpArgs = @('-q', '-F', $configPath, '-i', $resolvedIdentity, '-P', [string]$Port, $resolvedManifest, "deploy@${HostName}:$manifestRemotePath")
-& scp @scpArgs
-if ($LASTEXITCODE -ne 0) { throw 'Release manifest upload failed.' }
-Write-Host "Staging main commit $Sha in inactive private-acceptance colour $Colour using immutable image digests, avatar media $MediaVersion and stickers $StickerVersion."
-$remoteCommand = "sudo -n /usr/local/sbin/project-snow-release stage '$Colour' '$Sha'"
-$sshArgs = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName", $remoteCommand)
-& ssh @sshArgs
-if ($LASTEXITCODE -ne 0) { throw 'Remote staging failed; active traffic was not changed.' }
+$originPrivateKeyRemotePath = "/srv/project-snow/inbox/origin-key-$Sha-$originPrivateKeySha256.pem"
+$originKeySshBase = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName")
+$originKeyScpArgs = @('-q', '-F', $configPath, '-i', $resolvedIdentity, '-P', [string]$Port, $resolvedOriginPrivateKey, "deploy@${HostName}:$originPrivateKeyRemotePath")
+$originKeyCleanupRequired = $true
+try {
+    & ssh @originKeySshBase "rm -f -- '$originPrivateKeyRemotePath'"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not clear the fixed origin-key inbox coordinate.' }
+    & scp @originKeyScpArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Origin private key upload failed.' }
+    & ssh @originKeySshBase "chmod 0600 -- '$originPrivateKeyRemotePath'"
+    if ($LASTEXITCODE -ne 0) { throw 'Origin private key inbox mode could not be restricted.' }
+
+    $manifestRemotePath = "/srv/project-snow/inbox/release-$Sha.json"
+    $scpArgs = @('-q', '-F', $configPath, '-i', $resolvedIdentity, '-P', [string]$Port, $resolvedManifest, "deploy@${HostName}:$manifestRemotePath")
+    & scp @scpArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Release manifest upload failed.' }
+    Write-Host "Staging main commit $Sha in inactive private-acceptance colour $Colour using immutable image digests, avatar media $MediaVersion and stickers $StickerVersion."
+    $remoteCommand = "sudo -n /usr/local/sbin/project-snow-release stage '$Colour' '$Sha'"
+    $sshArgs = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName", $remoteCommand)
+    & ssh @sshArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Remote staging failed; active traffic was not changed.' }
+} finally {
+    if ($originKeyCleanupRequired) {
+        & ssh @originKeySshBase "rm -f -- '$originPrivateKeyRemotePath'"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Could not confirm cleanup of the fixed origin-key inbox coordinate.'
+        }
+    }
+}
