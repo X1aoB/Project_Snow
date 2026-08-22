@@ -17,9 +17,12 @@ from scripts.cloudflare_origin_firewall import (
     ORIGIN_UPLINK_INTERFACE,
     ORIGIN_FORWARD_DROP_COMMENT,
     ORIGIN_INPUT_DROP_COMMENT,
+    UFW_COMMENT,
     CloudflareRanges,
     FirewallError,
     RuntimePaths,
+    _ufw_allow,
+    _ufw_delete,
     deserialize_state,
     fetch_cloudflare_ranges,
     load_state,
@@ -141,6 +144,59 @@ class FakeRunner:
 
 
 class CloudflareOriginFirewallTests(TestCase):
+    def test_ufw_rule_commands_use_supported_noninteractive_argv(self) -> None:
+        commands: list[tuple[str, ...]] = []
+
+        def recording_runner(
+            command,
+            *,
+            input_text: str | None = None,
+            check: bool = True,
+            timeout: float = 30.0,
+        ) -> subprocess.CompletedProcess[str]:
+            del input_text, check, timeout
+            argv = tuple(command)
+            commands.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        network = "173.245.48.0/20"
+        _ufw_allow(network, runner=recording_runner, ufw_binary="ufw")
+        _ufw_delete(network, runner=recording_runner, ufw_binary="ufw")
+
+        self.assertEqual(
+            commands,
+            [
+                (
+                    "ufw",
+                    "allow",
+                    "from",
+                    network,
+                    "to",
+                    "any",
+                    "port",
+                    "443",
+                    "proto",
+                    "tcp",
+                    "comment",
+                    UFW_COMMENT,
+                ),
+                (
+                    "ufw",
+                    "delete",
+                    "allow",
+                    "from",
+                    network,
+                    "to",
+                    "any",
+                    "port",
+                    "443",
+                    "proto",
+                    "tcp",
+                ),
+            ],
+        )
+        self.assertTrue(all("--force" not in command for command in commands))
+
     def test_three_official_sources_must_match_exactly(self) -> None:
         payloads = _source_payloads()
         fetcher, calls = _fetcher_for(payloads)
@@ -331,9 +387,9 @@ class CloudflareOriginFirewallTests(TestCase):
             ]
             self.assertTrue(check_indexes)
             self.assertTrue(all(check < apply for check, apply in zip(check_indexes, apply_indexes)))
-            self.assertTrue(
-                any(item[1:3] == ("--force", "allow") for item in command_argv)
-            )
+            ufw_commands = [item for item in command_argv if item[0] == "ufw"]
+            self.assertTrue(any(item[1:2] == ("allow",) for item in ufw_commands))
+            self.assertTrue(all("--force" not in item for item in ufw_commands))
 
     def test_failed_nft_transition_keeps_old_lkg_and_rolls_back(self) -> None:
         old_payloads = _source_payloads()

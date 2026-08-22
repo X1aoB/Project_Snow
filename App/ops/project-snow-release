@@ -178,15 +178,17 @@ require_main_commit() {
 
 checkout_controller() {
   commit_sha="$1"
-  require_main_commit "$commit_sha"
+  require_main_commit "$commit_sha" || return 1
   git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
-    -C "$repo" checkout --quiet --force --detach "$commit_sha"
+    -C "$repo" checkout --quiet --force --detach "$commit_sha" || return 1
   git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
-    -C "$repo" reset --quiet --hard "$commit_sha"
+    -C "$repo" reset --quiet --hard "$commit_sha" || return 1
   git -c core.hooksPath=/dev/null -c core.fsmonitor=false \
-    -C "$repo" clean -ffdx >/dev/null
-  [ "$(git -C "$repo" rev-parse HEAD)" = "$commit_sha" ] || return 1
-  [ -z "$(git -C "$repo" status --porcelain --untracked-files=no)" ] || {
+    -C "$repo" clean -ffdx >/dev/null || return 1
+  checked_out_controller="$(git -C "$repo" rev-parse HEAD)" || return 1
+  [ "$checked_out_controller" = "$commit_sha" ] || return 1
+  checked_out_status="$(git -C "$repo" status --porcelain --untracked-files=no)" || return 1
+  [ -z "$checked_out_status" ] || {
     echo 'The trusted release checkout is not clean.' >&2
     return 1
   }
@@ -649,12 +651,14 @@ validate_release_manifest() {
       return 1
     }
 
-  public_digest="$(jq -r '.application.digest' "$manifest_path")"
-  embedding_digest="$(jq -r '.embedding.digest' "$manifest_path")"
-  regenerated_manifest="$(mktemp /run/project-snow-release.expected.XXXXXX.json)"
-  uploaded_normalized="$(mktemp /run/project-snow-release.uploaded.XXXXXX.json)"
-  expected_normalized="$(mktemp /run/project-snow-release.normalized.XXXXXX.json)"
-  cleanup_paths="$cleanup_paths $regenerated_manifest $uploaded_normalized $expected_normalized"
+  public_digest="$(jq -r '.application.digest' "$manifest_path")" || return 1
+  embedding_digest="$(jq -r '.embedding.digest' "$manifest_path")" || return 1
+  regenerated_manifest="$(mktemp /run/project-snow-release.expected.XXXXXX.json)" || return 1
+  cleanup_paths="$cleanup_paths $regenerated_manifest"
+  uploaded_normalized="$(mktemp /run/project-snow-release.uploaded.XXXXXX.json)" || return 1
+  cleanup_paths="$cleanup_paths $uploaded_normalized"
+  expected_normalized="$(mktemp /run/project-snow-release.normalized.XXXXXX.json)" || return 1
+  cleanup_paths="$cleanup_paths $expected_normalized"
   python3 "$app_root/scripts/release_manifest.py" \
     --sha "$commit_sha" \
     --public-image "$expected_public_image" \
@@ -662,9 +666,9 @@ validate_release_manifest() {
     --embedding-image "$expected_embedding_image" \
     --embedding-digest "$embedding_digest" \
     --app-root "$app_root" \
-    --output "$regenerated_manifest" >/dev/null
-  jq -S 'del(.generated_at)' "$manifest_path" > "$uploaded_normalized"
-  jq -S 'del(.generated_at)' "$regenerated_manifest" > "$expected_normalized"
+    --output "$regenerated_manifest" >/dev/null || return 1
+  jq -S 'del(.generated_at)' "$manifest_path" > "$uploaded_normalized" || return 1
+  jq -S 'del(.generated_at)' "$regenerated_manifest" > "$expected_normalized" || return 1
   cmp -s "$uploaded_normalized" "$expected_normalized" || {
     echo 'The uploaded manifest does not match the trusted main checkout.' >&2
     return 1

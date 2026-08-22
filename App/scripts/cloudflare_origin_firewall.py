@@ -532,7 +532,6 @@ def _ufw_allow(network: str, *, runner: Runner, ufw_binary: str) -> None:
     runner(
         [
             ufw_binary,
-            "--force",
             "allow",
             "from",
             network,
@@ -552,7 +551,6 @@ def _ufw_delete(network: str, *, runner: Runner, ufw_binary: str) -> None:
     runner(
         [
             ufw_binary,
-            "--force",
             "delete",
             "allow",
             "from",

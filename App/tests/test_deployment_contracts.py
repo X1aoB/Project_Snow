@@ -327,6 +327,31 @@ class DeploymentContractTests(TestCase):
         self.assertLess(daemon_reload, first_update)
         self.assertLess(first_update, enable_units)
         self.assertLess(enable_units, systemd_exec_check)
+        firewall_function_start = deploy.index("install_direct_origin_firewall() {")
+        firewall_function_end = deploy.index(
+            "\n}\n\ninstall_direct_origin_tls()", firewall_function_start
+        ) + 2
+        firewall_function = deploy[firewall_function_start:firewall_function_end]
+        for fail_closed_command in (
+            'install -o root -g root -m 0755 "$firewall_source" "$firewall_binary" || return 1',
+            '"$systemd_root/project-snow-origin-firewall.service" || return 1',
+            '"$systemd_root/project-snow-origin-firewall.timer" || return 1',
+            "systemctl daemon-reload || return 1",
+            '"$firewall_binary" update || return 1',
+            "systemctl enable project-snow-origin-firewall.service "
+            "project-snow-origin-firewall.timer || return 1",
+            "systemctl start project-snow-origin-firewall.timer || return 1",
+            "systemctl is-enabled --quiet project-snow-origin-firewall.service || return 1",
+            "systemctl is-enabled --quiet project-snow-origin-firewall.timer || return 1",
+            "systemctl is-active --quiet project-snow-origin-firewall.timer || return 1",
+        ):
+            self.assertIn(fail_closed_command, firewall_function)
+        firewall_gate = deploy.index(
+            'install_direct_origin_firewall "$candidate_config_root" || {'
+        )
+        marker_commit = deploy.index("commit_colour_marker || exit 78", firewall_gate)
+        self.assertLess(firewall_gate, marker_commit)
+        self.assertIn("exit 73", deploy[firewall_gate:marker_commit])
         self.assertIn("/usr/local/sbin/project-snow-origin-firewall", deploy)
         self.assertIn('"$firewall_binary|0:0:755:1"', deploy)
         self.assertIn("project-snow-origin-firewall.service|0:0:644:1", deploy)
@@ -358,6 +383,337 @@ class DeploymentContractTests(TestCase):
             "ExecStart=/usr/local/sbin/project-snow-origin-firewall update", service
         )
         self.assertNotIn("/srv/project-snow/app/scripts/cloudflare_origin_firewall.py", service)
+
+    def test_firewall_update_failure_stops_before_enable_and_stage_commit(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        function_start = deploy.index("install_direct_origin_firewall() {")
+        function_end = deploy.index(
+            "\n}\n\ninstall_direct_origin_tls()", function_start
+        ) + 2
+        firewall_function = deploy[function_start:function_end]
+        firewall_function = firewall_function.replace(
+            "firewall_binary=/usr/local/sbin/project-snow-origin-firewall",
+            'firewall_binary="$test_root/project-snow-origin-firewall"',
+        ).replace(
+            "systemd_root=/etc/systemd/system",
+            'systemd_root="$test_root/systemd"',
+        )
+        gate_start = deploy.index(
+            'install_direct_origin_firewall "$candidate_config_root" || {'
+        )
+        gate_end = deploy.index("\n}", gate_start) + 2
+        firewall_gate = deploy[gate_start:gate_end]
+        harness = """\
+set -u
+test_root=$1
+candidate_config_root="$test_root/config"
+firewall_log="$test_root/firewall.log"
+systemctl_log="$test_root/systemctl.log"
+marker_log="$test_root/marker.log"
+export FIREWALL_LOG="$firewall_log"
+mkdir -p "$candidate_config_root/infra" "$candidate_config_root/scripts" \
+  "$candidate_config_root/ops" "$test_root/systemd"
+printf '%s\n' origin-edge > "$candidate_config_root/infra/OriginEdge.Caddyfile"
+printf '%s\n' '#!/bin/sh' \
+  'printf "%s\\n" update >> "$FIREWALL_LOG"' \
+  'exit 42' > "$candidate_config_root/scripts/cloudflare_origin_firewall.py"
+printf '%s\n' service > "$candidate_config_root/ops/project-snow-origin-firewall.service"
+printf '%s\n' timer > "$candidate_config_root/ops/project-snow-origin-firewall.timer"
+install() {
+  while [ "$#" -gt 2 ]; do shift; done
+  command cp -- "$1" "$2" || return 1
+  command chmod +x "$2" || return 1
+}
+stat() {
+  case "$2" in
+    %h) printf '%s\n' 1 ;;
+    %u:%g:%a:%h)
+      case "$3" in
+        *.service|*.timer) printf '%s\n' 0:0:644:1 ;;
+        *) printf '%s\n' 0:0:755:1 ;;
+      esac
+      ;;
+    *) command stat "$@" ;;
+  esac
+}
+systemctl() {
+  printf '%s\n' "$*" >> "$systemctl_log"
+  return 0
+}
+commit_colour_marker() {
+  printf '%s\n' committed >> "$marker_log"
+}
+""" + firewall_function + "\n" + firewall_gate + """
+commit_colour_marker
+"""
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            result = self.run_posix_shell(harness, root.as_posix())
+            firewall_calls = (root / "firewall.log").read_text(encoding="utf-8").splitlines()
+            systemctl_calls = (root / "systemctl.log").read_text(encoding="utf-8").splitlines()
+            marker_exists = (root / "marker.log").exists()
+        self.assertEqual(result.returncode, 73, result.stderr)
+        self.assertEqual(firewall_calls, ["update"])
+        self.assertEqual(systemctl_calls, ["daemon-reload"])
+        self.assertFalse(marker_exists)
+
+    def test_checkout_controller_propagates_each_critical_git_failure(self) -> None:
+        runner = self.read("ops/project-snow-release")
+        function_start = runner.index("checkout_controller() {")
+        function_end = runner.index("\n}\n\ncurrent_controller_sha()", function_start) + 2
+        checkout_function = runner[function_start:function_end]
+        for guarded_command in (
+            'require_main_commit "$commit_sha" || return 1',
+            '-C "$repo" checkout --quiet --force --detach "$commit_sha" || return 1',
+            '-C "$repo" reset --quiet --hard "$commit_sha" || return 1',
+            '-C "$repo" clean -ffdx >/dev/null || return 1',
+            'checked_out_controller="$(git -C "$repo" rev-parse HEAD)" || return 1',
+            'checked_out_status="$(git -C "$repo" status --porcelain --untracked-files=no)" || return 1',
+        ):
+            self.assertIn(guarded_command, checkout_function)
+
+        target_sha = "a" * 40
+        harness = (
+            """\
+set -u
+failure=$1
+log=$2
+repo=/trusted/repo
+target_sha="""
+            + target_sha
+            + """
+require_main_commit() {
+  printf '%s\n' require >> "$log"
+  [ "$failure" != require ]
+}
+git() {
+  operation=unknown
+  case " $* " in
+    *" checkout "*) operation=checkout ;;
+    *" reset "*) operation=reset ;;
+    *" clean "*) operation=clean ;;
+    *" rev-parse HEAD "*) operation=head ;;
+    *" status --porcelain "*) operation=status ;;
+  esac
+  printf '%s\n' "$operation" >> "$log"
+  [ "$failure" != "$operation" ] || return 1
+  case "$operation" in
+    head) printf '%s\n' "$target_sha" ;;
+    status) [ "$failure" != dirty ] || printf '%s\n' dirty ;;
+  esac
+}
+"""
+            + checkout_function
+            + """
+checkout_status=0
+checkout_controller "$target_sha" || checkout_status=$?
+printf '%s\n' "$checkout_status"
+"""
+        )
+        expected_last_operation = {
+            "require": "require",
+            "checkout": "checkout",
+            "reset": "reset",
+            "clean": "clean",
+            "head": "head",
+            "status": "status",
+            "dirty": "status",
+        }
+        for failure, last_operation in expected_last_operation.items():
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary_root:
+                log = Path(temporary_root) / "git.log"
+                result = self.run_posix_shell(harness, failure, log.as_posix())
+                operations = log.read_text(encoding="utf-8").splitlines()
+            self.assertNotEqual(result.stdout.strip(), "0", result.stderr)
+            self.assertEqual(operations[-1], last_operation)
+        with tempfile.TemporaryDirectory() as temporary_root:
+            result = self.run_posix_shell(
+                harness, "success", (Path(temporary_root) / "git.log").as_posix()
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "0")
+
+    def test_manifest_validator_propagates_generation_and_normalization_failures(self) -> None:
+        runner = self.read("ops/project-snow-release")
+        function_start = runner.index("validate_release_manifest() {")
+        function_end = runner.index("\n}\n\ninstall_manifest_releases()", function_start) + 2
+        validate_function = runner[function_start:function_end]
+        for guarded_command in (
+            'public_digest="$(jq -r \'.application.digest\' "$manifest_path")" || return 1',
+            'embedding_digest="$(jq -r \'.embedding.digest\' "$manifest_path")" || return 1',
+            'regenerated_manifest="$(mktemp /run/project-snow-release.expected.XXXXXX.json)" || return 1',
+            'uploaded_normalized="$(mktemp /run/project-snow-release.uploaded.XXXXXX.json)" || return 1',
+            'expected_normalized="$(mktemp /run/project-snow-release.normalized.XXXXXX.json)" || return 1',
+            '--output "$regenerated_manifest" >/dev/null || return 1',
+            'jq -S \'del(.generated_at)\' "$manifest_path" > "$uploaded_normalized" || return 1',
+            'jq -S \'del(.generated_at)\' "$regenerated_manifest" > "$expected_normalized" || return 1',
+        ):
+            self.assertIn(guarded_command, validate_function)
+
+        target_sha = "b" * 40
+        digest = "sha256:" + "c" * 64
+        harness = (
+            """\
+set -u
+test_root=$1
+failure=$2
+expected_public_image=registry.invalid/public
+expected_embedding_image=registry.invalid/embedding
+app_root=/trusted/app
+cleanup_paths=
+counter_file="$test_root/mktemp-counter"
+normalize_counter="$test_root/normalize-counter"
+manifest="$test_root/manifest.json"
+printf '%s\n' manifest > "$manifest"
+mktemp() {
+  count=0
+  [ ! -f "$counter_file" ] || count="$(command cat "$counter_file")"
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$counter_file"
+  [ "$failure" != "mktemp$count" ] || return 1
+  temporary="$test_root/temp-$count"
+  : > "$temporary" || return 1
+  printf '%s\n' "$temporary"
+}
+jq() {
+  case " $* " in
+    *" -e "*) [ "$failure" != identity ] ;;
+    *" .application.digest "*)
+      [ "$failure" != public-digest ] || return 1
+      printf '%s\n' """
+            + digest
+            + """
+      ;;
+    *" .embedding.digest "*)
+      [ "$failure" != embedding-digest ] || return 1
+      printf '%s\n' """
+            + digest
+            + """
+      ;;
+    *" -S "*)
+      count=0
+      [ ! -f "$normalize_counter" ] || count="$(command cat "$normalize_counter")"
+      count=$((count + 1))
+      printf '%s\n' "$count" > "$normalize_counter"
+      [ "$failure" != "normalize$count" ] || return 1
+      printf '%s\n' normalized
+      ;;
+    *) return 1 ;;
+  esac
+}
+python3() {
+  [ "$failure" != generator ]
+}
+docker() {
+  printf '%s\n' 'Digest: """
+            + digest
+            + """'
+}
+"""
+            + validate_function
+            + """
+validation_status=0
+validate_release_manifest "$manifest" """
+            + target_sha
+            + """ || validation_status=$?
+printf '%s\n' "$validation_status"
+"""
+        )
+        for failure in (
+            "identity",
+            "public-digest",
+            "embedding-digest",
+            "mktemp1",
+            "mktemp2",
+            "mktemp3",
+            "generator",
+            "normalize1",
+            "normalize2",
+        ):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary_root:
+                result = self.run_posix_shell(
+                    harness, Path(temporary_root).as_posix(), failure
+                )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotEqual(result.stdout.strip(), "0")
+        with tempfile.TemporaryDirectory() as temporary_root:
+            result = self.run_posix_shell(
+                harness, Path(temporary_root).as_posix(), "success"
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "0")
+
+    def test_public_environment_builder_propagates_write_and_chmod_failures(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        function_start = deploy.index("build_candidate_public_env() {")
+        function_end = deploy.index("\n}\n\nif [ ! -r \"$static_env\" ]", function_start) + 2
+        build_function = deploy[function_start:function_end]
+        self.assertIn('} > "$output_file" || return 1', build_function)
+        self.assertIn('chmod 0600 "$output_file" || return 1', build_function)
+        self.assertIn(
+            '"$candidate_app_version" "$candidate_data_version" || return 1',
+            build_function,
+        )
+
+        harness = (
+            """\
+set -u
+test_root=$1
+failure=$2
+source_file="$test_root/public.env"
+output_file="$test_root/candidate.env"
+if [ "$failure" = redirect ]; then
+  output_file="$test_root/missing/candidate.env"
+fi
+printf '%s\n' \
+  'PUBLIC_ENABLED_PROVIDERS=openai' \
+  'TURNSTILE_SITE_KEY=fixture-key' > "$source_file"
+candidate_app_version=0.9.2
+candidate_data_version=data
+candidate_media_version=media
+candidate_media_root=/media
+candidate_sticker_version=stickers
+candidate_sticker_root=/stickers
+stat() {
+  case "$2" in
+    %u) printf '%s\n' 0 ;;
+    %a) printf '%s\n' 600 ;;
+    %h) printf '%s\n' 1 ;;
+    *) command stat "$@" ;;
+  esac
+}
+printf() {
+  if [ "$failure" = write ] &&
+     [ "$1" = 'PUBLIC_APP_VERSION=%s\\nPUBLIC_DATA_VERSION=%s\\n' ]; then
+    return 1
+  fi
+  command printf "$@"
+}
+chmod() {
+  [ "$failure" != chmod ] || return 1
+  command chmod "$@"
+}
+"""
+            + build_function
+            + """
+build_status=0
+build_candidate_public_env "$source_file" "$output_file" || build_status=$?
+printf '%s\n' "$build_status"
+"""
+        )
+        for failure in ("write", "redirect", "chmod"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary_root:
+                result = self.run_posix_shell(
+                    harness, Path(temporary_root).as_posix(), failure
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotEqual(result.stdout.strip(), "0")
+        with tempfile.TemporaryDirectory() as temporary_root:
+            result = self.run_posix_shell(
+                harness, Path(temporary_root).as_posix(), "success"
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "0")
 
     def test_compose_allows_a_colour_to_pin_verified_media(self) -> None:
         compose = self.read("compose.prod.yml")

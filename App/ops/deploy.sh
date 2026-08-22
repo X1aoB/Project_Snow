@@ -658,18 +658,21 @@ install_direct_origin_firewall() {
         echo "Managed origin-firewall path is not a regular file: $protected_firewall_path" >&2
         return 1
       }
-    if [ -e "$protected_firewall_path" ] && [ "$(stat -c %h "$protected_firewall_path")" -ne 1 ]; then
-      echo "Managed origin-firewall file has multiple hard links: $protected_firewall_path" >&2
-      return 1
+    if [ -e "$protected_firewall_path" ]; then
+      protected_firewall_links="$(stat -c %h "$protected_firewall_path")" || return 1
+      if [ "$protected_firewall_links" -ne 1 ]; then
+        echo "Managed origin-firewall file has multiple hard links: $protected_firewall_path" >&2
+        return 1
+      fi
     fi
   done
-  install -o root -g root -m 0755 "$firewall_source" "$firewall_binary"
+  install -o root -g root -m 0755 "$firewall_source" "$firewall_binary" || return 1
   install -o root -g root -m 0644 \
     "$firewall_config_root/ops/project-snow-origin-firewall.service" \
-    "$systemd_root/project-snow-origin-firewall.service"
+    "$systemd_root/project-snow-origin-firewall.service" || return 1
   install -o root -g root -m 0644 \
     "$firewall_config_root/ops/project-snow-origin-firewall.timer" \
-    "$systemd_root/project-snow-origin-firewall.timer"
+    "$systemd_root/project-snow-origin-firewall.timer" || return 1
   for installed_firewall_spec in \
     "$firewall_binary|0:0:755:1" \
     "$systemd_root/project-snow-origin-firewall.service|0:0:644:1" \
@@ -682,22 +685,23 @@ install_direct_origin_firewall() {
         return 1
       }
   done
-  systemctl daemon-reload
-  "$firewall_binary" update
-  systemctl enable project-snow-origin-firewall.service project-snow-origin-firewall.timer
+  systemctl daemon-reload || return 1
+  "$firewall_binary" update || return 1
+  systemctl enable project-snow-origin-firewall.service project-snow-origin-firewall.timer || return 1
   firewall_unit_text="$(systemctl cat --no-pager project-snow-origin-firewall.service)" || {
     echo 'Installed origin-firewall unit could not be read through systemd.' >&2
     return 1
   }
-  firewall_unit_exec_start="$(printf '%s\n' "$firewall_unit_text" | sed -n 's/^[[:space:]]*ExecStart=//p')"
+  firewall_unit_exec_start="$(printf '%s\n' "$firewall_unit_text" |
+    sed -n 's/^[[:space:]]*ExecStart=//p')" || return 1
   [ "$firewall_unit_exec_start" = '/usr/local/sbin/project-snow-origin-firewall update' ] || {
     echo 'Installed origin-firewall unit has an unexpected or overridden ExecStart.' >&2
     return 1
   }
-  systemctl start project-snow-origin-firewall.timer
-  systemctl is-enabled --quiet project-snow-origin-firewall.service
-  systemctl is-enabled --quiet project-snow-origin-firewall.timer
-  systemctl is-active --quiet project-snow-origin-firewall.timer
+  systemctl start project-snow-origin-firewall.timer || return 1
+  systemctl is-enabled --quiet project-snow-origin-firewall.service || return 1
+  systemctl is-enabled --quiet project-snow-origin-firewall.timer || return 1
+  systemctl is-active --quiet project-snow-origin-firewall.timer || return 1
 }
 
 install_direct_origin_tls() {
@@ -906,18 +910,18 @@ build_candidate_public_env() {
       'PUBLIC_DEVELOPMENT_ORIGINS=' \
       'PUBLIC_ALLOW_INSECURE_DEV=false' \
       'PUBLIC_AUTO_CREATE_SCHEMA=false' \
-      'PUBLIC_TRUST_PROXY_HEADERS=true'
-    printf 'PUBLIC_ENABLED_PROVIDERS=%s\n' "$public_enabled_providers"
+      'PUBLIC_TRUST_PROXY_HEADERS=true' || return 1
+    printf 'PUBLIC_ENABLED_PROVIDERS=%s\n' "$public_enabled_providers" || return 1
     printf 'PUBLIC_APP_VERSION=%s\nPUBLIC_DATA_VERSION=%s\n' \
-      "$candidate_app_version" "$candidate_data_version"
+      "$candidate_app_version" "$candidate_data_version" || return 1
     printf 'PUBLIC_MEDIA_VERSION=%s\nPUBLIC_MEDIA_ROOT=%s\n' \
-      "$candidate_media_version" "$candidate_media_root"
+      "$candidate_media_version" "$candidate_media_root" || return 1
     printf '%s\n' \
       'PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2' \
-      'PUBLIC_ARRIVAL_PROBABILITY=0.5'
+      'PUBLIC_ARRIVAL_PROBABILITY=0.5' || return 1
     printf 'PUBLIC_STICKER_VERSION=%s\nPUBLIC_STICKER_ROOT=%s\n' \
-      "$candidate_sticker_version" "$candidate_sticker_root"
-    printf 'TURNSTILE_SITE_KEY=%s\n' "$public_turnstile_site_key"
+      "$candidate_sticker_version" "$candidate_sticker_root" || return 1
+    printf 'TURNSTILE_SITE_KEY=%s\n' "$public_turnstile_site_key" || return 1
     printf '%s\n' \
       'PUBLIC_TURNSTILE_HOSTNAME=snow.xiaob.dev' \
       'PUBLIC_TURNSTILE_MAX_AGE_SECONDS=300' \
@@ -925,17 +929,17 @@ build_candidate_public_env() {
       'PUBLIC_PRIVACY_EFFECTIVE_AT=2026-08-20' \
       'PUBLIC_ATTRIBUTION_URL=/public/v1/attributions' \
       'PUBLIC_MAX_PROVIDER_CALLS_PER_ACTION=2' \
-      'PUBLIC_BYOK_LIFETIME_HOURS=12'
+      'PUBLIC_BYOK_LIFETIME_HOURS=12' || return 1
     printf 'PUBLIC_STATE_KEY_ID=%s\nPUBLIC_STATE_PREVIOUS_KEY_ID=%s\n' \
-      "$public_target_state_key_id" "$public_target_previous_key_id"
+      "$public_target_state_key_id" "$public_target_previous_key_id" || return 1
     printf '%s\n' \
       'QDRANT_URL=http://qdrant:6333' \
       'QDRANT_COLLECTION=project_snow_documents' \
       'EMBEDDING_URL=http://embedding:8000' \
       'NEO4J_URI=bolt://neo4j:7687' \
-      'NEO4J_USER=neo4j'
-  } > "$output_file"
-  chmod 0600 "$output_file"
+      'NEO4J_USER=neo4j' || return 1
+  } > "$output_file" || return 1
+  chmod 0600 "$output_file" || return 1
 }
 
 if [ ! -r "$static_env" ]; then
