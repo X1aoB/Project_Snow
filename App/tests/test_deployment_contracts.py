@@ -773,8 +773,8 @@ class DeploymentContractTests(TestCase):
         runner = self.read("ops/project-snow-release")
         bootstrap = self.read("ops/bootstrap-release-runner.sh")
         deployment_guide = self.read("docs/public_deployment.md")
-        preflight_start = runner.index("require_host_safety_preflight() {")
-        preflight_end = runner.index("\n}\n\nacquire_release_lock()", preflight_start)
+        preflight_start = runner.index("host_safety_preflight_active() {")
+        preflight_end = runner.index("\n}\n\nrequire_host_safety_preflight()", preflight_start)
         preflight = runner[preflight_start:preflight_end]
         for probe in (
             "sshd_policy_active",
@@ -782,9 +782,16 @@ class DeploymentContractTests(TestCase):
             "fail2ban_sshd_active",
             "deploy_lacks_docker_group",
             "deploy_cannot_access_docker",
+            "deploy_processes_lack_docker_socket_group",
         ):
             self.assertIn(probe, preflight)
-        self.assertIn("Host safety preflight failed.", preflight)
+        require_start = runner.index("require_host_safety_preflight() {")
+        require_end = runner.index("\n}\n\nacquire_release_lock()", require_start)
+        require = runner[require_start:require_end]
+        self.assertIn("host_safety_preflight_active && return 0", require)
+        self.assertIn("Host safety preflight failed.", require)
+        self.assertIn("deploy_process_has_docker_socket_group", runner)
+        self.assertIn("host_safety_preflight", runner)
 
         mutating_start = runner.index("run_mutating_operation() {")
         dispatch_start = runner.index('\ncase "$operation" in', mutating_start)
@@ -808,12 +815,82 @@ class DeploymentContractTests(TestCase):
             'install -o root -g root -m 0755 "$fresh_repo/App/ops/project-snow-release"',
             bootstrap,
         )
-        self.assertIn("An already installed runner does not update itself through `stage`", deployment_guide)
-        self.assertIn(
-            "App/ops/bootstrap-release-runner.sh --controller-sha <sha>",
-            deployment_guide,
+        self.assertIn("one bounded self-upgrade", deployment_guide)
+        self.assertIn("no root console, SSH configuration change or broader sudo rule", deployment_guide)
+
+    def test_stage_self_upgrade_is_exact_atomic_and_keeps_the_sudo_contract(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        runner = self.read("ops/project-snow-release")
+        local_deploy = self.read("scripts/deploy.ps1")
+        manifest_generator = self.read("scripts/release_manifest.py")
+        sudoers = self.read("ops/project-snow-release.sudoers")
+
+        for control_path in (
+            "ops/project-snow-release",
+            "ops/project-snow-release.sudoers",
+        ):
+            self.assertIn(control_path, deploy)
+            self.assertIn(control_path, runner)
+            self.assertIn(control_path, local_deploy)
+            self.assertIn(control_path, manifest_generator)
+        self.assertIn("release_control_sha256", deploy)
+        self.assertIn("release_control_sha256", runner)
+        self.assertIn("release_control_sha256", local_deploy)
+        self.assertIn("RELEASE_CONTROL_PATHS", manifest_generator)
+
+        control_gate = deploy.index("validate_release_control_contract || exit 78")
+        first_staging_write = deploy.index('install -d -m 0700 "$colour_env_root"')
+        self.assertLess(control_gate, first_staging_write)
+        self.assertIn("git -C \"$release_repository\" ls-tree", deploy)
+        self.assertIn("git -C \"$release_repository\" cat-file blob", deploy)
+        self.assertIn("git -C \"$release_repository\" hash-object", deploy)
+        self.assertIn("mktemp /usr/local/sbin/.project-snow-release.new.", deploy)
+        self.assertIn('/bin/sh -n "$runner_upgrade_new"', deploy)
+        self.assertIn('stat -c %u:%g:%a:%h "$release_runner_path"', deploy)
+        self.assertIn('mv -f -- "$runner_upgrade_new" "$release_runner_path"', deploy)
+        state_set = deploy.index("runner_upgrade_installed=1", deploy.index("install_verified_release_runner()"))
+        atomic_replace = deploy.index('mv -f -- "$runner_upgrade_new" "$release_runner_path"')
+        self.assertLess(state_set, atomic_replace)
+        self.assertIn("fsync_release_path /usr/local/sbin", deploy)
+        self.assertIn("restore_release_runner_if_pending", deploy)
+        self.assertIn('mv -f -- "$runner_upgrade_backup" "$release_runner_path"', deploy)
+        self.assertIn("release_runner_commit_is_durable", deploy)
+        self.assertIn('stat -c %u:%g:%a:%h "$colour_marker"', deploy)
+        self.assertIn('installed_runner_sha" = "$target_runner_sha', deploy)
+
+        firewall_gate = deploy.rindex('install_direct_origin_firewall "$candidate_config_root"')
+        upgrade = deploy.rindex("install_verified_release_runner || {")
+        marker = deploy.rindex('mv -f "$candidate_marker" "$colour_marker"')
+        committed = deploy.index("runner_upgrade_committed=1", marker)
+        self.assertLess(firewall_gate, upgrade)
+        self.assertLess(upgrade, marker)
+        self.assertLess(marker, committed)
+        self.assertIn("verify_new_release_runner_status", deploy)
+        self.assertIn(".release_runner_sha256 == $runner_sha", deploy)
+        self.assertIn(".host_safety_preflight == true", deploy)
+
+        self.assertIn("PROJECT_SNOW_RELEASE_PREVIOUS_CONTROLLER_SHA", runner)
+        self.assertIn("PROJECT_SNOW_RELEASE_PREVIOUS_RUNNER_SHA256", runner)
+        self.assertIn("PROJECT_SNOW_RELEASE_PREVIOUS_CONTROLLER_SHA", deploy)
+        self.assertIn("c4796bbdda5557666afaaeb708ed34864456acc2", deploy)
+        self.assertIn("/proc/[0-9]*/status", deploy)
+        self.assertIn("/var/run/docker.sock", deploy)
+        self.assertIn('visudo -cf "$release_sudoers_path"', deploy)
+        self.assertNotIn('mv -f -- "$release_sudoers_path"', deploy)
+        self.assertNotIn('install "$release_sudoers_path"', deploy)
+
+        rules = [
+            line
+            for line in sudoers.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(len(rules), 3)
+        self.assertEqual(
+            rules[-1],
+            "deploy ALL=(root) NOPASSWD: /usr/local/sbin/project-snow-release",
         )
-        self.assertIn("without invoking `prepare_debian.sh`", deployment_guide)
+        self.assertNotIn("docker", "\n".join(rules).casefold())
+        self.assertNotIn("/bin/sh", "\n".join(rules))
 
     def test_release_archives_are_safely_verified_before_atomic_install(self) -> None:
         runner = self.read("ops/project-snow-release")

@@ -59,6 +59,10 @@ foreach ($configurationPath in @('compose.prod.yml', 'infra/Caddyfile', 'infra/O
     $configurationHash = [string]$manifest.configuration_sha256.PSObject.Properties[$configurationPath].Value
     if ($configurationHash -notmatch '^[0-9a-f]{64}$') { throw "Release manifest has no valid hash for $configurationPath." }
 }
+foreach ($releaseControlPath in @('ops/project-snow-release', 'ops/project-snow-release.sudoers')) {
+    $releaseControlHash = [string]$manifest.release_control_sha256.PSObject.Properties[$releaseControlPath].Value
+    if ($releaseControlHash -notmatch '^[0-9a-f]{64}$') { throw "Release manifest has no valid hash for $releaseControlPath." }
+}
 $statusArgs = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName", 'sudo -n /usr/local/sbin/project-snow-release status')
 $statusOutput = & ssh @statusArgs
 if ($LASTEXITCODE -ne 0) { throw 'The root-owned release runner is not ready.' }

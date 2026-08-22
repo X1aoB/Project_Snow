@@ -63,3 +63,10 @@ class ReleaseManifestTests(TestCase):
         for relative_path, recorded_digest in manifest["configuration_sha256"].items():
             actual_digest = sha256((app_root / relative_path).read_bytes()).hexdigest()
             self.assertEqual(recorded_digest, actual_digest, relative_path)
+        self.assertEqual(
+            set(manifest["release_control_sha256"]),
+            {"ops/project-snow-release", "ops/project-snow-release.sudoers"},
+        )
+        for relative_path, recorded_digest in manifest["release_control_sha256"].items():
+            actual_digest = sha256((app_root / relative_path).read_bytes()).hexdigest()
+            self.assertEqual(recorded_digest, actual_digest, relative_path)

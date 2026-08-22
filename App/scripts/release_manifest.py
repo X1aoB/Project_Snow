@@ -36,6 +36,11 @@ RUNTIME_CONFIGURATION_PATHS = (
     "requirements-public.txt",
 )
 
+RELEASE_CONTROL_PATHS = (
+    "ops/project-snow-release",
+    "ops/project-snow-release.sudoers",
+)
+
 
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -174,6 +179,10 @@ def create_manifest(
         "configuration_sha256": {
             relative_path: _sha256_file(app_root / relative_path)
             for relative_path in RUNTIME_CONFIGURATION_PATHS
+        },
+        "release_control_sha256": {
+            relative_path: _sha256_file(app_root / relative_path)
+            for relative_path in RELEASE_CONTROL_PATHS
         },
         "generated_at": datetime.now(UTC).isoformat(),
     }

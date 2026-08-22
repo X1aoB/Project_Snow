@@ -28,6 +28,7 @@ expected_public_image=ghcr.io/x1aob/project_snow-public
 expected_embedding_image=ghcr.io/x1aob/project_snow-embedding
 active_file=/srv/project-snow/releases/active-colour
 colour_root=/srv/project-snow/releases/colours
+runner_path=/usr/local/sbin/project-snow-release
 
 operation="${1:-}"
 case "$operation" in
@@ -193,7 +194,12 @@ validate_release_manifest() {
       (.release_artifacts.avatar.manifest_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
       (.release_artifacts.avatar.checksums_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
       (.release_artifacts.sticker.manifest_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
-      (.release_artifacts.sticker.checksums_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
+      (.release_artifacts.sticker.checksums_sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+      (.release_control_sha256 | type == "object" and length == 2) and
+      (.release_control_sha256["ops/project-snow-release"] |
+        type == "string" and test("^[0-9a-f]{64}$")) and
+      (.release_control_sha256["ops/project-snow-release.sudoers"] |
+        type == "string" and test("^[0-9a-f]{64}$"))
     ' "$manifest_path" >/dev/null || {
       echo 'The uploaded release manifest has an invalid identity.' >&2
       return 1
@@ -317,12 +323,20 @@ run_stage() {
   fi
   public_image="$expected_public_image@$(jq -r '.application.digest' "$manifest_copy")"
   embedding_image="$expected_embedding_image@$(jq -r '.embedding.digest' "$manifest_copy")"
+  previous_runner_sha256="$(sha256sum "$runner_path" | awk '{print $1}')"
+  printf '%s\n' "$previous_runner_sha256" | grep -Eq '^[0-9a-f]{64}$' || {
+    checkout_controller "$previous_controller" || true
+    echo 'Installed release runner has no valid predecessor digest.' >&2
+    exit 71
+  }
   if ! (
     cd "$app_root"
     /usr/bin/env -i \
       HOME=/root USER=root LOGNAME=root \
       PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       PROJECT_SNOW_RELEASE_MANIFEST="$manifest_copy" \
+      PROJECT_SNOW_RELEASE_PREVIOUS_CONTROLLER_SHA="$previous_controller" \
+      PROJECT_SNOW_RELEASE_PREVIOUS_RUNNER_SHA256="$previous_runner_sha256" \
       PUBLIC_API_IMAGE="$public_image" \
       EMBEDDING_IMAGE="$embedding_image" \
       ./ops/deploy.sh "$colour" "$requested_sha"
@@ -439,14 +453,32 @@ deploy_cannot_access_docker() {
   ! runuser -u deploy -- docker info >/dev/null 2>&1
 }
 
+deploy_processes_lack_docker_socket_group() {
+  [ -S /var/run/docker.sock ] || return 1
+  deploy_uid="$(id -u deploy 2>/dev/null)" || return 1
+  docker_socket_gid="$(stat -Lc %g /var/run/docker.sock 2>/dev/null)" || return 1
+  for process_status in /proc/[0-9]*/status; do
+    [ -r "$process_status" ] || continue
+    process_uid="$(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$process_status" 2>/dev/null || true)"
+    [ "$process_uid" = "$deploy_uid" ] || continue
+    if sed -n 's/^Groups:[[:space:]]*//p' "$process_status" 2>/dev/null |
+       tr ' ' '\n' | grep -Fxq "$docker_socket_gid"; then
+      return 1
+    fi
+  done
+}
+
+host_safety_preflight_active() {
+  sshd_policy_active &&
+    ufw_policy_active &&
+    fail2ban_sshd_active &&
+    deploy_lacks_docker_group &&
+    deploy_cannot_access_docker &&
+    deploy_processes_lack_docker_socket_group
+}
+
 require_host_safety_preflight() {
-  if sshd_policy_active &&
-     ufw_policy_active &&
-     fail2ban_sshd_active &&
-     deploy_lacks_docker_group &&
-     deploy_cannot_access_docker; then
-    return 0
-  fi
+  host_safety_preflight_active && return 0
   echo 'Host safety preflight failed.' >&2
   return 1
 }
@@ -476,6 +508,10 @@ run_status() {
   if ! deploy_cannot_access_docker; then
     docker_access=true
   fi
+  deploy_process_docker_group=false
+  if ! deploy_processes_lack_docker_socket_group; then
+    deploy_process_docker_group=true
+  fi
   ufw_active=false
   if ufw_policy_active; then
     ufw_active=true
@@ -488,26 +524,41 @@ run_status() {
   if sshd_policy_active; then
     sshd_hardened=true
   fi
+  host_safety_preflight=false
+  if host_safety_preflight_active; then
+    host_safety_preflight=true
+  fi
+  release_runner_sha256=""
+  if [ -f "$runner_path" ] && [ ! -L "$runner_path" ] &&
+     [ "$(stat -c %u:%g:%a:%h "$runner_path" 2>/dev/null || true)" = 0:0:755:1 ]; then
+    release_runner_sha256="$(sha256sum "$runner_path" | awk '{print $1}')"
+  fi
   data_versions="$(verified_version_array data /srv/project-snow/data/releases)"
   avatar_versions="$(verified_version_array avatar /srv/project-snow/media/releases)"
   sticker_versions="$(verified_version_array sticker /srv/project-snow/media/stickers/releases)"
   jq -n \
     --arg controller_sha "$controller_sha" \
     --arg active_colour "$active_colour" \
+    --arg release_runner_sha256 "$release_runner_sha256" \
     --argjson deploy_has_docker_group "$docker_group" \
     --argjson deploy_can_access_docker "$docker_access" \
+    --argjson deploy_process_has_docker_socket_group "$deploy_process_docker_group" \
     --argjson ufw_active "$ufw_active" \
     --argjson fail2ban_active "$fail2ban_active" \
     --argjson sshd_hardened "$sshd_hardened" \
+    --argjson host_safety_preflight "$host_safety_preflight" \
     --argjson data_versions "$data_versions" \
     --argjson avatar_versions "$avatar_versions" \
     --argjson sticker_versions "$sticker_versions" \
     '{controller_sha: $controller_sha, active_colour: $active_colour,
+      release_runner_sha256: $release_runner_sha256,
       deploy_has_docker_group: $deploy_has_docker_group,
       deploy_can_access_docker: $deploy_can_access_docker,
+      deploy_process_has_docker_socket_group: $deploy_process_has_docker_socket_group,
       ufw_active: $ufw_active,
       fail2ban_active: $fail2ban_active,
       sshd_hardened: $sshd_hardened,
+      host_safety_preflight: $host_safety_preflight,
       installed_data_versions: $data_versions,
       installed_avatar_versions: $avatar_versions,
       installed_sticker_versions: $sticker_versions}'

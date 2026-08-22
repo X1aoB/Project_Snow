@@ -34,6 +34,14 @@ colour_env="$colour_env_root/$colour.compose.env"
 colour_manifest="$colour_release_root/$colour-manifest.json"
 colour_marker="$colour_release_root/$colour"
 colour_config_binding="$colour_release_root/$colour-config.json"
+release_runner_path=/usr/local/sbin/project-snow-release
+release_sudoers_path=/etc/sudoers.d/project-snow-release
+legacy_release_controller_sha=c4796bbdda5557666afaaeb708ed34864456acc2
+runner_upgrade_new=""
+runner_upgrade_backup=""
+runner_upgrade_previous_sha256=""
+runner_upgrade_installed=0
+runner_upgrade_committed=0
 
 base_configuration_paths="compose.prod.yml
 infra/Caddyfile
@@ -48,6 +56,243 @@ ops/project-snow-origin-firewall.service
 ops/project-snow-origin-firewall.timer"
 configuration_paths="$base_configuration_paths
 $direct_origin_configuration_paths"
+
+deploy_processes_lack_docker_socket_group() {
+  [ -S /var/run/docker.sock ] || return 1
+  deploy_uid="$(id -u deploy 2>/dev/null)" || return 1
+  docker_socket_gid="$(stat -Lc %g /var/run/docker.sock 2>/dev/null)" || return 1
+  for process_status in /proc/[0-9]*/status; do
+    [ -r "$process_status" ] || continue
+    process_uid="$(sed -n 's/^Uid:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$process_status" 2>/dev/null || true)"
+    [ "$process_uid" = "$deploy_uid" ] || continue
+    if sed -n 's/^Groups:[[:space:]]*//p' "$process_status" 2>/dev/null |
+       tr ' ' '\n' | grep -Fxq "$docker_socket_gid"; then
+      return 1
+    fi
+  done
+}
+
+fsync_release_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+path = sys.argv[1]
+flags = os.O_RDONLY
+if os.path.isdir(path):
+    flags |= getattr(os, "O_DIRECTORY", 0)
+descriptor = os.open(path, flags)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+}
+
+validate_release_control_contract() {
+  release_repository="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo 'The exact release repository could not be resolved.' >&2
+    return 1
+  }
+  [ "$release_repository" = /srv/project-snow/repo ] &&
+    [ "$(git -C "$release_repository" rev-parse HEAD 2>/dev/null)" = "$sha" ] &&
+    [ "$(pwd -P)" = "$(CDPATH= cd -- "$release_repository/App" && pwd -P)" ] || {
+      echo 'Runner self-upgrade is not executing from the exact root-controlled target checkout.' >&2
+      return 1
+    }
+  release_control_count="$(jq -r '.release_control_sha256 | if type == "object" then length else 0 end' "$release_manifest")"
+  [ "$release_control_count" -eq 2 ] || {
+    echo 'Release manifest has an unexpected release-control binding.' >&2
+    return 1
+  }
+  for release_control_spec in \
+    "ops/project-snow-release|100755" \
+    "ops/project-snow-release.sudoers|100644"; do
+    release_control_path="${release_control_spec%%|*}"
+    release_control_mode="${release_control_spec#*|}"
+    expected_release_control_sha="$(jq -r --arg path "$release_control_path" '.release_control_sha256[$path] // empty' "$release_manifest")"
+    printf '%s\n' "$expected_release_control_sha" | grep -Eq '^[0-9a-f]{64}$' || {
+      echo "Release manifest has no valid release-control hash for $release_control_path." >&2
+      return 1
+    }
+    release_control_tree_entry="$(git -C "$release_repository" ls-tree "$sha" -- "App/$release_control_path")" || return 1
+    set -- $release_control_tree_entry
+    [ "$#" -eq 4 ] && [ "$1" = "$release_control_mode" ] && [ "$2" = blob ] &&
+      [ "$4" = "App/$release_control_path" ] || {
+        echo "Release-control Git object has an unsafe mode, type or path: $release_control_path" >&2
+        return 1
+      }
+    git -C "$release_repository" cat-file -e "$sha:App/$release_control_path" 2>/dev/null || return 1
+    exact_blob_sha="$(git -C "$release_repository" cat-file blob "$sha:App/$release_control_path" | sha256sum | awk '{print $1}')"
+    worktree_sha="$(sha256sum "$release_repository/App/$release_control_path" | awk '{print $1}')"
+    [ "$exact_blob_sha" = "$expected_release_control_sha" ] &&
+      [ "$worktree_sha" = "$expected_release_control_sha" ] || {
+        echo "Release-control file does not match the exact target Git blob: $release_control_path" >&2
+        return 1
+      }
+  done
+  [ -f "$release_runner_path" ] && [ ! -L "$release_runner_path" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$release_runner_path")" = 0:0:755:1 ] || {
+      echo 'Installed release runner must be a root-owned mode-0755 single regular file.' >&2
+      return 1
+    }
+  installed_runner_sha="$(sha256sum "$release_runner_path" | awk '{print $1}')"
+  target_runner_sha="$(jq -r '.release_control_sha256["ops/project-snow-release"]' "$release_manifest")"
+  predecessor_controller_sha="${PROJECT_SNOW_RELEASE_PREVIOUS_CONTROLLER_SHA:-}"
+  predecessor_runner_sha="${PROJECT_SNOW_RELEASE_PREVIOUS_RUNNER_SHA256:-}"
+  if [ "$installed_runner_sha" = "$target_runner_sha" ]; then
+    : # Exact-target retry after an abrupt interruption needs no predecessor.
+  elif [ -z "$predecessor_controller_sha$predecessor_runner_sha" ]; then
+    # The production c479 runner predates the predecessor handoff below.  It is
+    # the sole compatibility source allowed to bootstrap this bounded upgrade.
+    git -C "$release_repository" cat-file -e "$legacy_release_controller_sha^{commit}" 2>/dev/null &&
+      git -C "$release_repository" merge-base --is-ancestor \
+        "$legacy_release_controller_sha" refs/remotes/origin/main || {
+          echo 'Legacy release-runner compatibility commit is not on pinned origin/main.' >&2
+          return 1
+        }
+    legacy_runner_sha="$(git -C "$release_repository" cat-file blob \
+      "$legacy_release_controller_sha:App/ops/project-snow-release" | sha256sum | awk '{print $1}')"
+    [ "$installed_runner_sha" = "$legacy_runner_sha" ] || {
+      echo 'Installed release runner is neither the declared predecessor nor the exact c479 compatibility runner.' >&2
+      return 1
+    }
+  else
+    printf '%s\n' "$predecessor_controller_sha" | grep -Eq '^[0-9a-f]{40}$' &&
+      printf '%s\n' "$predecessor_runner_sha" | grep -Eq '^[0-9a-f]{64}$' || {
+        echo 'Release-runner predecessor handoff is incomplete or malformed.' >&2
+        return 1
+      }
+    git -C "$release_repository" cat-file -e "$predecessor_controller_sha^{commit}" 2>/dev/null &&
+      git -C "$release_repository" merge-base --is-ancestor \
+        "$predecessor_controller_sha" refs/remotes/origin/main || {
+          echo 'Release-runner predecessor is not on pinned origin/main.' >&2
+          return 1
+        }
+    exact_predecessor_runner_sha="$(git -C "$release_repository" cat-file blob \
+      "$predecessor_controller_sha:App/ops/project-snow-release" | sha256sum | awk '{print $1}')"
+    [ "$predecessor_runner_sha" = "$exact_predecessor_runner_sha" ] &&
+      [ "$installed_runner_sha" = "$predecessor_runner_sha" ] || {
+        echo 'Installed release runner does not match the exact declared predecessor Git blob.' >&2
+        return 1
+      }
+  fi
+  expected_sudoers_sha="$(jq -r '.release_control_sha256["ops/project-snow-release.sudoers"]' "$release_manifest")"
+  [ -f "$release_sudoers_path" ] && [ ! -L "$release_sudoers_path" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$release_sudoers_path")" = 0:0:440:1 ] &&
+    [ "$(sha256sum "$release_sudoers_path" | awk '{print $1}')" = "$expected_sudoers_sha" ] &&
+    visudo -cf "$release_sudoers_path" >/dev/null || {
+      echo 'Installed runner sudoers contract differs from the exact target and will not be modified by stage.' >&2
+      return 1
+    }
+  deploy_processes_lack_docker_socket_group || {
+    echo 'A deploy-owned process still carries the Docker socket group; close every pre-migration session.' >&2
+    return 1
+  }
+}
+
+verify_installed_release_runner() {
+  expected_runner_sha="$1"
+  [ -f "$release_runner_path" ] && [ ! -L "$release_runner_path" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$release_runner_path")" = 0:0:755:1 ] &&
+    [ "$(sha256sum "$release_runner_path" | awk '{print $1}')" = "$expected_runner_sha" ]
+}
+
+verify_new_release_runner_status() {
+  expected_runner_sha="$1"
+  runner_status="$($release_runner_path status)" || {
+    echo 'The atomically installed release runner could not execute status.' >&2
+    return 1
+  }
+  printf '%s\n' "$runner_status" | jq -e \
+    --arg sha "$sha" --arg runner_sha "$expected_runner_sha" '
+      .controller_sha == $sha and
+      .release_runner_sha256 == $runner_sha and
+      .deploy_has_docker_group == false and
+      .deploy_can_access_docker == false and
+      .deploy_process_has_docker_socket_group == false and
+      .ufw_active == true and
+      .fail2ban_active == true and
+      .sshd_hardened == true and
+      .host_safety_preflight == true
+    ' >/dev/null || {
+      echo 'The new release runner did not activate its complete mutating preflight.' >&2
+      return 1
+    }
+}
+
+install_verified_release_runner() {
+  validate_release_control_contract || return 1
+  expected_runner_sha="$(jq -r '.release_control_sha256["ops/project-snow-release"]' "$release_manifest")"
+  expected_runner_blob="$(git -C "$release_repository" rev-parse "$sha:App/ops/project-snow-release")" || return 1
+  runner_upgrade_new="$(mktemp /usr/local/sbin/.project-snow-release.new.XXXXXX)"
+  git -C "$release_repository" cat-file blob "$sha:App/ops/project-snow-release" > "$runner_upgrade_new"
+  chown root:root "$runner_upgrade_new"
+  chmod 0755 "$runner_upgrade_new"
+  /bin/sh -n "$runner_upgrade_new" || {
+    echo 'The exact target release runner failed shell syntax validation.' >&2
+    return 1
+  }
+  [ "$(sha256sum "$runner_upgrade_new" | awk '{print $1}')" = "$expected_runner_sha" ] &&
+    [ "$(git -C "$release_repository" hash-object "$runner_upgrade_new")" = "$expected_runner_blob" ] || {
+      echo 'Prepared release runner does not match the exact target Git blob and manifest.' >&2
+      return 1
+    }
+  fsync_release_path "$runner_upgrade_new"
+  if verify_installed_release_runner "$expected_runner_sha"; then
+    rm -f -- "$runner_upgrade_new"
+    runner_upgrade_new=""
+    verify_new_release_runner_status "$expected_runner_sha"
+    return
+  fi
+  runner_upgrade_previous_sha256="$(sha256sum "$release_runner_path" | awk '{print $1}')"
+  runner_upgrade_backup="$(mktemp /usr/local/sbin/.project-snow-release.rollback.XXXXXX)"
+  install -o root -g root -m 0755 "$release_runner_path" "$runner_upgrade_backup"
+  [ "$(sha256sum "$runner_upgrade_backup" | awk '{print $1}')" = "$runner_upgrade_previous_sha256" ] || {
+    echo 'Could not create an exact rollback copy of the installed release runner.' >&2
+    return 1
+  }
+  fsync_release_path "$runner_upgrade_backup"
+  runner_upgrade_installed=1
+  mv -f -- "$runner_upgrade_new" "$release_runner_path"
+  runner_upgrade_new=""
+  fsync_release_path /usr/local/sbin
+  verify_installed_release_runner "$expected_runner_sha" || {
+    echo 'Atomic release runner installation failed its ownership or digest check.' >&2
+    return 1
+  }
+  verify_new_release_runner_status "$expected_runner_sha"
+}
+
+restore_release_runner_if_pending() {
+  [ "$runner_upgrade_installed" -eq 1 ] && [ "$runner_upgrade_committed" -ne 1 ] || return 0
+  [ -n "$runner_upgrade_backup" ] && [ -f "$runner_upgrade_backup" ] &&
+    [ ! -L "$runner_upgrade_backup" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$runner_upgrade_backup")" = 0:0:755:1 ] &&
+    [ "$(sha256sum "$runner_upgrade_backup" | awk '{print $1}')" = "$runner_upgrade_previous_sha256" ] || {
+      echo 'CRITICAL: staged runner rollback copy is missing or invalid.' >&2
+      return 1
+    }
+  mv -f -- "$runner_upgrade_backup" "$release_runner_path" || return 1
+  runner_upgrade_backup=""
+  fsync_release_path /usr/local/sbin || return 1
+  [ "$(stat -c %u:%g:%a:%h "$release_runner_path")" = 0:0:755:1 ] &&
+    [ "$(sha256sum "$release_runner_path" | awk '{print $1}')" = "$runner_upgrade_previous_sha256" ] || {
+      echo 'CRITICAL: previous release runner could not be restored exactly.' >&2
+      return 1
+    }
+  runner_upgrade_installed=0
+}
+
+release_runner_commit_is_durable() {
+  [ "$runner_upgrade_installed" -eq 1 ] &&
+    [ -f "$colour_marker" ] && [ ! -L "$colour_marker" ] &&
+    [ "$(stat -c %u:%g:%a:%h "$colour_marker" 2>/dev/null || true)" = 0:0:600:1 ] || return 1
+  read -r durable_colour durable_sha durable_public durable_embedding < "$colour_marker" || return 1
+  [ "$durable_colour" = "$colour" ] && [ "$durable_sha" = "$sha" ] &&
+    [ "$durable_public" = "$PUBLIC_API_IMAGE" ] &&
+    [ "$durable_embedding" = "$EMBEDDING_IMAGE" ]
+}
 
 configuration_paths_for_root() {
   paths_root="$1"
@@ -486,6 +731,11 @@ for configuration_path in $configuration_paths; do
   }
 done
 
+# This is the first root-side gate that understands release-runner upgrades.
+# It must run before any durable staging write because the legacy c479 runner
+# cannot itself detect supplementary Docker groups retained by old sessions.
+validate_release_control_contract || exit 78
+
 active_colour=""
 if [ ! -e "$active_file" ]; then
   echo 'Active-colour marker is required before staging.' >&2
@@ -642,14 +892,31 @@ candidate_config_tmp=""
 candidate_public_env=""
 public_env_path="$public_env_root/public-$sha.env"
 cleanup() {
+  cleanup_status=$?
+  trap - EXIT HUP INT TERM
+  if release_runner_commit_is_durable; then
+    runner_upgrade_committed=1
+  fi
+  if ! restore_release_runner_if_pending; then
+    echo 'CRITICAL: release runner rollback failed; root recovery is required before another release action.' >&2
+    exit 78
+  fi
+  [ -z "${runner_upgrade_new:-}" ] || rm -f -- "$runner_upgrade_new"
+  if [ "$runner_upgrade_committed" -eq 1 ]; then
+    [ -z "${runner_upgrade_backup:-}" ] || rm -f -- "$runner_upgrade_backup"
+  fi
   [ -z "${candidate_env:-}" ] || rm -f "$candidate_env"
   [ -z "${candidate_manifest:-}" ] || rm -f "$candidate_manifest"
   [ -z "${candidate_marker:-}" ] || rm -f "$candidate_marker"
   [ -z "${candidate_config_binding_tmp:-}" ] || rm -f "$candidate_config_binding_tmp"
   [ -z "${candidate_config_tmp:-}" ] || rm -rf -- "$candidate_config_tmp"
   [ -z "${candidate_public_env:-}" ] || rm -f "$candidate_public_env"
+  exit "$cleanup_status"
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 cat "$static_env" > "$candidate_env"
 printf '\nPUBLIC_API_IMAGE=%s\nEMBEDDING_IMAGE=%s\n' "$PUBLIC_API_IMAGE" "$EMBEDDING_IMAGE" >> "$candidate_env"
@@ -987,6 +1254,14 @@ install_direct_origin_firewall "$candidate_config_root" || {
   exit 73
 }
 
+# Upgrade only after the candidate and first firewall update have passed, but
+# before the durable colour binding is committed.  A normal failure after the
+# atomic rename restores the exact predecessor from the same filesystem.
+install_verified_release_runner || {
+  echo 'Exact release runner self-upgrade failed.' >&2
+  exit 78
+}
+
 if [ -n "$candidate_public_env" ]; then
   sed -i "s|^PUBLIC_ENV_FILE=.*|PUBLIC_ENV_FILE=$public_env_path|" "$candidate_env"
   mv -f "$candidate_public_env" "$public_env_path"
@@ -1008,6 +1283,7 @@ mv -f "$candidate_config_binding_tmp" "$colour_config_binding"
 candidate_config_binding_tmp=""
 mv -f "$candidate_marker" "$colour_marker"
 candidate_marker=""
+runner_upgrade_committed=1
 
 printf '%s\n' "Staged $colour $sha without changing active traffic."
 printf '%s\n' "Private acceptance target: $candidate_internal_ip:8000 (SSH tunnel only)"
