@@ -2095,6 +2095,7 @@ async function dismissCurrentRendezvous(thread = currentThread()) {
   const message = latestMovementMessage(thread);
   if (message?.movementStatus?.status !== "character_waiting") return;
   state.rendezvousDismissals.add(message.id);
+  if (thread === currentThread()) renderTimeline({ preserveScroll: true });
   await saveUiPreferences();
 }
 function rendezvousCardMarkup(message, presenting = false) {
@@ -2136,8 +2137,8 @@ function bindTimelineActions() {
   document.querySelectorAll("[data-rendezvous-stay]").forEach((button) => {
     button.onclick = async () => {
       state.rendezvousDismissals.add(button.dataset.rendezvousStay || "");
-      await saveUiPreferences();
       renderTimeline({ preserveScroll: true });
+      await saveUiPreferences();
     };
   });
   $("load-older-messages")?.addEventListener("click", () => { void loadOlderMessages(); });
