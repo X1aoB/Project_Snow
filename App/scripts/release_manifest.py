@@ -25,6 +25,10 @@ DOWN_REVISION_PATTERN = re.compile(
 RUNTIME_CONFIGURATION_PATHS = (
     "compose.prod.yml",
     "infra/Caddyfile",
+    "infra/OriginEdge.Caddyfile",
+    "scripts/cloudflare_origin_firewall.py",
+    "ops/project-snow-origin-firewall.service",
+    "ops/project-snow-origin-firewall.timer",
     "infra/egress-squid.conf",
     "infra/neo4j-entrypoint.sh",
     "infra/postgres/postgresql.conf",

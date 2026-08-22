@@ -53,13 +53,6 @@ case "$operation" in
     ;;
 esac
 
-install -o root -g root -m 0755 -d /run/lock
-exec 9>"$release_lock"
-if ! flock -n 9; then
-  echo 'Another Project Snow release operation is already running.' >&2
-  exit 75
-fi
-
 cleanup_paths=""
 cleanup() {
   for cleanup_path in $cleanup_paths; do
@@ -424,6 +417,49 @@ sshd_policy_active() {
     printf '%s\n' "$effective_root" | grep -Fxq 'kbdinteractiveauthentication no'
 }
 
+ufw_policy_active() {
+  command -v ufw >/dev/null 2>&1 &&
+    ufw status 2>/dev/null | grep -Fxq 'Status: active'
+}
+
+fail2ban_sshd_active() {
+  systemctl is-active --quiet fail2ban 2>/dev/null &&
+    fail2ban-client status sshd >/dev/null 2>&1
+}
+
+deploy_lacks_docker_group() {
+  deploy_groups="$(id -nG deploy 2>/dev/null)" || return 1
+  case " $deploy_groups " in
+    *' docker '*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+deploy_cannot_access_docker() {
+  ! runuser -u deploy -- docker info >/dev/null 2>&1
+}
+
+require_host_safety_preflight() {
+  if sshd_policy_active &&
+     ufw_policy_active &&
+     fail2ban_sshd_active &&
+     deploy_lacks_docker_group &&
+     deploy_cannot_access_docker; then
+    return 0
+  fi
+  echo 'Host safety preflight failed.' >&2
+  return 1
+}
+
+acquire_release_lock() {
+  install -o root -g root -m 0755 -d /run/lock
+  exec 9>"$release_lock"
+  if ! flock -n 9; then
+    echo 'Another Project Snow release operation is already running.' >&2
+    exit 75
+  fi
+}
+
 run_status() {
   require_root_controlled_repo
   controller_sha="$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null || true)"
@@ -432,20 +468,20 @@ run_status() {
     active_colour="$(cat "$active_file")"
   fi
   case "$active_colour" in blue|green) ;; *) active_colour=invalid ;; esac
-  deploy_groups="$(id -nG deploy 2>/dev/null || true)"
   docker_group=false
-  case " $deploy_groups " in *' docker '*) docker_group=true ;; esac
+  if ! deploy_lacks_docker_group; then
+    docker_group=true
+  fi
   docker_access=false
-  if runuser -u deploy -- docker info >/dev/null 2>&1; then
+  if ! deploy_cannot_access_docker; then
     docker_access=true
   fi
   ufw_active=false
-  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -Fxq 'Status: active'; then
+  if ufw_policy_active; then
     ufw_active=true
   fi
   fail2ban_active=false
-  if systemctl is-active --quiet fail2ban 2>/dev/null &&
-     fail2ban-client status sshd >/dev/null 2>&1; then
+  if fail2ban_sshd_active; then
     fail2ban_active=true
   fi
   sshd_hardened=false
@@ -477,9 +513,17 @@ run_status() {
       installed_sticker_versions: $sticker_versions}'
 }
 
+run_mutating_operation() {
+  require_host_safety_preflight || exit 78
+  acquire_release_lock
+  case "$operation" in
+    stage) run_stage ;;
+    promote) run_switch promote ;;
+    rollback) run_switch rollback ;;
+  esac
+}
+
 case "$operation" in
-  stage) run_stage ;;
-  promote) run_switch promote ;;
-  rollback) run_switch rollback ;;
   status) run_status ;;
+  stage|promote|rollback) run_mutating_operation ;;
 esac

@@ -45,7 +45,11 @@ class ChangeClassifierTests(TestCase):
         for path in (
             "App/scripts/bootstrap-release-runner.ps1",
             "App/scripts/bootstrap_release_host.py",
+            "App/scripts/cloudflare_origin_firewall.py",
             "App/scripts/install_release_archive.py",
+            "App/infra/OriginEdge.Caddyfile",
+            "App/ops/project-snow-origin-firewall.service",
+            "App/ops/project-snow-origin-firewall.timer",
         ):
             with self.subTest(path=path):
                 result = classify([path])

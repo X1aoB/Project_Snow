@@ -48,13 +48,37 @@ smoke_script="$script_dir/../infra/public_smoke.py"
   exit 66
 }
 
-configuration_paths="compose.prod.yml
+base_configuration_paths="compose.prod.yml
 infra/Caddyfile
 infra/egress-squid.conf
 infra/neo4j-entrypoint.sh
 infra/postgres/postgresql.conf
 infra/public-api.Dockerfile
 requirements-public.txt"
+direct_origin_configuration_paths="infra/OriginEdge.Caddyfile
+scripts/cloudflare_origin_firewall.py
+ops/project-snow-origin-firewall.service
+ops/project-snow-origin-firewall.timer"
+
+configuration_paths_for_root() {
+  paths_root="$1"
+  printf '%s\n' "$base_configuration_paths"
+  direct_origin_path_count=0
+  for direct_origin_path in $direct_origin_configuration_paths; do
+    if [ -e "$paths_root/$direct_origin_path" ] || [ -L "$paths_root/$direct_origin_path" ]; then
+      [ -f "$paths_root/$direct_origin_path" ] && [ ! -L "$paths_root/$direct_origin_path" ] || {
+        echo "Optional direct-origin configuration is not a regular file: $paths_root/$direct_origin_path" >&2
+        return 1
+      }
+      direct_origin_path_count=$((direct_origin_path_count + 1))
+    fi
+  done
+  case "$direct_origin_path_count" in
+    0) ;;
+    4) printf '%s\n' "$direct_origin_configuration_paths" ;;
+    *) echo "Direct-origin configuration snapshot is incomplete under $paths_root." >&2; return 1 ;;
+  esac
+}
 
 validate_config_binding() {
   binding_file="$1"
@@ -76,12 +100,14 @@ validate_config_binding() {
     echo "Configuration snapshot root is missing or mutable for $binding_colour." >&2
     return 1
   }
+  binding_paths="$(configuration_paths_for_root "$expected_root")" || return 1
+  binding_expected_count="$(printf '%s\n' "$binding_paths" | awk 'NF { count += 1 } END { print count + 0 }')"
   binding_count="$(jq -r '.configuration_sha256 | if type == "object" then length else 0 end' "$binding_file")"
-  [ "$binding_count" -eq 7 ] || {
+  [ "$binding_count" -eq "$binding_expected_count" ] || {
     echo "Configuration snapshot binding has an unexpected file count for $binding_colour." >&2
     return 1
   }
-  for binding_path in $configuration_paths; do
+  for binding_path in $binding_paths; do
     expected_digest="$(jq -r --arg path "$binding_path" '.configuration_sha256[$path] // empty' "$binding_file")"
     printf '%s\n' "$expected_digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
     [ -f "$expected_root/$binding_path" ] && [ ! -L "$expected_root/$binding_path" ] || return 1
@@ -231,11 +257,13 @@ validate_config_binding "$colour_config_binding" "$colour" "$marker_sha" || exit
 colour_config_root="$(jq -r '.root' "$colour_config_binding")"
 manifest_config_count="$(jq -r '.configuration_sha256 | if type == "object" then length else 0 end' "$colour_manifest")"
 if [ "$manifest_config_count" -gt 0 ]; then
-  [ "$manifest_config_count" -eq 7 ] || {
+  colour_configuration_paths="$(configuration_paths_for_root "$colour_config_root")" || exit 67
+  colour_configuration_count="$(printf '%s\n' "$colour_configuration_paths" | awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$manifest_config_count" -eq "$colour_configuration_count" ] || {
     echo 'Staged release manifest has an incomplete configuration hash set.' >&2
     exit 67
   }
-  for manifest_config_path in $configuration_paths; do
+  for manifest_config_path in $colour_configuration_paths; do
     manifest_config_digest="$(jq -r --arg path "$manifest_config_path" '.configuration_sha256[$path] // empty' "$colour_manifest")"
     binding_config_digest="$(jq -r --arg path "$manifest_config_path" '.configuration_sha256[$path] // empty' "$colour_config_binding")"
     [ "$manifest_config_digest" = "$binding_config_digest" ] || {
@@ -356,22 +384,667 @@ previous_services="$(previous_compose config --services)" || {
 if printf '%s\n' "$previous_services" | grep -Fx feedback-mailer >/dev/null; then
   previous_has_mailer=1
 fi
+
+service_list_has() {
+  printf '%s\n' "$1" | grep -Fx "$2" >/dev/null
+}
+
+validate_edge_service_list() {
+  edge_service_list="$1"
+  edge_service_label="$2"
+  for required_edge_service in caddy egress-proxy; do
+    service_list_has "$edge_service_list" "$required_edge_service" || {
+      echo "$edge_service_label configuration has no $required_edge_service service." >&2
+      return 1
+    }
+  done
+  if ! service_list_has "$edge_service_list" origin-edge &&
+     ! service_list_has "$edge_service_list" cloudflared; then
+    echo "$edge_service_label configuration has no supported edge ingress service." >&2
+    return 1
+  fi
+}
+
+validate_edge_service_list "$target_services" Target || exit 69
+validate_edge_service_list "$previous_services" Previous || exit 69
+target_has_origin_edge=0
+target_has_cloudflared=0
+previous_has_origin_edge=0
+previous_has_cloudflared=0
+service_list_has "$target_services" origin-edge && target_has_origin_edge=1
+service_list_has "$target_services" cloudflared && target_has_cloudflared=1
+service_list_has "$previous_services" origin-edge && previous_has_origin_edge=1
+service_list_has "$previous_services" cloudflared && previous_has_cloudflared=1
+if [ "$target_has_origin_edge" -eq 1 ] && [ "$target_has_cloudflared" -ne 1 ]; then
+  echo 'A direct-origin target must retain cloudflared until a separately authorized edge migration.' >&2
+  exit 69
+fi
+
+origin_firewall_binary=/usr/local/sbin/project-snow-origin-firewall
+run_origin_firewall() {
+  firewall_action="$1"
+  [ -f "$origin_firewall_binary" ] && [ ! -L "$origin_firewall_binary" ] &&
+    [ -x "$origin_firewall_binary" ] &&
+    [ "$(stat -c %u:%a:%h "$origin_firewall_binary")" = 0:755:1 ] || {
+      echo 'Origin firewall helper must be a root-owned mode-0755 single regular file.' >&2
+      return 1
+    }
+  "$origin_firewall_binary" "$firewall_action"
+}
+
+validate_origin_edge_material() {
+  for origin_material in \
+    /etc/project-snow/origin-edge/origin-cert.pem \
+    /etc/project-snow/origin-edge/origin-key.pem \
+    /etc/project-snow/origin-edge/aop-ca.pem; do
+    [ -f "$origin_material" ] && [ ! -L "$origin_material" ] &&
+      [ -s "$origin_material" ] &&
+      [ "$(stat -c %u:%a:%h "$origin_material")" = 0:400:1 ] || {
+        echo "Origin TLS material must be a root-owned mode-0400 single regular file: $origin_material" >&2
+        return 1
+      }
+  done
+}
+
+origin_edge_network=ps-origin0
+origin_edge_internal_network=ps-origin1
+
+validate_docker_dns_security_floor() {
+  docker_server_version="$(docker version --format '{{.Server.Version}}' 2>/dev/null)" || {
+    echo 'Docker Engine version could not be inspected for the origin DNS boundary.' >&2
+    return 1
+  }
+  printf '%s\n' "$docker_server_version" | awk -F. '
+    NF == 3 &&
+    $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ &&
+    $1 >= 26 {
+      supported = 1
+    }
+    END { exit(supported ? 0 : 1) }
+  ' || {
+    echo 'Docker Engine must be a stable numeric release at or above 26.0.0 for the origin DNS boundary.' >&2
+    return 1
+  }
+}
+
+validate_origin_edge_network() {
+  origin_network_document="$(docker network inspect "$origin_edge_network")" || {
+    echo "Origin edge network could not be inspected: $origin_edge_network" >&2
+    return 1
+  }
+  printf '%s\n' "$origin_network_document" | jq -e \
+    --arg network "$origin_edge_network" '
+      length == 1 and
+      .[0].Name == $network and
+      .[0].Driver == "bridge" and
+      .[0].Internal == false and
+      .[0].EnableIPv6 == false and
+      .[0].Options["com.docker.network.bridge.name"] == $network and
+      .[0].Labels["com.docker.compose.project"] == "project-snow-public" and
+      .[0].Labels["com.docker.compose.network"] == "origin-uplink"
+    ' >/dev/null || {
+      echo "Origin edge network metadata is not the exact fail-closed policy: $origin_edge_network" >&2
+      return 1
+    }
+  /usr/sbin/ip -json -details link show dev "$origin_edge_network" | jq -e \
+    --arg network "$origin_edge_network" '
+      length == 1 and
+      .[0].ifname == $network and
+      .[0].linkinfo.info_kind == "bridge"
+    ' >/dev/null || {
+      echo "Origin edge Linux bridge is missing or is not a bridge: $origin_edge_network" >&2
+      return 1
+    }
+  origin_internal_network_document="$(docker network inspect "$origin_edge_internal_network")" || {
+    echo "Internal edge network could not be inspected: $origin_edge_internal_network" >&2
+    return 1
+  }
+  printf '%s\n' "$origin_internal_network_document" | jq -e \
+    --arg network "$origin_edge_internal_network" '
+      length == 1 and
+      .[0].Name == $network and
+      .[0].Driver == "bridge" and
+      .[0].Internal == true and
+      .[0].EnableIPv6 == false and
+      .[0].Options["com.docker.network.bridge.name"] == $network and
+      .[0].Labels["com.docker.compose.project"] == "project-snow-public" and
+      .[0].Labels["com.docker.compose.network"] == "origin-backend"
+    ' >/dev/null || {
+      echo "Internal edge network metadata is not the exact isolated policy: $origin_edge_internal_network" >&2
+      return 1
+    }
+  /usr/sbin/ip -json -details link show dev "$origin_edge_internal_network" | jq -e \
+    --arg network "$origin_edge_internal_network" '
+      length == 1 and
+      .[0].ifname == $network and
+      .[0].linkinfo.info_kind == "bridge"
+    ' >/dev/null || {
+      echo "Origin backend Linux bridge is missing or is not a bridge: $origin_edge_internal_network" >&2
+      return 1
+    }
+}
+
+resolve_running_origin_caddy() {
+  caddy_env="$1"
+  caddy_config_root="$2"
+  caddy_colour="$3"
+  origin_caddy_ids="$(
+    SNOW_UPSTREAM="public-api-$caddy_colour:8000" \
+      docker compose --env-file "$caddy_env" -f "$caddy_config_root/compose.prod.yml" \
+        --profile "$caddy_colour" ps --quiet caddy
+  )" || return 1
+  origin_caddy_count="$(printf '%s\n' "$origin_caddy_ids" | awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$origin_caddy_count" -eq 1 ] || {
+    echo 'Expected exactly one running Caddy container for the origin backend.' >&2
+    return 1
+  }
+  origin_caddy_container_id="$(printf '%s\n' "$origin_caddy_ids" | awk 'NF { print; exit }')"
+  docker inspect "$origin_caddy_container_id" | jq -e '
+    length == 1 and
+    .[0].State.Running == true and
+    .[0].State.Paused == false and
+    .[0].Config.Labels["com.docker.compose.project"] == "project-snow-public" and
+    .[0].Config.Labels["com.docker.compose.service"] == "caddy"
+  ' >/dev/null || {
+    echo 'Caddy container identity or runtime state is invalid for the origin backend.' >&2
+    return 1
+  }
+}
+
+ensure_caddy_origin_backend() {
+  backend_env="$1"
+  backend_config_root="$2"
+  backend_colour="$3"
+  validate_origin_edge_network || return 1
+  resolve_running_origin_caddy "$backend_env" "$backend_config_root" "$backend_colour" || return 1
+  caddy_backend_attached="$(docker inspect "$origin_caddy_container_id" | jq -r \
+    --arg network "$origin_edge_internal_network" \
+    'if .[0].NetworkSettings.Networks[$network] then "true" else "false" end')" || return 1
+  if [ "$caddy_backend_attached" != true ]; then
+    docker network connect --alias caddy "$origin_edge_internal_network" "$origin_caddy_container_id" || {
+      echo 'Could not attach Caddy to the dedicated origin backend.' >&2
+      return 1
+    }
+  fi
+  docker inspect "$origin_caddy_container_id" | jq -e \
+    --arg network "$origin_edge_internal_network" \
+    '.[0].NetworkSettings.Networks[$network] as $backend |
+     $backend != null and (($backend.Aliases // []) | index("caddy")) != null' >/dev/null || {
+      echo 'Caddy is not attached to the dedicated origin backend with its fixed alias.' >&2
+      return 1
+    }
+  backend_origin_ids="$(docker ps --all \
+    --filter label=com.docker.compose.project=project-snow-public \
+    --filter label=com.docker.compose.service=origin-edge --quiet)" || return 1
+  backend_origin_count="$(printf '%s\n' "$backend_origin_ids" | awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$backend_origin_count" -le 1 ] || {
+    echo 'More than one origin-edge container exists on the dedicated backend.' >&2
+    return 1
+  }
+  backend_origin_id="$(printf '%s\n' "$backend_origin_ids" | awk 'NF { print; exit }')"
+  backend_origin_running=false
+  if [ -n "$backend_origin_id" ]; then
+    backend_origin_running="$(docker inspect --format '{{.State.Running}}' "$backend_origin_id")" || return 1
+    case "$backend_origin_running" in true|false) ;; *) return 1 ;; esac
+  fi
+  docker network inspect "$origin_edge_internal_network" | jq -e \
+    --arg caddy_id "$origin_caddy_container_id" \
+    --arg origin_id "$backend_origin_id" \
+    --argjson origin_running "$backend_origin_running" '
+      length == 1 and
+      ((.[0].Containers // {} | keys | sort) as $endpoints |
+       if $origin_id == "" then
+         $endpoints == [$caddy_id]
+       elif $origin_running then
+         $endpoints == ([$caddy_id, $origin_id] | sort)
+       else
+         ($endpoints == [$caddy_id] or
+          $endpoints == ([$caddy_id, $origin_id] | sort))
+       end)
+    ' >/dev/null || {
+      echo 'The dedicated origin backend contains an unexpected endpoint.' >&2
+      return 1
+    }
+}
+
+validate_origin_edge_container() {
+  inspected_env="$1"
+  inspected_config_root="$2"
+  inspected_colour="$3"
+  inspected_running="$4"
+  validate_origin_edge_network || return 1
+  resolve_running_origin_caddy "$inspected_env" "$inspected_config_root" "$inspected_colour" || return 1
+  inspected_container_ids="$(
+    SNOW_UPSTREAM="public-api-$inspected_colour:8000" \
+      docker compose --env-file "$inspected_env" -f "$inspected_config_root/compose.prod.yml" \
+        --profile "$inspected_colour" ps --all --quiet origin-edge
+  )" || {
+    echo 'Origin-edge container could not be resolved.' >&2
+    return 1
+  }
+  inspected_container_count="$(printf '%s\n' "$inspected_container_ids" | awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$inspected_container_count" -eq 1 ] || {
+    echo 'Expected exactly one origin-edge container.' >&2
+    return 1
+  }
+  inspected_container_id="$(printf '%s\n' "$inspected_container_ids" | awk 'NF { print; exit }')"
+  inspected_container_document="$(docker inspect "$inspected_container_id")" || {
+    echo 'Origin-edge container could not be inspected.' >&2
+    return 1
+  }
+  printf '%s\n' "$inspected_container_document" | jq -e \
+    --arg project project-snow-public \
+    --arg internal_network "$origin_edge_internal_network" \
+    --arg uplink_network "$origin_edge_network" \
+    --argjson expected_running "$inspected_running" '
+      length == 1 and
+      .[0].State.Running == $expected_running and
+      .[0].State.Paused == false and
+      .[0].Config.Labels["com.docker.compose.project"] == $project and
+      .[0].Config.Labels["com.docker.compose.service"] == "origin-edge" and
+      (((.[0].NetworkSettings.Networks // {}) | keys | sort) ==
+        ([$internal_network, $uplink_network] | sort)) and
+      ((.[0].HostConfig.PortBindings // {}) | keys) == ["8443/tcp"] and
+      .[0].HostConfig.Dns == ["127.0.0.1"] and
+      ((.[0].HostConfig.PortBindings["8443/tcp"] // []) | length) == 1 and
+      .[0].HostConfig.PortBindings["8443/tcp"][0].HostPort == "443" and
+      (.[0].HostConfig.PortBindings["8443/tcp"][0].HostIp == "" or
+       .[0].HostConfig.PortBindings["8443/tcp"][0].HostIp == "0.0.0.0" or
+       .[0].HostConfig.PortBindings["8443/tcp"][0].HostIp == "::") and
+      ($expected_running == false or
+       ([((.[0].NetworkSettings.Ports // {}) | to_entries[]) | select(.value != null)] as $published |
+        ($published | length) == 1 and
+        $published[0].key == "8443/tcp" and
+        ($published[0].value | length) >= 1 and
+        all($published[0].value[];
+          .HostPort == "443" and
+          (.HostIp == "" or .HostIp == "0.0.0.0" or .HostIp == "::")))) and
+      .[0].HostConfig.ReadonlyRootfs == true and
+      ((.[0].HostConfig.CapDrop // []) | index("ALL")) != null and
+      ((.[0].HostConfig.SecurityOpt // []) | index("no-new-privileges:true")) != null
+    ' >/dev/null || {
+      echo 'Origin-edge container violates its expected state, exact network, port or hardening policy.' >&2
+      return 1
+    }
+  inspected_origin_image_id="$(printf '%s\n' "$inspected_container_document" | jq -er \
+    '.[0].Image | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))')" || {
+      echo 'Origin-edge image identity is not an immutable local image ID.' >&2
+      return 1
+    }
+  printf '%s\n' "$origin_network_document" | jq -e \
+    --arg container_id "$inspected_container_id" \
+    --argjson expected_running "$inspected_running" '
+      length == 1 and
+      ((.[0].Containers // {}) as $containers |
+       if $expected_running then
+         ($containers | length) == 1 and ($containers | has($container_id))
+       else
+         (($containers | length) == 0 or
+          (($containers | length) == 1 and ($containers | has($container_id))))
+       end)
+    ' >/dev/null || {
+      echo 'Origin uplink contains an unexpected container endpoint.' >&2
+      return 1
+    }
+  printf '%s\n' "$origin_internal_network_document" | jq -e \
+    --arg container_id "$inspected_container_id" \
+    --arg caddy_id "$origin_caddy_container_id" \
+    --argjson expected_running "$inspected_running" '
+      length == 1 and
+      ((.[0].Containers // {}) as $containers |
+       if $expected_running then
+         (($containers | keys | sort) == ([$container_id, $caddy_id] | sort))
+       else
+         ((($containers | keys | sort) == [$caddy_id]) or
+          (($containers | keys | sort) == ([$container_id, $caddy_id] | sort)))
+       end)
+    ' >/dev/null || {
+      echo 'Origin backend contains an unexpected container endpoint.' >&2
+      return 1
+    }
+}
+
+remove_origin_network_probe() {
+  [ -n "${origin_probe_container:-}" ] || return 0
+  probe_remove_target="$origin_probe_container"
+  if docker rm -f "$probe_remove_target" >/dev/null 2>&1; then
+    origin_probe_container=""
+    return 0
+  fi
+  return 1
+}
+
+read_origin_drop_counter() {
+  counter_field="$1"
+  run_origin_firewall counters | jq -er --arg field "$counter_field" '
+    .[$field] | select(type == "number" and floor == . and . >= 0)
+  '
+}
+
+run_origin_network_probe() {
+  probe_env="$1"
+  probe_config_root="$2"
+  probe_colour="$3"
+  probe_candidate="project-snow-origin-netprobe-$$"
+  probe_nonce="$(printf '%s' "$expected_sha" | cut -c 1-12)-$$"
+  probe_external_name="project-snow-$probe_nonce.1-1-1-1.sslip.io"
+  probe_gateway_ipv4="$(printf '%s\n' "$origin_network_document" | jq -er '
+    [.[0].IPAM.Config[]?.Gateway // empty |
+      select(type == "string" and test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$"))] |
+    unique | if length == 1 then .[0] else error("origin gateway is not unique") end
+  ')" || {
+    echo 'Origin bridge has no unique IPv4 gateway for the isolation probe.' >&2
+    return 1
+  }
+  probe_backend_gateway_ipv4="$(printf '%s\n' "$origin_internal_network_document" | jq -er '
+    [.[0].IPAM.Config[]?.Gateway // empty |
+      select(type == "string" and test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$"))] |
+    unique | if length == 1 then .[0] else error("origin backend gateway is not unique") end
+  ')" || {
+    echo 'Origin backend has no unique IPv4 gateway for the isolation probe.' >&2
+    return 1
+  }
+  probe_target_ids="$(
+    SNOW_UPSTREAM="public-api-$probe_colour:8000" \
+      docker compose --env-file "$probe_env" -f "$probe_config_root/compose.prod.yml" \
+        --profile "$probe_colour" ps --quiet "public-api-$probe_colour"
+  )" || return 1
+  probe_target_count="$(printf '%s\n' "$probe_target_ids" | awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$probe_target_count" -eq 1 ] || {
+    echo 'Expected exactly one target API container for the cross-bridge isolation probe.' >&2
+    return 1
+  }
+  probe_target_id="$(printf '%s\n' "$probe_target_ids" | awk 'NF { print; exit }')"
+  probe_target_document="$(docker inspect "$probe_target_id")" || {
+    echo 'Target API container could not be inspected for the isolation probe.' >&2
+    return 1
+  }
+  probe_image_id="$(printf '%s\n' "$probe_target_document" | jq -er \
+    '.[0].Image | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))')" || {
+      echo 'Target API image identity is not an immutable local image ID.' >&2
+      return 1
+    }
+  probe_other_bridge_ipv4="$(printf '%s\n' "$probe_target_document" | jq -er \
+    --arg network project-snow-public_app '
+      .[0].NetworkSettings.Networks[$network].IPAddress |
+      select(type == "string" and test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$"))
+    ')" || {
+      echo 'Target API has no inspectable application-bridge IPv4 address.' >&2
+      return 1
+    }
+  probe_uplink_input_before="$(read_origin_drop_counter input_uplink)" || {
+    echo 'Origin uplink host-input drop counter is unavailable before the isolation probe.' >&2
+    return 1
+  }
+  probe_backend_input_before="$(read_origin_drop_counter input_backend)" || {
+    echo 'Origin backend host-input drop counter is unavailable before the isolation probe.' >&2
+    return 1
+  }
+  probe_forward_before="$(read_origin_drop_counter forward)" || {
+    echo 'Origin forwarding drop counter is unavailable before the isolation probe.' >&2
+    return 1
+  }
+  if ! docker create --name "$probe_candidate" \
+    --network "$origin_edge_network" \
+    --dns 127.0.0.1 \
+    --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --pids-limit 32 --memory 64m --cpus 0.25 \
+    --tmpfs /tmp:rw,nosuid,nodev,size=4m \
+    --entrypoint python "$probe_image_id" \
+    -c '
+import http.client
+import socket
+import sys
+
+external_name, origin_gateway, backend_gateway, other_bridge_target = sys.argv[1:5]
+
+try:
+    socket.getaddrinfo(external_name, 443)
+except socket.gaierror:
+    pass
+else:
+    raise SystemExit(41)
+
+def require_tcp_blocked(host, port, exit_code):
+    try:
+        connection = socket.create_connection((host, port), timeout=3)
+    except OSError:
+        return
+    connection.close()
+    raise SystemExit(exit_code)
+
+require_tcp_blocked("1.1.1.1", 80, 42)
+require_tcp_blocked("1.1.1.1", 53, 43)
+
+labels = external_name.encode("ascii").split(b".")
+query_name = b"".join(bytes((len(label),)) + label for label in labels) + b"\x00"
+query = b"\x50\x53\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + query_name + b"\x00\x01\x00\x01"
+udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+udp.settimeout(3)
+try:
+    udp.sendto(query, ("1.1.1.1", 53))
+    udp.recvfrom(512)
+except OSError:
+    pass
+else:
+    raise SystemExit(44)
+finally:
+    udp.close()
+
+require_tcp_blocked(origin_gateway, 53, 45)
+require_tcp_blocked(backend_gateway, 53, 46)
+require_tcp_blocked(other_bridge_target, 8000, 47)
+
+socket.getaddrinfo("caddy", 8080)
+connection = http.client.HTTPConnection("caddy", 8080, timeout=5)
+connection.request("GET", "/public/v1/health/live", headers={"Host": "snow.xiaob.dev"})
+response = connection.getresponse()
+response.read(65536)
+connection.close()
+if response.status != 200:
+    raise SystemExit(48)
+    ' project-snow-origin-netprobe "$probe_external_name" "$probe_gateway_ipv4" \
+      "$probe_backend_gateway_ipv4" "$probe_other_bridge_ipv4" >/dev/null; then
+    echo 'Could not create the no-secret origin network probe.' >&2
+    return 1
+  fi
+  origin_probe_container="$probe_candidate"
+  if ! docker network connect "$origin_edge_internal_network" "$origin_probe_container"; then
+    remove_origin_network_probe || true
+    echo 'Could not attach the no-secret probe to the internal edge network.' >&2
+    return 1
+  fi
+  probe_status=0
+  docker start --attach "$origin_probe_container" >/dev/null 2>&1 || probe_status=$?
+  probe_counter_status=0
+  probe_uplink_input_after="$(read_origin_drop_counter input_uplink)" || probe_counter_status=1
+  probe_backend_input_after="$(read_origin_drop_counter input_backend)" || probe_counter_status=1
+  probe_forward_after="$(read_origin_drop_counter forward)" || probe_counter_status=1
+  if ! remove_origin_network_probe; then
+    echo 'Could not remove the no-secret origin network probe.' >&2
+    return 1
+  fi
+  [ "$probe_status" -eq 0 ] || {
+    echo 'Origin network isolation probe failed; public DNS/TCP/UDP must fail while internal Caddy succeeds.' >&2
+    return 1
+  }
+  [ "$probe_counter_status" -eq 0 ] &&
+    [ "$probe_uplink_input_after" -gt "$probe_uplink_input_before" ] &&
+    [ "$probe_backend_input_after" -gt "$probe_backend_input_before" ] &&
+    [ "$probe_forward_after" -gt "$probe_forward_before" ] || {
+      echo 'Origin network isolation probe did not increment all enforced nftables drop counters.' >&2
+      return 1
+    }
+}
+
+validate_running_origin_edge_caddy() {
+  running_env="$1"
+  running_config_root="$2"
+  running_colour="$3"
+  SNOW_UPSTREAM="public-api-$running_colour:8000" \
+    docker compose --env-file "$running_env" -f "$running_config_root/compose.prod.yml" \
+      --profile "$running_colour" exec -T origin-edge \
+        caddy validate --config /etc/caddy/OriginEdge.Caddyfile --adapter caddyfile
+}
+
+prepare_or_retain_origin_edge() {
+  prepare_env="$1"
+  prepare_config_root="$2"
+  prepare_colour="$3"
+  validate_docker_dns_security_floor || return 1
+  origin_uplink_exists=0
+  origin_backend_exists=0
+  docker network inspect "$origin_edge_network" >/dev/null 2>&1 && origin_uplink_exists=1
+  docker network inspect "$origin_edge_internal_network" >/dev/null 2>&1 && origin_backend_exists=1
+  if [ "$origin_uplink_exists" -eq 1 ] || [ "$origin_backend_exists" -eq 1 ]; then
+    [ "$origin_uplink_exists" -eq 1 ] && [ "$origin_backend_exists" -eq 1 ] || {
+      echo 'The dedicated origin networks must either both exist or both be absent.' >&2
+      return 1
+    }
+    validate_origin_edge_network || return 1
+  else
+    for unmanaged_origin_bridge in "$origin_edge_network" "$origin_edge_internal_network"; do
+      if /usr/sbin/ip link show dev "$unmanaged_origin_bridge" >/dev/null 2>&1; then
+        echo "Refusing to adopt an unmanaged existing origin bridge: $unmanaged_origin_bridge" >&2
+        return 1
+      fi
+    done
+  fi
+  existing_origin_ids="$(
+    SNOW_UPSTREAM="public-api-$prepare_colour:8000" \
+      docker compose --env-file "$prepare_env" -f "$prepare_config_root/compose.prod.yml" \
+        --profile "$prepare_colour" ps --all --quiet origin-edge
+  )" || return 1
+  existing_origin_count="$(printf '%s\n' "$existing_origin_ids" | awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$existing_origin_count" -le 1 ] || {
+    echo 'More than one origin-edge container exists for the production project.' >&2
+    return 1
+  }
+  if [ "$existing_origin_count" -eq 1 ]; then
+    existing_origin_id="$(printf '%s\n' "$existing_origin_ids" | awk 'NF { print; exit }')"
+    existing_origin_running="$(docker inspect --format '{{.State.Running}}' "$existing_origin_id")" || return 1
+    if [ "$existing_origin_running" = true ]; then
+      ensure_caddy_origin_backend "$prepare_env" "$prepare_config_root" "$prepare_colour" || return 1
+      validate_origin_edge_container "$prepare_env" "$prepare_config_root" "$prepare_colour" true || return 1
+      validate_running_origin_edge_caddy "$prepare_env" "$prepare_config_root" "$prepare_colour" || return 1
+      origin_edge_prestart_mode=retain
+      return 0
+    fi
+  fi
+  SNOW_UPSTREAM="public-api-$prepare_colour:8000" \
+    docker compose --env-file "$prepare_env" -f "$prepare_config_root/compose.prod.yml" \
+      --profile "$prepare_colour" up --no-start --no-deps --force-recreate origin-edge || {
+        echo 'Origin-edge could not be created in a stopped state from its immutable snapshot.' >&2
+        return 1
+      }
+  ensure_caddy_origin_backend "$prepare_env" "$prepare_config_root" "$prepare_colour" || return 1
+  validate_origin_edge_container "$prepare_env" "$prepare_config_root" "$prepare_colour" false || return 1
+  origin_edge_prestart_mode=start
+}
+
+probe_prepared_origin_edge() {
+  prepared_env="$1"
+  prepared_config_root="$2"
+  prepared_colour="$3"
+  validate_origin_edge_container "$prepared_env" "$prepared_config_root" "$prepared_colour" false || return 1
+  run_origin_network_probe "$prepared_env" "$prepared_config_root" "$prepared_colour" || return 1
+  validate_origin_edge_container "$prepared_env" "$prepared_config_root" "$prepared_colour" false
+}
+
 switch_edge() {
   edge_env="$1"
   edge_config_root="$2"
-  target_colour="$3"
-  SNOW_UPSTREAM="public-api-$target_colour:8000" \
-    docker compose --env-file "$edge_env" -f "$edge_config_root/compose.prod.yml" --profile "$target_colour" \
-    up -d --no-deps --force-recreate caddy cloudflared egress-proxy
+  edge_colour="$3"
+  edge_service_list="$4"
+  edge_allow_origin="$5"
+  edge_origin_mode="$6"
+  edge_start_origin=0
+  edge_retain_origin=0
+  set -- caddy
+  if service_list_has "$edge_service_list" origin-edge && [ "$edge_allow_origin" -eq 1 ]; then
+    validate_origin_edge_material || return 1
+    case "$edge_origin_mode" in
+      start)
+        validate_origin_edge_container "$edge_env" "$edge_config_root" "$edge_colour" false || return 1
+        edge_start_origin=1
+        ;;
+      retain)
+        validate_origin_edge_container "$edge_env" "$edge_config_root" "$edge_colour" true || return 1
+        edge_retain_origin=1
+        ;;
+      *)
+        echo 'Origin-edge has no validated pre-start or retained-runtime state.' >&2
+        return 1
+        ;;
+    esac
+  fi
+  if service_list_has "$edge_service_list" cloudflared; then
+    set -- "$@" cloudflared
+  fi
+  [ "$edge_start_origin" -eq 1 ] || [ "$edge_retain_origin" -eq 1 ] || [ "$#" -gt 1 ] || {
+    echo 'No permitted edge ingress remains after fail-closed filtering.' >&2
+    return 1
+  }
+  set -- "$@" egress-proxy
+  SNOW_UPSTREAM="public-api-$edge_colour:8000" \
+    docker compose --env-file "$edge_env" -f "$edge_config_root/compose.prod.yml" --profile "$edge_colour" \
+    up -d --no-deps --force-recreate "$@" || return 1
+  edge_running_origin_ids="$(docker ps \
+    --filter label=com.docker.compose.project=project-snow-public \
+    --filter label=com.docker.compose.service=origin-edge \
+    --filter status=running --quiet)" || return 1
+  edge_running_origin_count="$(printf '%s\n' "$edge_running_origin_ids" | awk 'NF { count += 1 } END { print count + 0 }')"
+  [ "$edge_running_origin_count" -le 1 ] || {
+    echo 'More than one running origin-edge exists for the production project.' >&2
+    return 1
+  }
+  if [ "$edge_start_origin" -eq 1 ] || [ "$edge_retain_origin" -eq 1 ] ||
+     [ "$edge_running_origin_count" -eq 1 ]; then
+    ensure_caddy_origin_backend "$edge_env" "$edge_config_root" "$edge_colour" || return 1
+  fi
+  if [ "$edge_start_origin" -eq 1 ]; then
+    validate_origin_edge_container "$edge_env" "$edge_config_root" "$edge_colour" false || return 1
+    SNOW_UPSTREAM="public-api-$edge_colour:8000" \
+      docker compose --env-file "$edge_env" -f "$edge_config_root/compose.prod.yml" --profile "$edge_colour" \
+        start origin-edge || return 1
+    validate_origin_edge_container "$edge_env" "$edge_config_root" "$edge_colour" true || return 1
+    validate_running_origin_edge_caddy "$edge_env" "$edge_config_root" "$edge_colour"
+  elif [ "$edge_retain_origin" -eq 1 ]; then
+    validate_origin_edge_container "$edge_env" "$edge_config_root" "$edge_colour" true || return 1
+    validate_running_origin_edge_caddy "$edge_env" "$edge_config_root" "$edge_colour"
+  fi
+}
+
+stop_snapshot_service() {
+  stop_env="$1"
+  stop_config_root="$2"
+  stop_colour="$3"
+  stop_service="$4"
+  docker compose --env-file "$stop_env" -f "$stop_config_root/compose.prod.yml" --profile "$stop_colour" \
+    stop "$stop_service" &&
+    docker compose --env-file "$stop_env" -f "$stop_config_root/compose.prod.yml" --profile "$stop_colour" \
+      rm -f "$stop_service"
+}
+
+stop_known_origin_edge() {
+  if [ "$target_has_origin_edge" -eq 1 ]; then
+    stop_snapshot_service "$colour_env" "$colour_config_root" "$colour" origin-edge
+  elif [ "$previous_has_origin_edge" -eq 1 ]; then
+    stop_snapshot_service "$previous_env" "$previous_config_root" "$previous_colour" origin-edge
+  fi
 }
 
 # Prepare all marker files before changing traffic. The final renames are
 # same-filesystem operations and leave the previous colour available.
+origin_probe_container=""
 state_tmp="$(mktemp "$runtime_root/compose.env.promote.XXXXXX")"
 active_tmp="$(mktemp "$active_file.promote.XXXXXX")"
 manifest_tmp="$(mktemp "$current_manifest.promote.XXXXXX")"
 config_tmp="$(mktemp "$current_config_binding.promote.XXXXXX")"
 cleanup() {
+  if [ -n "${origin_probe_container:-}" ]; then
+    docker rm -f "$origin_probe_container" >/dev/null 2>&1 || true
+  fi
   rm -f "${state_tmp:-}" "${active_tmp:-}" "${manifest_tmp:-}" "${config_tmp:-}"
 }
 trap cleanup EXIT HUP INT TERM
@@ -391,6 +1064,33 @@ chmod 0600 "$config_tmp"
 
 restore_previous_runtime() {
   restore_failed=0
+  previous_edge_switched=0
+  previous_allow_origin=1
+  previous_origin_mode=none
+  if [ "$previous_has_origin_edge" -eq 1 ]; then
+    origin_edge_prestart_mode=none
+    if ! validate_origin_edge_material ||
+       ! prepare_or_retain_origin_edge "$previous_env" "$previous_config_root" "$previous_colour"; then
+      echo 'CRITICAL: previous origin-edge could not pass its retained-runtime or stopped pre-start gate; keeping public 443 fail-closed.' >&2
+      previous_allow_origin=0
+      if ! stop_known_origin_edge; then
+        echo 'CRITICAL: failed to stop origin-edge after its pre-start gate failed.' >&2
+        restore_failed=1
+      fi
+    else
+      previous_origin_mode="$origin_edge_prestart_mode"
+    fi
+  fi
+  if [ "$target_has_origin_edge" -eq 1 ] || [ "$previous_has_origin_edge" -eq 1 ]; then
+    if ! run_origin_firewall restore; then
+      echo 'CRITICAL: failed to restore the last-known-good origin firewall; keeping public 443 fail-closed.' >&2
+      previous_allow_origin=0
+      if ! stop_known_origin_edge; then
+        echo 'CRITICAL: failed to stop origin-edge after firewall restoration failed.' >&2
+        restore_failed=1
+      fi
+    fi
+  fi
   if ! previous_compose up -d --no-deps "$previous_service"; then
     echo 'CRITICAL: failed to restart the previous public API.' >&2
     restore_failed=1
@@ -407,12 +1107,34 @@ restore_previous_runtime() {
     restore_attempt=$((restore_attempt + 1))
     sleep 2
   done
+  if [ "$previous_ready" -eq 1 ] && [ "$previous_allow_origin" -eq 1 ] &&
+     [ "$previous_origin_mode" = start ]; then
+    if ! probe_prepared_origin_edge "$previous_env" "$previous_config_root" "$previous_colour"; then
+      echo 'CRITICAL: previous origin-edge failed its post-firewall no-secret network isolation probe.' >&2
+      previous_allow_origin=0
+      if ! stop_known_origin_edge; then
+        echo 'CRITICAL: failed to keep origin-edge stopped after its isolation probe failed.' >&2
+      fi
+      restore_failed=1
+    fi
+  fi
   if [ "$previous_ready" -ne 1 ]; then
     echo 'CRITICAL: previous public API did not become ready for restoration.' >&2
     restore_failed=1
-  elif ! switch_edge "$previous_env" "$previous_config_root" "$previous_colour"; then
+  elif ! switch_edge "$previous_env" "$previous_config_root" "$previous_colour" \
+    "$previous_services" "$previous_allow_origin" "$previous_origin_mode"; then
     echo 'CRITICAL: failed to restore the previous edge configuration snapshot.' >&2
     restore_failed=1
+  else
+    previous_edge_switched=1
+  fi
+  if [ "$previous_edge_switched" -eq 1 ]; then
+    if [ "$previous_allow_origin" -ne 1 ] && [ "$previous_has_origin_edge" -eq 1 ]; then
+      if ! stop_snapshot_service "$previous_env" "$previous_config_root" "$previous_colour" origin-edge; then
+        echo 'CRITICAL: failed to stop origin-edge after firewall restoration failed.' >&2
+        restore_failed=1
+      fi
+    fi
   fi
   if [ "$previous_has_mailer" -eq 1 ]; then
     if ! previous_compose up -d --no-deps feedback-mailer; then
@@ -428,10 +1150,69 @@ restore_previous_runtime() {
   [ "$restore_failed" -eq 0 ]
 }
 
-if ! switch_edge "$colour_env" "$colour_config_root" "$colour"; then
+target_allow_origin=1
+target_origin_mode=none
+if [ "$target_has_origin_edge" -eq 1 ]; then
+  origin_edge_prestart_mode=none
+  if ! validate_origin_edge_material ||
+     ! prepare_or_retain_origin_edge "$colour_env" "$colour_config_root" "$colour"; then
+    echo 'Target origin-edge could not pass its retained-runtime or stopped pre-start gate; public 443 was not started.' >&2
+    target_allow_origin=0
+    if ! stop_known_origin_edge; then
+      echo 'Could not stop origin-edge after the target pre-start gate failed.' >&2
+      restore_previous_runtime || exit 74
+      exit 72
+    fi
+    restore_previous_runtime || exit 74
+    exit 72
+  else
+    target_origin_mode="$origin_edge_prestart_mode"
+  fi
+fi
+if [ "$rollback_mode" = 1 ] &&
+   { [ "$target_has_origin_edge" -eq 1 ] || [ "$previous_has_origin_edge" -eq 1 ]; }; then
+  if ! run_origin_firewall restore; then
+    echo 'Rollback could not restore the last-known-good origin firewall; public 443 will remain fail-closed.' >&2
+    target_allow_origin=0
+    if ! stop_known_origin_edge; then
+      echo 'Could not stop origin-edge after the rollback firewall gate failed.' >&2
+      restore_previous_runtime || exit 74
+      exit 72
+    fi
+  fi
+elif [ "$target_has_origin_edge" -eq 1 ]; then
+  if ! run_origin_firewall update; then
+    echo 'Origin firewall refresh failed before edge switch; active traffic was not intentionally changed.' >&2
+    restore_previous_runtime || exit 74
+    exit 72
+  fi
+fi
+
+if [ "$target_has_origin_edge" -eq 1 ] && [ "$target_allow_origin" -eq 1 ] &&
+   [ "$target_origin_mode" = start ]; then
+  if ! probe_prepared_origin_edge "$colour_env" "$colour_config_root" "$colour"; then
+    echo 'Target origin-edge failed its post-firewall no-secret network isolation probe.' >&2
+    target_allow_origin=0
+    if ! stop_known_origin_edge; then
+      echo 'Could not keep origin-edge stopped after its isolation probe failed.' >&2
+    fi
+    restore_previous_runtime || exit 74
+    exit 72
+  fi
+fi
+
+if ! switch_edge "$colour_env" "$colour_config_root" "$colour" \
+  "$target_services" "$target_allow_origin" "$target_origin_mode"; then
   echo 'Edge switch failed; restoring the previous edge configuration snapshot.' >&2
   restore_previous_runtime || exit 74
   exit 72
+fi
+if [ "$target_allow_origin" -ne 1 ] && [ "$target_has_origin_edge" -eq 1 ]; then
+  if ! stop_snapshot_service "$colour_env" "$colour_config_root" "$colour" origin-edge; then
+    echo 'Failed to keep origin-edge stopped after the rollback firewall gate failed.' >&2
+    restore_previous_runtime || exit 74
+    exit 72
+  fi
 fi
 post_switch_smoke_ok=1
 if [ "$legacy_rollback_compat" -eq 1 ]; then

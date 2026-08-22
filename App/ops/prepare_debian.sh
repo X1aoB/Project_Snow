@@ -32,6 +32,7 @@ for protected_path in \
   /srv/project-snow/inbox \
   /etc/project-snow \
   /etc/project-snow/secrets \
+  /etc/project-snow/origin-edge \
   /etc/project-snow/cloudflared; do
   [ ! -L "$protected_path" ] || {
     echo "Protected host path must not be a symlink: $protected_path" >&2
@@ -52,7 +53,7 @@ secure_existing_file() {
 }
 
 apt-get update
-apt-get install -y ca-certificates curl fail2ban git jq openssl python3 rclone restic rsync sudo ufw unattended-upgrades util-linux
+apt-get install -y ca-certificates curl fail2ban git jq nftables openssl python3 rclone restic rsync sudo ufw unattended-upgrades util-linux
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
 chmod a+r /etc/apt/keyrings/docker.asc
@@ -89,6 +90,7 @@ if [ ! -L /srv/project-snow/app ] ||
 fi
 install -o root -g root -m 0750 -d /etc/project-snow
 install -o root -g root -m 0700 -d /etc/project-snow/secrets
+install -o root -g root -m 0700 -d /etc/project-snow/origin-edge
 install -o root -g root -m 0700 -d /etc/project-snow/cloudflared
 secure_existing_file /etc/project-snow/public.env
 touch /etc/project-snow/public.env

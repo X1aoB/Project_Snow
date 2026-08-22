@@ -51,6 +51,7 @@ for protected_path in \
   /srv/project-snow/media \
   /etc/project-snow \
   /etc/project-snow/secrets \
+  /etc/project-snow/origin-edge \
   /etc/project-snow/cloudflared; do
   [ ! -L "$protected_path" ] || {
     echo "Protected release path must not be a symlink: $protected_path" >&2
@@ -136,7 +137,8 @@ for served_root in /srv/project-snow/data /srv/project-snow/media; do
   chmod 0755 "$served_root"
 done
 install -o root -g root -m 0750 -d /etc/project-snow
-install -o root -g root -m 0700 -d /etc/project-snow/secrets /etc/project-snow/cloudflared
+install -o root -g root -m 0700 -d \
+  /etc/project-snow/secrets /etc/project-snow/origin-edge /etc/project-snow/cloudflared
 secure_existing_file() {
   secure_path="$1"
   [ ! -L "$secure_path" ] && { [ ! -e "$secure_path" ] || [ -f "$secure_path" ]; } || {

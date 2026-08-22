@@ -1,0 +1,30 @@
+{
+	admin 127.0.0.1:2019
+	auto_https off
+	servers {
+		protocols h1 h2
+		timeouts {
+			read_body 10s
+		}
+	}
+}
+
+https://:8443 {
+	tls /run/project-snow-origin/origin-cert.pem /run/project-snow-origin/origin-key.pem {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /run/project-snow-origin/aop-ca.pem
+		}
+	}
+
+	@snow host snow.xiaob.dev
+	handle @snow {
+		header -Server
+		request_body {
+			max_size 65536
+		}
+		reverse_proxy http://caddy:8080
+	}
+
+	respond 421
+}

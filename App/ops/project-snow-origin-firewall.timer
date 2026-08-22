@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Project Snow Cloudflare origin ranges daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=45m
+Unit=project-snow-origin-firewall.service
+
+[Install]
+WantedBy=timers.target

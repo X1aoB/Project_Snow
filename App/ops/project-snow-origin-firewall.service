@@ -1,0 +1,26 @@
+[Unit]
+Description=Project Snow fail-closed Cloudflare origin firewall
+Documentation=https://www.cloudflare.com/ips/
+Wants=network-online.target ufw.service
+After=network-online.target ufw.service
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/project-snow-origin-firewall update
+TimeoutStartSec=90
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ReadWritePaths=/etc/ufw /var/lib/project-snow-origin-firewall
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target
+RequiredBy=docker.service

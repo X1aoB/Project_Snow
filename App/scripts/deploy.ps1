@@ -55,7 +55,7 @@ foreach ($artifactBinding in $artifactBindings) {
         throw "Release manifest has no trusted $($artifactBinding.Kind) SHA256SUMS digest."
     }
 }
-foreach ($configurationPath in @('compose.prod.yml', 'infra/Caddyfile', 'infra/egress-squid.conf', 'infra/neo4j-entrypoint.sh', 'infra/postgres/postgresql.conf', 'infra/public-api.Dockerfile', 'requirements-public.txt')) {
+foreach ($configurationPath in @('compose.prod.yml', 'infra/Caddyfile', 'infra/OriginEdge.Caddyfile', 'scripts/cloudflare_origin_firewall.py', 'ops/project-snow-origin-firewall.service', 'ops/project-snow-origin-firewall.timer', 'infra/egress-squid.conf', 'infra/neo4j-entrypoint.sh', 'infra/postgres/postgresql.conf', 'infra/public-api.Dockerfile', 'requirements-public.txt')) {
     $configurationHash = [string]$manifest.configuration_sha256.PSObject.Properties[$configurationPath].Value
     if ($configurationHash -notmatch '^[0-9a-f]{64}$') { throw "Release manifest has no valid hash for $configurationPath." }
 }

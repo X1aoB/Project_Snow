@@ -150,7 +150,30 @@ services:
     read_only: true
     tmpfs: ["/config:rw,nosuid,size=16m", "/data:rw,nosuid,size=16m"]
     logging: *bounded-logging
-    networks: [edge-client, app]
+    networks: [edge-client, origin-backend, app]
+
+  origin-edge:
+    image: ${CADDY_IMAGE:?Set immutable CADDY_IMAGE digest}
+    restart: unless-stopped
+    command: ["caddy", "run", "--config", "/etc/caddy/OriginEdge.Caddyfile", "--adapter", "caddyfile"]
+    dns: ["127.0.0.1"]
+    volumes:
+      - ./infra/OriginEdge.Caddyfile:/etc/caddy/OriginEdge.Caddyfile:ro
+      - /etc/project-snow/origin-edge/origin-cert.pem:/run/project-snow-origin/origin-cert.pem:ro
+      - /etc/project-snow/origin-edge/origin-key.pem:/run/project-snow-origin/origin-key.pem:ro
+      - /etc/project-snow/origin-edge/aop-ca.pem:/run/project-snow-origin/aop-ca.pem:ro
+    ports:
+      - "443:8443/tcp"
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 64
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/config:rw,nosuid,size=16m", "/data:rw,nosuid,size=16m"]
+    logging: *bounded-logging
+    depends_on: [caddy]
+    networks: [origin-backend, origin-uplink]
 
   cloudflared:
     image: ${CLOUDFLARED_IMAGE:?Set immutable CLOUDFLARED_IMAGE digest}
@@ -264,6 +287,17 @@ volumes:
 networks:
   edge-client:
     internal: true
+  origin-backend:
+    name: ps-origin1
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.name: ps-origin1
+  origin-uplink:
+    name: ps-origin0
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: ps-origin0
   tunnel-uplink:
   app:
     internal: true

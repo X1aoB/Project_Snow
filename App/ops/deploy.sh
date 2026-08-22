@@ -3,7 +3,7 @@ set -eu
 umask 077
 
 # Stage a release in the inactive colour. This command deliberately never
-# recreates Caddy, cloudflared, or changes the active-colour marker. Traffic
+# recreates Caddy, either edge ingress, or changes the active-colour marker. Traffic
 # is promoted only by ops/promote.sh after private acceptance.
 colour="${1:?blue or green required}"
 sha="${2:?main SHA required}"
@@ -35,21 +35,48 @@ colour_manifest="$colour_release_root/$colour-manifest.json"
 colour_marker="$colour_release_root/$colour"
 colour_config_binding="$colour_release_root/$colour-config.json"
 
-configuration_paths="compose.prod.yml
+base_configuration_paths="compose.prod.yml
 infra/Caddyfile
 infra/egress-squid.conf
 infra/neo4j-entrypoint.sh
 infra/postgres/postgresql.conf
 infra/public-api.Dockerfile
 requirements-public.txt"
+direct_origin_configuration_paths="infra/OriginEdge.Caddyfile
+scripts/cloudflare_origin_firewall.py
+ops/project-snow-origin-firewall.service
+ops/project-snow-origin-firewall.timer"
+configuration_paths="$base_configuration_paths
+$direct_origin_configuration_paths"
+
+configuration_paths_for_root() {
+  paths_root="$1"
+  printf '%s\n' "$base_configuration_paths"
+  direct_origin_path_count=0
+  for direct_origin_path in $direct_origin_configuration_paths; do
+    if [ -e "$paths_root/$direct_origin_path" ] || [ -L "$paths_root/$direct_origin_path" ]; then
+      [ -f "$paths_root/$direct_origin_path" ] && [ ! -L "$paths_root/$direct_origin_path" ] || {
+        echo "Optional direct-origin configuration is not a regular file: $paths_root/$direct_origin_path" >&2
+        return 1
+      }
+      direct_origin_path_count=$((direct_origin_path_count + 1))
+    fi
+  done
+  case "$direct_origin_path_count" in
+    0) ;;
+    4) printf '%s\n' "$direct_origin_configuration_paths" ;;
+    *) echo "Direct-origin configuration snapshot is incomplete under $paths_root." >&2; return 1 ;;
+  esac
+}
 
 create_config_binding() {
   binding_colour="$1"
   binding_sha="$2"
   binding_root="$3"
   binding_output="$4"
+  binding_paths="$(configuration_paths_for_root "$binding_root")" || return 1
   binding_hashes='{}'
-  for binding_path in $configuration_paths; do
+  for binding_path in $binding_paths; do
     [ -f "$binding_root/$binding_path" ] && [ ! -L "$binding_root/$binding_path" ] || {
       echo "Configuration snapshot is missing a regular $binding_path file." >&2
       return 1
@@ -90,12 +117,14 @@ validate_config_binding() {
     echo "Configuration snapshot root is missing or mutable for $binding_colour." >&2
     return 1
   }
+  binding_paths="$(configuration_paths_for_root "$expected_root")" || return 1
+  binding_expected_count="$(printf '%s\n' "$binding_paths" | awk 'NF { count += 1 } END { print count + 0 }')"
   binding_count="$(jq -r '.configuration_sha256 | if type == "object" then length else 0 end' "$binding_file")"
-  [ "$binding_count" -eq 7 ] || {
+  [ "$binding_count" -eq "$binding_expected_count" ] || {
     echo "Configuration snapshot binding has an unexpected file count for $binding_colour." >&2
     return 1
   }
-  for binding_path in $configuration_paths; do
+  for binding_path in $binding_paths; do
     expected_digest="$(jq -r --arg path "$binding_path" '.configuration_sha256[$path] // empty' "$binding_file")"
     printf '%s\n' "$expected_digest" | grep -Eq '^[0-9a-f]{64}$' || {
       echo "Configuration snapshot has no valid hash for $binding_path." >&2
@@ -116,13 +145,74 @@ validate_config_binding() {
 verify_snapshot_against_manifest() {
   snapshot_root="$1"
   snapshot_manifest="$2"
-  for snapshot_path in $configuration_paths; do
+  snapshot_paths="$(configuration_paths_for_root "$snapshot_root")" || return 1
+  snapshot_expected_count="$(printf '%s\n' "$snapshot_paths" | awk 'NF { count += 1 } END { print count + 0 }')"
+  snapshot_manifest_count="$(jq -r '.configuration_sha256 | if type == "object" then length else 0 end' "$snapshot_manifest")"
+  [ "$snapshot_manifest_count" -eq "$snapshot_expected_count" ] || return 1
+  for snapshot_path in $snapshot_paths; do
     expected_digest="$(jq -r --arg path "$snapshot_path" '.configuration_sha256[$path] // empty' "$snapshot_manifest")"
     printf '%s\n' "$expected_digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
     [ -f "$snapshot_root/$snapshot_path" ] && [ ! -L "$snapshot_root/$snapshot_path" ] || return 1
     actual_digest="$(sha256sum "$snapshot_root/$snapshot_path" | awk '{print $1}')"
     [ "$actual_digest" = "$expected_digest" ] || return 1
   done
+}
+
+install_direct_origin_firewall() {
+  firewall_config_root="$1"
+  [ -f "$firewall_config_root/infra/OriginEdge.Caddyfile" ] || return 0
+  firewall_source="$firewall_config_root/scripts/cloudflare_origin_firewall.py"
+  firewall_binary=/usr/local/sbin/project-snow-origin-firewall
+  systemd_root=/etc/systemd/system
+  for protected_firewall_path in \
+    "$firewall_binary" \
+    "$systemd_root/project-snow-origin-firewall.service" \
+    "$systemd_root/project-snow-origin-firewall.timer"; do
+    [ ! -L "$protected_firewall_path" ] &&
+      { [ ! -e "$protected_firewall_path" ] || [ -f "$protected_firewall_path" ]; } || {
+        echo "Managed origin-firewall path is not a regular file: $protected_firewall_path" >&2
+        return 1
+      }
+    if [ -e "$protected_firewall_path" ] && [ "$(stat -c %h "$protected_firewall_path")" -ne 1 ]; then
+      echo "Managed origin-firewall file has multiple hard links: $protected_firewall_path" >&2
+      return 1
+    fi
+  done
+  install -o root -g root -m 0755 "$firewall_source" "$firewall_binary"
+  install -o root -g root -m 0644 \
+    "$firewall_config_root/ops/project-snow-origin-firewall.service" \
+    "$systemd_root/project-snow-origin-firewall.service"
+  install -o root -g root -m 0644 \
+    "$firewall_config_root/ops/project-snow-origin-firewall.timer" \
+    "$systemd_root/project-snow-origin-firewall.timer"
+  for installed_firewall_spec in \
+    "$firewall_binary|0:0:755:1" \
+    "$systemd_root/project-snow-origin-firewall.service|0:0:644:1" \
+    "$systemd_root/project-snow-origin-firewall.timer|0:0:644:1"; do
+    installed_firewall_path="${installed_firewall_spec%%|*}"
+    installed_firewall_metadata="${installed_firewall_spec#*|}"
+    [ -f "$installed_firewall_path" ] && [ ! -L "$installed_firewall_path" ] &&
+      [ "$(stat -c %u:%g:%a:%h "$installed_firewall_path")" = "$installed_firewall_metadata" ] || {
+        echo "Installed origin-firewall asset has unsafe ownership, mode, type or link count: $installed_firewall_path" >&2
+        return 1
+      }
+  done
+  systemctl daemon-reload
+  "$firewall_binary" update
+  systemctl enable project-snow-origin-firewall.service project-snow-origin-firewall.timer
+  firewall_unit_text="$(systemctl cat --no-pager project-snow-origin-firewall.service)" || {
+    echo 'Installed origin-firewall unit could not be read through systemd.' >&2
+    return 1
+  }
+  firewall_unit_exec_start="$(printf '%s\n' "$firewall_unit_text" | sed -n 's/^[[:space:]]*ExecStart=//p')"
+  [ "$firewall_unit_exec_start" = '/usr/local/sbin/project-snow-origin-firewall update' ] || {
+    echo 'Installed origin-firewall unit has an unexpected or overridden ExecStart.' >&2
+    return 1
+  }
+  systemctl start project-snow-origin-firewall.timer
+  systemctl is-enabled --quiet project-snow-origin-firewall.service
+  systemctl is-enabled --quiet project-snow-origin-firewall.timer
+  systemctl is-active --quiet project-snow-origin-firewall.timer
 }
 
 validate_mailer_env() {
@@ -491,21 +581,36 @@ if [ -n "$active_colour" ]; then
         echo "Cannot reconstruct rollback configuration for $bootstrap_marker_sha." >&2
         exit 69
       }
-      git -C "$repository_root" archive "$bootstrap_marker_sha" -- \
-        App/compose.prod.yml \
-        App/infra/Caddyfile \
-        App/infra/egress-squid.conf \
-        App/infra/neo4j-entrypoint.sh \
-        App/infra/postgres/postgresql.conf \
-        App/infra/public-api.Dockerfile \
-        App/requirements-public.txt |
+      bootstrap_archive_paths=""
+      for bootstrap_base_path in $base_configuration_paths; do
+        bootstrap_archive_paths="$bootstrap_archive_paths App/$bootstrap_base_path"
+      done
+      bootstrap_direct_count=0
+      for bootstrap_direct_path in $direct_origin_configuration_paths; do
+        if git -C "$repository_root" cat-file -e \
+          "$bootstrap_marker_sha:App/$bootstrap_direct_path" 2>/dev/null; then
+          bootstrap_archive_paths="$bootstrap_archive_paths App/$bootstrap_direct_path"
+          bootstrap_direct_count=$((bootstrap_direct_count + 1))
+        fi
+      done
+      case "$bootstrap_direct_count" in
+        0|4) ;;
+        *) echo 'Recorded rollback commit has an incomplete direct-origin configuration bundle.' >&2; exit 69 ;;
+      esac
+      git -C "$repository_root" archive "$bootstrap_marker_sha" -- $bootstrap_archive_paths |
         tar -x -C "$bootstrap_tmp" --strip-components=1
       if [ -e "$bootstrap_config_root" ]; then
         [ -d "$bootstrap_config_root" ] && [ ! -L "$bootstrap_config_root" ] || {
           echo 'Existing rollback configuration snapshot is not a regular directory.' >&2
           exit 69
         }
-        for bootstrap_path in $configuration_paths; do
+        bootstrap_paths="$(configuration_paths_for_root "$bootstrap_tmp")" || exit 69
+        existing_bootstrap_paths="$(configuration_paths_for_root "$bootstrap_config_root")" || exit 69
+        [ "$bootstrap_paths" = "$existing_bootstrap_paths" ] || {
+          echo 'Existing rollback configuration has a different file set than its commit.' >&2
+          exit 69
+        }
+        for bootstrap_path in $bootstrap_paths; do
           [ -f "$bootstrap_config_root/$bootstrap_path" ] &&
             [ ! -L "$bootstrap_config_root/$bootstrap_path" ] &&
             cmp -s "$bootstrap_tmp/$bootstrap_path" "$bootstrap_config_root/$bootstrap_path" || {
@@ -769,8 +874,8 @@ then
 fi
 compose run --rm --no-deps "$service" \
   python -m backend.snow_app.data_loader --release-root "$candidate_data_root"
-# Only the inactive API is started. Caddy and cloudflared keep serving the
-# current colour until promote.sh is explicitly invoked.
+# Only the inactive API is started. Caddy, origin-edge and cloudflared keep
+# serving the current colour until promote.sh is explicitly invoked.
 compose up -d "$service"
 ready=0
 attempt=0
@@ -870,6 +975,15 @@ while [ "$candidate_acceptance_attempt" -lt 10 ]; do
 done
 [ "$candidate_acceptance_ready" -eq 1 ] || {
   echo 'Staged API is not reachable on its internal SSH acceptance target.' >&2
+  exit 73
+}
+
+# Install the immutable firewall helper and boot ordering only after all staged
+# application gates pass. Its first live update must succeed before this colour
+# is made durable; promote.sh repeats that fail-closed gate immediately before
+# it is allowed to create or recreate origin-edge.
+install_direct_origin_firewall "$candidate_config_root" || {
+  echo 'Direct-origin firewall installation or initial update failed.' >&2
   exit 73
 }
 

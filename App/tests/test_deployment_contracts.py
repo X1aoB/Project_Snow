@@ -157,6 +157,53 @@ class DeploymentContractTests(TestCase):
         self.assertIn("@privacy_document path /privacy/ /privacy/index.html", caddyfile)
         self.assertIn("path_regexp unversioned_scene", caddyfile)
 
+    def test_direct_origin_is_a_hardened_tcp_only_sidecar(self) -> None:
+        compose = self.read("compose.prod.yml")
+        origin_caddyfile = self.read("infra/OriginEdge.Caddyfile")
+        caddy = compose[compose.index("  caddy:\n"):compose.index("\n  origin-edge:")]
+        origin_edge = compose[
+            compose.index("  origin-edge:\n"):compose.index("\n  cloudflared:")
+        ]
+        networks = compose[compose.index("\nnetworks:\n"):]
+
+        self.assertIn("image: ${CADDY_IMAGE:?Set immutable CADDY_IMAGE digest}", origin_edge)
+        self.assertIn('      - "443:8443/tcp"', origin_edge)
+        self.assertEqual(origin_edge.count("443:8443/tcp"), 1)
+        self.assertNotIn("/udp", origin_edge)
+        self.assertNotIn("h3", origin_caddyfile)
+        self.assertNotIn("ports:", caddy)
+        self.assertIn("networks: [edge-client, origin-backend, app]", caddy)
+        self.assertIn("networks: [origin-backend, origin-uplink]", origin_edge)
+        self.assertNotIn("edge-client", origin_edge)
+        self.assertIn('dns: ["127.0.0.1"]', origin_edge)
+        self.assertIn("cap_drop: [\"ALL\"]", origin_edge)
+        self.assertIn("security_opt: [\"no-new-privileges:true\"]", origin_edge)
+        self.assertIn("read_only: true", origin_edge)
+        for material in ("origin-cert.pem", "origin-key.pem", "aop-ca.pem"):
+            self.assertIn(f"/etc/project-snow/origin-edge/{material}", origin_edge)
+            self.assertIn(f"/run/project-snow-origin/{material}:ro", origin_edge)
+
+        self.assertIn("auto_https off", origin_caddyfile)
+        self.assertIn("protocols h1 h2", origin_caddyfile)
+        self.assertIn("https://:8443", origin_caddyfile)
+        self.assertNotIn("https://snow.xiaob.dev:8443", origin_caddyfile)
+        self.assertEqual(origin_caddyfile.count("client_auth"), 1)
+        self.assertIn("mode require_and_verify", origin_caddyfile)
+        self.assertIn("trust_pool file /run/project-snow-origin/aop-ca.pem", origin_caddyfile)
+        self.assertIn("@snow host snow.xiaob.dev", origin_caddyfile)
+        self.assertIn("handle @snow", origin_caddyfile)
+        self.assertIn("max_size 65536", origin_caddyfile)
+        self.assertIn("reverse_proxy http://caddy:8080", origin_caddyfile)
+        self.assertIn("respond 421", origin_caddyfile)
+        self.assertIn("  cloudflared:\n", compose)
+        self.assertIn("networks: [edge-client, tunnel-uplink]", compose)
+        self.assertIn("  origin-backend:\n    name: ps-origin1", networks)
+        self.assertIn("internal: true", networks[networks.index("  origin-backend:"):networks.index("  origin-uplink:")])
+        self.assertIn("com.docker.network.bridge.name: ps-origin1", networks)
+        self.assertIn("  origin-uplink:\n    name: ps-origin0", networks)
+        self.assertIn("driver: bridge", networks)
+        self.assertIn("com.docker.network.bridge.name: ps-origin0", networks)
+
     def test_deploy_stages_only_the_inactive_colour(self) -> None:
         script = self.read("ops/deploy.sh")
         verify_data = script.index(
@@ -187,7 +234,7 @@ class DeploymentContractTests(TestCase):
         self.assertIn("Active-colour marker exists but is not readable", script)
         self.assertIn('case "$active_colour" in blue|green)', script)
         self.assertNotIn("tr -d '[:space:]' < \"$active_file\"", script)
-        self.assertIn("Caddy and cloudflared keep serving", script)
+        self.assertIn("Caddy, origin-edge and cloudflared keep", script)
         self.assertNotIn("force-recreate caddy", script)
         self.assertIn(
             'candidate_media_root="/srv/project-snow/media/releases/$candidate_media_version"',
@@ -223,6 +270,70 @@ class DeploymentContractTests(TestCase):
         self.assertIn("address in subnet", script)
         self.assertIn("SSH tunnel only", script)
         self.assertIn("-H 'Host: snow.xiaob.dev'", script)
+        firewall_install = script.index(
+            'install_direct_origin_firewall "$candidate_config_root"'
+        )
+        self.assertLess(acceptance_smoke, firewall_install)
+        self.assertLess(firewall_install, stage_env)
+
+    def test_direct_origin_firewall_is_installed_and_gates_edge_recreation(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        promote = self.read("ops/promote.sh")
+        service = self.read("ops/project-snow-origin-firewall.service")
+
+        helper_install = deploy.index(
+            'install -o root -g root -m 0755 "$firewall_source" "$firewall_binary"'
+        )
+        unit_install = deploy.index(
+            '"$firewall_config_root/ops/project-snow-origin-firewall.service"'
+        )
+        daemon_reload = deploy.index("systemctl daemon-reload", unit_install)
+        first_update = deploy.index('"$firewall_binary" update', daemon_reload)
+        enable_units = deploy.index(
+            "systemctl enable project-snow-origin-firewall.service "
+            "project-snow-origin-firewall.timer",
+            first_update,
+        )
+        systemd_exec_check = deploy.index(
+            "systemctl cat --no-pager project-snow-origin-firewall.service",
+            enable_units,
+        )
+        self.assertLess(helper_install, unit_install)
+        self.assertLess(unit_install, daemon_reload)
+        self.assertLess(daemon_reload, first_update)
+        self.assertLess(first_update, enable_units)
+        self.assertLess(enable_units, systemd_exec_check)
+        self.assertIn("/usr/local/sbin/project-snow-origin-firewall", deploy)
+        self.assertIn('"$firewall_binary|0:0:755:1"', deploy)
+        self.assertIn("project-snow-origin-firewall.service|0:0:644:1", deploy)
+        self.assertIn("project-snow-origin-firewall.timer|0:0:644:1", deploy)
+        self.assertIn("stat -c %u:%g:%a:%h", deploy)
+        self.assertIn(
+            "[ \"$firewall_unit_exec_start\" = "
+            "'/usr/local/sbin/project-snow-origin-firewall update' ]",
+            deploy,
+        )
+        self.assertIn("systemctl is-enabled --quiet project-snow-origin-firewall.service", deploy)
+        self.assertIn("systemctl is-active --quiet project-snow-origin-firewall.timer", deploy)
+
+        update_gate = promote.index("run_origin_firewall update")
+        target_switch = promote.index(
+            'switch_edge "$colour_env" "$colour_config_root" "$colour"'
+        )
+        restore_gate = promote.index("run_origin_firewall restore")
+        previous_switch = promote.index(
+            'switch_edge "$previous_env" "$previous_config_root" "$previous_colour"'
+        )
+        self.assertLess(update_gate, target_switch)
+        self.assertLess(restore_gate, previous_switch)
+        self.assertIn("public 443 fail-closed", promote)
+        self.assertNotIn("ufw allow 443", deploy)
+        self.assertIn("Before=docker.service", service)
+        self.assertIn("RequiredBy=docker.service", service)
+        self.assertIn(
+            "ExecStart=/usr/local/sbin/project-snow-origin-firewall update", service
+        )
+        self.assertNotIn("/srv/project-snow/app/scripts/cloudflare_origin_firewall.py", service)
 
     def test_compose_allows_a_colour_to_pin_verified_media(self) -> None:
         compose = self.read("compose.prod.yml")
@@ -279,12 +390,20 @@ class DeploymentContractTests(TestCase):
         self.assertLess(switch, post_switch_smoke)
         self.assertLess(post_switch_smoke, marker)
         self.assertIn("restoring the previous edge configuration snapshot", script)
-        self.assertIn("--force-recreate caddy cloudflared", script)
-        self.assertIn("--force-recreate caddy cloudflared egress-proxy", script)
+        self.assertIn('up -d --no-deps --force-recreate "$@"', script)
+        self.assertNotIn("--force-recreate caddy cloudflared", script)
+        self.assertIn("service_list_has", script)
+        self.assertIn('set -- caddy', script)
+        self.assertNotIn('set -- "$@" origin-edge', script)
+        self.assertIn('set -- "$@" cloudflared', script)
+        self.assertIn('set -- "$@" egress-proxy', script)
+        self.assertIn("start origin-edge", script)
         self.assertIn(
             'switch_edge "$previous_env" "$previous_config_root" "$previous_colour"',
             script,
         )
+        self.assertIn('"$previous_services" "$previous_allow_origin"', script)
+        self.assertIn('"$target_services" "$target_allow_origin"', script)
         self.assertNotIn(
             "switch_edge \"$previous_env\" \"$previous_colour\" || true", script
         )
@@ -330,6 +449,184 @@ class DeploymentContractTests(TestCase):
             restore,
         )
         self.assertLess(restore, restore_edge)
+        firewall_update = script.index("run_origin_firewall update")
+        firewall_restore = script.index("run_origin_firewall restore")
+        target_origin_prepare = script.index(
+            'prepare_or_retain_origin_edge "$colour_env" "$colour_config_root" "$colour"'
+        )
+        previous_origin_prepare = script.index(
+            'prepare_or_retain_origin_edge "$previous_env" "$previous_config_root" "$previous_colour"'
+        )
+        target_origin_probe = script.index(
+            'probe_prepared_origin_edge "$colour_env" "$colour_config_root" "$colour"'
+        )
+        previous_origin_probe = script.index(
+            'probe_prepared_origin_edge "$previous_env" "$previous_config_root" "$previous_colour"'
+        )
+        self.assertLess(target_origin_prepare, firewall_update)
+        self.assertLess(previous_origin_prepare, firewall_restore)
+        self.assertLess(firewall_update, target_origin_probe)
+        self.assertLess(firewall_restore, previous_origin_probe)
+        self.assertLess(target_origin_probe, switch)
+        self.assertLess(previous_origin_probe, restore_edge)
+        self.assertLess(firewall_update, switch)
+        self.assertLess(firewall_restore, restore_edge)
+        self.assertIn("validate_origin_edge_material", script)
+        self.assertIn("validate_origin_edge_container", script)
+        self.assertIn("validate_origin_edge_network", script)
+        self.assertIn("up --no-start --no-deps --force-recreate origin-edge", script)
+        self.assertIn('docker network inspect "$origin_edge_network"', script)
+        self.assertIn("validate_docker_dns_security_floor", script)
+        self.assertIn("docker version --format '{{.Server.Version}}'", script)
+        self.assertIn("at or above 26.0.0", script)
+        self.assertIn(".Driver == \"bridge\"", script)
+        self.assertIn(".[0].Internal == false", script)
+        self.assertIn(".[0].EnableIPv6 == false", script)
+        self.assertIn('Options["com.docker.network.bridge.name"]', script)
+        self.assertIn('Labels["com.docker.compose.project"] == "project-snow-public"', script)
+        self.assertIn('Labels["com.docker.compose.network"] == "origin-uplink"', script)
+        self.assertIn('.Labels["com.docker.compose.network"] == "origin-backend"', script)
+        self.assertIn(".[0].Internal == true", script)
+        self.assertIn('/usr/sbin/ip -json -details link show dev "$origin_edge_network"', script)
+        self.assertIn('/usr/sbin/ip -json -details link show dev "$origin_edge_internal_network"', script)
+        self.assertIn(
+            'for unmanaged_origin_bridge in "$origin_edge_network" "$origin_edge_internal_network"',
+            script,
+        )
+        self.assertIn('/usr/sbin/ip link show dev "$unmanaged_origin_bridge"', script)
+        self.assertIn("origin_uplink_exists", script)
+        self.assertIn("origin_backend_exists", script)
+        self.assertIn("Refusing to adopt an unmanaged existing origin bridge", script)
+        self.assertIn(".[0].State.Running == $expected_running", script)
+        self.assertIn(
+            'validate_origin_edge_container "$prepare_env" "$prepare_config_root" "$prepare_colour" false',
+            script,
+        )
+        self.assertIn('keys) == ["8443/tcp"]', script)
+        self.assertIn('HostPort == "443"', script)
+        self.assertIn('.[0].HostConfig.Dns == ["127.0.0.1"]', script)
+        self.assertIn("NetworkSettings.Ports", script)
+        self.assertIn("($containers | length) == 1", script)
+        self.assertIn("($containers | has($container_id))", script)
+        self.assertIn(
+            "caddy validate --config /etc/caddy/OriginEdge.Caddyfile --adapter caddyfile",
+            script,
+        )
+        self.assertIn("Expected exactly one origin-edge container", script)
+        probe_start = script.index("run_origin_network_probe() {")
+        probe_end = script.index("\n}\n\nvalidate_running_origin_edge_caddy()", probe_start)
+        probe = script[probe_start:probe_end]
+        self.assertIn('docker create --name "$probe_candidate"', probe)
+        self.assertIn('--network "$origin_edge_network"', probe)
+        self.assertIn("--dns 127.0.0.1", probe)
+        self.assertIn('docker network connect "$origin_edge_internal_network"', probe)
+        self.assertIn('--entrypoint python "$probe_image_id"', probe)
+        self.assertIn("socket.getaddrinfo(external_name, 443)", probe)
+        self.assertIn('require_tcp_blocked("1.1.1.1", 80, 42)', probe)
+        self.assertIn('require_tcp_blocked("1.1.1.1", 53, 43)', probe)
+        self.assertIn("socket.SOCK_DGRAM", probe)
+        self.assertIn('udp.sendto(query, ("1.1.1.1", 53))', probe)
+        self.assertIn("require_tcp_blocked(origin_gateway, 53, 45)", probe)
+        self.assertIn("require_tcp_blocked(backend_gateway, 53, 46)", probe)
+        self.assertIn("require_tcp_blocked(other_bridge_target, 8000, 47)", probe)
+        self.assertIn('socket.getaddrinfo("caddy", 8080)', probe)
+        self.assertIn('http.client.HTTPConnection("caddy", 8080, timeout=5)', probe)
+        self.assertIn('headers={"Host": "snow.xiaob.dev"}', probe)
+        self.assertIn("read_origin_drop_counter", script)
+        self.assertIn("run_origin_firewall counters", script)
+        self.assertIn("read_origin_drop_counter input_uplink", probe)
+        self.assertIn("read_origin_drop_counter input_backend", probe)
+        self.assertIn("read_origin_drop_counter forward", probe)
+        self.assertIn(
+            '"$probe_uplink_input_after" -gt "$probe_uplink_input_before"', probe
+        )
+        self.assertIn(
+            '"$probe_backend_input_after" -gt "$probe_backend_input_before"', probe
+        )
+        self.assertIn('"$probe_forward_after" -gt "$probe_forward_before"', probe)
+        self.assertIn("--read-only --cap-drop ALL --security-opt no-new-privileges", probe)
+        self.assertNotIn("origin-key.pem", probe)
+        self.assertNotIn("/etc/project-snow/origin-edge", probe)
+        self.assertIn("ensure_caddy_origin_backend", script)
+        self.assertIn(
+            'docker network connect --alias caddy "$origin_edge_internal_network"',
+            script,
+        )
+        self.assertIn('index("caddy")', script)
+        self.assertIn("The dedicated origin backend contains an unexpected endpoint", script)
+        self.assertIn(
+            '([$container_id, $caddy_id] | sort)',
+            script,
+        )
+        retained_runtime = script.index('if [ "$existing_origin_running" = true ]; then')
+        retained_caddy_validation = script.index(
+            'validate_running_origin_edge_caddy "$prepare_env" "$prepare_config_root" "$prepare_colour"',
+            retained_runtime,
+        )
+        retained_return = script.index("return 0", retained_runtime)
+        stopped_create = script.index(
+            "up --no-start --no-deps --force-recreate origin-edge",
+            retained_runtime,
+        )
+        self.assertLess(retained_caddy_validation, retained_return)
+        self.assertLess(retained_return, stopped_create)
+        stopped_validation = script.index(
+            'validate_origin_edge_container "$prepare_env" "$prepare_config_root" "$prepare_colour" false',
+            stopped_create,
+        )
+        start_mode = script.index("origin_edge_prestart_mode=start", stopped_validation)
+        probe_wrapper = script.index("probe_prepared_origin_edge() {", start_mode)
+        probe_call = script.index(
+            'run_origin_network_probe "$prepared_env"', probe_wrapper
+        )
+        self.assertLess(stopped_create, stopped_validation)
+        self.assertLess(stopped_validation, start_mode)
+        self.assertLess(start_mode, probe_call)
+        self.assertIn("origin_edge_prestart_mode=retain", script)
+        self.assertIn("origin_edge_prestart_mode=start", script)
+        self.assertIn('"$target_origin_mode"', script)
+        self.assertIn('"$previous_origin_mode"', script)
+        self.assertIn("root-owned mode-0400 single regular file", script)
+        self.assertIn(
+            "A direct-origin target must retain cloudflared until a separately authorized edge migration.",
+            script,
+        )
+        self.assertNotIn("remove target-only origin-edge", script)
+        self.assertNotIn("remove target-only cloudflared", script)
+        self.assertNotIn(
+            'elif [ "$target_has_origin_edge" -ne 1 ] && [ "$previous_has_origin_edge" -eq 1 ]',
+            script,
+        )
+        self.assertNotIn(
+            'if [ "$target_has_cloudflared" -ne 1 ] && [ "$previous_has_cloudflared" -eq 1 ]',
+            script,
+        )
+        cloudflared_lines = "\n".join(
+            line for line in script.splitlines() if "cloudflared" in line
+        )
+        self.assertNotIn("stop_snapshot_service", cloudflared_lines)
+        self.assertEqual(script.count("previous_allow_origin=0"), 3)
+        self.assertEqual(script.count("target_allow_origin=0"), 3)
+        self.assertIn(
+            "previous origin-edge could not pass its retained-runtime or stopped pre-start gate; keeping public 443 fail-closed",
+            script,
+        )
+        self.assertIn(
+            "Target origin-edge could not pass its retained-runtime or stopped pre-start gate; public 443 was not started",
+            script,
+        )
+        self.assertIn(
+            'if ! run_origin_firewall restore; then\n'
+            "      echo 'CRITICAL: failed to restore the last-known-good origin firewall; keeping public 443 fail-closed.' >&2\n"
+            "      previous_allow_origin=0",
+            script,
+        )
+        self.assertIn(
+            'if ! run_origin_firewall restore; then\n'
+            "    echo 'Rollback could not restore the last-known-good origin firewall; public 443 will remain fail-closed.' >&2\n"
+            "    target_allow_origin=0",
+            script,
+        )
         self.assertIn("previous public API did not become ready for restoration", script)
         self.assertIn(
             "Cloudflare Access and MyWebsite settings were not changed", script
@@ -370,6 +667,8 @@ class DeploymentContractTests(TestCase):
         self.assertIn("PermitRootLogin no", script)
         self.assertIn("AllowUsers deploy", script)
         self.assertIn("systemctl enable --now fail2ban", script)
+        self.assertIn("jq nftables openssl", script)
+        self.assertIn("/etc/project-snow/origin-edge", script)
         self.assertIn("Refusing to disable root SSH", script)
         self.assertIn("ufw allow 43556/tcp", script)
         self.assertLess(script.index("ufw --force enable"), script.index("systemctl restart docker", script.index("ufw --force enable")))
@@ -470,6 +769,52 @@ class DeploymentContractTests(TestCase):
         self.assertNotIn("/bin/sh", sudoers_rules)
         self.assertNotIn("docker", sudoers_rules.casefold())
 
+    def test_release_runner_preflights_host_before_any_mutation(self) -> None:
+        runner = self.read("ops/project-snow-release")
+        bootstrap = self.read("ops/bootstrap-release-runner.sh")
+        deployment_guide = self.read("docs/public_deployment.md")
+        preflight_start = runner.index("require_host_safety_preflight() {")
+        preflight_end = runner.index("\n}\n\nacquire_release_lock()", preflight_start)
+        preflight = runner[preflight_start:preflight_end]
+        for probe in (
+            "sshd_policy_active",
+            "ufw_policy_active",
+            "fail2ban_sshd_active",
+            "deploy_lacks_docker_group",
+            "deploy_cannot_access_docker",
+        ):
+            self.assertIn(probe, preflight)
+        self.assertIn("Host safety preflight failed.", preflight)
+
+        mutating_start = runner.index("run_mutating_operation() {")
+        dispatch_start = runner.index('\ncase "$operation" in', mutating_start)
+        mutating = runner[mutating_start:dispatch_start]
+        safety_gate = mutating.index("require_host_safety_preflight")
+        acquire_lock = mutating.index("acquire_release_lock")
+        stage = mutating.index("run_stage", acquire_lock)
+        promote = mutating.index("run_switch promote", acquire_lock)
+        rollback = mutating.index("run_switch rollback", acquire_lock)
+        self.assertLess(safety_gate, acquire_lock)
+        self.assertLess(acquire_lock, stage)
+        self.assertLess(acquire_lock, promote)
+        self.assertLess(acquire_lock, rollback)
+
+        dispatch = runner[dispatch_start:]
+        self.assertIn("status) run_status ;;", dispatch)
+        self.assertIn("stage|promote|rollback) run_mutating_operation ;;", dispatch)
+        self.assertEqual(runner.count('exec 9>"$release_lock"'), 1)
+        self.assertNotIn("acquire_release_lock", dispatch.split("status) run_status ;;", 1)[0])
+        self.assertIn(
+            'install -o root -g root -m 0755 "$fresh_repo/App/ops/project-snow-release"',
+            bootstrap,
+        )
+        self.assertIn("An already installed runner does not update itself through `stage`", deployment_guide)
+        self.assertIn(
+            "App/ops/bootstrap-release-runner.sh --controller-sha <sha>",
+            deployment_guide,
+        )
+        self.assertIn("without invoking `prepare_debian.sh`", deployment_guide)
+
     def test_release_archives_are_safely_verified_before_atomic_install(self) -> None:
         runner = self.read("ops/project-snow-release")
         installer = self.read("scripts/install_release_archive.py")
@@ -521,6 +866,8 @@ class DeploymentContractTests(TestCase):
         self.assertNotIn("cd /srv/project-snow/repo", script)
         self.assertIn("os.O_NOFOLLOW", host_bootstrap)
         self.assertIn("EXPECTED_FILES", host_bootstrap)
+        self.assertIn('"App/ops/project-snow-release"', host_bootstrap)
+        self.assertIn("'App/ops/project-snow-release'", script)
         self.assertIn("host preparation bundle does not match the exact Git archive", host_bootstrap)
         self.assertIn("host preparation executable must use LF line endings", host_bootstrap)
         self.assertIn("project-snow-prepare-", host_bootstrap)
@@ -532,6 +879,10 @@ class DeploymentContractTests(TestCase):
         for relative_path in (
             "compose.prod.yml",
             "infra/Caddyfile",
+            "infra/OriginEdge.Caddyfile",
+            "scripts/cloudflare_origin_firewall.py",
+            "ops/project-snow-origin-firewall.service",
+            "ops/project-snow-origin-firewall.timer",
             "infra/egress-squid.conf",
             "infra/neo4j-entrypoint.sh",
             "infra/postgres/postgresql.conf",
@@ -757,14 +1108,32 @@ class DeploymentContractTests(TestCase):
             self.assertIn("project-snow-config-snapshot-1", script)
             self.assertIn("/srv/project-snow/releases/configurations", script)
             self.assertIn("configuration_sha256", script)
+            self.assertIn("configuration_paths_for_root()", script)
+            self.assertIn('case "$direct_origin_path_count" in', script)
+            self.assertIn("    0) ;;", script)
+            self.assertIn(
+                "    4) printf '%s\\n' \"$direct_origin_configuration_paths\" ;;",
+                script,
+            )
+            self.assertIn('"$binding_expected_count"', script)
+            self.assertNotIn('"$binding_count" -eq 7', script)
+            self.assertNotIn('"$binding_count" -eq 11', script)
             for relative_path in (
                 "compose.prod.yml",
                 "infra/Caddyfile",
+                "infra/OriginEdge.Caddyfile",
+                "scripts/cloudflare_origin_firewall.py",
+                "ops/project-snow-origin-firewall.service",
+                "ops/project-snow-origin-firewall.timer",
                 "infra/egress-squid.conf",
                 "infra/neo4j-entrypoint.sh",
                 "infra/postgres/postgresql.conf",
             ):
                 self.assertIn(relative_path, script)
+        self.assertIn('case "$bootstrap_direct_count" in', deploy)
+        self.assertIn("        0|4) ;;", deploy)
+        self.assertIn('existing_bootstrap_paths="$(configuration_paths_for_root', deploy)
+        self.assertIn('[ "$bootstrap_paths" = "$existing_bootstrap_paths" ]', deploy)
         self.assertIn('-f "$candidate_config_root/compose.prod.yml"', deploy)
         self.assertIn(
             'verify_snapshot_against_manifest "$candidate_config_root" "$release_manifest"',
