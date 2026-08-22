@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest import TestCase
@@ -953,6 +954,11 @@ printf '%s\n' "$build_status"
         probe_start = script.index("run_origin_network_probe() {")
         probe_end = script.index("\n}\n\nvalidate_running_origin_edge_caddy()", probe_start)
         probe = script[probe_start:probe_end]
+        probe_program_start = script.index("origin_network_probe_program='")
+        probe_program_end = script.index(
+            "\n\nprobe_ipv4_belongs_to_app_network()", probe_program_start
+        )
+        probe += script[probe_program_start:probe_program_end]
         self.assertIn('docker create --name "$probe_candidate"', probe)
         self.assertIn('--network "$origin_edge_network"', probe)
         self.assertIn("--dns 127.0.0.1", probe)
@@ -991,6 +997,37 @@ printf '%s\n' "$build_status"
         )
         self.assertIn('index("caddy")', script)
         self.assertIn("The dedicated origin backend contains an unexpected endpoint", script)
+        stale_cleanup = script.index("remove_verified_stale_origin_network_probes || return 1")
+        backend_endpoint_gate = script.index(
+            'docker network inspect "$origin_edge_internal_network"', stale_cleanup
+        )
+        self.assertLess(stale_cleanup, backend_endpoint_gate)
+        for probe_label in (
+            "com.project-snow.origin-network-probe=1",
+            "com.project-snow.origin-network-probe-schema=1",
+            "com.project-snow.origin-network-probe-sha=$marker_sha",
+            "com.project-snow.origin-network-probe-colour=$probe_colour",
+        ):
+            self.assertIn(probe_label, probe)
+        stale_start = script.index("validate_stale_origin_network_probe() {")
+        stale_end = script.index("\n}\n\nremove_origin_network_probe()", stale_start)
+        stale = script[stale_start:stale_end]
+        for exact_stale_predicate in (
+            '.[0].State.Running == false',
+            '.[0].State.Status == "created"',
+            '.[0].State.Status == "exited"',
+            '.[0].Config.Cmd[1] == $program',
+            '.[0].HostConfig.ReadonlyRootfs == true',
+            '.[0].HostConfig.PidsLimit == 32',
+            '.[0].HostConfig.Memory == 67108864',
+            '.[0].HostConfig.NanoCpus == 250000000',
+            '([$uplink, $backend] | sort)',
+            'probe_ipv4_belongs_to_app_network',
+            '"$marker_app_image" "$previous_app_image"',
+        ):
+            self.assertIn(exact_stale_predicate, stale)
+        self.assertIn('docker rm "$stale_probe_id"', stale)
+        self.assertNotIn('docker rm -f "$stale_probe_id"', stale)
         self.assertIn(
             '([$container_id, $caddy_id] | sort)',
             script,
@@ -1091,6 +1128,173 @@ printf '%s\n' "$build_status"
             "Cloudflare Access and MyWebsite settings were not changed", script
         )
         self.assertNotIn("cloudflared tunnel route dns", script)
+
+    def test_stale_origin_probe_cleanup_is_exact_and_fail_closed(self) -> None:
+        script = self.read("ops/promote.sh")
+        cleanup_start = script.index("origin_network_probe_program='")
+        cleanup_end = script.index("\n\nremove_origin_network_probe() {", cleanup_start)
+        cleanup_functions = script[cleanup_start:cleanup_end]
+        jq_path = shutil.which("jq")
+        if jq_path is None:
+            local_jq = Path(tempfile.gettempdir()) / "jq-windows-amd64.exe"
+            jq_path = str(local_jq) if local_jq.is_file() else None
+        self.assertIsNotNone(jq_path, "jq is required for the stale-probe dynamic contract.")
+        python_path = Path(sys.executable).as_posix()
+        harness = f'''\
+set -u
+mode=$1
+log_file=$2
+jq_bin=$3
+python_bin=$4
+origin_edge_network=ps-origin0
+origin_edge_internal_network=ps-origin1
+origin_network_document='[{{"IPAM":{{"Config":[{{"Gateway":"172.18.0.1"}}]}}}}]'
+origin_internal_network_document='[{{"IPAM":{{"Config":[{{"Gateway":"172.19.0.1"}}]}}}}]'
+marker_app_image=registry.example/snow@sha256:{"1" * 64}
+previous_app_image=registry.example/snow@sha256:{"2" * 64}
+candidate_id={"a" * 64}
+allowed_image=sha256:{"b" * 64}
+release_sha={"c" * 40}
+
+python3() {{ "$python_bin" "$@"; }}
+jq() {{ "$jq_bin" "$@"; }}
+
+{cleanup_functions}
+
+docker() {{
+  if [ "$1" = ps ]; then
+    printf '%s\n' "$candidate_id"
+    return 0
+  fi
+  if [ "$1" = inspect ]; then
+    probe_running=false
+    probe_status=exited
+    probe_pid=0
+    probe_program=$origin_network_probe_program
+    probe_pids=32
+    probe_image=$allowed_image
+    probe_other_ipv4=172.20.0.25
+    probe_backend=true
+    case "$mode" in
+      running) probe_running=true; probe_status=running; probe_pid=99 ;;
+      created|legacy_created) probe_status=created; probe_backend=false ;;
+      created_dual|legacy_created_dual) probe_status=created ;;
+      command) probe_program="$origin_network_probe_program#" ;;
+      network) probe_backend=false ;;
+      resource) probe_pids=33 ;;
+      image) probe_image=sha256:{"d" * 64} ;;
+      subnet) probe_other_ipv4=192.0.2.25 ;;
+    esac
+    "$jq_bin" -n \
+      --arg id "$candidate_id" \
+      --arg image "$probe_image" \
+      --argjson running "$probe_running" \
+      --arg status "$probe_status" \
+      --argjson pid "$probe_pid" \
+      --arg program "$probe_program" \
+      --argjson pids "$probe_pids" \
+      --arg other "$probe_other_ipv4" \
+      --argjson include_backend "$probe_backend" \
+      --arg label_mode "$mode" \
+      --arg sha "$release_sha" '
+        (if ($label_mode == "legacy" or
+             $label_mode == "legacy_created" or
+             $label_mode == "legacy_created_dual") then {{}} else {{
+          "com.project-snow.origin-network-probe": "1",
+          "com.project-snow.origin-network-probe-schema": "1",
+          "com.project-snow.origin-network-probe-sha": $sha,
+          "com.project-snow.origin-network-probe-colour": "green"
+        }} end) as $labels |
+        ({{"ps-origin0": {{"Gateway":"172.18.0.1", "IPAddress":"172.18.0.25"}}}} +
+          (if $include_backend then
+             {{"ps-origin1": {{"Gateway":"172.19.0.1", "IPAddress":"172.19.0.25"}}}}
+           else {{}} end)) as $networks |
+        [{{
+          Id: $id,
+          Name: "/project-snow-origin-netprobe-4242",
+          Image: $image,
+          State: {{
+            Running: $running, Paused: false, Restarting: false, Dead: false,
+            OOMKilled: false, Pid: $pid, Status: $status, Error: ""
+          }},
+          Config: {{
+            Entrypoint: ["python"],
+            Cmd: ["-c", $program, "project-snow-origin-netprobe",
+              ("project-snow-" + ($sha[0:12]) + "-4242.1-1-1-1.sslip.io"),
+              "172.18.0.1", "172.19.0.1", $other],
+            Labels: $labels
+          }},
+          HostConfig: {{
+            NetworkMode: "ps-origin0", ReadonlyRootfs: true,
+            CapDrop: ["CAP_ALL"], CapAdd: [],
+            SecurityOpt: ["no-new-privileges:true"], Privileged: false,
+            AutoRemove: false, PublishAllPorts: false, PortBindings: {{}},
+            PidsLimit: $pids, Memory: 67108864, NanoCpus: 250000000,
+            Dns: ["127.0.0.1"], Tmpfs: {{"/tmp":"rw,nosuid,nodev,size=4m"}}
+          }},
+          NetworkSettings: {{Networks: $networks}}
+        }}]'
+    return 0
+  fi
+  if [ "$1" = image ] && [ "$2" = inspect ]; then
+    printf '%s\n' "$allowed_image"
+    return 0
+  fi
+  if [ "$1" = network ] && [ "$2" = inspect ]; then
+    "$jq_bin" -n '[{{
+      Name: "project-snow-public_app", Driver: "bridge", Internal: true,
+      EnableIPv6: false,
+      Labels: {{
+        "com.docker.compose.project": "project-snow-public",
+        "com.docker.compose.network": "app"
+      }},
+      IPAM: {{Config: [{{Subnet: "172.20.0.0/16"}}]}}
+    }}]'
+    return 0
+  fi
+  if [ "$1" = rm ]; then
+    printf '%s\n' "$*" >> "$log_file"
+    return 0
+  fi
+  return 64
+}}
+
+remove_verified_stale_origin_network_probes
+'''
+        jq_argument = Path(jq_path).as_posix() if jq_path else ""
+        for allowed_mode in (
+            "new",
+            "legacy",
+            "created",
+            "legacy_created",
+            "created_dual",
+            "legacy_created_dual",
+        ):
+            with self.subTest(mode=allowed_mode), tempfile.TemporaryDirectory() as root:
+                log = Path(root) / "docker-rm.log"
+                result = self.run_posix_shell(
+                    harness, allowed_mode, log.as_posix(), jq_argument, python_path
+                )
+                removed = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(removed, [f"rm {'a' * 64}"])
+
+        for rejected_mode in (
+            "running",
+            "command",
+            "network",
+            "resource",
+            "image",
+            "subnet",
+        ):
+            with self.subTest(mode=rejected_mode), tempfile.TemporaryDirectory() as root:
+                log = Path(root) / "docker-rm.log"
+                result = self.run_posix_shell(
+                    harness, rejected_mode, log.as_posix(), jq_argument, python_path
+                )
+                removed = log.read_text(encoding="utf-8") if log.exists() else ""
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(removed, "")
 
     def test_origin_edge_bundle_replacement_requires_and_retains_tunnel_fallback(self) -> None:
         script = self.read("ops/promote.sh")

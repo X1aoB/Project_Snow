@@ -874,6 +874,7 @@ ensure_caddy_origin_backend() {
     backend_origin_running="$(docker inspect --format '{{.State.Running}}' "$backend_origin_id")" || return 1
     case "$backend_origin_running" in true|false) ;; *) return 1 ;; esac
   fi
+  remove_verified_stale_origin_network_probes || return 1
   docker network inspect "$origin_edge_internal_network" | jq -e \
     --arg caddy_id "$origin_caddy_container_id" \
     --arg origin_id "$backend_origin_id" \
@@ -1163,6 +1164,217 @@ wait_for_origin_edge_running_policy() {
   return 1
 }
 
+origin_network_probe_program='
+import http.client
+import socket
+import sys
+
+external_name, origin_gateway, backend_gateway, other_bridge_target = sys.argv[1:5]
+
+try:
+    socket.getaddrinfo(external_name, 443)
+except socket.gaierror:
+    pass
+else:
+    raise SystemExit(41)
+
+def require_tcp_blocked(host, port, exit_code):
+    try:
+        connection = socket.create_connection((host, port), timeout=3)
+    except OSError:
+        return
+    connection.close()
+    raise SystemExit(exit_code)
+
+require_tcp_blocked("1.1.1.1", 80, 42)
+require_tcp_blocked("1.1.1.1", 53, 43)
+
+labels = external_name.encode("ascii").split(b".")
+query_name = b"".join(bytes((len(label),)) + label for label in labels) + b"\x00"
+query = b"\x50\x53\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + query_name + b"\x00\x01\x00\x01"
+udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+udp.settimeout(3)
+try:
+    udp.sendto(query, ("1.1.1.1", 53))
+    udp.recvfrom(512)
+except OSError:
+    pass
+else:
+    raise SystemExit(44)
+finally:
+    udp.close()
+
+require_tcp_blocked(origin_gateway, 53, 45)
+require_tcp_blocked(backend_gateway, 53, 46)
+require_tcp_blocked(other_bridge_target, 8000, 47)
+
+socket.getaddrinfo("caddy", 8080)
+connection = http.client.HTTPConnection("caddy", 8080, timeout=5)
+connection.request("GET", "/public/v1/health/live", headers={"Host": "snow.xiaob.dev"})
+response = connection.getresponse()
+response.read(65536)
+connection.close()
+if response.status != 200:
+    raise SystemExit(48)
+    '
+
+probe_ipv4_belongs_to_app_network() {
+  checked_ipv4="$1"
+  shift
+  python3 - "$checked_ipv4" "$@" <<'PY'
+import ipaddress
+import sys
+
+address = ipaddress.ip_address(sys.argv[1])
+networks = [ipaddress.ip_network(value, strict=False) for value in sys.argv[2:]]
+if address.version != 4 or not networks or not any(address in network for network in networks):
+    raise SystemExit(1)
+PY
+}
+
+validate_stale_origin_network_probe() {
+  stale_probe_id="$1"
+  stale_probe_document="$(docker inspect "$stale_probe_id")" || return 1
+  stale_probe_uplink_gateway="$(printf '%s\n' "$origin_network_document" | jq -er '
+    [.[0].IPAM.Config[]?.Gateway // empty |
+      select(type == "string" and test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$"))] |
+    unique | if length == 1 then .[0] else error("origin gateway is not unique") end
+  ')" || return 1
+  stale_probe_backend_gateway="$(printf '%s\n' "$origin_internal_network_document" | jq -er '
+    [.[0].IPAM.Config[]?.Gateway // empty |
+      select(type == "string" and test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$"))] |
+    unique | if length == 1 then .[0] else error("origin backend gateway is not unique") end
+  ')" || return 1
+  stale_probe_identity="$(printf '%s\n' "$stale_probe_document" | jq -er \
+    --arg container_id "$stale_probe_id" \
+    --arg uplink "$origin_edge_network" \
+    --arg backend "$origin_edge_internal_network" \
+    --arg uplink_gateway "$stale_probe_uplink_gateway" \
+    --arg backend_gateway "$stale_probe_backend_gateway" \
+    --arg program "$origin_network_probe_program" '
+      (.[0].Name |
+        capture("^/project-snow-origin-netprobe-(?<pid>[1-9][0-9]*)$") |
+        .pid) as $pid |
+      select(
+      length == 1 and
+      .[0].Id == $container_id and
+      (.[0].Name | test("^/project-snow-origin-netprobe-[1-9][0-9]*$")) and
+      .[0].State.Running == false and
+      .[0].State.Paused == false and
+      .[0].State.Restarting == false and
+      .[0].State.Dead == false and
+      .[0].State.OOMKilled == false and
+      .[0].State.Pid == 0 and
+      ((.[0].State.Status == "created") or (.[0].State.Status == "exited")) and
+      (.[0].State.Error // "") == "" and
+      .[0].Config.Entrypoint == ["python"] and
+      (.[0].Config.Cmd | length) == 7 and
+      .[0].Config.Cmd[0] == "-c" and
+      .[0].Config.Cmd[1] == $program and
+      .[0].Config.Cmd[2] == "project-snow-origin-netprobe" and
+      .[0].Config.Cmd[4] == $uplink_gateway and
+      .[0].Config.Cmd[5] == $backend_gateway and
+      (.[0].Config.Cmd[3] |
+        test("^project-snow-[0-9a-f]{12}-" + $pid + "\\.1-1-1-1\\.sslip\\.io$")) and
+      (.[0].Config.Cmd[6] |
+        test("^([0-9]{1,3}\\.){3}[0-9]{1,3}$")) and
+      .[0].HostConfig.NetworkMode == $uplink and
+      .[0].HostConfig.ReadonlyRootfs == true and
+      (((.[0].HostConfig.CapDrop // []) | sort) == ["ALL"] or
+       ((.[0].HostConfig.CapDrop // []) | sort) == ["CAP_ALL"]) and
+      ((.[0].HostConfig.CapAdd // []) | length) == 0 and
+      (((.[0].HostConfig.SecurityOpt // []) | sort) == ["no-new-privileges"] or
+       ((.[0].HostConfig.SecurityOpt // []) | sort) == ["no-new-privileges:true"]) and
+      .[0].HostConfig.Privileged == false and
+      .[0].HostConfig.AutoRemove == false and
+      .[0].HostConfig.PublishAllPorts == false and
+      ((.[0].HostConfig.PortBindings // {}) | length) == 0 and
+      .[0].HostConfig.PidsLimit == 32 and
+      .[0].HostConfig.Memory == 67108864 and
+      .[0].HostConfig.NanoCpus == 250000000 and
+      .[0].HostConfig.Dns == ["127.0.0.1"] and
+      .[0].HostConfig.Tmpfs == {"/tmp":"rw,nosuid,nodev,size=4m"} and
+      ((.[0].NetworkSettings.Networks // {} | keys | sort) as $networks |
+        if .[0].State.Status == "created" then
+          ($networks == [$uplink] or
+           $networks == ([$uplink, $backend] | sort))
+        else
+          $networks == ([$uplink, $backend] | sort)
+        end) and
+      ((.[0].Config.Labels // {}) as $labels |
+        (($labels["com.project-snow.origin-network-probe"] == null and
+          $labels["com.project-snow.origin-network-probe-schema"] == null and
+          $labels["com.project-snow.origin-network-probe-sha"] == null and
+          $labels["com.project-snow.origin-network-probe-colour"] == null) or
+         ($labels["com.project-snow.origin-network-probe"] == "1" and
+          $labels["com.project-snow.origin-network-probe-schema"] == "1" and
+          ($labels["com.project-snow.origin-network-probe-sha"] |
+            test("^[0-9a-f]{40}$")) and
+          ($labels["com.project-snow.origin-network-probe-colour"] |
+            test("^(blue|green)$")) and
+          .[0].Config.Cmd[3] ==
+            ("project-snow-" +
+             ($labels["com.project-snow.origin-network-probe-sha"][0:12]) +
+             "-" + $pid + ".1-1-1-1.sslip.io"))))) |
+      [.[0].Image, .[0].Config.Cmd[6]] | @tsv
+    ')" || return 1
+  stale_probe_image="$(printf '%s\n' "$stale_probe_identity" | cut -f 1)"
+  stale_probe_other_ipv4="$(printf '%s\n' "$stale_probe_identity" | cut -f 2)"
+  printf '%s\n' "$stale_probe_image" | grep -Eq '^sha256:[0-9a-f]{64}$' || return 1
+  stale_probe_image_allowed=0
+  for stale_probe_allowed_ref in "$marker_app_image" "$previous_app_image"; do
+    stale_probe_allowed_image="$(docker image inspect --format '{{.Id}}' \
+      "$stale_probe_allowed_ref" 2>/dev/null)" || return 1
+    if [ "$stale_probe_image" = "$stale_probe_allowed_image" ]; then
+      stale_probe_image_allowed=1
+    fi
+  done
+  [ "$stale_probe_image_allowed" -eq 1 ] || return 1
+  stale_probe_app_network_document="$(docker network inspect project-snow-public_app)" || return 1
+  stale_probe_app_subnets="$(printf '%s\n' "$stale_probe_app_network_document" | jq -er '
+    if length == 1 and
+       .[0].Name == "project-snow-public_app" and
+       .[0].Driver == "bridge" and
+       .[0].Internal == true and
+       .[0].EnableIPv6 == false and
+       .[0].Labels["com.docker.compose.project"] == "project-snow-public" and
+       .[0].Labels["com.docker.compose.network"] == "app"
+    then
+      [.[0].IPAM.Config[]?.Subnet |
+        select(type == "string" and test("^[0-9./]+$"))] |
+      unique | if length > 0 then .[] else error("no app subnet") end
+    else error("invalid app network") end
+  ')" || return 1
+  # Subnets are restricted above to digits, dots and slashes before word-splitting.
+  # shellcheck disable=SC2086
+  probe_ipv4_belongs_to_app_network "$stale_probe_other_ipv4" $stale_probe_app_subnets
+}
+
+remove_verified_stale_origin_network_probes() {
+  stale_probe_ids="$(docker ps --all --no-trunc --quiet \
+    --filter name=project-snow-origin-netprobe-)" || return 1
+  [ -n "$stale_probe_ids" ] || return 0
+  for stale_probe_id in $stale_probe_ids; do
+    printf '%s\n' "$stale_probe_id" | grep -Eq '^[0-9a-f]{64}$' || {
+      echo 'A stale origin probe candidate has an invalid container identity.' >&2
+      return 1
+    }
+    validate_stale_origin_network_probe "$stale_probe_id" || {
+      echo 'Refusing to remove an origin backend endpoint that is not an exact stale Project Snow probe.' >&2
+      return 1
+    }
+  done
+  for stale_probe_id in $stale_probe_ids; do
+    # Revalidate immediately and use non-forced removal so a concurrently
+    # started or mutated endpoint remains fail-closed instead of being killed.
+    validate_stale_origin_network_probe "$stale_probe_id" || return 1
+    docker rm "$stale_probe_id" >/dev/null || {
+      echo 'Could not remove an exact stopped stale Project Snow origin probe.' >&2
+      return 1
+    }
+  done
+}
+
 remove_origin_network_probe() {
   [ -n "${origin_probe_container:-}" ] || return 0
   probe_remove_target="$origin_probe_container"
@@ -1185,7 +1397,7 @@ run_origin_network_probe() {
   probe_config_root="$2"
   probe_colour="$3"
   probe_candidate="project-snow-origin-netprobe-$$"
-  probe_nonce="$(printf '%s' "$expected_sha" | cut -c 1-12)-$$"
+  probe_nonce="$(printf '%s' "$marker_sha" | cut -c 1-12)-$$"
   probe_external_name="project-snow-$probe_nonce.1-1-1-1.sslip.io"
   probe_gateway_ipv4="$(printf '%s\n' "$origin_network_document" | jq -er '
     [.[0].IPAM.Config[]?.Gateway // empty |
@@ -1244,65 +1456,18 @@ run_origin_network_probe() {
     return 1
   }
   if ! docker create --name "$probe_candidate" \
+    --label com.project-snow.origin-network-probe=1 \
+    --label com.project-snow.origin-network-probe-schema=1 \
+    --label "com.project-snow.origin-network-probe-sha=$marker_sha" \
+    --label "com.project-snow.origin-network-probe-colour=$probe_colour" \
     --network "$origin_edge_network" \
     --dns 127.0.0.1 \
     --read-only --cap-drop ALL --security-opt no-new-privileges \
     --pids-limit 32 --memory 64m --cpus 0.25 \
     --tmpfs /tmp:rw,nosuid,nodev,size=4m \
     --entrypoint python "$probe_image_id" \
-    -c '
-import http.client
-import socket
-import sys
-
-external_name, origin_gateway, backend_gateway, other_bridge_target = sys.argv[1:5]
-
-try:
-    socket.getaddrinfo(external_name, 443)
-except socket.gaierror:
-    pass
-else:
-    raise SystemExit(41)
-
-def require_tcp_blocked(host, port, exit_code):
-    try:
-        connection = socket.create_connection((host, port), timeout=3)
-    except OSError:
-        return
-    connection.close()
-    raise SystemExit(exit_code)
-
-require_tcp_blocked("1.1.1.1", 80, 42)
-require_tcp_blocked("1.1.1.1", 53, 43)
-
-labels = external_name.encode("ascii").split(b".")
-query_name = b"".join(bytes((len(label),)) + label for label in labels) + b"\x00"
-query = b"\x50\x53\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + query_name + b"\x00\x01\x00\x01"
-udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-udp.settimeout(3)
-try:
-    udp.sendto(query, ("1.1.1.1", 53))
-    udp.recvfrom(512)
-except OSError:
-    pass
-else:
-    raise SystemExit(44)
-finally:
-    udp.close()
-
-require_tcp_blocked(origin_gateway, 53, 45)
-require_tcp_blocked(backend_gateway, 53, 46)
-require_tcp_blocked(other_bridge_target, 8000, 47)
-
-socket.getaddrinfo("caddy", 8080)
-connection = http.client.HTTPConnection("caddy", 8080, timeout=5)
-connection.request("GET", "/public/v1/health/live", headers={"Host": "snow.xiaob.dev"})
-response = connection.getresponse()
-response.read(65536)
-connection.close()
-if response.status != 200:
-    raise SystemExit(48)
-    ' project-snow-origin-netprobe "$probe_external_name" "$probe_gateway_ipv4" \
+    -c "$origin_network_probe_program" \
+      project-snow-origin-netprobe "$probe_external_name" "$probe_gateway_ipv4" \
       "$probe_backend_gateway_ipv4" "$probe_other_bridge_ipv4" >/dev/null; then
     echo 'Could not create the no-secret origin network probe.' >&2
     return 1
