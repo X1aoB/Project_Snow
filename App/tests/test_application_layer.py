@@ -3581,6 +3581,107 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertEqual(result["state_updates"], [])
         self.assertFalse(any(block.get("type") == "sticker" for block in result["content_blocks"]))
 
+    def test_text_rendezvous_semantics_rewrites_joint_arrival_with_two_call_cap(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        context = {
+            "public_state_update_catalog": [{
+                "location_id": "base_beach",
+                "activity_id": "walking_by_sea_together",
+                "movement_mode": "rendezvous",
+            }],
+        }
+        self.assertEqual(
+            service._text_rendezvous_semantics_violations(
+                "好，我们一起去吧。",
+                context,
+            ),
+            ["text_rendezvous_semantics"],
+        )
+        self.assertEqual(
+            service._text_rendezvous_semantics_violations(
+                "好，我先过去海滩等你。",
+                context,
+            ),
+            [],
+        )
+        self.assertEqual(
+            service._text_rendezvous_semantics_violations("今天不去了。", context),
+            [],
+        )
+
+        initial = json.dumps({
+            "answer": "好，我们一起去吧。",
+            "content_blocks": [{"type": "message", "text": "好，我们一起去吧。"}],
+            "state_updates": [{
+                "type": "joint_move",
+                "location_id": "base_beach",
+                "activity_id": "walking_by_sea_together",
+                "commit": "now",
+            }],
+        }, ensure_ascii=False)
+        rewritten = json.dumps({
+            "answer": "好，我先过去海滩等你。",
+            "content_blocks": [{
+                "type": "message",
+                "text": "好，我先过去海滩等你。",
+            }],
+            "state_updates": [{
+                "type": "joint_move",
+                "location_id": "base_beach",
+                "activity_id": "walking_by_sea_together",
+                "commit": "now",
+            }],
+        }, ensure_ascii=False)
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_views", return_value={"ca0144ccd81b": {"character_id": "ca0144ccd81b"}}
+        ), patch.object(
+            service,
+            "_call_model",
+            side_effect=[(initial, {}), (rewritten, {})],
+        ) as call_model:
+            result = service.chat(
+                "ca0144ccd81b",
+                "要不要一起去海滩？",
+                session_id="text-rendezvous-semantics-test",
+                communication_channel="text",
+                thinking_decision={"max_provider_http_calls": 2},
+                public_state_update_catalog=[{
+                    "location_id": "base_beach",
+                    "activity_id": "walking_by_sea_together",
+                    "aliases": ["海滩"],
+                    "movement_mode": "rendezvous",
+                }],
+            )
+        self.assertEqual(call_model.call_count, 2)
+        self.assertEqual(result["answer"], "好，我先过去海滩等你。")
+        self.assertIn("answer_guardrail_retry", result["response_adjustments"])
+        self.assertEqual(result["state_updates"][0]["location_id"], "base_beach")
+
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_views", return_value={"ca0144ccd81b": {"character_id": "ca0144ccd81b"}}
+        ), patch.object(
+            service,
+            "_call_model",
+            side_effect=[(initial, {}), (initial, {})],
+        ) as failed_rewrite:
+            fallback = service.chat(
+                "ca0144ccd81b",
+                "要不要一起去海滩？",
+                session_id="text-rendezvous-fallback-test",
+                communication_channel="text",
+                thinking_decision={"max_provider_http_calls": 2},
+                public_state_update_catalog=[{
+                    "location_id": "base_beach",
+                    "activity_id": "walking_by_sea_together",
+                    "aliases": ["海滩"],
+                    "movement_mode": "rendezvous",
+                }],
+            )
+        self.assertEqual(failed_rewrite.call_count, 2)
+        self.assertIn("我先过去等你", fallback["answer"])
+        self.assertIn("rendezvous_semantics_guard", fallback["response_adjustments"])
+        self.assertEqual(fallback["validation_disposition"], "safe_fallback")
+
     def test_mvp_generated_answer_keeps_plain_non_json_fallback(self) -> None:
         service = MVPService(self.settings, self.repository)
         self.assertEqual(

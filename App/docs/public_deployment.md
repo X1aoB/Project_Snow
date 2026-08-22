@@ -2,21 +2,25 @@
 
 The public process exposes only `/public/v1` and the static immersive client. The existing internal `/api/v1`, attachments, voice, agents and workspace are not mounted by `public_main.py`.
 
-The 0.9.1 client uses IndexedDB v4: messages and conversation metadata are stored separately, the first 60 messages are loaded eagerly and older history is paged in 40-message batches. Drafts, pins, recent characters, sticker favourites and presentation queues remain browser-local. If IndexedDB is unavailable, the client falls back to a non-persistent in-memory session instead of blocking chat.
+The 0.9.2 client uses IndexedDB v4: messages and conversation metadata are stored separately, the first 60 messages are loaded eagerly and older history is paged in 40-message batches. Deterministic `displayBlocks` are stored with assistant messages so text segments remain separate after the presentation queue completes, a character switch, stop/recovery or reload. Drafts, pins, recent characters and sticker favourites remain browser-local. If IndexedDB is unavailable, the client falls back to a non-persistent in-memory session instead of blocking chat.
 
-One shared signed `public-state-2` world package is stored separately. A v1 package is accepted, completed with the current 22-character presence registry and re-signed as v2. Version 0.9.0 adds optional subject binding and key IDs, accepts the configured previous key during rotation, and preserves backward readability for a 0.8.x rollback. Text messages may contain one manifest-backed sticker after the message text; in-person messages continue to accept `speech` and `action`. Public presence endpoints are:
+One signed `public-state-2` world package is maintained per anonymous subject. A v1 package is accepted, completed with the current 22-character presence registry and re-signed as v2. Version 0.9.2 keeps the existing key-rotation and rollback compatibility while adding ignorable pending-rendezvous metadata. Text messages may contain one manifest-backed sticker after the message text; in-person messages continue to accept `speech` and `action`. Public presence endpoints are:
 
 - `POST /public/v1/presence/resolve`: read a character scene without changing revision.
 - `POST /public/v1/presence/transition`: move to the character or open the communicator without a model call.
 - `POST /public/v1/presence/arrival`: make one idempotent 50/50 arrival decision; only the noticed branch consumes chat quota and invokes the current BYOK model.
 
-Arrival generation failures keep the signed location transition but return no fabricated role dialogue. Server-side movement resolution accepts an immediate joint move only when the user proposes a controlled destination and the character clearly accepts; a failed scene update never discards valid dialogue. The daily character schedule is deterministic (HMAC-derived) and shared for all anonymous users in the Hong Kong calendar day; its signed package includes `schedule_date`, `generated_at`, and the next-midnight `expires_at`. A browser can explicitly continue yesterday's segment or start a new one without sending yesterday's transcript.
+Arrival generation failures keep the signed location transition but return no fabricated role dialogue. In text communication, a validated controlled-location invitation that the character clearly accepts moves only that character and records that she is waiting; the analyst moves only after choosing “go to her”. In-person acceptance retains immediate joint movement. The public catalogue contains 15 selectable destinations, including the active character's room and the analyst's room; the legacy canteen remains readable but is not selectable for new invitations. A failed scene update never discards valid dialogue.
+
+The daily character schedule is deterministic (HMAC-derived) from the anonymous subject and Hong Kong calendar date, so different visitors do not share a schedule. The first state request after Hong Kong midnight lazily refreshes location, activity, analyst position, pending rendezvous and recent state events while preserving conversations and relationships. State consumers compare `(schedule_date, schedule_revision)` and reject a late package from an older date.
+
+BYOK API keys are sealed into a fixed, absolute 12-hour AES-GCM envelope bound to the anonymous subject. There is no sliding renewal and no migration or extension of an already-issued two-hour envelope. The browser stores the envelope only in the current tab's `sessionStorage`, so closing the tab clears the local copy before its server-verifiable expiry. Provider calls still receive the current user content and key according to the selected provider's privacy policy.
 
 Sticker media `2026.08.19.sticker.1` is a separate independently verified public package with 363 source resources, chat-sized display derivatives and thumbnails. It records role/emotion metadata, per-file fixed revisions, uploader and hashes, CC BY-NC-SA 4.0 attribution evidence, and manifest/SHA256SUMS verification before promotion. Avatar media `2026.08.19.avatar.1` and data `2026.08.19.1` have the same fail-closed provenance rule. None of these Wiki-derived packages is copied into the GPL application image.
 
 ## Candidate and public-access gate
 
-Keep Cloudflare Access enabled throughout inactive-colour staging and candidate acceptance. Do not add or modify a MyWebsite play button. Only remove Access for `snow.xiaob.dev` after the exact candidate has passed health, BYOK, dialogue, movement, sticker, feedback-context and rate-limit checks and the production WAF, cache, Turnstile and abuse controls are active. Then use a fresh browser without an Access cookie for one public smoke test. A security or abuse anomaly restores Access first; an application failure rolls back the exact prior colour and release pins.
+Preserve the currently configured Cloudflare Access policy throughout inactive-colour staging, candidate acceptance and promotion; the 0.9.2 release must not add, remove or alter an Access policy. Do not add or modify a MyWebsite play button. Test the candidate through the private SSH tunnel, then exercise the public site using the access state already in force. A security or abuse anomaly restores Access first; an application failure rolls back the exact prior colour and release pins.
 
 `PUBLIC_ENABLED_PROVIDERS` starts empty; add a provider ID only after a real-key smoke test for that provider succeeds. Every user action is capped at two provider HTTP calls. Compatibility probes and uncertain-timeout retries are disabled so a browser recovery can reuse the original request ID and server idempotency result without duplicate billing.
 
@@ -47,17 +51,17 @@ Keep Cloudflare Access enabled throughout inactive-colour staging and candidate 
 - Public API colours publish no host ports. A successful stage resolves and validates the candidate container's address on the internal `app` bridge; private acceptance forwards a client-local `127.0.0.1` socket to that address through authenticated SSH. There is no candidate listener in the server host namespace, firewall or Cloudflare Tunnel.
 - `127.0.0.1:19090` remains the intended feedback-administration endpoint through an SSH tunnel. This separate legacy path still depends on Docker instantiating a loopback publication for a container whose `data` and `management` networks are internal. On hosts where Moby leaves that runtime mapping empty, the admin endpoint is unavailable; do not attach admin to an uplink network as a workaround. A future control-plane change should use the same root-validated internal-address SSH pattern before operators rely on this endpoint.
 
-The production image runs `fingerprint_public_frontend.py` after copying the client. It creates 16-hex-character SHA-256 filenames for every immersive scene SVG, rewrites the image copy of `app.js` to a fixed scene URL map, then fingerprints `app.js`, `app.css`, `privacy.js` and the shared immersive stylesheet and rewrites only the image's HTML references. HTML and the original development URLs remain `no-store`; fingerprinted files use `public, max-age=31536000, immutable`. The checked-in HTML and JavaScript deliberately retain `?v=0.9.1` and canonical scene paths for direct local development.
+The production image runs `fingerprint_public_frontend.py` after copying the client. It creates 16-hex-character SHA-256 filenames for every immersive scene SVG, rewrites the image copy of `app.js` to a fixed scene URL map, then fingerprints `app.js`, `app.css`, `privacy.js` and the shared immersive stylesheet and rewrites only the image's HTML references. HTML and the original development URLs remain `no-store`; fingerprinted files use `public, max-age=31536000, immutable`. The checked-in HTML and JavaScript deliberately retain `?v=0.9.2` and canonical scene paths for direct local development.
 
 ## One-time least-privilege migration
 
-Older installations made `deploy` a member of the root-equivalent Docker group. Keep Cloudflare Access enabled while changing that boundary. Select the exact CI-passing 0.9.1 main SHA; do not use an uncommitted checkout or a branch name.
+Older installations made `deploy` a member of the root-equivalent Docker group. Keep Cloudflare Access enabled while changing that boundary. Select the exact CI-passing 0.9.2 main SHA; do not use an uncommitted checkout or a branch name.
 
 From the trusted local workspace, use the one-time migration client with the CI release manifest for the same SHA. It creates a Git archive containing only the seven host-preparation files from that exact `origin/main` object and fixes its SHA-256. A host-bootstrap program read from the same Git object is streamed into the digest-pinned CI application image; it opens the uploaded archive without following links, verifies the digest and exact member set, then schedules a host systemd oneshot. The helper container exits before the host unit restarts Docker. The host unit runs the firewall, fail2ban, SSH and Docker preparation and passes the exact SHA into the root-runner bootstrap. Nothing from the old deploy-owned server checkout is executed as root. This is the final authorized use of the deploy account's Docker access:
 
 ```powershell
 & App/scripts/bootstrap-release-runner.ps1 `
-  -Sha <exact-0.9.1-main-sha> `
+  -Sha <exact-0.9.2-main-sha> `
   -ManifestPath <downloaded-CI-release-manifest.json> `
   -SshConfig App/runtime/project-snow-ssh-config
 ```
@@ -66,7 +70,7 @@ The root bootstrap clones the fixed HTTPS origin into a new directory with hooks
 
 ```sh
 /path/to/fresh-exact-sha/App/ops/prepare_debian.sh \
-  --controller-sha <exact-0.9.1-main-sha>
+  --controller-sha <exact-0.9.2-main-sha>
 ```
 
 The previous checkout is retained under `/srv/project-snow/backups/repo-before-root-runner-<UTC timestamp>` with mode `0700`; the script does not stop or recreate running production containers. Existing SSH processes retain their old supplementary group list, so disconnect every deploy session after the script succeeds. Open a fresh connection and require all of these checks before staging or removing Access:
@@ -120,4 +124,6 @@ Use restic to an R2 bucket for daily PostgreSQL logical dumps and release manife
 
 Run each layer once: relevant unit tests followed by one complete pytest run, one Playwright matrix (1280 px, 390 px, 320 px and reduced motion), and one media/license/hash/supply-chain check. Re-read `active-colour` immediately before staging and require exactly `blue` or `green`; deploy the exact main SHA, image digests, edge configuration and immutable avatar/sticker/data versions only to the other colour.
 
-Run one inactive-candidate smoke covering live/ready health, BYOK, text and in-person dialogue, joint movement, cross-character social dialogue, display stickers, feedback without context, queue limits and the exact rollback command. Promote only after it passes. After switching, run one immediate smoke through Access, activate the public edge controls, remove Access only for `snow.xiaob.dev`, then run one clean-browser public smoke and a concentrated observation of approximately ten minutes for 5xx responses, queue depth, database health, memory, media caching and feedback delivery. There is no two-hour or 24-hour observation loop.
+For the 0.9.2 release, first require production to be exactly `blue@c4796bbdda5557666afaaeb708ed34864456acc2`, re-read `active-colour`, and stage only inactive `green`. Keep blue, data `2026.08.19.1`, avatar `2026.08.19.avatar.1` and sticker `2026.08.19.sticker.1` pinned as the exact rollback target.
+
+Run one inactive-candidate smoke covering live/ready health, 12-hour BYOK policy, text and in-person dialogue, segmented display persistence, rendezvous waiting/arrival, daily subject state, stickers, feedback without context, queue limits and the exact rollback command. Promote only after it passes. After switching, run one immediate public smoke under the already configured Access policy and a concentrated observation of approximately ten minutes for 5xx responses, queue depth, database health, memory, media caching and feedback delivery. Do not change Access or MyWebsite. There is no two-hour or 24-hour observation loop.

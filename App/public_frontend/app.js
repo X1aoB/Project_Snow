@@ -19,6 +19,7 @@ const state = {
   favoriteStickerIds: new Set(),
   favoriteStickers: new Map(),
   recentStickerIds: [],
+  rendezvousDismissals: new Set(),
   selectedSticker: null,
   actionComposerOpen: false,
   selected: "",
@@ -182,7 +183,7 @@ function fitPublicRequestPayload(payload, { arrays = [], texts = [], targetBytes
 }
 if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
   Object.defineProperty(window, "__projectSnowTest", {
-    value: Object.freeze({ escapeHtml, fitPublicRequestPayload }),
+    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder }),
     configurable: false,
     writable: false,
   });
@@ -207,6 +208,24 @@ function formatBytes(bytes) {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 function delay(milliseconds) { return new Promise((resolve) => window.setTimeout(resolve, milliseconds)); }
+function abortableDelay(milliseconds, signal) {
+  if (!milliseconds || signal?.aborted) {
+    return signal?.aborted ? Promise.reject(new DOMException("Aborted", "AbortError")) : Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(finish, milliseconds);
+    function finish() {
+      signal?.removeEventListener("abort", cancel);
+      resolve();
+    }
+    function cancel() {
+      window.clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+      reject(new DOMException("Aborted", "AbortError"));
+    }
+    signal?.addEventListener("abort", cancel, { once: true });
+  });
+}
 function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
 function typewriterTiming(value) {
   const length = plain(value).length;
@@ -549,20 +568,27 @@ function wireBlocks(blocks) {
 function normalizeMessage(message) {
   const channel = (message.communicationChannel || message.communication_channel) === "in_person" ? "in_person" : "text";
   const blocks = normalizeBlocks(message.contentBlocks || message.content_blocks, channel, message.content || "");
+  const role = message.role === "assistant" ? "assistant" : "user";
+  const storedDisplayBlocks = message.displayBlocks || message.display_blocks;
+  const displayBlocks = role === "assistant"
+    ? deriveDisplayBlocks(storedDisplayBlocks ? normalizeBlocks(storedDisplayBlocks, channel) : blocks, channel)
+    : blocks;
   const rawCreatedAt = message.createdAt ?? message.created_at;
   const parsedCreatedAt = Number(rawCreatedAt);
   const hasCreatedAt = Number.isFinite(parsedCreatedAt) && parsedCreatedAt > 0;
   return {
     id: message.id || id(),
     characterId: plain(message.characterId || message.character_id),
-    role: message.role === "assistant" ? "assistant" : "user",
+    role,
     content: renderBlocksText(blocks),
     contentBlocks: blocks,
+    displayBlocks,
     communicationChannel: channel,
     createdAt: hasCreatedAt ? parsedCreatedAt : Date.now(),
     createdAtEstimated: Boolean(message.createdAtEstimated || message.created_at_estimated || !hasCreatedAt),
     status: ["sent", "pending", "failed"].includes(message.status) ? message.status : "sent",
     requestId: plain(message.requestId || message.request_id),
+    movementLocationId: plain(message.movementLocationId || message.movement_location_id),
     requestSnapshot: message.requestSnapshot && typeof message.requestSnapshot === "object"
       ? structuredClone(message.requestSnapshot)
       : null,
@@ -570,6 +596,11 @@ function normalizeMessage(message) {
     source: message.source || "chat",
     conversationSegmentId: plain(message.conversationSegmentId || message.conversation_segment_id),
     usage: message.usage && typeof message.usage === "object" ? { ...message.usage } : null,
+    movementStatus: message.movementStatus && typeof message.movementStatus === "object"
+      ? structuredClone(message.movementStatus)
+      : message.movement_status && typeof message.movement_status === "object"
+        ? structuredClone(message.movement_status)
+        : null,
   };
 }
 function normalizeThread(record, characterId) {
@@ -686,21 +717,39 @@ function decodeStatePackage(token) {
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch { return {}; }
 }
+function statePackageOrder(token) {
+  const decoded = typeof token === "string" ? decodeStatePackage(token) : (token || {});
+  const scheduleDate = plain(decoded.schedule_date || decoded.world?.schedule_date || decoded.date).match(/^\d{4}-\d{2}-\d{2}$/)?.[0] || "";
+  return { scheduleDate, revision: Number(decoded.revision || decoded.world?.revision || 0) };
+}
 async function saveWorldPackage(token) {
   if (!token) return false;
-  const decoded = decodeStatePackage(token);
-  const incomingRevision = Number(decoded.revision || 0);
-  const currentRevision = Number(decodeStatePackage(state.worldPackage || "").revision || 0);
+  const incoming = statePackageOrder(token);
+  const current = statePackageOrder(state.worldPackage || "");
   // A slow response from a character the user has already left must not roll
   // the shared world back over a newer signed package. A revision identifies
   // exactly one signed payload; response order must not choose between two
   // different tokens carrying the same revision.
-  if (state.worldPackage && incomingRevision < currentRevision) return false;
-  if (state.worldPackage && incomingRevision === currentRevision) {
+  if (state.worldPackage && incoming.scheduleDate && current.scheduleDate && incoming.scheduleDate < current.scheduleDate) return false;
+  if (state.worldPackage && incoming.scheduleDate && current.scheduleDate && incoming.scheduleDate > current.scheduleDate) {
+    state.worldPackage = token;
+    await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
+    return true;
+  }
+  if (state.worldPackage && incoming.scheduleDate !== current.scheduleDate) {
+    // A dated 0.9.2 package supersedes an undated legacy package. An undated
+    // late response must never replace a dated package from the current day.
+    if (!incoming.scheduleDate) return false;
+    state.worldPackage = token;
+    await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
+    return true;
+  }
+  if (state.worldPackage && incoming.revision < current.revision) return false;
+  if (state.worldPackage && incoming.revision === current.revision) {
     return token === state.worldPackage;
   }
   state.worldPackage = token;
-  await storePut("app_state", { key: "world", statePackage: token, revision: Number(decoded.revision || 0) });
+  await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
   return true;
 }
 function statePackageRecoveryError(error) {
@@ -731,6 +780,7 @@ async function migrateBrowserState() {
   const uiPreferences = await storeGet("app_state", "ui_preferences");
   state.pinnedCharacters = new Set(Array.isArray(uiPreferences?.pinnedCharacters) ? uiPreferences.pinnedCharacters.map(plain) : []);
   state.favoriteStickerIds = new Set(Array.isArray(uiPreferences?.favoriteStickerIds) ? uiPreferences.favoriteStickerIds.map(plain) : []);
+  state.rendezvousDismissals = new Set(Array.isArray(uiPreferences?.rendezvousDismissals) ? uiPreferences.rendezvousDismissals.map(plain) : []);
   state.recentStickerIds = Array.isArray(uiPreferences?.recentStickerIds) ? uiPreferences.recentStickerIds.map(plain).slice(0, 24) : [];
   state.historyRetentionDays = [30, 90].includes(Number(uiPreferences?.historyRetentionDays)) ? Number(uiPreferences.historyRetentionDays) : 0;
   for (const sticker of Array.isArray(uiPreferences?.favoriteStickers) ? uiPreferences.favoriteStickers : []) {
@@ -765,6 +815,7 @@ async function saveUiPreferences() {
     favoriteStickerIds: [...state.favoriteStickerIds],
     favoriteStickers: [...state.favoriteStickers.values()].slice(0, 120),
     recentStickerIds: state.recentStickerIds.slice(0, 24),
+    rendezvousDismissals: [...state.rendezvousDismissals].slice(-120),
     historyRetentionDays: state.historyRetentionDays,
   });
 }
@@ -826,7 +877,10 @@ function refreshCredentialStatus() {
   const active = Boolean(state.credential && state.credentialExpiresAt > Date.now() && state.provider === $("provider-select").value);
   $("credential-status").hidden = !active;
   if (active) {
-    const expires = new Date(state.credentialExpiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    const expiration = new Date(state.credentialExpiresAt);
+    const expires = localDayKey(expiration) === localDayKey()
+      ? expiration.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+      : expiration.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
     $("credential-status").textContent = `加密凭证有效至 ${expires}；获取模型列表和切换角色无需重新输入 Key。`;
   }
 }
@@ -870,7 +924,7 @@ function attachTurnstile() {
 }
 
 function experienceNoticeKey() {
-  return `project-snow-public:notice:${state.config?.experience_notice_version || "0.9"}`;
+  return `project-snow-public:notice:${state.config?.experience_notice_version || "0.9.2"}`;
 }
 function experienceNoticeAccepted() { return localStorage.getItem(experienceNoticeKey()) === "accepted"; }
 async function showExperienceNoticeIfNeeded() {
@@ -898,15 +952,65 @@ async function showExperienceNoticeIfNeeded() {
   });
 }
 
+function syncProviderControls(providerId = $("provider-select")?.value || "") {
+  const select = $("provider-select");
+  if (select) {
+    if (providerId && select.value !== providerId) select.value = providerId;
+    select.dataset.providerChoice = providerId;
+  }
+  document.querySelectorAll("[data-provider-option]").forEach((button) => {
+    const selected = button.dataset.providerOption === providerId;
+    button.setAttribute("aria-checked", String(selected));
+    button.tabIndex = selected || (!providerId && button === $("provider-options-mobile")?.firstElementChild) ? 0 : -1;
+  });
+}
+function chooseProvider(providerId) {
+  const value = plain(providerId);
+  if (!state.config?.providers?.some((provider) => provider.provider_id === value)) return;
+  const select = $("provider-select");
+  const previousChoice = plain(select.dataset.providerChoice || state.provider);
+  const changed = Boolean(previousChoice && previousChoice !== value);
+  $("provider-select").value = value;
+  syncProviderControls(value);
+  if (changed) {
+    clearCredential();
+    state.model = "";
+    $("model-id").value = "";
+    $("discovered-models").innerHTML = "";
+    $("discovered-models").hidden = true;
+  }
+  refreshCredentialStatus();
+}
+function renderMobileProviderOptions() {
+  const root = $("provider-options-mobile");
+  if (!root) return;
+  root.innerHTML = (state.config?.providers || []).map((provider) => `<button type="button" role="radio" data-provider-option="${escapeHtml(provider.provider_id)}" aria-checked="false" tabindex="-1">${escapeHtml(provider.display_name)}</button>`).join("");
+  root.querySelectorAll("[data-provider-option]").forEach((button) => {
+    button.onclick = () => chooseProvider(button.dataset.providerOption);
+    button.onkeydown = (event) => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const values = [...root.querySelectorAll("[data-provider-option]")];
+      const current = values.indexOf(button);
+      const direction = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1;
+      const target = event.key === "Home" ? 0 : event.key === "End" ? values.length - 1 : (current + direction + values.length) % values.length;
+      values[target].focus();
+      chooseProvider(values[target].dataset.providerOption);
+    };
+  });
+  syncProviderControls($("provider-select").value);
+}
+
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.9.1";
+  $("version-badge").textContent = state.config.app_version || "0.9.2";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
   $("provider-select").innerHTML = state.config.providers.length
     ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}">${escapeHtml(provider.display_name)}</option>`).join("")
     : '<option value="">暂未开放模型厂商</option>';
+  renderMobileProviderOptions();
   const providerLinks = [];
   for (const provider of state.config.providers || []) {
     const docs = safeExternalUrl(provider.documentation_url || provider.docs_url);
@@ -932,11 +1036,13 @@ async function loadConfig() {
         state.provider = saved.provider;
         state.model = saved.model || "";
         $("provider-select").value = state.provider;
+        syncProviderControls(state.provider);
         $("model-id").value = state.model;
       } else clearCredential();
     } catch { clearCredential(); }
   }
   refreshCredentialStatus();
+  syncProviderControls($("provider-select").value);
 }
 function normalizeSticker(sticker) {
   if (!sticker?.asset_id) return null;
@@ -1154,9 +1260,12 @@ function cancelPresentationQueue(characterId = state.selected, requestId = "") {
   const queue = presentationFor(characterId);
   if (!queue || (requestId && queue.requestId !== requestId)) return false;
   queue.cancelled = true;
+  queue.controller?.abort();
   if (queue.timer) window.clearTimeout(queue.timer);
   state.presentationByCharacter.delete(characterId);
   if (characterId === state.selected) {
+    window.clearInterval(state.typewriter.timer);
+    state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
     renderTimeline();
     renderStage();
   }
@@ -1197,9 +1306,9 @@ function naturalSpeechParts(value) {
   }
   return merged;
 }
-function presentationBlocks(message) {
+function expandedPresentationBlocks(sourceBlocks) {
   const blocks = [];
-  for (const block of message?.contentBlocks || []) {
+  for (const block of sourceBlocks || []) {
     if (!block) continue;
     if (block.type === "sticker") {
       blocks.push({ ...block });
@@ -1215,10 +1324,33 @@ function presentationBlocks(message) {
   }
   return blocks;
 }
+function deriveDisplayBlocks(sourceBlocks, channel = "text") {
+  const blocks = expandedPresentationBlocks(sourceBlocks);
+  while (blocks.length > 4) {
+    let mergeAt = -1;
+    let shortest = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < blocks.length - 1; index += 1) {
+      const left = blocks[index];
+      const right = blocks[index + 1];
+      if (left.type === "sticker" || right.type === "sticker" || left.type !== right.type) continue;
+      const length = [...plain(left.text)].length + [...plain(right.text)].length;
+      if (length < shortest) { shortest = length; mergeAt = index; }
+    }
+    if (mergeAt < 0) break;
+    const left = blocks[mergeAt];
+    const right = blocks[mergeAt + 1];
+    const separator = left.type === right.type && channel === "text" ? "" : "\n";
+    blocks.splice(mergeAt, 2, { type: left.type, text: `${plain(left.text)}${separator}${plain(right.text)}`.trim() });
+  }
+  return blocks;
+}
+function presentationBlocks(message) {
+  return deriveDisplayBlocks(message?.displayBlocks?.length ? message.displayBlocks : message?.contentBlocks, message?.communicationChannel || "text");
+}
 function visibleBlocksFor(message) {
   const queue = message ? presentationFor(message.characterId || state.selected) : null;
   if (queue && queue.messageId === message?.id) return queue.blocks.slice(0, queue.visibleCount);
-  return message?.contentBlocks || [];
+  return message?.displayBlocks?.length ? message.displayBlocks : message?.contentBlocks || [];
 }
 function timelineTypingMarkup(characterId = state.selected) {
   const pending = typingStateFor(characterId);
@@ -1229,7 +1361,7 @@ function timelineTypingMarkup(characterId = state.selected) {
 function stickerDisplaySource(block) {
   return plain(block?.displaySrc || block?.display_src || block?.thumbnailSrc || block?.thumbnail_src || block?.src);
 }
-async function preloadStickerBlock(block, timeoutMs = 450) {
+async function preloadStickerBlock(block, timeoutMs = 900, signal = undefined) {
   const src = stickerDisplaySource(block);
   if (!src) return;
   const loading = new Promise((resolve) => {
@@ -1241,7 +1373,7 @@ async function preloadStickerBlock(block, timeoutMs = 450) {
     image.onerror = resolve;
     image.src = src;
   });
-  await Promise.race([loading, delay(timeoutMs)]);
+  await Promise.race([loading, abortableDelay(timeoutMs, signal)]);
 }
 async function presentAssistantTurn(characterId, requestId, message) {
   if (!ownsTypingState(characterId, requestId)) return false;
@@ -1256,6 +1388,7 @@ async function presentAssistantTurn(characterId, requestId, message) {
     visibleCount: 1,
     timer: 0,
     cancelled: false,
+    controller: new AbortController(),
   };
   const revealCounts = blocks.length <= 4
     ? blocks.map((_block, index) => index + 1)
@@ -1265,44 +1398,54 @@ async function presentAssistantTurn(characterId, requestId, message) {
     renderTimeline();
     renderStage();
   }
-  if (
-    !reducedMotion()
-    && message.communicationChannel === "in_person"
-    && blocks[0]?.type === "speech"
-  ) {
-    await delay(typewriterTiming(blocks[0].text).duration);
-  }
-  for (let step = 1; step < revealCounts.length; step += 1) {
-    if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
-    const previousCount = revealCounts[step - 1];
-    const visibleCount = revealCounts[step];
-    const revealed = blocks.slice(previousCount, visibleCount);
-    const block = revealed[0];
-    updateTypingPhase(characterId, requestId, "segment");
-    const hasSticker = revealed.some((item) => item.type === "sticker");
-    const wait = hasSticker
-      ? requestDelay(requestId, `sticker:${step}`, 650, 850)
-      : requestDelay(requestId, `segment:${step}`, 750, 1000);
-    const preload = hasSticker
-      ? Promise.all(revealed.filter((item) => item.type === "sticker").map((item) => preloadStickerBlock(item)))
-      : Promise.resolve();
-    if (!reducedMotion()) await Promise.all([delay(wait), preload]);
-    else await preload;
-    if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
-    queue.visibleCount = visibleCount;
-    updateTypingPhase(characterId, requestId, "presenting");
-    if (characterId === state.selected) {
-      renderTimeline();
-      renderStage();
-    }
+  try {
     if (
       !reducedMotion()
       && message.communicationChannel === "in_person"
-      && block.type === "speech"
-      && step < revealCounts.length - 1
+      && blocks[0]?.type === "speech"
     ) {
-      await delay(typewriterTiming(block.text).duration);
+      await abortableDelay(typewriterTiming(blocks[0].text).duration, queue.controller.signal);
     }
+    for (let step = 1; step < revealCounts.length; step += 1) {
+      if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
+      const previousCount = revealCounts[step - 1];
+      const visibleCount = revealCounts[step];
+      const revealed = blocks.slice(previousCount, visibleCount);
+      const block = revealed[0];
+      const hasSticker = revealed.some((item) => item.type === "sticker");
+      const previousTextLength = [...plain(blocks[Math.max(0, previousCount - 1)]?.text)].length;
+      const totalWait = hasSticker
+        ? requestDelay(requestId, `sticker:${step}`, 2200, 3000)
+        : Math.max(2800, Math.min(4200, 2200 + previousTextLength * 35));
+      const readingWait = Math.min(totalWait, requestDelay(requestId, `reading:${step}`, 800, 1400));
+      updateTypingPhase(characterId, requestId, "reading");
+      if (!reducedMotion()) await abortableDelay(readingWait, queue.controller.signal);
+      if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
+      updateTypingPhase(characterId, requestId, "segment");
+      const preload = hasSticker
+        ? Promise.all(revealed.filter((item) => item.type === "sticker").map((item) => preloadStickerBlock(item, 1200, queue.controller.signal)))
+        : Promise.resolve();
+      if (!reducedMotion()) await Promise.all([abortableDelay(totalWait - readingWait, queue.controller.signal), preload]);
+      else await preload;
+      if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
+      queue.visibleCount = visibleCount;
+      updateTypingPhase(characterId, requestId, "presenting");
+      if (characterId === state.selected) {
+        renderTimeline();
+        renderStage();
+      }
+      if (
+        !reducedMotion()
+        && message.communicationChannel === "in_person"
+        && block.type === "speech"
+        && step < revealCounts.length - 1
+      ) {
+        await abortableDelay(typewriterTiming(block.text).duration, queue.controller.signal);
+      }
+    }
+  } catch (error) {
+    if (error?.name === "AbortError") return false;
+    throw error;
   }
   if (characterId === state.selected) {
     renderTimeline();
@@ -1310,6 +1453,10 @@ async function presentAssistantTurn(characterId, requestId, message) {
   }
   if (state.presentationByCharacter.get(characterId) === queue) {
     state.presentationByCharacter.delete(characterId);
+  }
+  if (characterId === state.selected) {
+    renderTimeline();
+    renderStage();
   }
   return true;
 }
@@ -1775,19 +1922,46 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   const previousId = state.selected;
   const previousThread = currentThread();
   const switchingFromStage = Boolean(previousId && previousId !== characterId && previousThread?.channel === "in_person");
-  const previousScene = state.scene;
   cancelPresentationQueue(previousId);
-  state.selected = characterId;
-  window.clearInterval(state.typewriter.timer);
-  state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
-  // Remove the previous owner's transient UI synchronously. Thread loading
-  // may yield to IndexedDB; an old typing bubble must never sit under the new
-  // character selection during that gap.
-  renderTimeline();
-  renderStage();
-  renderRequestStatus();
-  updateComposerAvailability();
-  if (previousId !== characterId) {
+  try {
+    const thread = await dbGetThread(characterId);
+    if (sequence !== state.selectionSequence) return;
+    if (!(await ensureContinuityDecision(thread)) || sequence !== state.selectionSequence) return;
+    thread.lastActiveAt = Date.now();
+    await dbPutThread(thread);
+    if (sequence !== state.selectionSequence) return;
+
+    let preparedScene = state.sceneByCharacter.get(characterId) || cachedSceneForCharacter(characterId) || null;
+    let preparedPackage = "";
+    let recoveredState = false;
+    if (globalRequestBusy()) {
+      state.deferredPresenceCharacter = characterId;
+    } else {
+      state.presenceResolvePending += 1;
+      updateComposerAvailability();
+      try {
+        const operation = preparePresenceCandidate(characterId, controller.signal);
+        const candidate = switchingFromStage
+          ? await runSceneTransition(operation, "正在前往……", sequence)
+          : await operation;
+        if (sequence !== state.selectionSequence || controller.signal.aborted) return;
+        preparedScene = candidate.result.scene_state || preparedScene;
+        preparedPackage = plain(candidate.result.state_package);
+        recoveredState = candidate.recoveredState;
+      } finally {
+        state.presenceResolvePending = Math.max(0, state.presenceResolvePending - 1);
+        updateComposerAvailability();
+      }
+    }
+
+    if (sequence !== state.selectionSequence || controller.signal.aborted) return;
+    if (recoveredState) await clearPersistedWorldPackage();
+    if (preparedPackage && !(await saveWorldPackage(preparedPackage))) {
+      preparedScene = cachedSceneForCharacter(characterId);
+    }
+    if (sequence !== state.selectionSequence || controller.signal.aborted) return;
+
+    state.selected = characterId;
     state.selectedSticker = null;
     state.actionComposerOpen = false;
     if (state.stickerSection === "character") {
@@ -1795,58 +1969,27 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
       state.stickerCursor = null;
       state.stickerHasMore = true;
     }
-  }
-  try {
-    const thread = await dbGetThread(characterId);
-    if (sequence !== state.selectionSequence) return;
-    if (!(await ensureContinuityDecision(thread))) {
-      if (sequence === state.selectionSequence) state.selected = previousId;
-      return;
-    }
-    thread.lastActiveAt = Date.now();
-    await dbPutThread(thread);
-    const character = currentCharacter();
+    window.clearInterval(state.typewriter.timer);
+    state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
+    if (preparedScene) state.sceneByCharacter.set(characterId, preparedScene);
+    state.scene = preparedScene;
+    const character = characterById(characterId);
     renderCharacters();
     $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: false, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
     fillAvatar($("stage-header-avatar"), character, { thumbnail: true, priority: true });
     fillAvatar($("stage-portrait-avatar"), character, { thumbnail: false, priority: true });
     $("stage-character-name").textContent = character.display_name;
     $("stage-speaker").textContent = character.display_name;
-    const cached = state.sceneByCharacter.get(characterId) || cachedSceneForCharacter(characterId);
-    state.scene = cached || null;
+
     renderScene();
-    if (globalRequestBusy()) {
-      // Generation is owned globally by the anonymous subject. Let the prior
-      // character finish in the background, but do not start a competing
-      // presence read for the newly selected character.
-      state.deferredPresenceCharacter = characterId;
-      await setChannel(thread.channel || "text", false);
+    if (globalRequestBusy() && !preparedPackage) {
+      await setChannel("text", false, thread);
       setRequestStatus(characterId, "上一位角色仍在回复，完成后会重新读取当前场景。");
-      renderAll();
-      updateComposerAvailability();
-      if (closeContacts) {
-        $("contact-panel").classList.remove("open");
-        if (window.matchMedia("(max-width: 820px)").matches) {
-          $("contact-panel").setAttribute("aria-hidden", "true");
-          $("contact-panel").inert = true;
-        }
-        syncContactToggleState();
-      }
-      return;
-    }
-    const resolving = resolvePresence(characterId, controller.signal);
-    if (switchingFromStage) {
-      await runSceneTransition(resolving, "正在前往……", sequence);
-    } else {
-      await resolving;
-    }
-    if (sequence !== state.selectionSequence) return;
-    const scene = state.scene || {};
-    if (switchingFromStage && !scene.co_located) {
+    } else if (switchingFromStage && !preparedScene?.co_located) {
       await setChannel("in_person", false);
       window.setTimeout(() => { if (sequence === state.selectionSequence) openPresenceDialog(); }, 0);
     } else {
-      await setChannel(thread.channel || "text", false);
+      await setChannel(thread.channel || "text", false, thread);
     }
     renderAll();
     updateComposerAvailability();
@@ -1860,15 +2003,12 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     }
   } catch (error) {
     if (error?.name === "AbortError" || sequence !== state.selectionSequence) return;
-    state.selected = previousId;
-    state.scene = previousScene;
-    if (previousId) {
-      const oldThread = await dbGetThread(previousId);
-      await setChannel(oldThread.channel || "text", false);
-      renderAll();
-    }
     syncContactToggleState();
     showBanner(displayError(error));
+  } finally {
+    if (state.selectionSequence === sequence && state.selectionController === controller) {
+      state.selectionController = null;
+    }
   }
 }
 
@@ -1921,6 +2061,60 @@ function usageMarkup(message) {
   const values = [model, total > 0 ? `${total} tokens` : "", calls > 0 ? `${calls} 次模型调用` : ""].filter(Boolean);
   return values.length ? `<span class="message-usage">${escapeHtml(values.join(" · "))}</span>` : "";
 }
+
+async function preparePresenceCandidate(characterId, signal, stateRecoveryAttempt = 0, statePackage = state.worldPackage || "") {
+  try {
+    const result = await api("/presence/resolve", { method: "POST", signal, body: JSON.stringify({ request_id: id(), character_id: characterId, state_package: statePackage }) });
+    return { result, recoveredState: stateRecoveryAttempt > 0 };
+  } catch (error) {
+    if (stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !signal?.aborted) {
+      return preparePresenceCandidate(characterId, signal, stateRecoveryAttempt + 1, "");
+    }
+    throw error;
+  }
+}
+function signedPendingRendezvous(characterId = state.selected) {
+  const decoded = decodeStatePackage(state.worldPackage || "");
+  const container = decoded.pending_rendezvous ?? decoded.world?.pending_rendezvous;
+  const authoritative = Object.hasOwn(decoded, "pending_rendezvous")
+    || Object.hasOwn(decoded.world || {}, "pending_rendezvous");
+  if (!container || typeof container !== "object" || Array.isArray(container)) return { authoritative, value: null };
+  const value = container[characterId];
+  return { authoritative: true, value: value && typeof value === "object" ? value : null };
+}
+function latestMovementMessage(thread = currentThread()) {
+  for (const message of [...(thread?.messages || [])].reverse()) {
+    if (message.role !== "assistant" || !message.movementStatus) continue;
+    const status = plain(message.movementStatus.status);
+    if (["joined", "cancelled", "expired"].includes(status)) return null;
+    if (status === "character_waiting") return message;
+  }
+  return null;
+}
+async function dismissCurrentRendezvous(thread = currentThread()) {
+  const message = latestMovementMessage(thread);
+  if (message?.movementStatus?.status !== "character_waiting") return;
+  state.rendezvousDismissals.add(message.id);
+  await saveUiPreferences();
+}
+function rendezvousCardMarkup(message, presenting = false) {
+  const movement = message?.movementStatus;
+  const pending = signedPendingRendezvous(message?.characterId);
+  if (
+    presenting
+    || message?.communicationChannel !== "text"
+    || movement?.status !== "character_waiting"
+    || latestMovementMessage()?.id !== message.id
+    || state.rendezvousDismissals.has(message.id)
+  ) return "";
+  if (pending.authoritative && !pending.value) return "";
+  if (pending.value && plain(pending.value.location_id) && plain(pending.value.location_id) !== plain(movement.location_id)) return "";
+  const packageDate = statePackageOrder(state.worldPackage || "").scheduleDate;
+  const movementDate = plain(movement.schedule_date);
+  if (movementDate && packageDate && movementDate !== packageDate) return "";
+  const location = plain(movement.location_name || movement.display_name || movement.character_location || state.sceneByCharacter.get(message.characterId)?.character_location || "约定地点");
+  return `<section class="rendezvous-card" aria-label="会合操作"><div><strong>她已先到${escapeHtml(location)}等你</strong><small>你可以现在去找她，也可以继续留在通讯器。</small></div><div class="rendezvous-actions"><button type="button" class="primary-button" data-rendezvous-go="${escapeHtml(message.id)}">去找她</button><button type="button" class="secondary-button" data-rendezvous-stay="${escapeHtml(message.id)}">留在通讯器</button></div></section>`;
+}
 function bindTimelineActions() {
   document.querySelectorAll("[data-retry-message]").forEach((button) => { button.onclick = () => retryMessage(button.dataset.retryMessage); });
   document.querySelectorAll("[data-feedback-message]").forEach((button) => { button.onclick = () => openFeedback(button.dataset.feedbackMessage); });
@@ -1930,6 +2124,20 @@ function bindTimelineActions() {
       updateInputCount();
       scheduleDraftSave();
       $("message-input").focus();
+    };
+  });
+  document.querySelectorAll("[data-rendezvous-go]").forEach((button) => {
+    button.onclick = async () => {
+      if (globalRequestBusy()) return;
+      button.disabled = true;
+      await arriveInPerson();
+    };
+  });
+  document.querySelectorAll("[data-rendezvous-stay]").forEach((button) => {
+    button.onclick = async () => {
+      state.rendezvousDismissals.add(button.dataset.rendezvousStay || "");
+      await saveUiPreferences();
+      renderTimeline({ preserveScroll: true });
     };
   });
   $("load-older-messages")?.addEventListener("click", () => { void loadOlderMessages(); });
@@ -1957,7 +2165,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
     const blocks = message.role === "assistant" ? visibleBlocksFor(message) : message.contentBlocks;
-    return `${time ? `<div class="message-time" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div><div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
+    return `${time ? `<div class="message-time" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div>${message.role === "assistant" ? rendezvousCardMarkup(message, presenting) : ""}<div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
   }).join("") + timelineTypingMarkup();
   timeline.dataset.messageCount = String(messages.length);
   bindTimelineActions();
@@ -2047,15 +2255,19 @@ function renderStage() {
   const visibleLatestBlocks = latestMessage ? visibleBlocksFor(latestMessage) : [];
   const actions = visibleLatestBlocks.filter((block) => block.type === "action").map((block) => block.text);
   const speeches = visibleAssistantBlocks.filter((block) => block.type === "speech").map((block) => block.text);
-  $("stage-narration").textContent = actions.join("\n") || plain(state.scene?.character_activity);
-  const speech = speeches.join("\n") || "场景已经建立。你可以说些什么，也可以只描述一个动作。";
-  renderTypewriter(speech, assistantMessage?.id || `scene:${state.selected}:${state.scene?.visual_key || "generic"}`);
+  $("stage-narration").textContent = actions.at(-1) || plain(state.scene?.character_activity);
+  const speech = speeches.at(-1) || "场景已经建立。你可以说些什么，也可以只描述一个动作。";
+  const visibleSpeechIndex = Math.max(0, visibleAssistantBlocks.reduce((count, block) => count + Number(block.type === "speech"), 0) - 1);
+  renderTypewriter(speech, assistantMessage ? `${assistantMessage.id}:${visibleSpeechIndex}` : `scene:${state.selected}:${state.scene?.visual_key || "generic"}`);
   $("stage-open-feedback").disabled = !assistantMessage || Boolean(presentationFor()?.messageId === assistantMessage?.id);
   $("stage-open-feedback").dataset.messageId = assistantMessage?.id || "";
 }
 function renderTranscript() {
   const messages = currentThread()?.messages || [];
-  $("transcript-content").innerHTML = messages.length ? messages.map((message) => `<article class="transcript-entry"><strong>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")} · ${message.communicationChannel === "text" ? "文字通讯" : "面对面"} · ${escapeHtml(new Date(message.createdAt || Date.now()).toLocaleString())}</strong><p>${message.contentBlocks.map((block) => block.type === "sticker" ? `〔表情〕${escapeHtml(block.caption || "表情")}` : `${block.type === "action" ? "〔动作〕" : ""}${escapeHtml(block.text)}`).join("\n")}</p></article>`).join("") : "<p>当前角色还没有本地记录。</p>";
+  $("transcript-content").innerHTML = messages.length ? messages.map((message) => {
+    const blocks = message.role === "assistant" && message.displayBlocks?.length ? message.displayBlocks : message.contentBlocks;
+    return `<article class="transcript-entry"><strong>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")} · ${message.communicationChannel === "text" ? "文字通讯" : "面对面"} · ${escapeHtml(new Date(message.createdAt || Date.now()).toLocaleString())}</strong><p>${blocks.map((block) => block.type === "sticker" ? `〔表情〕${escapeHtml(block.caption || "表情")}` : `${block.type === "action" ? "〔动作〕" : ""}${escapeHtml(block.text)}`).join("\n\n")}</p></article>`;
+  }).join("") : "<p>当前角色还没有本地记录。</p>";
 }
 function renderInfo() {
   const character = currentCharacter();
@@ -2090,7 +2302,18 @@ function movementCatalog() {
     : configuredCatalog && typeof configuredCatalog === "object"
       ? Object.entries(configuredCatalog).map(([locationId, value]) => typeof value === "string" ? { location_id: locationId, display_name: value } : { location_id: locationId, ...value })
       : [];
-  return values.filter((item) => item && (item.display_name || item.name || item.location_name)).slice(0, 20);
+  return values
+    .filter((item) => item && (item.display_name || item.name || item.location_name))
+    .filter((item) => !["base_canteen", "canteen"].includes(plain(item.location_id)))
+    .slice(0, 20);
+}
+function movementInvitationFor(item, name) {
+  const template = plain(item?.invitation_text || item?.invitation_template || item?.invitation || "现在一起去{location_name}吗？");
+  return template
+    .replaceAll("${location_name}", name)
+    .replaceAll("{location_name}", name)
+    .replaceAll("{location}", name)
+    .trim();
 }
 function openMovementShortcuts() {
   if (globalRequestBusy()) return;
@@ -2098,7 +2321,7 @@ function openMovementShortcuts() {
   const root = $("movement-options");
   const invitation = $("movement-invitation");
   invitation.value = "";
-  invitation.disabled = true;
+  invitation.readOnly = true;
   $("send-movement-invitation").disabled = true;
   $("movement-dialog").dataset.locationId = "";
   if (!values.length) {
@@ -2106,17 +2329,29 @@ function openMovementShortcuts() {
   } else {
     root.innerHTML = values.map((item) => {
       const name = plain(item.display_name || item.name || item.location_name);
-      return `<button type="button" data-movement-id="${escapeHtml(item.location_id || "")}" data-movement-name="${escapeHtml(name)}" aria-pressed="false"><strong>${escapeHtml(name)}</strong>${item.activity_name ? `<small>${escapeHtml(item.activity_name)}</small>` : ""}</button>`;
+      return `<button type="button" role="radio" data-movement-id="${escapeHtml(item.location_id || "")}" data-movement-name="${escapeHtml(name)}" aria-checked="false" tabindex="-1"><strong>${escapeHtml(name)}</strong>${item.activity_name ? `<small>${escapeHtml(item.activity_name)}</small>` : ""}</button>`;
     }).join("");
-    root.querySelectorAll("[data-movement-name]").forEach((button) => {
+    root.querySelector("[role=radio]")?.setAttribute("tabindex", "0");
+    root.querySelectorAll("[data-movement-name]").forEach((button, index) => {
       button.onclick = () => {
-        root.querySelectorAll("[data-movement-name]").forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+        root.querySelectorAll("[data-movement-name]").forEach((item) => {
+          item.setAttribute("aria-checked", String(item === button));
+          item.tabIndex = item === button ? 0 : -1;
+        });
         $("movement-dialog").dataset.locationId = button.dataset.movementId || "";
-        invitation.disabled = false;
-        invitation.value = `现在一起去${button.dataset.movementName}吗？`;
+        invitation.value = movementInvitationFor(values[index], button.dataset.movementName || "");
         $("send-movement-invitation").disabled = false;
-        invitation.focus();
-        invitation.setSelectionRange(invitation.value.length, invitation.value.length);
+        $("send-movement-invitation").focus();
+      };
+      button.onkeydown = (event) => {
+        if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const radios = [...root.querySelectorAll("[role=radio]")];
+        const current = radios.indexOf(button);
+        const direction = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1;
+        const target = event.key === "Home" ? 0 : event.key === "End" ? radios.length - 1 : (current + direction + radios.length) % radios.length;
+        radios[target].focus();
+        radios[target].click();
       };
     });
   }
@@ -2325,9 +2560,13 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       streamedBlocks.set(blockIndex, current);
     }
     if (event === "state") {
-      if (ownsTypingState(characterId, requestId)) await saveWorldPackage(payload.state_package);
-      pendingSceneState = payload.scene_state || pendingSceneState;
-      pendingStateEvent = payload.state_event || pendingStateEvent;
+      if (ownsTypingState(characterId, requestId)) {
+        const accepted = await saveWorldPackage(payload.state_package);
+        if (accepted) {
+          pendingSceneState = payload.scene_state || pendingSceneState;
+          pendingStateEvent = payload.state_event || pendingStateEvent;
+        }
+      }
     }
     if (event === "done") {
       completed = true;
@@ -2382,6 +2621,7 @@ function compatibleRetrySnapshot(userMessage) {
   if (plain(candidate.payload.character_id) !== plain(userMessage.characterId)) return null;
   if (plain(candidate.payload.message) !== plain(userMessage.content)) return null;
   if (plain(candidate.payload.communication_channel) !== plain(userMessage.communicationChannel)) return null;
+  if (plain(candidate.payload.movement_location_id) !== plain(userMessage.movementLocationId)) return null;
   if (plain(candidate.payload.provider) !== state.provider || plain(candidate.payload.model) !== state.model) return null;
   return { requestId: candidateRequestId, payload: structuredClone(candidate.payload) };
 }
@@ -2403,6 +2643,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     state_package: state.worldPackage || "",
     continuity_decision: thread.continuityDecision || "",
     local_day_key: thread.localDayKey || localDayKey(),
+    ...(userMessage.movementLocationId ? { movement_location_id: userMessage.movementLocationId } : {}),
   });
   let requestSnapshot = retrySnapshot?.payload || buildRequestSnapshot();
   if (retrySnapshot && jsonBodyBytes({ ...requestSnapshot, credential: state.credential }) > PUBLIC_REQUEST_LIMIT_BYTES) {
@@ -2459,7 +2700,12 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   setRequestStatus(characterId, "", requestId);
   const timing = { shownAt: 0 };
   const typingGate = (async () => {
-    if (!reducedMotion()) await delay(requestDelay(requestId, "initial", 600, 900));
+    try {
+      if (!reducedMotion()) await abortableDelay(requestDelay(requestId, "initial", 1800, 2600), requestController.signal);
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      throw error;
+    }
     if (!ownsRequest()) return;
     timing.shownAt = performance.now();
     updateTypingPhase(characterId, requestId, "typing");
@@ -2475,7 +2721,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       if (attempt > 0) {
         if (!recoverableChatError(lastError) || requestController.signal.aborted) throw lastError;
         setRequestStatus(characterId, `连接中断，正在恢复（${attempt}/3）……`, requestId);
-        await delay(backoffs[attempt]);
+        await abortableDelay(backoffs[attempt], requestController.signal);
       }
       try {
         const response = await fetch(`${apiRoot}/chat/stream`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, signal: requestController.signal, body: requestBody });
@@ -2499,10 +2745,10 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     await typingGate;
     if (timing.shownAt && !reducedMotion()) {
       const visibleFor = performance.now() - timing.shownAt;
-      if (visibleFor < 450) await delay(450 - visibleFor);
+      if (visibleFor < 1200) await abortableDelay(1200 - visibleFor, requestController.signal);
     }
     userMessage.status = "sent";
-    const assistantMessage = normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, communicationChannel: result.returnedChannel, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model } });
+    const assistantMessage = normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, communicationChannel: result.returnedChannel, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
     thread.messages.push(assistantMessage);
     thread.messageCount = Number(thread.messageCount || 0) + 1;
     thread.turnCount += 1;
@@ -2511,7 +2757,6 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: "", usage: result.usage });
     await dbPutThread(thread);
     updateTypingPhase(characterId, requestId, "presenting");
-    if (ownsVisibleRequest()) renderAll();
     await presentAssistantTurn(characterId, requestId, assistantMessage);
     if (ownsRequest() && result.pendingSceneState) {
       state.sceneByCharacter.set(characterId, result.pendingSceneState);
@@ -2557,13 +2802,14 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     }
   } finally {
     window.clearTimeout(requestTimeout);
+    requestController.abort();
     if (state.chatRequestByCharacter.get(characterId)?.requestId === requestId) state.chatRequestByCharacter.delete(characterId);
     clearTypingState(characterId, requestId);
     updateComposerAvailability();
     void flushDeferredPresenceRefresh();
   }
 }
-async function submitUserBlocks(blocks, { clearComposer = false, onAccepted = null } = {}) {
+async function submitUserBlocks(blocks, { clearComposer = false, onAccepted = null, movementLocationId = "" } = {}) {
   if (!state.selected || globalRequestBusy()) return false;
   const total = renderBlocksText(blocks).length;
   if (!blocks.length) return false;
@@ -2578,7 +2824,7 @@ async function submitUserBlocks(blocks, { clearComposer = false, onAccepted = nu
   }
   const thread = await dbGetThread(state.selected);
   if (!(await ensureContinuityDecision(thread))) return false;
-  const userMessage = normalizeMessage({ id: id(), characterId: thread.characterId, role: "user", contentBlocks: blocks, communicationChannel: thread.channel, createdAt: Date.now(), status: "pending", conversationSegmentId: thread.conversationSegmentId });
+  const userMessage = normalizeMessage({ id: id(), characterId: thread.characterId, role: "user", contentBlocks: blocks, communicationChannel: thread.channel, createdAt: Date.now(), status: "pending", conversationSegmentId: thread.conversationSegmentId, movementLocationId });
   thread.messages.push(userMessage);
   thread.messageCount = Number(thread.messageCount || 0) + 1;
   onAccepted?.();
@@ -2603,11 +2849,12 @@ async function sendMessage(event) {
 async function sendMovementInvitation(event) {
   event.preventDefault();
   const invitation = $("movement-invitation").value.trim();
-  if (!invitation || !$("movement-dialog").dataset.locationId) return;
+  const locationId = $("movement-dialog").dataset.locationId || "";
+  if (!invitation || !locationId) return;
   const channel = currentThread()?.channel === "in_person" ? "in_person" : "text";
   await submitUserBlocks(
     [{ type: channel === "in_person" ? "speech" : "message", text: invitation }],
-    { onAccepted: () => $("movement-dialog").close() },
+    { onAccepted: () => $("movement-dialog").close(), movementLocationId: locationId },
   );
 }
 async function retryMessage(messageId) {
@@ -2730,6 +2977,7 @@ async function arriveInPerson() {
   try {
     if (!configured()) {
       await transitionPresence("in_person", characterId, thread);
+      await dismissCurrentRendezvous(thread);
       if (ownsVisibleArrival()) showBanner("场景已更新。配置模型后可以开始对话。");
       return;
     }
@@ -2748,6 +2996,7 @@ async function arriveInPerson() {
       thread.messageCount = Number(thread.messageCount || 0) + 1;
     }
     if (thread) await dbPutThread(thread);
+    await dismissCurrentRendezvous(thread);
     // Populate the arrival turn before exposing the stage. Otherwise
     // setChannel() can make the scene visible for one paint while the
     // reaction is still being persisted, producing an empty dialogue box.
@@ -2900,6 +3149,7 @@ function openSettings(tab = "models") {
   $("history-retention").value = String(state.historyRetentionDays);
   $("summary-last-updated").textContent = activeThread?.summaryUpdatedAt ? `最近更新：${new Date(activeThread.summaryUpdatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}` : "尚未生成摘要";
   $("provider-select").value = state.provider || $("provider-select").value;
+  syncProviderControls($("provider-select").value);
   $("model-id").value = state.model || $("model-id").value;
   refreshCredentialStatus();
   if (!$("settings-dialog").open) $("settings-dialog").showModal();
@@ -2986,7 +3236,7 @@ $("movement-invitation").oninput = () => {
 };
 $("stop-waiting").onclick = () => {
   const pending = typingStateFor();
-  if (pending && pending.phase === "segment") {
+  if (pending && presentationFor(pending.characterId)?.requestId === pending.requestId) {
     cancelPresentationQueue(pending.characterId, pending.requestId);
     updateTypingPhase(pending.characterId, pending.requestId, "presenting");
     setRequestStatus(pending.characterId, "已停止分段等待，完整回复已经显示。", pending.requestId);
@@ -3070,7 +3320,7 @@ $("toggle-advanced-model").onclick = () => {
   panel.hidden = !expanded;
   $("toggle-advanced-model").setAttribute("aria-expanded", String(expanded));
 };
-$("provider-select").onchange = () => { if (state.provider && state.provider !== $("provider-select").value) clearCredential(); };
+$("provider-select").onchange = () => chooseProvider($("provider-select").value);
 $("auto-summary-enabled").onchange = async () => {
   state.autoSummaryEnabled = $("auto-summary-enabled").checked;
   await storePut("app_state", { key: "preferences", autoSummaryEnabled: state.autoSummaryEnabled });
@@ -3084,7 +3334,7 @@ $("history-retention").onchange = async () => {
 };
 document.querySelectorAll("[data-settings-tab]").forEach((button) => { button.onclick = () => openSettings(button.dataset.settingsTab); });
 $("delete-character-history").onclick = async () => { if (globalRequestBusy()) return; const characterId = $("history-character").value; await deleteMessagesForCharacter(characterId); await storeDelete("threads", characterId); state.threads.delete(characterId); if (characterId === state.selected) { await dbGetThread(characterId); renderAll(); } openSettings("history"); toast("该角色本地历史已删除"); };
-$("clear-all-history").onclick = async () => { if (globalRequestBusy()) return; if (!window.confirm("确定清空全部 Project Snow 本地历史与世界状态吗？")) return; await storeClear("threads"); await storeClear("messages"); await storeClear("app_state"); state.threads.clear(); state.worldPackage = ""; state.drafts.clear(); state.pinnedCharacters.clear(); state.favoriteStickerIds.clear(); state.favoriteStickers.clear(); state.recentStickerIds = []; if (state.selected) { await dbGetThread(state.selected); await resolvePresence(); } renderAll(); openSettings("history"); toast("全部本地历史已清空"); };
+$("clear-all-history").onclick = async () => { if (globalRequestBusy()) return; if (!window.confirm("确定清空全部 Project Snow 本地历史与世界状态吗？")) return; await storeClear("threads"); await storeClear("messages"); await storeClear("app_state"); state.threads.clear(); state.worldPackage = ""; state.drafts.clear(); state.pinnedCharacters.clear(); state.favoriteStickerIds.clear(); state.favoriteStickers.clear(); state.recentStickerIds = []; state.rendezvousDismissals.clear(); if (state.selected) { await dbGetThread(state.selected); await resolvePresence(); } renderAll(); openSettings("history"); toast("全部本地历史已清空"); };
 document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   if (!button.getAttribute("aria-label")) button.setAttribute("aria-label", "关闭对话框");
   button.onclick = () => $(button.dataset.closeDialog).close();

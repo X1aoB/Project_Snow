@@ -94,7 +94,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     "app_version": "e2e",
                     "data_version": "fixture",
                     "turnstile_site_key": "",
-                    "experience_notice_version": "0.9",
+                    "experience_notice_version": "0.9.2",
                     "analyst_avatar": {
                         "asset_id": "analyst-default",
                         "thumbnail_src": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
@@ -109,18 +109,26 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     "arrival_reaction_probability": 0.5,
                     "automatic_summary": {"default_enabled": True},
                     "movement_catalog": [
-                        {
-                            "location_id": "commercial_street",
-                            "display_name": "商业街",
-                            "activity_name": "一起逛街",
-                        },
-                        {
-                            "location_id": "base_lounge",
-                            "display_name": "休息区",
-                            "activity_name": "喝茶聊天",
-                        },
+                        {"location_id": "commercial_street", "display_name": "商业街", "activity_name": "一起逛街", "invitation_text": "现在一起去商业街吗？"},
+                        {"location_id": "shopping_mall", "display_name": "购物中心"},
+                        {"location_id": "park", "display_name": "公园"},
+                        {"location_id": "base_restaurant", "display_name": "基地餐厅"},
+                        {"location_id": "base_lounge", "display_name": "基地休息区"},
+                        {"location_id": "observation", "display_name": "观景区"},
+                        {"location_id": "training", "display_name": "训练区"},
+                        {"location_id": "archive", "display_name": "资料室"},
+                        {"location_id": "base_beach", "display_name": "基地海滩"},
+                        {"location_id": "base_arcade", "display_name": "基地游戏厅"},
+                        {"location_id": "base_hot_spring", "display_name": "基地温泉"},
+                        {"location_id": "base_healing_center", "display_name": "基地疗愈中心"},
+                        {"location_id": "base_bar", "display_name": "基地酒吧"},
+                        {"location_id": "character_room", "display_name": "她的房间", "invitation_text": "要不要一起去你的房间？"},
+                        {"location_id": "analyst_room", "display_name": "我的房间", "invitation_text": "要不要一起去我的房间？"},
                     ],
-                    "providers": [{"provider_id": "openai", "display_name": "OpenAI"}],
+                    "providers": [
+                        {"provider_id": "openai", "display_name": "OpenAI"},
+                        {"provider_id": "anthropic", "display_name": "Anthropic"},
+                    ],
                     "source_links": {
                         "project_snow": "https://github.com/X1aoB/Project_Snow",
                         "mywebsite": "https://github.com/X1aoB/MyWebsite",
@@ -207,7 +215,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             self._json(
                 {
                     "credential": "encrypted-e2e-credential",
-                    "expires_at": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
+                    "expires_at": (datetime.now(UTC) + timedelta(hours=12)).isoformat(),
                 }
             )
             return
@@ -297,6 +305,16 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 f'event: meta\ndata: {json.dumps({"request_id": payload.get("request_id"), "character_id": payload.get("character_id"), "provider": "openai", "model": "gpt-e2e", "communication_channel": channel}, ensure_ascii=False)}\n\n'
             ).encode()
             request_id = str(payload.get("request_id") or "")
+            if payload.get("message") == "取消重连测试":
+                attempts = type(self).chat_attempts
+                attempts[request_id] = attempts.get(request_id, 0) + 1
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Content-Length", str(len(meta_packet)))
+                self.end_headers()
+                self.wfile.write(meta_packet)
+                self.wfile.flush()
+                return
             if payload.get("message") == "断流恢复测试":
                 attempts = type(self).chat_attempts
                 attempts[request_id] = attempts.get(request_id, 0) + 1
@@ -308,7 +326,40 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     self.wfile.write(meta_packet)
                     self.wfile.flush()
                     return
-            if payload.get("message") == "多段测试":
+            if payload.get("movement_location_id"):
+                location_id = str(payload.get("movement_location_id"))
+                location_name = "商业街" if location_id == "commercial_street" else "约定地点"
+                blocks = [{"type": "message", "text": f"我先去{location_name}等你。"}]
+                state_packet = {
+                    "state_package": "fixture-state.signature",
+                    "scene_state": {
+                        "analyst_location": None,
+                        "character_location": location_name,
+                        "character_activity": f"在{location_name}等分析员",
+                        "visual_key": "observation",
+                        "co_located": False,
+                        "state_scope": "subject_daily",
+                    },
+                    "state_event": {"event_type": "rendezvous_waiting"},
+                }
+                done_packet = {
+                    "truncated": False,
+                    "communication_channel": "text",
+                    "content_blocks": blocks,
+                    "movement_status": {
+                        "status": "character_waiting",
+                        "location_id": location_id,
+                        "location_name": location_name,
+                    },
+                }
+                remaining_packets = "".join(
+                    (
+                        f'event: delta\ndata: {json.dumps({"block_index": 0, "block_type": "message", "text": blocks[0]["text"]}, ensure_ascii=False)}\n\n',
+                        f'event: state\ndata: {json.dumps(state_packet, ensure_ascii=False)}\n\n',
+                        f'event: done\ndata: {json.dumps(done_packet, ensure_ascii=False)}\n\n',
+                    )
+                ).encode()
+            elif payload.get("message") == "多段测试":
                 blocks = [
                     {"type": "message", "text": "第一段"},
                     {"type": "message", "text": "第二段"},
@@ -467,7 +518,7 @@ class PublicFrontendE2ETests(TestCase):
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
             page.locator("#open-settings").click()
-            self.assertEqual(page.locator("#provider-select option").count(), 1)
+            self.assertEqual(page.locator("#provider-select option").count(), 2)
             page.locator("#api-key").fill("sk-e2e-only-not-real")
             page.locator("#discover-models").click()
             page.locator("#discovered-models").wait_for(state="visible")
@@ -706,6 +757,49 @@ class PublicFrontendE2ETests(TestCase):
             self.assertFalse(page.locator("#chat-app").evaluate("element => element.classList.contains('sidebar-collapsed')"))
             browser.close()
 
+    def test_mobile_provider_buttons_and_page_wide_privacy_wheel(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(viewport={"width": 390, "height": 844})
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator("#open-contacts").click()
+            page.locator("#open-settings").click()
+            self.assertTrue(page.locator("#provider-select").is_hidden())
+            self.assertTrue(page.locator("#provider-options-mobile").is_visible())
+            page.locator("#toggle-advanced-model").click()
+            page.locator("#model-id").fill("old-provider-model")
+            page.evaluate("""() => {
+                const select = document.querySelector('#discovered-models');
+                select.innerHTML = '<option value="old-provider-model">old-provider-model</option>';
+                select.hidden = false;
+            }""")
+            page.locator('[data-provider-option="anthropic"]').click()
+            self.assertEqual(page.locator("#provider-select").input_value(), "anthropic")
+            self.assertEqual(page.locator('[data-provider-option="anthropic"]').get_attribute("aria-checked"), "true")
+            self.assertEqual(page.locator("#model-id").input_value(), "")
+            self.assertTrue(page.locator("#discovered-models").is_hidden())
+            page.locator("#save-model").click()
+            self.assertIn("填写或选择模型", page.locator("#setup-error").inner_text())
+            page.locator('[data-provider-option="openai"]').click()
+            self.assertEqual(page.locator("#provider-select").input_value(), "openai")
+
+            page.set_viewport_size({"width": 1280, "height": 800})
+            page.goto(f"{self.base_url}/privacy/", wait_until="networkidle")
+            scroll_root = page.evaluate("() => document.scrollingElement === document.documentElement")
+            self.assertTrue(scroll_root)
+            page.locator(".privacy-hero h1").hover()
+            page.mouse.wheel(0, 650)
+            page.wait_for_function("() => document.scrollingElement.scrollTop > 0")
+            first_scroll = page.evaluate("() => document.scrollingElement.scrollTop")
+            self.assertGreater(first_scroll, 0)
+            page.evaluate("() => window.scrollTo(0, 0)")
+            page.mouse.move(1270, 500)
+            page.mouse.wheel(0, 650)
+            page.wait_for_function("() => document.scrollingElement.scrollTop > 0")
+            self.assertGreater(page.evaluate("() => document.scrollingElement.scrollTop"), 0)
+            browser.close()
+
     def test_indexeddb_unavailable_uses_memory_and_chat_still_works(self) -> None:
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
@@ -735,7 +829,7 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
             browser.close()
 
-    def test_v091_frontend_contracts_are_non_blocking_and_opt_out_feedback(self) -> None:
+    def test_v092_frontend_contracts_are_non_blocking_and_opt_out_feedback(self) -> None:
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
             page = browser.new_page(viewport={"width": 1280, "height": 800})
@@ -747,6 +841,19 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(
                 page.evaluate("""() => window.__projectSnowTest.escapeHtml(`模型" title="注入'`)"""),
                 "模型&quot; title=&quot;注入&#39;",
+            )
+            mixed_blocks = page.evaluate(
+                """() => window.__projectSnowTest.deriveDisplayBlocks([
+                    {type: 'action', text: '动作一'},
+                    {type: 'speech', text: '对白一。'},
+                    {type: 'action', text: '动作二'},
+                    {type: 'speech', text: '对白二。'},
+                    {type: 'action', text: '动作三'},
+                ], 'in_person')"""
+            )
+            self.assertEqual(
+                [block["type"] for block in mixed_blocks],
+                ["action", "speech", "action", "speech", "action"],
             )
             request_budget = page.evaluate(
                 """() => {
@@ -824,8 +931,14 @@ class PublicFrontendE2ETests(TestCase):
 
             page.locator("#message-input").fill("这段主输入框草稿必须保留")
             page.locator("#open-movement-shortcuts").click()
+            self.assertEqual(page.locator("#movement-options [role=radio]").count(), 15)
+            page.locator('[data-movement-id="character_room"]').click()
+            self.assertEqual(page.locator("#movement-invitation").input_value(), "要不要一起去你的房间？")
             page.locator('[data-movement-id="commercial_street"]').click()
             self.assertEqual(page.locator("#movement-invitation").input_value(), "现在一起去商业街吗？")
+            self.assertEqual(page.locator('[data-movement-id="character_room"]').get_attribute("aria-checked"), "false")
+            self.assertEqual(page.locator('[data-movement-id="commercial_street"]').get_attribute("aria-checked"), "true")
+            self.assertEqual(page.locator("#movement-invitation").get_attribute("readonly"), "")
             self.assertEqual(page.locator("#message-input").input_value(), "这段主输入框草稿必须保留")
             self.assertTrue(page.locator("#send-movement-invitation").is_enabled())
             page.locator('[data-close-dialog="movement-dialog"]').last.click()
@@ -854,6 +967,7 @@ class PublicFrontendE2ETests(TestCase):
             PublicFrontendHandler.chat_stream_started = threading.Event()
             PublicFrontendHandler.chat_stream_release = threading.Event()
             page.locator("#message-input").fill("停顿测试")
+            page.evaluate("() => { window.__messageSentAt = performance.now(); }")
             page.locator("#send-message").click()
             self.assertTrue(PublicFrontendHandler.chat_stream_started.wait(timeout=5))
             page.wait_for_timeout(150)
@@ -861,6 +975,9 @@ class PublicFrontendE2ETests(TestCase):
             page.wait_for_timeout(300)
             self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
             page.locator("#timeline .typing-indicator").wait_for(state="visible")
+            typing_elapsed = page.evaluate("() => performance.now() - window.__messageSentAt")
+            self.assertGreaterEqual(typing_elapsed, 1750)
+            self.assertLessEqual(typing_elapsed, 2900)
             bounds = page.evaluate(
                 """() => {
                     const outer = document.querySelector('#timeline').getBoundingClientRect();
@@ -898,6 +1015,22 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
             browser.close()
 
+    def test_stop_waiting_cancels_reconnect_backoff(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#message-input").fill("取消重连测试")
+            page.locator("#send-message").click()
+            page.locator("#request-status").get_by_text("连接中断，正在恢复（1/3）").wait_for(state="visible")
+            page.locator("#stop-waiting").click()
+            page.locator("#request-status").get_by_text("已停止等待").wait_for(state="visible")
+            page.wait_for_timeout(1300)
+            self.assertEqual(sum(PublicFrontendHandler.chat_attempts.values()), 1)
+            browser.close()
+
     def test_movement_invitation_requires_explicit_send_and_preserves_main_draft(self) -> None:
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
@@ -908,12 +1041,14 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#message-input").fill("不要覆盖这段主草稿")
             page.locator("#open-movement-shortcuts").click()
             page.locator('[data-movement-id="commercial_street"]').click()
-            page.locator("#movement-invitation").fill("现在一起去商业街走走，好吗？")
+            self.assertEqual(page.locator("#movement-invitation").input_value(), "现在一起去商业街吗？")
             self.assertEqual(page.locator("#message-input").input_value(), "不要覆盖这段主草稿")
             page.locator("#send-movement-invitation").click()
             page.locator("#movement-dialog").wait_for(state="hidden")
-            page.locator("#timeline").get_by_text("现在一起去商业街走走，好吗？").wait_for(state="visible")
-            page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
+            page.locator("#timeline").get_by_text("现在一起去商业街吗？").wait_for(state="visible")
+            page.locator("#timeline").get_by_text("我先去商业街等你。").wait_for(state="visible")
+            page.locator("#timeline .rendezvous-card").wait_for(state="visible")
+            self.assertIn("她已先到商业街等你", page.locator("#timeline .rendezvous-card").inner_text())
             self.assertEqual(page.locator("#message-input").input_value(), "不要覆盖这段主草稿")
             feedback_overlap = page.evaluate(
                 """() => {
@@ -924,11 +1059,30 @@ class PublicFrontendE2ETests(TestCase):
             )
             self.assertFalse(feedback_overlap)
             sent = PublicFrontendHandler.chat_payloads[-1]
-            self.assertEqual(sent.get("message"), "现在一起去商业街走走，好吗？")
+            self.assertEqual(sent.get("message"), "现在一起去商业街吗？")
+            self.assertEqual(sent.get("movement_location_id"), "commercial_street")
             self.assertEqual(
                 sent.get("content_blocks"),
-                [{"type": "message", "text": "现在一起去商业街走走，好吗？"}],
+                [{"type": "message", "text": "现在一起去商业街吗？"}],
             )
+            page.locator("#message-input").fill("继续在通讯器里说一句")
+            page.locator("#send-message").click()
+            page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
+            self.assertTrue(page.locator("#timeline .rendezvous-card").is_visible())
+            requests_before_stay = len(PublicFrontendHandler.chat_payloads)
+            page.locator('[data-rendezvous-stay]').click()
+            self.assertEqual(page.locator("#timeline .rendezvous-card").count(), 0)
+            page.wait_for_timeout(100)
+            self.assertEqual(len(PublicFrontendHandler.chat_payloads), requests_before_stay)
+
+            page.locator("#open-movement-shortcuts").click()
+            page.locator('[data-movement-id="commercial_street"]').click()
+            page.locator("#send-movement-invitation").click()
+            page.locator("#timeline .rendezvous-card").wait_for(state="visible")
+            page.locator('[data-rendezvous-go]').click()
+            page.locator("#in-person-surface").wait_for(state="visible")
+            page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+            self.assertEqual(page.locator("#timeline .rendezvous-card").count(), 0)
             browser.close()
 
     def test_reload_recovers_persisted_request_id_without_a_second_generation(self) -> None:
@@ -1163,9 +1317,9 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#message-input").fill("多段测试")
             page.locator("#send-message").click()
             page.locator("#timeline").get_by_text("第一段").wait_for(state="visible")
-            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 1)
+            page.locator("#timeline .typing-indicator").wait_for(state="visible")
             page.locator("#timeline").get_by_text("第二段").wait_for(state="visible")
-            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 1)
+            page.locator("#timeline .typing-indicator").wait_for(state="visible")
             page.locator("#timeline").get_by_text("收到").wait_for(state="visible")
             self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
             sticker_image = page.locator("#timeline .content-sticker img")
@@ -1183,11 +1337,22 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#message-input").fill("句界测试")
             page.locator("#send-message").click()
             page.locator("#timeline").get_by_text("第一句自然回应。").wait_for(state="visible")
-            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 1)
+            first_segment_at = page.evaluate("() => performance.now()")
+            page.locator("#timeline .typing-indicator").wait_for(state="visible")
             page.locator("#timeline").get_by_text("第二句换个角度继续。").wait_for(state="visible")
-            self.assertEqual(page.locator("#timeline .typing-indicator").count(), 1)
+            second_segment_at = page.evaluate("() => performance.now()")
+            self.assertGreaterEqual(second_segment_at - first_segment_at, 2400)
+            self.assertLessEqual(second_segment_at - first_segment_at, 4600)
+            page.locator("#timeline .typing-indicator").wait_for(state="visible")
             page.locator("#timeline").get_by_text("第三句收住话题。").wait_for(state="visible")
             self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
+            sentence_message = page.locator("#timeline .message.assistant").filter(has_text="第一句自然回应。")
+            self.assertEqual(sentence_message.locator(".content-message").count(), 3)
+            sentence_message_id = sentence_message.get_attribute("data-message-id")
+            page.reload(wait_until="networkidle")
+            persisted_message = page.locator(f'[data-message-id="{sentence_message_id}"]')
+            persisted_message.wait_for(state="visible")
+            self.assertEqual(persisted_message.locator(".content-message").count(), 3)
             page.locator("#go-in-person").click()
             page.locator("#confirm-presence-transition").click()
             page.locator("#in-person-surface").wait_for(state="visible")

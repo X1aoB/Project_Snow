@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import asyncio
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
@@ -104,6 +104,51 @@ class PublicSecurityTests(TestCase):
             open_byok_credential(settings, anonymous_id="anonymous-b", token=token)
         with self.assertRaises(PublicSecurityError):
             open_byok_credential(settings, anonymous_id="anonymous-a", token=token, expected_provider="deepseek")
+
+    def test_byok_credential_has_absolute_twelve_hour_default_and_legacy_lifetime(self) -> None:
+        settings = _settings()
+        issued_at = datetime.now(UTC)
+        token, expires_at = issue_byok_credential(
+            settings,
+            anonymous_id="anonymous-a",
+            provider="openai",
+            api_key="sk-test-key",
+        )
+        self.assertGreaterEqual(expires_at - issued_at, timedelta(hours=11, minutes=59))
+        self.assertLessEqual(expires_at - issued_at, timedelta(hours=12, seconds=5))
+        claims = open_byok_credential(
+            settings,
+            anonymous_id="anonymous-a",
+            token=token,
+            expected_provider="openai",
+        )
+        self.assertEqual(claims["exp"], int(expires_at.timestamp()))
+
+        legacy, legacy_expiry = issue_byok_credential(
+            settings,
+            anonymous_id="anonymous-a",
+            provider="openai",
+            api_key="sk-test-key",
+            lifetime=timedelta(hours=2),
+        )
+        self.assertLess(legacy_expiry, expires_at)
+        self.assertEqual(
+            open_byok_credential(
+                settings,
+                anonymous_id="anonymous-a",
+                token=legacy,
+                expected_provider="openai",
+            )["api_key"],
+            "sk-test-key",
+        )
+        with self.assertRaises(PublicSecurityError):
+            issue_byok_credential(
+                settings,
+                anonymous_id="anonymous-a",
+                provider="openai",
+                api_key="sk-test-key",
+                lifetime=timedelta(hours=13),
+            )
 
     def test_state_signature_rejects_tampering(self) -> None:
         settings = _settings()

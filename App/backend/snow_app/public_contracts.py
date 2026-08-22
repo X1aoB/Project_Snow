@@ -112,6 +112,11 @@ class ChatRequest(StrictModel):
     recent_history: list[HistoryTurn] = Field(default_factory=list, max_length=24)
     history_summary: str = Field(default="", max_length=6000)
     state_package: str = Field(default="", max_length=32768)
+    movement_location_id: str = Field(
+        default="",
+        max_length=64,
+        pattern=r"^$|^[a-z][a-z0-9_]{1,63}$",
+    )
     continuity_decision: Literal["", "continue_previous", "start_today"] = ""
     local_day_key: str = Field(default="", max_length=32)
 
@@ -230,12 +235,37 @@ class PresenceState(StrictModel):
     character_name: str = Field(min_length=1, max_length=80)
     location: str = Field(min_length=1, max_length=120)
     activity: str = Field(min_length=1, max_length=240)
-    state_scope: Literal["session_simulation", "conversation_confirmed", "shared_daily"] = "session_simulation"
+    state_scope: Literal[
+        "session_simulation",
+        "conversation_confirmed",
+        "shared_daily",
+        "subject_daily",
+    ] = "session_simulation"
+
+
+class PendingRendezvous(StrictModel):
+    """A character who accepted a text invitation and is waiting to meet."""
+
+    rendezvous_id: str = Field(min_length=8, max_length=160)
+    character_id: str = Field(min_length=12, max_length=32)
+    location_id: str = Field(min_length=1, max_length=64)
+    location_name: str = Field(min_length=1, max_length=120)
+    activity_id: str = Field(min_length=1, max_length=64)
+    waiting_activity: str = Field(min_length=1, max_length=240)
+    joined_activity: str = Field(min_length=1, max_length=240)
+    created_at: str = Field(default="", max_length=64)
+    schedule_date: str = Field(default="", max_length=16)
 
 
 class StateEvent(StrictModel):
     event_id: str = Field(min_length=8, max_length=160)
-    event_type: Literal["presence_transition", "arrival", "communication", "joint_movement"]
+    event_type: Literal[
+        "presence_transition",
+        "arrival",
+        "communication",
+        "joint_movement",
+        "rendezvous_waiting",
+    ]
     character_id: str = Field(min_length=12, max_length=32)
     communication_channel: Literal["text", "in_person"]
     location: str | None = Field(default=None, max_length=120)
@@ -261,6 +291,7 @@ class StatePayload(StrictModel):
     analyst_location: str | None = Field(default=None, max_length=120)
     presence: dict[str, PresenceState] = Field(default_factory=dict)
     relationships: dict[str, Any] = Field(default_factory=dict)
+    pending_rendezvous: dict[str, PendingRendezvous] = Field(default_factory=dict)
     recent_events: list[StateEvent] = Field(default_factory=list, max_length=4)
     schedule_date: str = Field(default="", max_length=16)
     schedule_revision: int = Field(default=0, ge=0)
@@ -268,3 +299,15 @@ class StatePayload(StrictModel):
     expires_at: str = Field(default="", max_length=64)
     subject_binding: str = Field(default="", max_length=64)
     state_key_id: str = Field(default="", max_length=32)
+
+    @field_validator("pending_rendezvous")
+    @classmethod
+    def validate_pending_rendezvous(
+        cls,
+        value: dict[str, PendingRendezvous],
+    ) -> dict[str, PendingRendezvous]:
+        if len(value) > 22:
+            raise ValueError("pending_rendezvous may contain at most 22 characters")
+        if any(character_id != item.character_id for character_id, item in value.items()):
+            raise ValueError("pending_rendezvous key must match character_id")
+        return value

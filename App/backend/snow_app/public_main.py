@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import logging
@@ -98,6 +98,136 @@ def _error(code: str, http_status: int, message: str | None = None) -> HTTPExcep
 
 def _sse(event: str, payload: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+
+
+def _public_scene_state_payload(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    projected: dict[str, Any] = {}
+    for key, limit in (
+        ("analyst_location", 120),
+        ("character_location", 120),
+        ("character_activity", 240),
+        ("visual_key", 120),
+        ("state_scope", 40),
+    ):
+        if key in value:
+            raw = value.get(key)
+            projected[key] = (
+                None if raw is None else redact_sensitive_text(str(raw), limit)
+            )
+    if "co_located" in value:
+        projected["co_located"] = bool(value.get("co_located"))
+    return projected
+
+
+def _public_state_event_payload(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    projected: dict[str, Any] = {}
+    for key, limit in (
+        ("event_id", 160),
+        ("event_type", 40),
+        ("character_id", 32),
+        ("communication_channel", 16),
+        ("location", 120),
+        ("arrival_decision", 16),
+        ("location_id", 64),
+        ("activity_id", 64),
+        ("target_character_id", 32),
+    ):
+        if key in value:
+            raw = value.get(key)
+            projected[key] = (
+                None if raw is None else redact_sensitive_text(str(raw), limit)
+            )
+    return projected
+
+
+def _public_pending_rendezvous_payload(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    projected: dict[str, Any] = {}
+    for key, limit in (
+        ("rendezvous_id", 160),
+        ("character_id", 32),
+        ("location_id", 64),
+        ("location_name", 120),
+        ("activity_id", 64),
+        ("waiting_activity", 240),
+        ("joined_activity", 240),
+        ("created_at", 64),
+        ("schedule_date", 16),
+    ):
+        if key in value:
+            raw = value.get(key)
+            projected[key] = (
+                None if raw is None else redact_sensitive_text(str(raw), limit)
+            )
+    return projected
+
+
+def _public_movement_status_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {"status": "none"}
+    projected: dict[str, Any] = {}
+    for key, limit in (
+        ("status", 40),
+        ("location_id", 64),
+        ("location_name", 120),
+        ("display_name", 120),
+        ("activity_id", 64),
+        ("target_character_id", 32),
+        ("character_id", 32),
+        ("schedule_date", 16),
+    ):
+        if key in value:
+            raw = value.get(key)
+            projected[key] = (
+                None if raw is None else redact_sensitive_text(str(raw), limit)
+            )
+    raw_revision = value.get("schedule_revision")
+    if isinstance(raw_revision, int) and not isinstance(raw_revision, bool):
+        projected["schedule_revision"] = max(0, raw_revision)
+    pending = _public_pending_rendezvous_payload(value.get("pending_rendezvous"))
+    if pending is not None:
+        projected["pending_rendezvous"] = pending
+    if not projected.get("status"):
+        projected["status"] = "none"
+    return projected
+
+
+def _public_content_blocks_payload(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    projected_blocks: list[dict[str, Any]] = []
+    for item in value[:8]:
+        if not isinstance(item, dict):
+            continue
+        block_type = str(item.get("type") or "").casefold()
+        if block_type not in {"message", "speech", "action", "sticker"}:
+            continue
+        block: dict[str, Any] = {"type": block_type}
+        if block_type == "sticker":
+            for key, limit in (
+                ("asset_id", 64),
+                ("caption", 120),
+                ("src", 500),
+                ("thumbnail_src", 500),
+                ("display_src", 500),
+                ("display_mime_type", 80),
+            ):
+                if key in item:
+                    block[key] = redact_sensitive_text(str(item.get(key) or ""), limit)
+            block["display_animated"] = bool(item.get("display_animated"))
+            block["animated"] = bool(item.get("animated"))
+        else:
+            text_value = redact_sensitive_text(str(item.get("text") or ""), 1200)
+            if not text_value:
+                continue
+            block["text"] = text_value
+        projected_blocks.append(block)
+    return projected_blocks
 
 
 def _request_hash(payload: dict[str, Any]) -> str:
@@ -395,9 +525,15 @@ def create_app(
             },
             "attribution_url": public_settings.attribution_url,
             "max_provider_calls_per_action": public_settings.max_provider_calls_per_action,
+            "credential_policy": {
+                "lifetime_hours": public_settings.byok_lifetime_hours,
+                "storage": "sessionStorage",
+                "renewal": "none",
+            },
             "movement_catalog": chat_service.movement_catalog(),
             "feature_flags": {
                 "joint_movement": True,
+                "rendezvous_actions": True,
                 "request_recovery": True,
                 "sticker_display_derivatives": True,
                 "indexeddb_v4": True,
@@ -410,7 +546,7 @@ def create_app(
                 else None
             ),
             "state_schedule": {
-                "scope": "shared_daily",
+                "scope": "subject_daily",
                 "timezone": "Asia/Hong_Kong",
                 "update": "00:00",
             },
@@ -527,6 +663,7 @@ def create_app(
             anonymous_id=request.state.anonymous_id,
             provider=spec.provider_id,
             api_key=payload.api_key,
+            lifetime=timedelta(hours=public_settings.byok_lifetime_hours),
         )
         return {
             "provider": spec.provider_id,
@@ -679,6 +816,13 @@ def create_app(
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
         public_model = redact_sensitive_text(payload.model, 200)
         chat_service.ensure_character_available(payload.character_id)
+        try:
+            # Validate a structured invitation before opening BYOK, claiming
+            # idempotency, or reserving provider budget. Hidden, forged, and
+            # message-mismatched destinations therefore cost no model call.
+            chat_service.validate_movement_request(payload)
+        except ValueError as exc:
+            raise _error("invalid_movement_location", 422) from exc
         try:
             canonical_blocks = chat_service.validate_content_blocks(
                 payload.content_blocks,
@@ -958,9 +1102,9 @@ def create_app(
                     },
                 )
                 return
-            content_blocks = list(result_payload.get("content_blocks") or [])
-            if not content_blocks and str(result_payload.get("answer") or "").strip():
-                content_blocks = [
+            raw_content_blocks = list(result_payload.get("content_blocks") or [])
+            if not raw_content_blocks and str(result_payload.get("answer") or "").strip():
+                raw_content_blocks = [
                     {
                         "type": (
                             "message"
@@ -970,6 +1114,7 @@ def create_app(
                         "text": str(result_payload["answer"]),
                     }
                 ]
+            content_blocks = _public_content_blocks_payload(raw_content_blocks)
             for block_index, block in enumerate(content_blocks):
                 block_type = str(block.get("type") or "")
                 block_text = str(block.get("text") or "")
@@ -1006,10 +1151,16 @@ def create_app(
                 state_event_payload: dict[str, Any] = {
                     "state_package": result_payload["state_package"],
                 }
-                if result_payload.get("scene_state"):
-                    state_event_payload["scene_state"] = result_payload["scene_state"]
-                if result_payload.get("state_event"):
-                    state_event_payload["state_event"] = result_payload["state_event"]
+                safe_scene_state = _public_scene_state_payload(
+                    result_payload.get("scene_state")
+                )
+                if safe_scene_state:
+                    state_event_payload["scene_state"] = safe_scene_state
+                safe_state_event = _public_state_event_payload(
+                    result_payload.get("state_event")
+                )
+                if safe_state_event:
+                    state_event_payload["state_event"] = safe_state_event
                 yield _sse("state", state_event_payload)
             internal_diagnostics = (
                 result_payload.get("diagnostics")
@@ -1058,7 +1209,7 @@ def create_app(
                         or internal_diagnostics.get("validation_disposition")
                         or "accepted"
                     ),
-                    "movement_status": (
+                    "movement_status": _public_movement_status_payload(
                         result_payload.get("movement_status")
                         if isinstance(result_payload.get("movement_status"), dict)
                         else {
@@ -1066,6 +1217,9 @@ def create_app(
                                 internal_diagnostics.get("state_update_status") or "none"
                             )
                         }
+                    ),
+                    "pending_rendezvous": _public_pending_rendezvous_payload(
+                        result_payload.get("pending_rendezvous")
                     ),
                     "recovery_action": str(
                         result_payload.get("recovery_action") or "none"

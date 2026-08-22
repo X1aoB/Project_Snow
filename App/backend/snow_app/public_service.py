@@ -24,6 +24,7 @@ from .mvp_service import MVPService, _SESSION_STATES, _SESSION_LOCK, _WORLD_STAT
 from .public_contracts import (
     ChatRequest,
     HistoryTurn,
+    PendingRendezvous,
     PresenceArrivalRequest,
     PresenceResolveRequest,
     PresenceTransitionRequest,
@@ -350,6 +351,24 @@ _CONTROLLED_JOINT_LOCATIONS: dict[str, dict[str, Any]] = {
         # space and the activity remains suitable for every character.
         "activities": {"chatting_at_bar": "和分析员一起在酒吧坐坐聊天"},
     },
+    "character_room": {
+        # The public catalog deliberately uses a relationship-neutral label;
+        # the signed state resolves it to the selected character at runtime.
+        "location": "她的房间",
+        "explicit_aliases": ("她的房间", "你的房间", "角色房间"),
+        "aliases": ("她的房间", "你的房间", "角色房间"),
+        "activities": {"spending_time_in_room": "和分析员在房间里相处"},
+        "invitation_text": "要不要一起去你的房间？",
+        "dynamic_location": "character_room",
+    },
+    "analyst_room": {
+        "location": "我的房间",
+        "explicit_aliases": ("我的房间", "分析员的房间"),
+        "aliases": ("我的房间", "分析员的房间"),
+        "activities": {"spending_time_in_room": "和分析员在房间里相处"},
+        "invitation_text": "要不要一起去我的房间？",
+        "dynamic_location": "analyst_room",
+    },
 }
 _JOINT_MOVE_REQUEST_TERMS = (
     "一起去", "一起出发", "和我去", "陪我去", "跟我去", "带你去", "带你逛", "带你散步",
@@ -368,7 +387,8 @@ _JOINT_MOVE_ACCEPT_TERMS = (
     "这就过去", "立即过去", "马上过去", "动身", "这就走", "现在就走",
 )
 _JOINT_MOVE_NEGATIVE_TERMS = (
-    "不去", "不想去", "不想", "不能", "不可以", "不行", "不好", "先不", "还是不", "算了",
+    "不去", "不想去", "不想", "不愿意", "不能", "不可以", "不行", "不好", "先不", "还是不", "算了",
+    "没办法", "无法", "做不到", "不合适",
     "没空", "不方便", "拒绝", "下次", "以后", "改天",
     "稍后", "晚点", "等会", "待会", "一会儿", "过一会", "晚些时候", "你可以先去", "你先去",
     "我先去", "先去吧", "等我", "明天", "到时候", "之后再",
@@ -662,9 +682,102 @@ class PublicChatService:
                     "display_name": str(definition.get("location") or location_id),
                     "activity_id": activity_id,
                     "activity_name": str(activities.get(activity_id) or ""),
+                    "invitation_text": str(
+                        definition.get("invitation_text")
+                        or f"要不要一起去{definition.get('location') or location_id}？"
+                    ),
                 }
             )
         return values
+
+    @staticmethod
+    def _character_name(character_id: str) -> str:
+        return next(
+            (
+                character.display_name
+                for character in MVP_CHARACTERS
+                if character.character_id == character_id
+            ),
+            "她",
+        )
+
+    @classmethod
+    def _resolved_location_definition(
+        cls,
+        location_id: str,
+        definition: dict[str, Any],
+        character_id: str,
+    ) -> dict[str, Any]:
+        resolved = {**definition, "activities": dict(definition.get("activities") or {})}
+        dynamic_location = str(definition.get("dynamic_location") or "")
+        if dynamic_location == "character_room":
+            character_name = cls._character_name(character_id)
+            resolved["location"] = f"{character_name}的房间"
+            resolved["waiting_activity"] = f"在自己的房间等分析员"
+        elif dynamic_location == "analyst_room":
+            resolved["location"] = "分析员的房间"
+            resolved["waiting_activity"] = "在分析员的房间等分析员"
+        else:
+            resolved["waiting_activity"] = (
+                f"在{resolved.get('location') or location_id}等分析员"
+            )
+        return resolved
+
+    @classmethod
+    def validate_movement_request(cls, request: ChatRequest) -> None:
+        """Reject a forged structured invitation before any provider work."""
+
+        selected = str(request.movement_location_id or "").strip()
+        if not selected:
+            return
+        definition = _CONTROLLED_JOINT_LOCATIONS.get(selected)
+        if not definition or definition.get("public_invitation") is False:
+            raise ValueError("movement location is not publicly selectable")
+        expected_message = str(
+            definition.get("invitation_text")
+            or f"要不要一起去{definition.get('location') or selected}？"
+        ).strip()
+        if request.message.strip() != expected_message:
+            raise ValueError("movement invitation text does not match the catalog")
+        expected_block_type = (
+            "message" if request.communication_channel == "text" else "speech"
+        )
+        if (
+            len(request.content_blocks) != 1
+            or request.content_blocks[0].type != expected_block_type
+            or request.content_blocks[0].text.strip() != expected_message
+        ):
+            raise ValueError("movement invitation must contain only the catalog text")
+        resolved = cls._direct_joint_move_intent(
+            request.message,
+            None,
+            request.character_id,
+        )
+        if not resolved or resolved[0] != selected:
+            raise ValueError("movement location does not match the invitation")
+
+    @classmethod
+    def _movement_intent_for_request(
+        cls,
+        request: ChatRequest,
+        state: dict[str, Any] | None,
+    ) -> tuple[str, dict[str, Any]] | None:
+        intent = cls._joint_move_intent(
+            request.message,
+            request.recent_history,
+            state,
+            request.character_id,
+        )
+        selected = str(request.movement_location_id or "").strip()
+        if not selected:
+            return intent
+        if not intent or intent[0] != selected:
+            return None
+        return selected, cls._resolved_location_definition(
+            selected,
+            intent[1],
+            request.character_id,
+        )
 
     @staticmethod
     def _history_text(turn: HistoryTurn | dict[str, Any]) -> str:
@@ -782,7 +895,7 @@ class PublicChatService:
         return None
 
     @staticmethod
-    def _joint_move_is_accepted(answer: str) -> bool:
+    def _joint_move_is_accepted(answer: str, *, rendezvous: bool = False) -> bool:
         """Conservatively recognize an immediate, affirmative reply.
 
         A bare substring such as ``好`` is intentionally insufficient: it
@@ -792,7 +905,17 @@ class PublicChatService:
         """
 
         value = str(answer or "").strip()
-        if not value or _joint_move_has_blocker(value):
+        blocker_value = value
+        if rendezvous:
+            # "我先去那里等你" is the required text-channel hand-off, not a
+            # future-plan refusal.  Remove only that bounded construction;
+            # all other negative, conditional and delayed language still wins.
+            blocker_value = re.sub(
+                r"我先(?:去|过去|到).{0,32}(?:等你|等分析员)",
+                "现在动身",
+                blocker_value,
+            )
+        if not value or _joint_move_has_blocker(blocker_value):
             return False
         if _contains_any(value, _JOINT_MOVE_ANSWER_QUESTION_TERMS) and not _contains_any(
             value,
@@ -805,7 +928,28 @@ class PublicChatService:
                 value,
             )
         )
-        return bare_acceptance or _contains_any(value, _JOINT_MOVE_ACCEPT_TERMS)
+        waiting_acceptance = rendezvous and bool(
+            re.search(
+                r"(?:我先(?:去|过去|到).{0,32}(?:等你|等分析员)|"
+                r"(?:先到|先过去).{0,24}(?:等你|等分析员)|"
+                r"(?:在那里|那边|到了).{0,16}等你)",
+                value,
+            )
+        )
+        return waiting_acceptance or bare_acceptance or _contains_any(
+            value, _JOINT_MOVE_ACCEPT_TERMS
+        )
+
+    @staticmethod
+    def _text_rendezvous_is_explicit(answer: str) -> bool:
+        return bool(
+            re.search(
+                r"(?:我先(?:去|过去|到).{0,32}(?:等你|等分析员)|"
+                r"(?:先到|先过去).{0,24}(?:等你|等分析员)|"
+                r"(?:在那里|那边|到了).{0,16}等你)",
+                str(answer or ""),
+            )
+        )
 
     def _apply_joint_movement(
         self,
@@ -814,14 +958,12 @@ class PublicChatService:
         result: dict[str, Any],
     ) -> tuple[dict[str, Any], StateEvent | None, dict[str, Any]]:
         diagnostics: dict[str, Any] = {"state_update_status": "not_requested"}
-        intent = self._joint_move_intent(
-            request.message,
-            request.recent_history,
-            state,
-            request.character_id,
-        )
+        intent = self._movement_intent_for_request(request, state)
         answer = str(result.get("answer") or "")
-        accepted = self._joint_move_is_accepted(answer)
+        accepted = self._joint_move_is_accepted(
+            answer,
+            rendezvous=request.communication_channel == "text",
+        )
         raw_updates = result.get("state_updates") or []
         proposal: StateUpdateProposal | None = None
         if raw_updates:
@@ -838,11 +980,22 @@ class PublicChatService:
         if not accepted:
             diagnostics["state_update_rejected_reason"] = "character_did_not_accept_now"
             return state, None, diagnostics
+        if (
+            request.communication_channel == "text"
+            and not self._text_rendezvous_is_explicit(answer)
+        ):
+            diagnostics["state_update_rejected_reason"] = "rendezvous_semantics_unresolved"
+            return state, None, diagnostics
 
         # The deterministic server resolver is authoritative. A model
         # proposal can confirm it, but absence, malformed data, or a mismatch
         # never suppresses an otherwise valid natural-language movement.
-        location_id, definition = intent
+        location_id, raw_definition = intent
+        definition = self._resolved_location_definition(
+            location_id,
+            raw_definition,
+            request.character_id,
+        )
         activity_id = str(
             definition.get("resolved_activity_id")
             or next(iter(definition.get("activities") or {}), "")
@@ -858,7 +1011,49 @@ class PublicChatService:
         location = str(definition["location"])
         activity = str(definition["activities"][activity_id])
         target_character_id = str(definition.get("target_character_id") or "") or None
-        event_id = f"{request.request_id}:joint_move"
+        event_id = (
+            f"{request.request_id}:rendezvous_waiting"
+            if request.communication_channel == "text"
+            else f"{request.request_id}:joint_move"
+        )
+        pending = dict(state.get("pending_rendezvous") or {})
+        existing_pending = dict(pending.get(request.character_id) or {})
+        if (
+            request.communication_channel == "text"
+            and str(existing_pending.get("rendezvous_id") or "") == event_id
+        ):
+            diagnostics.update({
+                "state_update_status": "character_waiting",
+                "state_update_type": "rendezvous_waiting",
+                "location_id": location_id,
+                "location_name": location,
+                "display_name": location,
+                "activity_id": activity_id,
+                "pending_rendezvous": existing_pending,
+            })
+            existing_event = next(
+                (
+                    item
+                    for item in state.get("recent_events") or []
+                    if str(item.get("event_id") or "") == event_id
+                ),
+                None,
+            )
+            event = (
+                StateEvent.model_validate(existing_event)
+                if existing_event
+                else StateEvent(
+                    event_id=event_id,
+                    event_type="rendezvous_waiting",
+                    character_id=request.character_id,
+                    communication_channel="text",
+                    location=location,
+                    location_id=location_id,
+                    activity_id=activity_id,
+                    target_character_id=target_character_id,
+                )
+            )
+            return state, event, diagnostics
         existing = next(
             (
                 item
@@ -875,23 +1070,57 @@ class PublicChatService:
                 return state, None, diagnostics
             diagnostics.update({
                 "state_update_status": "already_applied",
-                "state_update_type": "joint_move",
+                "state_update_type": (
+                    "rendezvous_waiting"
+                    if request.communication_channel == "text"
+                    else "joint_move"
+                ),
                 "location_id": location_id,
+                "location_name": location,
+                "display_name": location,
                 "activity_id": activity_id,
                 "target_character_id": target_character_id,
             })
             return state, event, diagnostics
         presence = dict(state.get("presence") or {})
         character_scene = dict(presence.get(request.character_id) or {})
+        joined_activity = activity
+        waiting_activity = str(
+            definition.get("waiting_activity") or f"在{location}等分析员"
+        )
         character_scene.update({
             "location": location,
-            "activity": activity,
+            "activity": (
+                waiting_activity
+                if request.communication_channel == "text"
+                else joined_activity
+            ),
             "state_scope": "conversation_confirmed",
         })
         presence[request.character_id] = character_scene
+        if request.communication_channel == "text":
+            pending_record = {
+                "rendezvous_id": event_id,
+                "character_id": request.character_id,
+                "location_id": location_id,
+                "location_name": location,
+                "activity_id": activity_id,
+                "waiting_activity": waiting_activity,
+                "joined_activity": joined_activity,
+                "created_at": datetime.now(ZoneInfo("Asia/Hong_Kong")).isoformat(),
+                "schedule_date": str(state.get("schedule_date") or ""),
+            }
+            pending[request.character_id] = pending_record
+        else:
+            pending_record = None
+            pending.pop(request.character_id, None)
         event = StateEvent(
             event_id=event_id,
-            event_type="joint_movement",
+            event_type=(
+                "rendezvous_waiting"
+                if request.communication_channel == "text"
+                else "joint_movement"
+            ),
             character_id=request.character_id,
             communication_channel=request.communication_channel,
             location=location,
@@ -900,36 +1129,63 @@ class PublicChatService:
             target_character_id=target_character_id,
         )
         next_state = self._state_with_event(
-            {**state, "presence": presence},
+            {
+                **state,
+                "presence": presence,
+                "pending_rendezvous": pending,
+            },
             event=event,
-            analyst_location=location,
+            analyst_location=(
+                state.get("analyst_location")
+                if request.communication_channel == "text"
+                else location
+            ),
         )
         diagnostics.update({
-            "state_update_status": "applied",
-            "state_update_type": "joint_move",
+            "state_update_status": (
+                "character_waiting"
+                if request.communication_channel == "text"
+                else "applied"
+            ),
+            "state_update_type": (
+                "rendezvous_waiting"
+                if request.communication_channel == "text"
+                else "joint_move"
+            ),
             "location_id": location_id,
+            "location_name": location,
+            "display_name": location,
             "activity_id": activity_id,
             "target_character_id": target_character_id,
             "intent_resolution": str(definition.get("resolution") or "current_explicit"),
+            **(
+                {"pending_rendezvous": pending_record}
+                if pending_record is not None
+                else {}
+            ),
         })
         return next_state, event, diagnostics
 
     def _default_state(self, subject_hash: str) -> dict[str, Any]:
-        # Presence is intentionally shared across anonymous users for one
-        # Hong Kong calendar day.  The analyst's location remains local to
-        # the signed browser state and is not part of this shared schedule.
+        # Every anonymous subject gets a deterministic, independent schedule
+        # for one Hong Kong calendar day.  Including the subject in the HMAC
+        # seed prevents one visitor's scene from becoming a global schedule.
         hong_kong_now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
         schedule_start = hong_kong_now.replace(hour=0, minute=0, second=0, microsecond=0)
         schedule_date = schedule_start.date().isoformat()
         schedule_expires = schedule_start + timedelta(days=1)
         schedule_key = self.public_settings.state_hmac_key or b"project-snow-public-schedule-dev"
-        daily_seed = hmac.new(schedule_key, schedule_date.encode("ascii"), sha256).hexdigest()
-        world_id = "public_shared_schedule_" + daily_seed[:32]
+        daily_seed = hmac.new(
+            schedule_key,
+            f"{subject_hash}\x1f{schedule_date}".encode("utf-8"),
+            sha256,
+        ).hexdigest()
+        world_id = "public_subject_schedule_" + daily_seed[:32]
         world = self.mvp._world_snapshot(world_id)
         presence = {
             character_id: {
                 **dict(scene),
-                "state_scope": "shared_daily",
+                "state_scope": "subject_daily",
             }
             for character_id, scene in (world.get("presence") or {}).items()
         }
@@ -939,6 +1195,7 @@ class PublicChatService:
             analyst_location=world.get("analyst_location"),
             presence=presence,
             relationships={},
+            pending_rendezvous={},
             recent_events=[],
             schedule_date=schedule_date,
             schedule_revision=1,
@@ -961,11 +1218,13 @@ class PublicChatService:
         if incoming_binding and not hmac.compare_digest(incoming_binding, subject_hash):
             raise PublicSecurityError("Public state belongs to another anonymous session")
         incoming_schedule_date = str(raw.get("schedule_date") or "")
+        incoming_schedule_revision = max(0, int(raw.get("schedule_revision") or 0))
         if schema_version == "public-state-1":
             old_world = raw.get("world") if isinstance(raw.get("world"), dict) else {}
             incoming_presence = old_world.get("presence") or {}
             analyst_location = old_world.get("analyst_location")
             recent_events: list[dict[str, Any]] = []
+            incoming_pending: dict[str, Any] = {}
             # Legacy state packages are user-authored conversation snapshots;
             # preserve their known scene while upgrading the envelope.
             incoming_schedule_date = str(defaults.get("schedule_date") or "")
@@ -973,11 +1232,39 @@ class PublicChatService:
             incoming_presence = raw.get("presence") or {}
             analyst_location = raw.get("analyst_location")
             recent_events = list(raw.get("recent_events") or [])[-4:]
+            incoming_pending = (
+                dict(raw.get("pending_rendezvous") or {})
+                if isinstance(raw.get("pending_rendezvous"), dict)
+                else {}
+            )
 
-        # A stale browser package must not keep yesterday's global schedule
-        # alive.  Keep only the user's analyst location and relationship data.
-        if incoming_schedule_date != str(defaults.get("schedule_date") or ""):
+        # A stale browser package must not keep yesterday's scene alive.  The
+        # first request after Hong Kong midnight lazily replaces all positions,
+        # activities, recent events and rendezvous records while retaining
+        # relationship memory.  Incrementing the schedule revision lets the
+        # browser reject a late response from the previous day.
+        schedule_changed = (
+            incoming_schedule_date != str(defaults.get("schedule_date") or "")
+        )
+        shared_schedule_migrated = False
+        if schedule_changed:
             incoming_presence = {}
+            analyst_location = defaults.get("analyst_location")
+            recent_events = []
+            incoming_pending = {}
+        elif isinstance(incoming_presence, dict):
+            legacy_shared_present = any(
+                isinstance(scene, dict) and scene.get("state_scope") == "shared_daily"
+                for scene in incoming_presence.values()
+            )
+            shared_schedule_migrated = legacy_shared_present
+            conversation_confirmed_present = any(
+                isinstance(scene, dict)
+                and scene.get("state_scope") == "conversation_confirmed"
+                for scene in incoming_presence.values()
+            )
+            if legacy_shared_present and not conversation_confirmed_present:
+                analyst_location = defaults.get("analyst_location")
 
         canonical = {character.character_id: character for character in MVP_CHARACTERS}
         presence: dict[str, dict[str, Any]] = {}
@@ -988,6 +1275,13 @@ class PublicChatService:
                 if isinstance(incoming_presence, dict)
                 else {}
             )
+            # 0.9.1's shared_daily scene was identical for every visitor. On
+            # same-day upgrade it must not be relabelled and retained as if it
+            # had been subject-specific. Keep only explicitly confirmed
+            # conversation scenes; replace shared entries with today's
+            # subject-derived fallback.
+            if candidate.get("state_scope") == "shared_daily":
+                candidate = {}
             presence[character_id] = {
                 "character_id": character_id,
                 "character_name": character.display_name,
@@ -996,9 +1290,9 @@ class PublicChatService:
                 "state_scope": (
                     "conversation_confirmed"
                     if candidate.get("state_scope") == "conversation_confirmed"
-                    else "shared_daily"
-                    if candidate.get("state_scope") == "shared_daily"
-                    else fallback.get("state_scope", "shared_daily")
+                    else "subject_daily"
+                    if candidate.get("state_scope") in {"subject_daily", "shared_daily"}
+                    else fallback.get("state_scope", "subject_daily")
                 ),
             }
 
@@ -1008,15 +1302,39 @@ class PublicChatService:
                 validated_events.append(StateEvent.model_validate(event).model_dump())
             except (TypeError, ValueError):
                 continue
+        validated_pending: dict[str, dict[str, Any]] = {}
+        if not schedule_changed:
+            for character_id, item in incoming_pending.items():
+                if character_id not in canonical or not isinstance(item, dict):
+                    continue
+                try:
+                    rendezvous = PendingRendezvous.model_validate(item)
+                except (TypeError, ValueError):
+                    continue
+                if rendezvous.character_id != character_id:
+                    continue
+                validated_pending[character_id] = rendezvous.model_dump()
         return StatePayload(
             data_version=self.public_settings.data_version,
-            revision=max(0, int(raw.get("revision") or 0)),
+            revision=(
+                max(0, int(raw.get("revision") or 0)) + 1
+                if schedule_changed or shared_schedule_migrated
+                else max(0, int(raw.get("revision") or 0))
+            ),
             analyst_location=str(analyst_location)[:120] if analyst_location else None,
             presence=presence,
             relationships=dict(raw.get("relationships") or {}),
+            pending_rendezvous=validated_pending,
             recent_events=validated_events[-4:],
             schedule_date=str(defaults.get("schedule_date") or ""),
-            schedule_revision=int(defaults.get("schedule_revision") or 1),
+            schedule_revision=(
+                max(
+                    int(defaults.get("schedule_revision") or 1),
+                    incoming_schedule_revision + 1,
+                )
+                if schedule_changed or shared_schedule_migrated
+                else max(1, incoming_schedule_revision)
+            ),
             generated_at=str(defaults.get("generated_at") or ""),
             expires_at=str(defaults.get("expires_at") or ""),
             subject_binding=subject_hash,
@@ -1071,6 +1389,7 @@ class PublicChatService:
             analyst_location=analyst_location,
             presence=presence,
             relationships=dict(state.get("relationships") or {}),
+            pending_rendezvous=dict(state.get("pending_rendezvous") or {}),
             recent_events=events,
             schedule_date=str(state.get("schedule_date") or ""),
             schedule_revision=int(state.get("schedule_revision") or 1),
@@ -1080,6 +1399,38 @@ class PublicChatService:
             state_key_id=self.public_settings.state_key_id,
         ).model_dump()
 
+    @staticmethod
+    def _pending_for_character(
+        state: dict[str, Any],
+        character_id: str,
+    ) -> dict[str, Any] | None:
+        item = (state.get("pending_rendezvous") or {}).get(character_id)
+        return dict(item) if isinstance(item, dict) else None
+
+    @classmethod
+    def _join_pending_rendezvous(
+        cls,
+        state: dict[str, Any],
+        character_id: str,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        pending = dict(state.get("pending_rendezvous") or {})
+        item = pending.pop(character_id, None)
+        if not isinstance(item, dict):
+            return state, None
+        presence = dict(state.get("presence") or {})
+        scene = dict(presence.get(character_id) or {})
+        if item.get("location_name"):
+            scene["location"] = str(item["location_name"])
+        if item.get("joined_activity"):
+            scene["activity"] = str(item["joined_activity"])
+        scene["state_scope"] = "conversation_confirmed"
+        presence[character_id] = scene
+        return {
+            **state,
+            "presence": presence,
+            "pending_rendezvous": pending,
+        }, dict(item)
+
     def resolve_presence(
         self,
         request: PresenceResolveRequest,
@@ -1088,12 +1439,14 @@ class PublicChatService:
         if request.character_id not in self.mvp._views():
             raise CharacterUnavailable(request.character_id)
         state = self._normalized_state(request.state_package, subject_hash)
+        pending = self._pending_for_character(state, request.character_id)
         return {
             "request_id": str(request.request_id),
             "character_id": request.character_id,
             "scene_state": self._scene_state(state, request.character_id),
             "state_package": sign_state(self.public_settings, state),
             "schema_version": "public-state-2",
+            "pending_rendezvous": pending,
         }
 
     def transition_presence(
@@ -1105,11 +1458,16 @@ class PublicChatService:
             raise CharacterUnavailable(request.character_id)
         state = self._normalized_state(request.state_package, subject_hash)
         before = self._scene_state(state, request.character_id)
+        joined_rendezvous: dict[str, Any] | None = None
         next_location = state.get("analyst_location")
         if request.target_channel == "in_person":
             next_location = before.get("character_location")
             if not next_location:
                 raise ValueError("character scene has no location")
+            state, joined_rendezvous = self._join_pending_rendezvous(
+                state,
+                request.character_id,
+            )
         event = StateEvent(
             event_id=str(request.request_id),
             event_type="presence_transition",
@@ -1142,6 +1500,23 @@ class PublicChatService:
                 "location": next_location,
             },
             "state_package": sign_state(self.public_settings, next_state),
+            "pending_rendezvous": self._pending_for_character(
+                next_state,
+                request.character_id,
+            ),
+            "movement_status": (
+                {
+                    "status": "joined",
+                    "location_id": str(joined_rendezvous.get("location_id") or ""),
+                    "location_name": str(joined_rendezvous.get("location_name") or ""),
+                    "display_name": str(joined_rendezvous.get("location_name") or ""),
+                    "character_id": request.character_id,
+                    "schedule_date": str(next_state.get("schedule_date") or ""),
+                    "schedule_revision": int(next_state.get("schedule_revision") or 1),
+                }
+                if joined_rendezvous
+                else {"status": "not_requested"}
+            ),
             "model_called": False,
         }
 
@@ -1162,6 +1537,10 @@ class PublicChatService:
         else:
             threshold = int(self.public_settings.arrival_probability * 10_000)
             decision = "noticed" if secrets.randbelow(10_000) < threshold else "unnoticed"
+        state, joined_rendezvous = self._join_pending_rendezvous(
+            state,
+            request.character_id,
+        )
         next_state = self._state_with_event(
             state,
             event=StateEvent(
@@ -1183,6 +1562,23 @@ class PublicChatService:
             "status": "completed",
             "reaction": None,
             "state_package": sign_state(self.public_settings, next_state),
+            "pending_rendezvous": self._pending_for_character(
+                next_state,
+                request.character_id,
+            ),
+            "movement_status": (
+                {
+                    "status": "joined",
+                    "location_id": str(joined_rendezvous.get("location_id") or ""),
+                    "location_name": str(joined_rendezvous.get("location_name") or ""),
+                    "display_name": str(joined_rendezvous.get("location_name") or ""),
+                    "character_id": request.character_id,
+                    "schedule_date": str(next_state.get("schedule_date") or ""),
+                    "schedule_revision": int(next_state.get("schedule_revision") or 1),
+                }
+                if joined_rendezvous
+                else {"status": "not_requested"}
+            ),
             "model_called": False,
             "terminal_error": "",
             "state": next_state,
@@ -1589,12 +1985,7 @@ class PublicChatService:
             else []
         )
         with self._request_state(request, subject_hash) as (session_id, world_id, prior_state):
-            movement_intent = self._joint_move_intent(
-                request.message,
-                request.recent_history,
-                prior_state,
-                request.character_id,
-            )
+            movement_intent = self._movement_intent_for_request(request, prior_state)
             movement_catalog: list[dict[str, Any]] = []
             if movement_intent:
                 location_id, definition = movement_intent
@@ -1607,6 +1998,11 @@ class PublicChatService:
                         "location_id": location_id,
                         "activity_id": activity_id,
                         "aliases": list(definition.get("aliases") or ()),
+                        "movement_mode": (
+                            "rendezvous"
+                            if request.communication_channel == "text"
+                            else "joint"
+                        ),
                     })
             try:
                 result = self.mvp.chat(
@@ -1758,7 +2154,12 @@ class PublicChatService:
             movement_status = {
                 "status": (
                     state_status
-                    if state_status in {"applied", "already_applied", "state_unchanged"}
+                    if state_status in {
+                        "applied",
+                        "already_applied",
+                        "character_waiting",
+                        "state_unchanged",
+                    }
                     else "not_accepted"
                     if state_update_diagnostics.get("state_update_rejected_reason") == "character_did_not_accept_now"
                     else "unresolved"
@@ -1767,9 +2168,27 @@ class PublicChatService:
                 ),
                 **{
                     key: state_update_diagnostics.get(key)
-                    for key in ("location_id", "activity_id", "target_character_id")
+                    for key in (
+                        "location_id",
+                        "location_name",
+                        "display_name",
+                        "activity_id",
+                        "target_character_id",
+                    )
                     if state_update_diagnostics.get(key)
                 },
+                **(
+                    {
+                        "character_id": request.character_id,
+                        "pending_rendezvous": state_update_diagnostics.get(
+                            "pending_rendezvous"
+                        ),
+                    }
+                    if state_status == "character_waiting"
+                    else {}
+                ),
+                "schedule_date": str(next_state.get("schedule_date") or ""),
+                "schedule_revision": int(next_state.get("schedule_revision") or 1),
             }
             return {
                 "request_id": str(request.request_id),
@@ -1790,6 +2209,10 @@ class PublicChatService:
                 "generation_outcome": generation_outcome,
                 "validation_disposition": validation_disposition,
                 "movement_status": movement_status,
+                "pending_rendezvous": self._pending_for_character(
+                    next_state,
+                    request.character_id,
+                ),
                 "recovery_action": (
                     "refresh_scene"
                     if movement_status.get("status") == "state_unchanged"

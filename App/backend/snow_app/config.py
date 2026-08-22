@@ -168,7 +168,7 @@ class PublicSettings:
     trust_proxy_headers: bool = False
     media_version: str = "2026.08.19.avatar.1"
     media_root: Path = Path("/srv/project-snow/media/current")
-    experience_notice_version: str = "0.9"
+    experience_notice_version: str = "0.9.2"
     arrival_probability: float = 0.5
     sticker_version: str = "2026.08.19.sticker.1"
     sticker_root: Path = Path("/srv/project-snow/media/stickers/current")
@@ -183,10 +183,11 @@ class PublicSettings:
     state_previous_key_id: str = ""
     turnstile_hostname: str = "snow.xiaob.dev"
     turnstile_max_age_seconds: int = 300
-    privacy_policy_version: str = "0.9"
-    privacy_effective_at: str = "2026-08-19"
+    privacy_policy_version: str = "0.9.2"
+    privacy_effective_at: str = "2026-08-20"
     attribution_url: str = "/public/v1/attributions"
     max_provider_calls_per_action: int = 2
+    byok_lifetime_hours: int = 12
 
     @classmethod
     def from_environment(cls) -> "PublicSettings":
@@ -227,8 +228,12 @@ class PublicSettings:
             )
         except (TypeError, ValueError):
             max_provider_calls_per_action = 2
+        try:
+            byok_lifetime_hours = int(os.getenv("PUBLIC_BYOK_LIFETIME_HOURS", "12"))
+        except (TypeError, ValueError):
+            byok_lifetime_hours = 12
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "0.9.1"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "0.9.2"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_public_database_url(),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),
@@ -256,7 +261,7 @@ class PublicSettings:
                 os.getenv("PUBLIC_MEDIA_ROOT", "/srv/project-snow/media/current")
             ).resolve(),
             experience_notice_version=os.getenv(
-                "PUBLIC_EXPERIENCE_NOTICE_VERSION", "0.9"
+                "PUBLIC_EXPERIENCE_NOTICE_VERSION", "0.9.2"
             ).strip(),
             arrival_probability=max(0.0, min(1.0, arrival_probability)),
             sticker_version=os.getenv("PUBLIC_STICKER_VERSION", "2026.08.19.sticker.1").strip(),
@@ -276,14 +281,18 @@ class PublicSettings:
             state_previous_key_id=os.getenv("PUBLIC_STATE_PREVIOUS_KEY_ID", "").strip(),
             turnstile_hostname=os.getenv("PUBLIC_TURNSTILE_HOSTNAME", "snow.xiaob.dev").strip(),
             turnstile_max_age_seconds=max(60, min(600, turnstile_max_age_seconds)),
-            privacy_policy_version=os.getenv("PUBLIC_PRIVACY_POLICY_VERSION", "0.9").strip(),
+            privacy_policy_version=os.getenv("PUBLIC_PRIVACY_POLICY_VERSION", "0.9.2").strip(),
             privacy_effective_at=os.getenv(
-                "PUBLIC_PRIVACY_EFFECTIVE_AT", "2026-08-19"
+                "PUBLIC_PRIVACY_EFFECTIVE_AT", "2026-08-20"
             ).strip(),
             attribution_url=os.getenv(
                 "PUBLIC_ATTRIBUTION_URL", "/public/v1/attributions"
             ).strip(),
             max_provider_calls_per_action=max(1, min(2, max_provider_calls_per_action)),
+            # Product policy is a fixed absolute envelope lifetime.  Keep the
+            # environment knob bounded so a deployment cannot silently turn
+            # a tab-scoped convenience token into a long-lived credential.
+            byok_lifetime_hours=max(1, min(12, byok_lifetime_hours)),
         )
 
     @property

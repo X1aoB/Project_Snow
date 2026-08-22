@@ -6,8 +6,8 @@
     <meta name="referrer" content="same-origin" />
     <meta name="color-scheme" content="light" />
     <title>Project Snow · 沉浸式体验</title>
-    <link rel="stylesheet" href="/shared/immersive.css?v=0.9.1" />
-    <link rel="stylesheet" href="/app.css?v=0.9.1" />
+    <link rel="stylesheet" href="/shared/immersive.css?v=0.9.2" />
+    <link rel="stylesheet" href="/app.css?v=0.9.2" />
   </head>
   <body>
     <div id="chat-app" class="app-shell" data-channel="text">
@@ -15,7 +15,7 @@
         <header class="product-header">
           <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
             <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="version-badge">0.9.1</small></span>
+            <span><strong>Project Snow</strong><small id="version-badge">0.9.2</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
         </header>
@@ -176,9 +176,9 @@
     <dialog id="movement-dialog" class="modal movement-modal">
       <form id="movement-form">
         <header><div><span class="panel-kicker">共同移动</span><h2>一起去哪里？</h2></div><button class="icon-button" type="button" data-close-dialog="movement-dialog" aria-label="关闭地点选择">×</button></header>
-        <p class="modal-context">选择地点后可编辑邀请。只有点击“发送邀请”才会发送，由角色在回复中决定是否现在出发。</p>
-        <div id="movement-options" class="movement-options"></div>
-        <label class="movement-preview" for="movement-invitation">邀请预览<textarea id="movement-invitation" rows="3" maxlength="240" placeholder="先选择一个地点" disabled></textarea></label>
+        <p class="modal-context">选择一个受控地点并确认预览。只有点击“发送邀请”才会发送，由角色在回复中决定是否先过去等你。</p>
+        <div id="movement-options" class="movement-options" role="radiogroup" aria-label="选择邀请地点"></div>
+        <label class="movement-preview" for="movement-invitation">只读邀请预览<textarea id="movement-invitation" rows="3" maxlength="240" placeholder="先选择一个地点" readonly aria-readonly="true"></textarea></label>
         <div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="movement-dialog">取消</button><button id="send-movement-invitation" type="submit" class="primary-button" disabled>发送邀请</button></div>
       </form>
     </dialog>
@@ -212,7 +212,7 @@
       <form method="dialog"><header><div><span class="panel-kicker">Project Snow</span><h2>体验设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog">×</button></header><nav class="settings-tabs"><button type="button" class="active" data-settings-tab="models">模型</button><button type="button" data-settings-tab="history">记录</button><button type="button" data-settings-tab="about">关于</button></nav>
         <section class="settings-section" data-settings-panel="models">
           <div id="provider-doc-links" class="provider-doc-links" aria-label="模型厂商官方文档"></div>
-          <p>选择你已有的模型服务。Key 只在当前标签页使用，获取模型列表后不会清除凭证。</p><div class="provider-form"><label>模型厂商<select id="provider-select"><option value="">正在读取可用厂商</option></select></label><p id="provider-empty" class="form-hint" hidden>当前暂未开放可用的模型厂商，请稍后再试。</p><label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" /></label><p id="credential-status" class="form-hint" hidden></p><div class="advanced-model-settings"><button id="toggle-advanced-model" class="secondary-button" type="button" aria-expanded="false">高级设置：手工填写模型 ID</button><div id="advanced-model-panel" hidden><label>模型 ID<input id="model-id" maxlength="200" placeholder="厂商未提供列表时填写" /></label></div></div><div class="settings-actions"><button id="discover-models" class="secondary-button" type="button">获取模型列表</button><select id="discovered-models" hidden aria-label="已发现模型"></select></div><p id="setup-error" class="form-error" role="alert"></p><div class="settings-actions"><button id="save-model" class="primary-button" type="button">保存本次模型会话</button><button id="clear-credential" class="danger-button" type="button">清除模型会话</button></div></div>
+          <p>选择你已有的模型服务。加密凭证只保存在当前标签页，最长有效 12 小时；获取模型列表后不会清除凭证。</p><div class="provider-form"><label class="provider-select-field"><span>模型厂商</span><select id="provider-select"><option value="">正在读取可用厂商</option></select></label><div id="provider-options-mobile" class="provider-options-mobile" role="radiogroup" aria-label="模型厂商"></div><p id="provider-empty" class="form-hint" hidden>当前暂未开放可用的模型厂商，请稍后再试。</p><label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" /></label><p id="credential-status" class="form-hint" hidden></p><div class="advanced-model-settings"><button id="toggle-advanced-model" class="secondary-button" type="button" aria-expanded="false">高级设置：手工填写模型 ID</button><div id="advanced-model-panel" hidden><label>模型 ID<input id="model-id" maxlength="200" placeholder="厂商未提供列表时填写" /></label></div></div><div class="settings-actions"><button id="discover-models" class="secondary-button" type="button">获取模型列表</button><select id="discovered-models" hidden aria-label="已发现模型"></select></div><p id="setup-error" class="form-error" role="alert"></p><div class="settings-actions"><button id="save-model" class="primary-button" type="button">保存本次模型会话</button><button id="clear-credential" class="danger-button" type="button">清除模型会话</button></div></div>
         </section>
         <section class="settings-section" data-settings-panel="history" hidden><p>完整历史只在当前浏览器保存。共享电脑请及时清理。</p><label>自动清理本地历史<select id="history-retention"><option value="0">永不（默认）</option><option value="30">保留 30 天</option><option value="90">保留 90 天</option></select></label><label class="setting-toggle"><span><strong>自动整理连续性</strong><small id="summary-last-updated">尚未生成摘要</small></span><input id="auto-summary-enabled" type="checkbox" checked /></label><p id="storage-usage">正在计算占用空间……</p><label>选择角色<select id="history-character"></select></label><div class="settings-actions"><button id="delete-character-history" class="secondary-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部历史</button></div></section>
         <section class="settings-section attribution" data-settings-panel="about" hidden><p>体验说明、反馈保留规则与头像来源统一放在“隐私与素材”页面。</p><div class="source-links"><a href="/privacy/">隐私与素材</a><a id="github-link" href="https://github.com/X1aoB/Project_Snow" rel="noreferrer">Project Snow 源码</a><a id="website-github-link" href="https://github.com/X1aoB/MyWebsite" rel="noreferrer">MyWebsite 源码</a><a id="releases-link" href="https://github.com/X1aoB/Project_Snow/releases" rel="noreferrer">版本发布</a></div></section>
@@ -220,6 +220,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=0.9.1"></script>
+    <script type="module" src="/app.js?v=0.9.2"></script>
   </body>
 </html>

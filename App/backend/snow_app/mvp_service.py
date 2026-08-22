@@ -8892,6 +8892,7 @@ class MVPService:
             for marker in _COMPANION_HOSTILITY_MARKERS:
                 if cls._companion_hostility_asserted(answer, marker):
                     violations.append(f"companion_hostility:{marker}")
+        violations.extend(cls._text_rendezvous_semantics_violations(answer, context))
         violations.extend(cls._fenny_voice_violations(message, answer, context))
         violations.extend(
             f"unsupported_analyst_premise:{premise}"
@@ -9024,6 +9025,59 @@ class MVPService:
         return list(dict.fromkeys(violations))
 
     @staticmethod
+    def _text_rendezvous_semantics_violations(
+        answer: str,
+        context: dict[str, Any],
+    ) -> list[str]:
+        """Keep an accepted remote invitation from claiming joint arrival."""
+
+        catalog = [
+            item
+            for item in (context.get("public_state_update_catalog") or [])
+            if isinstance(item, dict) and item.get("movement_mode") == "rendezvous"
+        ]
+        if not catalog:
+            return []
+        value = _compact(answer)
+        if not value:
+            return []
+        blockers = (
+            "不去", "不愿意", "不能", "不行", "没办法", "无法", "做不到", "算了", "改天", "下次", "以后", "稍后",
+            "晚点", "等会", "待会", "明天", "如果", "假如", "再考虑", "想一想",
+        )
+        if any(marker in value for marker in blockers):
+            return []
+        accepted = bool(
+            re.search(r"(?:^|[，。！？!?；;])(?:好|行)(?:呀|啊|吧|啦)?(?:[，。！？!?；;]|$)", value)
+        ) or any(
+            marker in value
+            for marker in (
+                "当然", "愿意", "没问题", "正合我意", "乐意奉陪", "就这么定",
+                "动身", "出发", "马上过去", "这就过去", "现在就走", "一起去",
+            )
+        )
+        if not accepted:
+            return []
+        waiting = bool(
+            re.search(
+                r"(?:我先(?:去|过去|到).{0,32}(?:等你|等分析员)|"
+                r"(?:先到|先过去).{0,24}(?:等你|等分析员)|"
+                r"(?:在那里|那边|到了).{0,16}等你)",
+                value,
+            )
+        )
+        return [] if waiting else ["text_rendezvous_semantics"]
+
+    @staticmethod
+    def _text_rendezvous_fallback(context: dict[str, Any]) -> str:
+        address = str(
+            (context.get("relationship_address_memory") or {}).get("preferred_address")
+            or ""
+        ).strip()
+        prefix = f"{address}，" if address else ""
+        return f"{prefix}好，我先过去等你。你准备好了，再来找我。"
+
+    @staticmethod
     def _companion_hostility_asserted(answer: str, marker: str) -> bool:
         """Return true only for an affirmative hostility statement.
 
@@ -9069,6 +9123,7 @@ class MVPService:
                 "dual_persona_",
                 "live_scene_mismatch:",
                 "unsupported_quote:",
+                "text_rendezvous_",
             )
         ) or value in {
             "unsupported_current_food_fact",
@@ -9136,8 +9191,11 @@ class MVPService:
                      "严格按照 communication_context 的媒介能力重新组织 content_blocks。"
                      "若包含 fenny_daily_harshness，保留芬妮自信、亲昵、会开玩笑的语气，删除命令、辱骂或过度强硬的表达；"
                       "普通问候和闲聊中不要把她写成在训斥分析员。"
-                      "若包含 dual_persona_unresolved，必须明确回应莫尔索/琴诺的双重人格语境；"
-                      "只在本轮被点名时让莫尔索接话，不要把她当作可选角色或随机切换。"
+                    "若包含 dual_persona_unresolved，必须明确回应莫尔索/琴诺的双重人格语境；"
+                    "只在本轮被点名时让莫尔索接话，不要把她当作可选角色或随机切换。"
+                    "若包含 text_rendezvous_semantics，当前是文字通讯中的地点邀请；若角色接受，"
+                    "必须明确说自己先去目的地等分析员，不得声称双方已经一起出发或共同抵达。"
+                    "若不接受则自然拒绝，不能返回移动提案。"
                 ),
             },
             ensure_ascii=False,
@@ -9165,7 +9223,8 @@ class MVPService:
                     "严格遵守 original_request 的 response_contract、交流媒介和角色边界。"
                     "必须至少返回一个非空 message 或 speech；可以在文字之后附带候选表情，"
                     "但表情不能代替本轮应有的自然回应。若这是共同出发邀请，只有角色明确愿意"
-                    "立刻行动时才返回 state_updates；不确定时自然回应邀请并保持 state_updates 为空。"
+                    "立刻行动时才返回 state_updates；文字通讯中接受时必须说自己先去目的地等分析员，"
+                    "不能说双方已经共同抵达；不确定时自然回应邀请并保持 state_updates 为空。"
                 ),
             },
             ensure_ascii=False,
@@ -9772,15 +9831,28 @@ class MVPService:
 """
         if public_state_update_catalog:
             location_lines = "\n".join(
-                f"- location_id={item.get('location_id')}; activity_id={item.get('activity_id')}; aliases={','.join(item.get('aliases') or [])}"
+                f"- location_id={item.get('location_id')}; activity_id={item.get('activity_id')}; "
+                f"movement_mode={item.get('movement_mode') or 'joint'}; aliases={','.join(item.get('aliases') or [])}"
                 for item in public_state_update_catalog
                 if item.get("location_id") and item.get("activity_id")
+            )
+            rendezvous_mode = any(
+                item.get("movement_mode") == "rendezvous"
+                for item in public_state_update_catalog
+                if isinstance(item, dict)
+            )
+            movement_semantics = (
+                "当前是文字通讯。角色若接受，必须明确回答‘我先过去等你’这一语义：角色先行到目的地等待，"
+                "分析员此刻仍留在原处；不得写成双方已经一起出发、同行或共同抵达。"
+                if rendezvous_mode
+                else "当前是面对面交流。角色若接受，可以自然表达双方现在共同出发。"
             )
             system_prompt += f"""
 
 【共同移动状态提案】
-仅当分析员在本轮明确提出现在共同出发、角色在本轮明确接受立刻行动，且回答不是拒绝、假设或未来计划时，返回一个 state_updates 项；否则返回空数组。提案不直接修改状态，服务端还会再次校验。只能使用以下受控地点与活动：
+仅当分析员在本轮明确提出现在前往受控地点的邀请、角色在本轮明确接受立刻行动，且回答不是拒绝、假设或未来计划时，返回一个 state_updates 项；否则返回空数组。提案不直接修改状态，服务端还会再次校验。只能使用以下受控地点与活动：
 {location_lines}
+{movement_semantics}
 格式："state_updates":[{{"type":"joint_move","location_id":"...","activity_id":"...","commit":"now"}}]
 """
         user_prompt = self._prompt(character, message.strip(), context)
@@ -9938,6 +10010,7 @@ class MVPService:
         logistics_guard = False
         fenny_voice_guard = False
         relationship_roster_guard = False
+        rendezvous_semantics_guard = False
         address_alias_normalized = False
         relationship_address_normalized = False
         unsupported_quote_sanitized = False
@@ -10040,6 +10113,24 @@ class MVPService:
                 # replacement action or presenting mixed blocks as valid.
                 in_person_block_rewrite = True
                 content_block_guard_rejected = True
+            elif "text_rendezvous_semantics" in retry_violations:
+                answer_text = self._text_rendezvous_fallback(context)
+                generated = {
+                    "answer": answer_text,
+                    "content_blocks": [{
+                        "type": "message",
+                        "text": answer_text,
+                    }],
+                    "confidence": "medium",
+                    "narrative_scope": "unknown",
+                    "used_document_ids": [],
+                    "used_relation_candidate_ids": [],
+                    "uncertainties": [],
+                    "citation_notes": [
+                        "远程邀约语义已校正为角色先行等待，未声明双方共同抵达。"
+                    ],
+                }
+                rendezvous_semantics_guard = True
             elif any(
                 item.startswith("direct_answer_focus:") for item in retry_violations
             ):
@@ -10567,6 +10658,7 @@ class MVPService:
             or narrative_action_fallback
             or logistics_guard
             or relationship_roster_guard
+            or rendezvous_semantics_guard
             or empty_model_output_guard
         )
         if not used_document_ids and not deterministic_fallback:
@@ -10923,6 +11015,7 @@ class MVPService:
                     ("narrative_action_repetition", narrative_action_guard),
                     ("logistics_evidence_fallback", logistics_guard),
                     ("relationship_roster_guard", relationship_roster_guard),
+                    ("rendezvous_semantics_guard", rendezvous_semantics_guard),
                     ("empty_output_recovery", empty_output_recovery),
                     ("empty_model_output_guard", empty_model_output_guard),
                     ("in_person_blocks_reclassified", in_person_blocks_reclassified),

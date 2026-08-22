@@ -78,10 +78,12 @@ def issue_byok_credential(
     anonymous_id: str,
     provider: str,
     api_key: str,
-    lifetime: timedelta = timedelta(hours=2),
+    lifetime: timedelta = timedelta(hours=12),
 ) -> tuple[str, datetime]:
     if not settings.credential_key:
         raise PublicSecurityError("PUBLIC_CREDENTIAL_KEY is not configured")
+    if lifetime <= timedelta(0) or lifetime > timedelta(hours=12):
+        raise PublicSecurityError("BYOK credential lifetime must be within 12 hours")
     expires_at = datetime.now(UTC) + lifetime
     payload = json.dumps(
         {

@@ -92,12 +92,18 @@ class PublicAPITests(TestCase):
         self.assertEqual(payload["limits"]["input_characters"], 2000)
         self.assertEqual(payload["history_schema"], "indexeddb-v4")
         self.assertEqual(payload["sticker_version"], "2026.08.19.sticker.1")
-        self.assertEqual(payload["privacy_policy"]["version"], "0.9")
+        self.assertEqual(payload["credential_policy"], {
+            "lifetime_hours": 12,
+            "storage": "sessionStorage",
+            "renewal": "none",
+        })
+        self.assertEqual(payload["state_schedule"]["scope"], "subject_daily")
         self.assertEqual(payload["privacy_policy"]["url"], "/privacy/")
         self.assertEqual(payload["attribution_url"], "/public/v1/attributions")
         self.assertEqual(payload["max_provider_calls_per_action"], 2)
         self.assertTrue(payload["movement_catalog"])
         self.assertTrue(payload["feature_flags"]["joint_movement"])
+        self.assertTrue(payload["feature_flags"]["rendezvous_actions"])
         self.assertTrue(payload["feature_flags"]["request_recovery"])
         self.assertTrue(payload["feature_flags"]["indexeddb_v4"])
         self.assertTrue(payload["providers"][0]["documentation_url"].startswith("https://"))
@@ -114,6 +120,7 @@ class PublicAPITests(TestCase):
             model="gpt-test",
             character_id=character.character_id,
             message="我们去商场逛街吧",
+            communication_channel="in_person",
         )
         self.assertEqual(service._joint_move_intent(request.message)[0], "shopping_mall")
         self.assertEqual(service._joint_move_intent("我想带角色逛街")[0], "commercial_street")
@@ -133,7 +140,7 @@ class PublicAPITests(TestCase):
         )
         self.assertIsNone(service._joint_move_intent("能不能陪我去基地食堂？"))
         catalog_ids = {item["location_id"] for item in service.movement_catalog()}
-        self.assertEqual(len(catalog_ids), 13)
+        self.assertEqual(len(catalog_ids), 15)
         self.assertNotIn("base_canteen", catalog_ids)
         self.assertTrue({
             "base_beach",
@@ -141,6 +148,8 @@ class PublicAPITests(TestCase):
             "base_hot_spring",
             "base_healing_center",
             "base_bar",
+            "character_room",
+            "analyst_room",
         }.issubset(catalog_ids))
         state = {
             "schema_version": "public-state-2",
@@ -269,6 +278,7 @@ class PublicAPITests(TestCase):
             model="gpt-test",
             character_id=speaker.character_id,
             message="要不要一起去商场？",
+            communication_channel="in_person",
         )
         moved, event, diagnostics = service._apply_joint_movement(
             state,
@@ -287,6 +297,179 @@ class PublicAPITests(TestCase):
         self.assertEqual(event.location_id, "shopping_mall")
         self.assertEqual(diagnostics["model_proposal_status"], "mismatch_ignored")
 
+    def test_text_invitation_moves_only_character_then_join_clears_waiting(self) -> None:
+        service: PublicChatService = self.app.state.chat_service
+        character = MVP_CHARACTERS[0]
+        state = service._default_state("a" * 64)
+        analyst_before = state["analyst_location"]
+        request = ChatRequest(
+            request_id=uuid4(),
+            provider="openai",
+            credential="c" * 24,
+            model="gpt-test",
+            character_id=character.character_id,
+            message="要不要一起去商场？",
+            movement_location_id="shopping_mall",
+            communication_channel="text",
+        )
+        moved, event, diagnostics = service._apply_joint_movement(
+            state,
+            request,
+            {"answer": "好，我先过去购物中心等你。"},
+        )
+        self.assertEqual(diagnostics["state_update_status"], "character_waiting")
+        self.assertEqual(event.event_type, "rendezvous_waiting")
+        self.assertEqual(moved["analyst_location"], analyst_before)
+        self.assertEqual(
+            moved["presence"][character.character_id]["location"],
+            "购物中心",
+        )
+        pending = moved["pending_rendezvous"][character.character_id]
+        self.assertEqual(pending["location_id"], "shopping_mall")
+        self.assertIn("等分析员", pending["waiting_activity"])
+
+        joined, joined_record = service._join_pending_rendezvous(
+            moved,
+            character.character_id,
+        )
+        self.assertEqual(joined_record["rendezvous_id"], pending["rendezvous_id"])
+        self.assertNotIn(character.character_id, joined["pending_rendezvous"])
+        self.assertEqual(
+            joined["presence"][character.character_id]["activity"],
+            pending["joined_activity"],
+        )
+
+    def test_text_rendezvous_sse_and_arrival_round_trip(self) -> None:
+        credential, _ = self._byok()
+        service: PublicChatService = self.app.state.chat_service
+        character = MVP_CHARACTERS[0]
+        catalog_item = next(
+            item
+            for item in service.movement_catalog()
+            if item["location_id"] == "shopping_mall"
+        )
+        generated = {
+            "answer": "好，我先过去购物中心等你。",
+            "content_blocks": [{
+                "type": "message",
+                "text": "好，我先过去购物中心等你。",
+            }],
+            "state_updates": [{
+                "type": "joint_move",
+                "location_id": "shopping_mall",
+                "activity_id": "shopping_together",
+                "commit": "now",
+            }],
+            "response_adjustments": [],
+            "usage": {"total_tokens": 3},
+        }
+        with patch.object(service.mvp, "chat", return_value=generated):
+            response = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json={
+                    "request_id": str(uuid4()),
+                    "provider": "openai",
+                    "credential": credential,
+                    "model": "gpt-test",
+                    "character_id": character.character_id,
+                    "message": catalog_item["invitation_text"],
+                    "movement_location_id": "shopping_mall",
+                    "communication_channel": "text",
+                    "state_package": "",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        parsed_events: dict[str, dict[str, object]] = {}
+        for chunk in response.text.split("\n\n"):
+            event_name = ""
+            event_data = ""
+            for line in chunk.splitlines():
+                if line.startswith("event: "):
+                    event_name = line.removeprefix("event: ")
+                elif line.startswith("data: "):
+                    event_data = line.removeprefix("data: ")
+            if event_name and event_data:
+                parsed_events[event_name] = json.loads(event_data)
+        done = parsed_events["done"]
+        self.assertEqual(done["movement_status"]["status"], "character_waiting")
+        self.assertEqual(done["movement_status"]["location_id"], "shopping_mall")
+        self.assertEqual(done["pending_rendezvous"]["location_name"], "购物中心")
+        state_event = parsed_events["state"]
+        waiting_state = verify_state(self.settings, state_event["state_package"])
+        self.assertIn(character.character_id, waiting_state["pending_rendezvous"])
+
+        with patch("backend.snow_app.public_service.secrets.randbelow", return_value=1):
+            arrived = self.client.post(
+                "/public/v1/presence/arrival",
+                headers={"Origin": "http://testserver"},
+                json={
+                    "arrival_id": str(uuid4()),
+                    "provider": "openai",
+                    "credential": credential,
+                    "model": "gpt-test",
+                    "character_id": character.character_id,
+                    "state_package": state_event["state_package"],
+                },
+            )
+        self.assertEqual(arrived.status_code, 200)
+        self.assertEqual(arrived.json()["movement_status"]["status"], "joined")
+        self.assertIsNone(arrived.json()["pending_rendezvous"])
+        joined_state = verify_state(self.settings, arrived.json()["state_package"])
+        self.assertNotIn(character.character_id, joined_state["pending_rendezvous"])
+        self.assertEqual(
+            joined_state["analyst_location"],
+            joined_state["presence"][character.character_id]["location"],
+        )
+
+    def test_structured_movement_requires_public_matching_single_location(self) -> None:
+        service: PublicChatService = self.app.state.chat_service
+        character = MVP_CHARACTERS[0]
+        valid = ChatRequest(
+            request_id=uuid4(),
+            provider="openai",
+            credential="c" * 24,
+            model="gpt-test",
+            character_id=character.character_id,
+            message="要不要一起去你的房间？",
+            movement_location_id="character_room",
+        )
+        service.validate_movement_request(valid)
+        room_intent = service._direct_joint_move_intent(
+            valid.message,
+            selected_character_id=character.character_id,
+        )
+        self.assertEqual(room_intent[0], "character_room")
+        character_room = service._resolved_location_definition(
+            "character_room",
+            room_intent[1],
+            character.character_id,
+        )
+        self.assertEqual(character_room["location"], f"{character.display_name}的房间")
+        with self.assertRaises(ValueError):
+            service.validate_movement_request(
+                valid.model_copy(update={"movement_location_id": "analyst_room"})
+            )
+        with self.assertRaises(ValueError):
+            service.validate_movement_request(
+                valid.model_copy(update={"movement_location_id": "base_canteen"})
+            )
+
+        response = self.client.post(
+            "/public/v1/chat/stream",
+            headers={"Origin": "http://testserver"},
+            json={
+                **valid.model_dump(mode="json"),
+                "credential": "invalid-before-byok-is-opened",
+                "movement_location_id": "analyst_room",
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["detail"]["code"],
+            "invalid_movement_location",
+        )
+
     def test_joint_move_rejects_future_or_noncommittal_answer(self) -> None:
         service: PublicChatService = self.app.state.chat_service
         self.assertIsNone(service._joint_move_intent("我们明天一起去公园吧"))
@@ -299,6 +482,7 @@ class PublicAPITests(TestCase):
         self.assertFalse(service._joint_move_is_accepted("你好，分析员。"))
         self.assertFalse(service._joint_move_is_accepted("不好吧。"))
         self.assertFalse(service._joint_move_is_accepted("算了，先不动身。"))
+        self.assertFalse(service._joint_move_is_accepted("我不愿意现在过去。"))
         self.assertFalse(service._joint_move_is_accepted("好，等会儿再动身吧。"))
         self.assertFalse(service._joint_move_is_accepted("可以，你可以先去等我。"))
 
@@ -727,6 +911,96 @@ class PublicAPITests(TestCase):
         self.assertIn(": heartbeat", stream)
         self.assertIn("event: done", stream)
 
+    def test_sse_projects_public_state_fields_and_drops_internal_keys(self) -> None:
+        credential, _ = self._byok()
+        character = MVP_CHARACTERS[0]
+        pending = {
+            "rendezvous_id": "rendezvous-safe-id",
+            "character_id": character.character_id,
+            "location_id": "park",
+            "location_name": "公园",
+            "activity_id": "strolling_together",
+            "waiting_activity": "在公园等分析员",
+            "joined_activity": "和分析员一起散步",
+            "created_at": "2026-08-20T12:00:00+08:00",
+            "schedule_date": "2026-08-20",
+            "internal_sentinel": "pending-secret",
+        }
+
+        async def injected_chat(*_args, **_kwargs):
+            return {
+                "answer": "我先过去等你。",
+                "content_blocks": [{
+                    "type": "message",
+                    "text": "我先过去等你。",
+                    "internal_sentinel": "block-secret",
+                }],
+                "state_package": "opaque-safe-state",
+                "scene_state": {
+                    "analyst_location": "基地休息区",
+                    "character_location": "公园",
+                    "character_activity": "在公园等分析员",
+                    "visual_key": "park",
+                    "co_located": False,
+                    "state_scope": "conversation_confirmed",
+                    "internal_sentinel": "scene-secret",
+                },
+                "state_event": {
+                    "event_id": "rendezvous-safe-id",
+                    "event_type": "rendezvous_waiting",
+                    "character_id": character.character_id,
+                    "communication_channel": "text",
+                    "location": "公园",
+                    "location_id": "park",
+                    "activity_id": "strolling_together",
+                    "internal_sentinel": "event-secret",
+                },
+                "movement_status": {
+                    "status": "character_waiting",
+                    "location_id": "park",
+                    "location_name": "公园",
+                    "display_name": "公园",
+                    "activity_id": "strolling_together",
+                    "character_id": character.character_id,
+                    "schedule_date": "2026-08-20",
+                    "schedule_revision": 2,
+                    "pending_rendezvous": pending,
+                    "internal_sentinel": "movement-secret",
+                },
+                "pending_rendezvous": pending,
+                "response_adjustments": [],
+                "usage": {},
+                "diagnostics": {"internal_sentinel": "diagnostic-secret"},
+            }
+
+        with patch.object(
+            self.app.state.chat_service,
+            "chat",
+            side_effect=injected_chat,
+        ):
+            response = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json={
+                    "request_id": str(uuid4()),
+                    "provider": "openai",
+                    "credential": credential,
+                    "model": "gpt-test",
+                    "character_id": character.character_id,
+                    "message": "接口边界测试",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("internal_sentinel", response.text)
+        self.assertNotIn("scene-secret", response.text)
+        self.assertNotIn("event-secret", response.text)
+        self.assertNotIn("movement-secret", response.text)
+        self.assertNotIn("pending-secret", response.text)
+        self.assertIn('"event_type":"rendezvous_waiting"', response.text)
+        self.assertIn('"status":"character_waiting"', response.text)
+        self.assertIn('"location_name":"公园"', response.text)
+        self.assertIn('"schedule_revision":2', response.text)
+
     def test_chat_queue_rejection_is_http_429_with_retry_after(self) -> None:
         credential, _ = self._byok()
         payload = {
@@ -1049,7 +1323,7 @@ class PublicAPITests(TestCase):
         self.assertEqual(upgraded["presence"][character.character_id]["location"], "观景区")
         self.assertEqual(upgraded["relationships"][character.character_id]["address"], "分析员")
 
-    def test_shared_daily_state_has_hong_kong_schedule_window(self) -> None:
+    def test_subject_daily_state_has_hong_kong_schedule_window(self) -> None:
         character = MVP_CHARACTERS[0]
         first = self.client.post(
             "/public/v1/presence/resolve",
@@ -1062,7 +1336,103 @@ class PublicAPITests(TestCase):
         self.assertEqual(state["schedule_revision"], 1)
         self.assertTrue(state["schedule_date"])
         self.assertTrue(state["generated_at"] < state["expires_at"])
-        self.assertEqual(state["presence"][character.character_id]["state_scope"], "shared_daily")
+        self.assertEqual(state["presence"][character.character_id]["state_scope"], "subject_daily")
+
+    def test_daily_seed_is_subject_bound_and_midnight_resets_scene_only(self) -> None:
+        service: PublicChatService = self.app.state.chat_service
+        character = MVP_CHARACTERS[0]
+        with patch.object(
+            service.mvp,
+            "_world_snapshot",
+            wraps=service.mvp._world_snapshot,
+        ) as snapshot:
+            first_default = service._default_state("a" * 64)
+            second_default = service._default_state("b" * 64)
+        self.assertNotEqual(snapshot.call_args_list[0].args[0], snapshot.call_args_list[1].args[0])
+        self.assertNotEqual(first_default["subject_binding"], second_default["subject_binding"])
+
+        stale = json.loads(json.dumps(first_default))
+        stale["schedule_date"] = "2000-01-01"
+        stale["schedule_revision"] = 7
+        stale["revision"] = 12
+        stale["analyst_location"] = "旧日地点"
+        stale["presence"][character.character_id].update({
+            "location": "旧日角色地点",
+            "activity": "旧日活动",
+            "state_scope": "conversation_confirmed",
+        })
+        stale["relationships"] = {character.character_id: {"address": "分析员"}}
+        stale["recent_events"] = [{
+            "event_id": "old-event-id",
+            "event_type": "communication",
+            "character_id": character.character_id,
+            "communication_channel": "text",
+        }]
+        stale["pending_rendezvous"] = {character.character_id: {
+            "rendezvous_id": "old-rendezvous-id",
+            "character_id": character.character_id,
+            "location_id": "park",
+            "location_name": "公园",
+            "activity_id": "strolling_together",
+            "waiting_activity": "在公园等分析员",
+            "joined_activity": "和分析员一起散步",
+            "created_at": "2000-01-01T12:00:00+08:00",
+            "schedule_date": "2000-01-01",
+        }}
+        refreshed = service._normalized_state(
+            sign_state(self.settings, stale),
+            "a" * 64,
+        )
+        today_default = service._default_state("a" * 64)
+        self.assertEqual(refreshed["schedule_date"], today_default["schedule_date"])
+        self.assertEqual(refreshed["schedule_revision"], 8)
+        self.assertEqual(refreshed["revision"], 13)
+        self.assertEqual(refreshed["analyst_location"], today_default["analyst_location"])
+        self.assertEqual(
+            refreshed["presence"][character.character_id]["location"],
+            today_default["presence"][character.character_id]["location"],
+        )
+        self.assertEqual(refreshed["pending_rendezvous"], {})
+        self.assertEqual(refreshed["recent_events"], [])
+        self.assertEqual(
+            refreshed["relationships"][character.character_id]["address"],
+            "分析员",
+        )
+
+    def test_same_day_shared_schedule_migrates_to_subject_fallback(self) -> None:
+        service: PublicChatService = self.app.state.chat_service
+        subject = "c" * 64
+        expected = service._default_state(subject)
+        legacy = json.loads(json.dumps(expected))
+        legacy["analyst_location"] = "旧共享分析员地点"
+        for scene in legacy["presence"].values():
+            scene["location"] = "旧共享角色地点"
+            scene["activity"] = "旧共享活动"
+            scene["state_scope"] = "shared_daily"
+        legacy["relationships"] = {MVP_CHARACTERS[0].character_id: {"address": "分析员"}}
+        migrated = service._normalized_state(
+            sign_state(self.settings, legacy),
+            subject,
+        )
+        character = MVP_CHARACTERS[0]
+        self.assertEqual(migrated["analyst_location"], expected["analyst_location"])
+        self.assertEqual(
+            migrated["presence"][character.character_id]["location"],
+            expected["presence"][character.character_id]["location"],
+        )
+        self.assertEqual(
+            migrated["presence"][character.character_id]["state_scope"],
+            "subject_daily",
+        )
+        self.assertEqual(migrated["revision"], legacy["revision"] + 1)
+        self.assertEqual(
+            migrated["schedule_revision"],
+            legacy["schedule_revision"] + 1,
+        )
+        self.assertEqual(
+            migrated["relationships"][character.character_id]["address"],
+            "分析员",
+        )
 
     def test_text_channel_rejects_action_blocks(self) -> None:
         response = self.client.post(

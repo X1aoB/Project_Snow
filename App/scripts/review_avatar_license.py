@@ -26,7 +26,7 @@ WIKI_API = "https://wiki.biligame.com/sonw/api.php"
 WIKI_HOME = "https://wiki.biligame.com/sonw/%E9%A6%96%E9%A1%B5"
 LICENSE_URL = "https://creativecommons.org/licenses/by-nc-sa/4.0/"
 EXPECTED_HOME_REVISION = "21546"
-USER_AGENT = "ProjectSnow-public-avatar-review/0.9.1 (contact: admin@xiaob.dev)"
+USER_AGENT = "ProjectSnow-public-avatar-review/0.9.2 (contact: admin@xiaob.dev)"
 SPECIAL_NOTICE = re.compile(
     r"特殊说明|版权声明|许可证|许可协议|禁止转载|版权所有|保留所有权利",
     re.IGNORECASE,

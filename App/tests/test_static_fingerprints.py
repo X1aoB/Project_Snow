@@ -36,16 +36,16 @@ class StaticFingerprintTests(TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(payload)
             (root / "public_frontend/index.html").write_text(
-                '<link href="/shared/immersive.css?v=0.9.1">'
-                '<link href="/app.css?v=0.9.1">'
+                '<link href="/shared/immersive.css?v=0.9.2">'
+                '<link href="/app.css?v=0.9.2">'
                 '<img src="/assets/immersive/scenes/generic.svg">'
-                '<script src="/app.js?v=0.9.1"></script>',
+                '<script src="/app.js?v=0.9.2"></script>',
                 encoding="utf-8",
             )
             (root / "public_frontend/privacy/index.html").write_text(
-                '<link href="/shared/immersive.css?v=0.9.1">'
-                '<link href="/app.css?v=0.9.1">'
-                '<script src="/privacy/privacy.js?v=0.9.1"></script>',
+                '<link href="/shared/immersive.css?v=0.9.2">'
+                '<link href="/app.css?v=0.9.2">'
+                '<script src="/privacy/privacy.js?v=0.9.2"></script>',
                 encoding="utf-8",
             )
 
