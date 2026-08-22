@@ -943,9 +943,13 @@ validate_origin_edge_container() {
       length == 1 and
       .[0].State.Running == $expected_running and
       .[0].State.Paused == false and
+      .[0].State.Restarting == false and
+      (.[0].State.Error // "") == "" and
+      ($expected_running == false or .[0].State.Status == "running") and
       .[0].Config.Labels["com.docker.compose.project"] == $project and
       .[0].Config.Labels["com.docker.compose.service"] == "origin-edge" and
       .[0].Config.Image == $caddy_image and
+      .[0].Config.Entrypoint == null and
       .[0].Config.Cmd == ["caddy", "run", "--config", "/etc/caddy/OriginEdge.Caddyfile", "--adapter", "caddyfile"] and
       (((.[0].NetworkSettings.Networks // {}) | keys | sort) ==
         ([$internal_network, $uplink_network] | sort)) and
@@ -966,6 +970,8 @@ validate_origin_edge_container() {
           (.HostIp == "" or .HostIp == "0.0.0.0" or .HostIp == "::")))) and
       .[0].HostConfig.ReadonlyRootfs == true and
       ((.[0].HostConfig.CapDrop // []) | index("ALL")) != null and
+      (((.[0].HostConfig.CapAdd // []) | sort) == ["NET_BIND_SERVICE"] or
+       ((.[0].HostConfig.CapAdd // []) | sort) == ["CAP_NET_BIND_SERVICE"]) and
       ((.[0].HostConfig.SecurityOpt // []) | index("no-new-privileges:true")) != null and
       ((.[0].Mounts // []) |
         map(select(.Type == "bind" or .Type == "volume")) |
@@ -1017,6 +1023,144 @@ validate_origin_edge_container() {
       echo 'Origin backend contains an unexpected container endpoint.' >&2
       return 1
     }
+}
+
+print_origin_edge_runtime_diagnostics() {
+  diagnostic_env="$1"
+  diagnostic_config_root="$2"
+  diagnostic_colour="$3"
+  diagnostic_container_ids="$(
+    SNOW_UPSTREAM="public-api-$diagnostic_colour:8000" \
+      docker compose --env-file "$diagnostic_env" \
+        -f "$diagnostic_config_root/compose.prod.yml" \
+        --profile "$diagnostic_colour" ps --all --quiet origin-edge 2>/dev/null
+  )" || {
+    echo 'Origin-edge runtime diagnostics are unavailable.' >&2
+    return 0
+  }
+  diagnostic_container_count="$(printf '%s\n' "$diagnostic_container_ids" |
+    awk 'NF { count += 1 } END { print count + 0 }')"
+  if [ "$diagnostic_container_count" -ne 1 ]; then
+    printf '%s\n' "Origin-edge runtime diagnostics: {\"container_count\":$diagnostic_container_count}" >&2
+    return 0
+  fi
+  diagnostic_container_id="$(printf '%s\n' "$diagnostic_container_ids" |
+    awk 'NF { print; exit }')"
+  diagnostic_document="$(docker inspect "$diagnostic_container_id" 2>/dev/null)" || {
+    echo 'Origin-edge runtime diagnostics are unavailable.' >&2
+    return 0
+  }
+  diagnostic_caddy_image="$(sed -n 's/^CADDY_IMAGE=//p' "$diagnostic_env" 2>/dev/null)" || {
+    echo 'Origin-edge runtime diagnostics are unavailable.' >&2
+    return 0
+  }
+  diagnostic_tls_root="$(origin_tls_root_for_env "$diagnostic_env" \
+    "$diagnostic_config_root" 2>/dev/null)" || {
+    echo 'Origin-edge runtime diagnostics are unavailable.' >&2
+    return 0
+  }
+  diagnostic_caddy_config="$diagnostic_config_root/infra/OriginEdge.Caddyfile"
+  diagnostic_json="$(printf '%s\n' "$diagnostic_document" | jq -c \
+    --arg internal_network "$origin_edge_internal_network" \
+    --arg uplink_network "$origin_edge_network" \
+    --arg tls_root "$diagnostic_tls_root" \
+    --arg caddy_image "$diagnostic_caddy_image" \
+    --arg caddy_config "$diagnostic_caddy_config" '
+      .[0] as $container |
+      (($container.State.Status // "unknown") as $raw_status |
+       if (["created", "running", "paused", "restarting", "removing", "exited", "dead"] |
+           index($raw_status)) == null then "unknown" else $raw_status end) as $status |
+      ([((($container.NetworkSettings.Ports // {}) | to_entries[]) |
+          select(.value != null))] // []) as $published |
+      {
+        status: $status,
+        running: ($container.State.Running == true),
+        restarting: ($container.State.Restarting == true),
+        exit_code: (if ($container.State.ExitCode | type) == "number" then
+          $container.State.ExitCode else null end),
+        state_error_present: (($container.State.Error // "") != ""),
+        restart_count: (if ($container.RestartCount | type) == "number" then
+          $container.RestartCount else null end),
+        image_exact: ($container.Config.Image == $caddy_image),
+        entrypoint_exact: ($container.Config.Entrypoint == null),
+        command_exact:
+          ($container.Config.Cmd == ["caddy", "run", "--config",
+           "/etc/caddy/OriginEdge.Caddyfile", "--adapter", "caddyfile"]),
+        declared_port_exact:
+          (((($container.HostConfig.PortBindings // {}) | keys) == ["8443/tcp"]) and
+           ((($container.HostConfig.PortBindings["8443/tcp"] // []) | length) == 1) and
+           $container.HostConfig.PortBindings["8443/tcp"][0].HostPort == "443" and
+           ($container.HostConfig.PortBindings["8443/tcp"][0].HostIp == "" or
+            $container.HostConfig.PortBindings["8443/tcp"][0].HostIp == "0.0.0.0" or
+            $container.HostConfig.PortBindings["8443/tcp"][0].HostIp == "::")),
+        dns_exact: ($container.HostConfig.Dns == ["127.0.0.1"]),
+        readonly_rootfs: ($container.HostConfig.ReadonlyRootfs == true),
+        capabilities_exact:
+          (((($container.HostConfig.CapDrop // []) | sort) == ["ALL"]) and
+           (((($container.HostConfig.CapAdd // []) | sort) == ["NET_BIND_SERVICE"]) or
+            ((($container.HostConfig.CapAdd // []) | sort) == ["CAP_NET_BIND_SERVICE"]))),
+        no_new_privileges:
+          ((($container.HostConfig.SecurityOpt // []) | index("no-new-privileges:true")) != null),
+        mounts_exact:
+          (((($container.Mounts // []) |
+             map(select(.Type == "bind" or .Type == "volume")) |
+             map({Type, Source, Destination, RW}) |
+             sort_by(.Destination))) ==
+           ([
+             {Type: "bind", Source: $caddy_config,
+              Destination: "/etc/caddy/OriginEdge.Caddyfile", RW: false},
+             {Type: "bind", Source: ($tls_root + "/aop-ca.pem"),
+              Destination: "/run/project-snow-origin/aop-ca.pem", RW: false},
+             {Type: "bind", Source: ($tls_root + "/origin-cert.pem"),
+              Destination: "/run/project-snow-origin/origin-cert.pem", RW: false},
+             {Type: "bind", Source: ($tls_root + "/origin-key.pem"),
+              Destination: "/run/project-snow-origin/origin-key.pem", RW: false}
+           ] | sort_by(.Destination))),
+        runtime_networks_exact:
+          (((($container.NetworkSettings.Networks // {}) | keys | sort)) ==
+           ([$internal_network, $uplink_network] | sort)),
+        runtime_port_exact:
+          (($published | length) == 1 and
+           $published[0].key == "8443/tcp" and
+           ($published[0].value | length) >= 1 and
+           all($published[0].value[];
+             .HostPort == "443" and
+             (.HostIp == "" or .HostIp == "0.0.0.0" or .HostIp == "::")))
+      }
+    ' 2>/dev/null)" || {
+      echo 'Origin-edge runtime diagnostics are unavailable.' >&2
+      return 0
+    }
+  [ -n "$diagnostic_json" ] || {
+    echo 'Origin-edge runtime diagnostics are unavailable.' >&2
+    return 0
+  }
+  printf '%s\n' "Origin-edge runtime diagnostics: $diagnostic_json" >&2
+}
+
+wait_for_origin_edge_running_policy() {
+  waiting_env="$1"
+  waiting_config_root="$2"
+  waiting_colour="$3"
+  waiting_attempt=0
+  waiting_consecutive=0
+  while [ "$waiting_attempt" -lt 10 ]; do
+    if validate_origin_edge_container "$waiting_env" "$waiting_config_root" \
+      "$waiting_colour" true >/dev/null 2>&1; then
+      waiting_consecutive=$((waiting_consecutive + 1))
+      if [ "$waiting_consecutive" -ge 2 ]; then
+        return 0
+      fi
+    else
+      waiting_consecutive=0
+    fi
+    waiting_attempt=$((waiting_attempt + 1))
+    [ "$waiting_attempt" -ge 10 ] || sleep 1
+  done
+  print_origin_edge_runtime_diagnostics "$waiting_env" "$waiting_config_root" \
+    "$waiting_colour"
+  echo 'Origin-edge did not reach its exact running policy within 10 seconds.' >&2
+  return 1
 }
 
 remove_origin_network_probe() {
@@ -1200,6 +1344,22 @@ validate_running_origin_edge_caddy() {
     docker compose --env-file "$running_env" -f "$running_config_root/compose.prod.yml" \
       --profile "$running_colour" exec -T origin-edge \
         caddy validate --config /etc/caddy/OriginEdge.Caddyfile --adapter caddyfile
+}
+
+validate_prepared_origin_edge_caddy() {
+  prepared_caddy_env="$1"
+  prepared_caddy_config_root="$2"
+  prepared_caddy_colour="$3"
+  SNOW_UPSTREAM="public-api-$prepared_caddy_colour:8000" \
+    docker compose --env-file "$prepared_caddy_env" \
+      -f "$prepared_caddy_config_root/compose.prod.yml" \
+      --profile "$prepared_caddy_colour" run --rm --no-deps -T \
+      --entrypoint caddy origin-edge validate \
+      --config /etc/caddy/OriginEdge.Caddyfile --adapter caddyfile \
+      >/dev/null 2>&1 || {
+        echo 'Origin-edge Caddy configuration or TLS material failed pre-start validation.' >&2
+        return 1
+      }
 }
 
 running_origin_edge_matches_snapshot() {
@@ -1502,6 +1662,8 @@ probe_prepared_origin_edge() {
   prepared_colour="$3"
   validate_origin_edge_container "$prepared_env" "$prepared_config_root" "$prepared_colour" false || return 1
   run_origin_network_probe "$prepared_env" "$prepared_config_root" "$prepared_colour" || return 1
+  validate_prepared_origin_edge_caddy "$prepared_env" "$prepared_config_root" \
+    "$prepared_colour" || return 1
   validate_origin_edge_container "$prepared_env" "$prepared_config_root" "$prepared_colour" false
 }
 
@@ -1532,9 +1694,9 @@ restore_replaced_origin_edge() {
     docker compose --env-file "$origin_edge_replacement_restore_env" \
       -f "$origin_edge_replacement_restore_config_root/compose.prod.yml" \
       --profile "$origin_edge_replacement_restore_colour" start origin-edge || return 1
-  validate_origin_edge_container "$origin_edge_replacement_restore_env" \
+  wait_for_origin_edge_running_policy "$origin_edge_replacement_restore_env" \
     "$origin_edge_replacement_restore_config_root" \
-    "$origin_edge_replacement_restore_colour" true || return 1
+    "$origin_edge_replacement_restore_colour" || return 1
   validate_running_origin_edge_caddy "$origin_edge_replacement_restore_env" \
     "$origin_edge_replacement_restore_config_root" \
     "$origin_edge_replacement_restore_colour" || return 1
@@ -1635,8 +1797,8 @@ switch_edge() {
     SNOW_UPSTREAM="public-api-$edge_colour:8000" \
       docker compose --env-file "$edge_env" -f "$edge_config_root/compose.prod.yml" --profile "$edge_colour" \
         start origin-edge || return 1
-    validate_origin_edge_container "$edge_runtime_env" "$edge_runtime_config_root" \
-      "$edge_runtime_colour" true || return 1
+    wait_for_origin_edge_running_policy "$edge_runtime_env" "$edge_runtime_config_root" \
+      "$edge_runtime_colour" || return 1
     validate_running_origin_edge_caddy "$edge_runtime_env" "$edge_runtime_config_root" \
       "$edge_runtime_colour" || return 1
     if ! persist_live_origin_edge_binding "$edge_runtime_env" \

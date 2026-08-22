@@ -198,6 +198,8 @@ class DeploymentContractTests(TestCase):
         self.assertNotIn("edge-client", origin_edge)
         self.assertIn('dns: ["127.0.0.1"]', origin_edge)
         self.assertIn("cap_drop: [\"ALL\"]", origin_edge)
+        self.assertIn("cap_add: [\"NET_BIND_SERVICE\"]", origin_edge)
+        self.assertEqual(origin_edge.count("cap_add:"), 1)
         self.assertIn("security_opt: [\"no-new-privileges:true\"]", origin_edge)
         self.assertIn("read_only: true", origin_edge)
         for material in ("origin-cert.pem", "origin-key.pem", "aop-ca.pem"):
@@ -889,10 +891,22 @@ printf '%s\n' "$build_status"
         self.assertIn('HostPort == "443"', script)
         self.assertIn('.[0].HostConfig.Dns == ["127.0.0.1"]', script)
         self.assertIn('.[0].Config.Image == $caddy_image', script)
+        self.assertIn('.[0].Config.Entrypoint == null', script)
         self.assertIn(
             '.[0].Config.Cmd == ["caddy", "run", "--config", "/etc/caddy/OriginEdge.Caddyfile", "--adapter", "caddyfile"]',
             script,
         )
+        self.assertIn(
+            '((.[0].HostConfig.CapAdd // []) | sort) == ["NET_BIND_SERVICE"]',
+            script,
+        )
+        self.assertIn(
+            '((.[0].HostConfig.CapAdd // []) | sort) == ["CAP_NET_BIND_SERVICE"]',
+            script,
+        )
+        self.assertIn('.[0].State.Restarting == false', script)
+        self.assertIn('(.[0].State.Error // "") == ""', script)
+        self.assertIn('.[0].State.Status == "running"', script)
         self.assertIn(
             '{Type: "bind", Source: $caddy_config, Destination: "/etc/caddy/OriginEdge.Caddyfile", RW: false}',
             script,
@@ -905,6 +919,36 @@ printf '%s\n' "$build_status"
             "caddy validate --config /etc/caddy/OriginEdge.Caddyfile --adapter caddyfile",
             script,
         )
+        self.assertIn("validate_prepared_origin_edge_caddy() {", script)
+        self.assertIn("run --rm --no-deps -T", script)
+        self.assertIn("--entrypoint caddy origin-edge validate", script)
+        self.assertIn(">/dev/null 2>&1 || {", script)
+        self.assertIn("wait_for_origin_edge_running_policy() {", script)
+        self.assertIn('while [ "$waiting_attempt" -lt 10 ]', script)
+        self.assertIn('waiting_consecutive=$((waiting_consecutive + 1))', script)
+        self.assertIn('if [ "$waiting_consecutive" -ge 2 ]', script)
+        self.assertIn("print_origin_edge_runtime_diagnostics() {", script)
+        for safe_diagnostic_field in (
+            "status:",
+            "running:",
+            "restarting:",
+            "exit_code:",
+            "state_error_present:",
+            "restart_count:",
+            "image_exact:",
+            "entrypoint_exact:",
+            "command_exact:",
+            "declared_port_exact:",
+            "dns_exact:",
+            "readonly_rootfs:",
+            "capabilities_exact:",
+            "no_new_privileges:",
+            "mounts_exact:",
+            "runtime_networks_exact:",
+            "runtime_port_exact:",
+        ):
+            self.assertIn(safe_diagnostic_field, script)
+        self.assertNotIn("docker logs", script)
         self.assertIn("Expected exactly one origin-edge container", script)
         probe_start = script.index("run_origin_network_probe() {")
         probe_end = script.index("\n}\n\nvalidate_running_origin_edge_caddy()", probe_start)
@@ -972,8 +1016,13 @@ printf '%s\n' "$build_status"
         probe_call = script.index(
             'run_origin_network_probe "$prepared_env"', probe_wrapper
         )
+        caddy_prestart = script.index(
+            'validate_prepared_origin_edge_caddy "$prepared_env"', probe_wrapper
+        )
         self.assertLess(stopped_create, stopped_validation)
         self.assertLess(stopped_validation, start_mode)
+        self.assertLess(start_mode, probe_call)
+        self.assertLess(probe_call, caddy_prestart)
         self.assertLess(start_mode, probe_call)
         self.assertIn("origin_edge_prestart_mode=retain", script)
         self.assertIn("origin_edge_prestart_mode=start", script)
