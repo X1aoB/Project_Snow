@@ -202,6 +202,7 @@ jobs:
         working-directory: App
         env:
           PUBLIC_ENV_FILE: /tmp/project-snow-public.env
+          PUBLIC_MAILER_ENV_FILE: /tmp/project-snow-mailer.env
           PUBLIC_API_IMAGE: ghcr.io/example/public@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           EMBEDDING_IMAGE: ghcr.io/example/embedding@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           CLOUDFLARED_IMAGE: cloudflare/cloudflared@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -214,6 +215,7 @@ jobs:
           PUBLIC_DATA_ROOT: /srv/project-snow/data/releases/ci-fixture
         run: |
           install -m 600 /dev/null /tmp/project-snow-public.env
+          install -m 600 /dev/null /tmp/project-snow-mailer.env
           docker compose -f compose.prod.yml --profile blue --profile admin config --quiet
       - name: Validate shell and deployment contracts
         run: |

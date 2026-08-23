@@ -566,6 +566,9 @@ class PublicAPITests(TestCase):
             ),
         ):
             app = create_app(production_settings, self.internal_settings, self.store)
+        app.state.chat_service.mvp.views_path = self.app.state.chat_service.mvp.views_path
+        app.state.chat_service.mvp._views_cache = None
+        app.state.chat_service.mvp._views_mtime = None
         with TestClient(app, base_url="https://snow.xiaob.dev") as client:
             for route in (
                 "/public/v1/config",
