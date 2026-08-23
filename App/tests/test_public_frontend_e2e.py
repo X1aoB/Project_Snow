@@ -1510,6 +1510,15 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#go-in-person").click()
             page.locator("#confirm-presence-transition").click()
             page.locator("#in-person-surface").wait_for(state="visible")
+            page.locator("#stage-speech").get_by_text("你来了。").wait_for(
+                state="visible"
+            )
+            page.locator("#presence-arrival-loading").wait_for(
+                state="hidden", timeout=7000
+            )
+            page.wait_for_function(
+                "() => !document.querySelector('#send-message').disabled"
+            )
             PublicFrontendHandler.chat_stream_started = threading.Event()
             PublicFrontendHandler.chat_stream_release = threading.Event()
             page.locator("#message-input").fill("多段测试")
