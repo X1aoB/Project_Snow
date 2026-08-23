@@ -211,6 +211,7 @@ jobs:
           NEO4J_IMAGE: neo4j@sha256:1111111111111111111111111111111111111111111111111111111111111111
           EGRESS_PROXY_IMAGE: ubuntu/squid@sha256:2222222222222222222222222222222222222222222222222222222222222222
           ORIGIN_TLS_ROOT: /etc/project-snow/origin-edge/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          PUBLIC_DATA_ROOT: /srv/project-snow/data/releases/ci-fixture
         run: |
           install -m 600 /dev/null /tmp/project-snow-public.env
           docker compose -f compose.prod.yml --profile blue --profile admin config --quiet

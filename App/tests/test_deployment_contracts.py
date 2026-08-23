@@ -2916,12 +2916,15 @@ require_runner_controller_binding
         )
         validate_all = self.read("scripts/validate_all.ps1")
         self.assertIn("ORIGIN_TLS_ROOT: /etc/project-snow/origin-edge/releases/", workflow)
+        self.assertIn("PUBLIC_DATA_ROOT: /srv/project-snow/data/releases/ci-fixture", workflow)
         self.assertIn("App/scripts/install_origin_tls.py", workflow)
         self.assertIn("App/scripts/cloudflare_origin_firewall.py", workflow)
         self.assertIn("App/tests/test_install_origin_tls.py", workflow)
         self.assertIn("App/tests/test_origin_firewall.py", workflow)
         self.assertIn("$originTlsRootWasSet = Test-Path Env:ORIGIN_TLS_ROOT", validate_all)
         self.assertIn("Remove-Item Env:ORIGIN_TLS_ROOT", validate_all)
+        self.assertIn("$publicDataRootWasSet = Test-Path Env:PUBLIC_DATA_ROOT", validate_all)
+        self.assertIn("Remove-Item Env:PUBLIC_DATA_ROOT", validate_all)
 
     def test_directly_invoked_operations_are_executable_in_git(self) -> None:
         repo_root = self.app_root.parent

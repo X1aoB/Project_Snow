@@ -17,8 +17,11 @@ try {
     if (Get-Command docker -ErrorAction SilentlyContinue) {
         $originTlsRootWasSet = Test-Path Env:ORIGIN_TLS_ROOT
         $previousOriginTlsRoot = $env:ORIGIN_TLS_ROOT
+        $publicDataRootWasSet = Test-Path Env:PUBLIC_DATA_ROOT
+        $previousPublicDataRoot = $env:PUBLIC_DATA_ROOT
         try {
             $env:ORIGIN_TLS_ROOT = '/etc/project-snow/origin-edge/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            $env:PUBLIC_DATA_ROOT = '/srv/project-snow/data/releases/local-validation-fixture'
             docker compose -f compose.yml config --quiet
             docker compose -f compose.prod.yml --profile blue --profile admin config --quiet
         } finally {
@@ -26,6 +29,11 @@ try {
                 $env:ORIGIN_TLS_ROOT = $previousOriginTlsRoot
             } else {
                 Remove-Item Env:ORIGIN_TLS_ROOT -ErrorAction SilentlyContinue
+            }
+            if ($publicDataRootWasSet) {
+                $env:PUBLIC_DATA_ROOT = $previousPublicDataRoot
+            } else {
+                Remove-Item Env:PUBLIC_DATA_ROOT -ErrorAction SilentlyContinue
             }
         }
     } else {
