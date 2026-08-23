@@ -1003,7 +1003,7 @@ function renderMobileProviderOptions() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.9.2";
+  $("version-badge").textContent = state.config.app_version || "0.9.3";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
@@ -2956,6 +2956,15 @@ async function transitionPresence(targetChannel, characterId = state.selected, t
   if (state.selected === characterId) renderScene();
   return result;
 }
+function arrivalReactionUnavailableMessage(code = "") {
+  if (code === "credential_invalid") {
+    return "位置切换已完成；模型会话已失效，重新配置后可以继续对话。";
+  }
+  if (["generation_queue_full", "generation_queue_timeout", "rate_limit_exceeded", "provider_rate_limited"].includes(code)) {
+    return "位置切换已完成；到场反应暂未生成，你可以直接开始对话。";
+  }
+  return "位置切换已完成；她暂时没有作出到场回应，你可以直接开始对话。";
+}
 async function arriveInPerson() {
   if (!state.selected || globalRequestBusy()) return;
   state.arrivalPending = true;
@@ -2965,6 +2974,7 @@ async function arriveInPerson() {
   const thread = currentThread();
   const previousChannel = thread?.channel || "text";
   let arrivalMessage = null;
+  let transitionApplied = false;
   const ownsArrival = () => ownsTypingState(characterId, arrivalId);
   const ownsVisibleArrival = () => ownsArrival() && state.selected === characterId;
   setTypingState({ characterId, requestId: arrivalId, channel: "in_person", phase: "arrival" });
@@ -2976,9 +2986,10 @@ async function arriveInPerson() {
   }
   updateComposerAvailability();
   try {
+    await transitionPresence("in_person", characterId, thread);
+    transitionApplied = true;
+    await dismissCurrentRendezvous(thread);
     if (!configured()) {
-      await transitionPresence("in_person", characterId, thread);
-      await dismissCurrentRendezvous(thread);
       if (ownsVisibleArrival()) showBanner("场景已更新。配置模型后可以开始对话。");
       return;
     }
@@ -2997,14 +3008,13 @@ async function arriveInPerson() {
       thread.messageCount = Number(thread.messageCount || 0) + 1;
     }
     if (thread) await dbPutThread(thread);
-    await dismissCurrentRendezvous(thread);
     // Populate the arrival turn before exposing the stage. Otherwise
     // setChannel() can make the scene visible for one paint while the
     // reaction is still being persisted, producing an empty dialogue box.
     if (ownsVisibleArrival()) {
       updateTypingPhase(characterId, arrivalId, "presenting");
       await setChannel("in_person");
-      if (result.terminal_error) showBanner(displayError(new Error(result.terminal_error)));
+      if (result.terminal_error) showBanner(arrivalReactionUnavailableMessage(result.terminal_error));
       else if (result.decision === "unnoticed") showBanner("你来到她身边，她暂时没有注意到。位置切换已经完成。");
       else showBanner("她注意到了你的到来。");
       renderAll();
@@ -3014,31 +3024,33 @@ async function arriveInPerson() {
     }
   } catch (error) {
     cancelPresentationQueue(characterId, arrivalId);
-    if ((error instanceof Error ? error.message : "") === "credential_invalid") {
-      clearCredential();
-      if (ownsVisibleArrival()) {
-        await transitionPresence("in_person", characterId, thread);
-        showBanner("模型凭证已过期，位置切换已完成；重新配置后才能生成到场反应。");
-      }
-    } else {
+    const code = error instanceof Error ? error.message : plain(error);
+    if (code === "credential_invalid") clearCredential();
+    if (transitionApplied) {
       if (thread) {
-        thread.channel = previousChannel;
+        thread.channel = "in_person";
         await dbPutThread(thread);
       }
       if (ownsVisibleArrival()) {
-        await setChannel(previousChannel, false);
-        showBanner(displayError(error));
+        await setChannel("in_person", false, thread);
+        showBanner(arrivalReactionUnavailableMessage(code));
       }
+    } else {
+      if (thread && thread.characterId === state.selected) {
+        await setChannel(previousChannel, false, thread);
+      } else if (thread) {
+        thread.channel = previousChannel;
+      }
+      if (thread) await dbPutThread(thread);
+      if (ownsVisibleArrival()) showBanner(displayError(error));
     }
   } finally {
     const minimum = reducedMotion() ? 0 : 900;
     const elapsed = performance.now() - started;
     if (elapsed < minimum) await delay(minimum - elapsed);
-    if (ownsArrival()) state.arrivalPending = false;
-    if (ownsVisibleArrival()) {
-      $("presence-arrival-loading").hidden = true;
-      $("stage-presence-status").hidden = true;
-    }
+    state.arrivalPending = false;
+    $("presence-arrival-loading").hidden = true;
+    $("stage-presence-status").hidden = true;
     clearTypingState(characterId, arrivalId);
     updateComposerAvailability();
     if (characterId === state.selected) renderStage();

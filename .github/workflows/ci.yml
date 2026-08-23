@@ -202,6 +202,7 @@ jobs:
         working-directory: App
         env:
           PUBLIC_ENV_FILE: /tmp/project-snow-public.env
+          PUBLIC_MAILER_ENV_FILE: /tmp/project-snow-mailer.env
           PUBLIC_API_IMAGE: ghcr.io/example/public@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           EMBEDDING_IMAGE: ghcr.io/example/embedding@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
           CLOUDFLARED_IMAGE: cloudflare/cloudflared@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -211,8 +212,10 @@ jobs:
           NEO4J_IMAGE: neo4j@sha256:1111111111111111111111111111111111111111111111111111111111111111
           EGRESS_PROXY_IMAGE: ubuntu/squid@sha256:2222222222222222222222222222222222222222222222222222222222222222
           ORIGIN_TLS_ROOT: /etc/project-snow/origin-edge/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          PUBLIC_DATA_ROOT: /srv/project-snow/data/releases/ci-fixture
         run: |
           install -m 600 /dev/null /tmp/project-snow-public.env
+          install -m 600 /dev/null /tmp/project-snow-mailer.env
           docker compose -f compose.prod.yml --profile blue --profile admin config --quiet
       - name: Validate shell and deployment contracts
         run: |

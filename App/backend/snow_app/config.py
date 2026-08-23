@@ -233,7 +233,7 @@ class PublicSettings:
         except (TypeError, ValueError):
             byok_lifetime_hours = 12
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "0.9.2"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "0.9.3"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_public_database_url(),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),
