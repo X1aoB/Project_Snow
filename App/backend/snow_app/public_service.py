@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 from .config import PublicSettings, Settings
 from .mvp_policy import MVP_CHARACTERS, scene_visual_key
 from .mvp_service import MVPService, _SESSION_STATES, _SESSION_LOCK, _WORLD_STATES, _WORLD_STATE_LOCK
+from .provider_registry import ProviderRegistry
 from .public_contracts import (
     ChatRequest,
     HistoryTurn,
@@ -96,6 +97,23 @@ _PUBLIC_NORMALIZATION_ADJUSTMENTS = frozenset({
     "relationship_address_normalized",
     "unsupported_quote_sanitized",
 })
+
+
+def _public_immersive_thinking_decision(provider: ProviderSpec) -> dict[str, Any]:
+    """Build the complete provider request contract for public dialogue."""
+
+    return {
+        "requested": "off",
+        "effective": "off",
+        "reason": "public_immersive_policy",
+        "provider_kind": provider.provider_id,
+        "request_fields": ProviderRegistry.thinking_request_fields(
+            provider.provider_id,
+            "off",
+        ),
+        "max_provider_http_calls": 2,
+        "disable_compatibility_retries": True,
+    }
 
 
 class GenerationGate:
@@ -1666,14 +1684,7 @@ class PublicChatService:
                         "model_name": request.model,
                         "reason": "public_presence_arrival",
                     },
-                    thinking_decision={
-                        "requested": "off",
-                        "effective": "off",
-                        "reason": "public_immersive_policy",
-                        "provider_kind": provider.provider_id,
-                        "max_provider_http_calls": 2,
-                        "disable_compatibility_retries": True,
-                    },
+                    thinking_decision=_public_immersive_thinking_decision(provider),
                     max_tokens_override=1600,
                     persist_exchange=False,
                     remember_session=False,
@@ -2019,14 +2030,7 @@ class PublicChatService:
                         "model_name": request.model,
                         "reason": "public_byok",
                     },
-                    thinking_decision={
-                        "requested": "off",
-                        "effective": "off",
-                        "reason": "public_immersive_policy",
-                        "provider_kind": provider.provider_id,
-                        "max_provider_http_calls": 2,
-                        "disable_compatibility_retries": True,
-                    },
+                    thinking_decision=_public_immersive_thinking_decision(provider),
                     max_tokens_override=1600,
                     persist_exchange=False,
                     remember_session=False,

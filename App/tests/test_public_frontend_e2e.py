@@ -74,6 +74,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
     chat_payloads: list[dict[str, object]] = []
     chat_attempts: dict[str, int] = {}
     presence_resolve_count = 0
+    arrival_mode = "success"
+    transition_mode = "success"
+    request_paths: list[str] = []
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
@@ -208,6 +211,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         length = int(self.headers.get("Content-Length") or 0)
         payload = json.loads(self.rfile.read(length) or b"{}")
+        type(self).request_paths.append(self.path)
         if self.path == "/public/v1/byok/session":
             if not payload.get("api_key"):
                 self._json({"detail": {"code": "invalid_request"}}, status=422)
@@ -245,6 +249,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             )
             return
         if self.path == "/public/v1/presence/transition":
+            if self.transition_mode == "http_error":
+                self._json({"detail": {"code": "state_invalid"}}, status=409)
+                return
             in_person = payload.get("target_channel") == "in_person"
             self._json(
                 {
@@ -269,6 +276,17 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 self.arrival_started.set()
             if self.arrival_release is not None:
                 self.arrival_release.wait(timeout=5)
+            if self.arrival_mode == "http_error":
+                self._json(
+                    {"detail": {"code": "generation_queue_full"}},
+                    status=429,
+                )
+                return
+            terminal_error = (
+                "upstream_invalid_response"
+                if self.arrival_mode == "terminal_error"
+                else ""
+            )
             self._json(
                 {
                     "arrival_id": payload.get("arrival_id"),
@@ -285,9 +303,11 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     },
                     "decision": "noticed",
                     "status": "completed",
-                    "terminal_error": "",
+                    "terminal_error": terminal_error,
                     "model_called": True,
-                    "reaction": {
+                    "reaction": None
+                    if terminal_error
+                    else {
                         "message_id": "arrival-e2e-message",
                         "content_blocks": [
                             {"type": "action", "text": "凯茜娅转过身看向你。"},
@@ -459,6 +479,9 @@ class PublicFrontendE2ETests(TestCase):
         PublicFrontendHandler.chat_payloads = []
         PublicFrontendHandler.chat_attempts = {}
         PublicFrontendHandler.presence_resolve_count = 0
+        PublicFrontendHandler.arrival_mode = "success"
+        PublicFrontendHandler.transition_mode = "success"
+        PublicFrontendHandler.request_paths = []
 
     def tearDown(self) -> None:
         for gate in (
@@ -623,8 +646,23 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(stage_indicator.count(), 1)
             self.assertNotIn("你来了。", page.locator("#stage-speech").inner_text())
             self.assertTrue(page.locator("#open-communicator").is_disabled())
+            page.locator('[data-character="9f5804761c56"]').click()
+            page.locator("#active-character h1", has_text="安卡希雅").wait_for(
+                state="visible"
+            )
             PublicFrontendHandler.arrival_release.set()
-            page.locator("#presence-arrival-loading").wait_for(state="hidden")
+            page.wait_for_function(
+                "() => document.querySelector('#presence-arrival-loading').hidden"
+            )
+            page.locator('[data-character="25b23cb64398"]').click()
+            page.locator("#stage-character-name", has_text="凯茜娅").wait_for(
+                state="visible"
+            )
+            self.assertTrue(
+                page.locator("#presence-arrival-loading").evaluate(
+                    "element => element.hidden"
+                )
+            )
             page.locator("#stage-speech").get_by_text("你来了。").wait_for(state="visible")
             self.assertEqual(page.locator("#stage-speech .typing-indicator").count(), 0)
             self.assertEqual(page.locator("#stage-speech").inner_text(), "你来了。")
@@ -1079,10 +1117,126 @@ class PublicFrontendE2ETests(TestCase):
             page.locator('[data-movement-id="commercial_street"]').click()
             page.locator("#send-movement-invitation").click()
             page.locator("#timeline .rendezvous-card").wait_for(state="visible")
+            PublicFrontendHandler.arrival_mode = "http_error"
             page.locator('[data-rendezvous-go]').click()
             page.locator("#in-person-surface").wait_for(state="visible")
             page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
             self.assertEqual(page.locator("#timeline .rendezvous-card").count(), 0)
+            page.locator("#system-banner").get_by_text(
+                "位置切换已完成；到场反应暂未生成，你可以直接开始对话。"
+            ).wait_for(state="visible")
+            page.wait_for_function(
+                "() => !document.querySelector('#send-message').disabled"
+            )
+            self.assertTrue(page.locator("#message-input").is_enabled())
+            self.assertTrue(page.locator("#toggle-action").is_enabled())
+            page.locator("#toggle-action").click()
+            page.locator("#action-input").fill("向她挥了挥手")
+            page.locator("#message-input").fill("我到了，我们继续聊吧。")
+            page.locator("#send-message").click()
+            page.locator("#stage-speech").get_by_text("晚上好，分析员。").wait_for(
+                state="visible"
+            )
+            sent = PublicFrontendHandler.chat_payloads[-1]
+            self.assertEqual(sent.get("communication_channel"), "in_person")
+            self.assertEqual(
+                sent.get("content_blocks"),
+                [
+                    {"type": "action", "text": "向她挥了挥手"},
+                    {"type": "speech", "text": "我到了，我们继续聊吧。"},
+                ],
+            )
+            transition_index = max(
+                index
+                for index, path in enumerate(PublicFrontendHandler.request_paths)
+                if path == "/public/v1/presence/transition"
+            )
+            arrival_index = max(
+                index
+                for index, path in enumerate(PublicFrontendHandler.request_paths)
+                if path == "/public/v1/presence/arrival"
+            )
+            self.assertLess(transition_index, arrival_index)
+            browser.close()
+
+    def test_failed_presence_transition_preserves_text_draft(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#message-input").fill("这段文字通讯草稿不能丢失")
+
+            PublicFrontendHandler.transition_mode = "http_error"
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#system-banner").get_by_text(
+                "本地场景状态仍然无效，请重新发送本条消息。"
+            ).wait_for(state="visible")
+            page.wait_for_function(
+                "() => document.querySelector('#presence-arrival-loading').hidden"
+            )
+
+            self.assertTrue(page.locator("#text-surface").is_visible())
+            self.assertEqual(
+                page.locator("#message-input").input_value(),
+                "这段文字通讯草稿不能丢失",
+            )
+            browser.close()
+
+    def test_face_to_face_character_switch_recovers_from_empty_arrival_reply(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#stage-speech").get_by_text("你来了。").wait_for(
+                state="visible"
+            )
+            page.locator("#presence-arrival-loading").wait_for(state="hidden")
+
+            PublicFrontendHandler.arrival_mode = "terminal_error"
+            page.locator('[data-character="9f5804761c56"]').click()
+            page.locator("#stage-character-name", has_text="安卡希雅").wait_for(
+                state="visible"
+            )
+            page.locator("#presence-dialog").wait_for(state="visible")
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#presence-arrival-loading").wait_for(state="hidden")
+            page.locator("#system-banner").get_by_text(
+                "位置切换已完成；她暂时没有作出到场回应，你可以直接开始对话。"
+            ).wait_for(state="visible")
+            page.wait_for_function(
+                "() => !document.querySelector('#send-message').disabled"
+            )
+            self.assertTrue(page.locator("#message-input").is_enabled())
+            self.assertTrue(page.locator("#toggle-action").is_enabled())
+            self.assertNotIn(
+                "模型没有返回可用正文",
+                page.locator("#system-banner").inner_text(),
+            )
+
+            page.locator("#toggle-action").click()
+            page.locator("#action-input").fill("在她面前停下脚步")
+            page.locator("#message-input").fill("现在可以听见我吗？")
+            page.locator("#send-message").click()
+            page.locator("#stage-speech").get_by_text("晚上好，分析员。").wait_for(
+                state="visible"
+            )
+            sent = PublicFrontendHandler.chat_payloads[-1]
+            self.assertEqual(sent.get("character_id"), "9f5804761c56")
+            self.assertEqual(sent.get("communication_channel"), "in_person")
+            self.assertEqual(
+                sent.get("content_blocks"),
+                [
+                    {"type": "action", "text": "在她面前停下脚步"},
+                    {"type": "speech", "text": "现在可以听见我吗？"},
+                ],
+            )
             browser.close()
 
     def test_reload_recovers_persisted_request_id_without_a_second_generation(self) -> None:

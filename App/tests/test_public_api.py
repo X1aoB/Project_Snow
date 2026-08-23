@@ -18,7 +18,12 @@ from backend.snow_app.config import PublicSettings, Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from backend.snow_app.public_contracts import ChatRequest, HistoryTurn
 from backend.snow_app.public_main import create_app
-from backend.snow_app.public_service import GenerationBusy, PublicChatService
+from backend.snow_app.public_providers import PROVIDERS
+from backend.snow_app.public_service import (
+    GenerationBusy,
+    PublicChatService,
+    _public_immersive_thinking_decision,
+)
 from backend.snow_app.public_security import sign_state, verify_state
 from backend.snow_app.public_store import PublicStore
 
@@ -420,6 +425,40 @@ class PublicAPITests(TestCase):
         self.assertEqual(
             joined_state["analyst_location"],
             joined_state["presence"][character.character_id]["location"],
+        )
+
+        transitioned = self.client.post(
+            "/public/v1/presence/transition",
+            headers={"Origin": "http://testserver"},
+            json={
+                "request_id": str(uuid4()),
+                "character_id": character.character_id,
+                "target_channel": "in_person",
+                "action": "join_character",
+                "state_package": state_event["state_package"],
+            },
+        )
+        self.assertEqual(transitioned.status_code, 200)
+        self.assertEqual(transitioned.json()["movement_status"]["status"], "joined")
+        self.assertIsNone(transitioned.json()["pending_rendezvous"])
+        with patch("backend.snow_app.public_service.secrets.randbelow", return_value=1):
+            reacted = self.client.post(
+                "/public/v1/presence/arrival",
+                headers={"Origin": "http://testserver"},
+                json={
+                    "arrival_id": str(uuid4()),
+                    "provider": "openai",
+                    "credential": credential,
+                    "model": "gpt-test",
+                    "character_id": character.character_id,
+                    "state_package": transitioned.json()["state_package"],
+                },
+            )
+        self.assertEqual(reacted.status_code, 200)
+        self.assertTrue(reacted.json()["scene_state"]["co_located"])
+        self.assertEqual(
+            reacted.json()["movement_status"]["status"],
+            "not_requested",
         )
 
     def test_structured_movement_requires_public_matching_single_location(self) -> None:
@@ -1537,6 +1576,10 @@ class PublicAPITests(TestCase):
             chat.call_args.kwargs["analyst_content_blocks"],
             [{"type": "action", "text": "向她挥了挥手"}],
         )
+        self.assertEqual(
+            chat.call_args.kwargs["thinking_decision"]["request_fields"],
+            {},
+        )
 
     def test_presence_transition_moves_analyst_and_replays(self) -> None:
         character = MVP_CHARACTERS[0]
@@ -1713,3 +1756,19 @@ class PublicAPITests(TestCase):
         decision = chat.call_args.kwargs["thinking_decision"]
         self.assertEqual(decision["max_provider_http_calls"], 2)
         self.assertTrue(decision["disable_compatibility_retries"])
+        self.assertEqual(decision["request_fields"], {})
+
+    def test_public_immersive_thinking_decision_disables_supported_provider_reasoning(self) -> None:
+        expected = {
+            "deepseek": {"thinking": {"type": "disabled"}},
+            "dashscope": {"enable_thinking": False},
+            "openai": {},
+        }
+        for provider_id, request_fields in expected.items():
+            with self.subTest(provider=provider_id):
+                decision = _public_immersive_thinking_decision(PROVIDERS[provider_id])
+                self.assertEqual(decision["effective"], "off")
+                self.assertEqual(decision["provider_kind"], provider_id)
+                self.assertEqual(decision["request_fields"], request_fields)
+                self.assertEqual(decision["max_provider_http_calls"], 2)
+                self.assertTrue(decision["disable_compatibility_retries"])
