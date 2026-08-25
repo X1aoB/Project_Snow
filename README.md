@@ -19,6 +19,7 @@ Project Snow 是一个以《尘白禁区》公开 Wiki 资料为知识基础的�
 [项目一览](#项目一览) ·
 [核心能力](#当前能力) ·
 [总体架构](#总体架构) ·
+[公网安全与受控媒体](#公网安全与受控媒体) ·
 [技术栈](#技术栈) ·
 [快速开始](#本地安装) ·
 [开发经历](#开发经历) ·
@@ -33,6 +34,11 @@ IndexedDB，BYOK 密钥只在当前标签页的 `sessionStorage` 中保存加密
 浏览器中的 envelope。公开服务与上述本地单用户产品具有不同的数据边界，详见
 [公开部署说明](App/docs/public_deployment.md)。
 
+当前更新进一步收紧了本地 API 与 Agent 的信任边界，并补齐公网角色语音和 Cubism 舞台模型的
+失效关闭式发布链路。两类媒体能力目前都**没有公开启用**：语音配置仍为禁用且审批清单为空；舞台侧
+没有可公开分发的 22 角色 Cubism 包，也尚未接入获准发布的 Live2D Web SDK。现有静态头像继续作为
+确定性回退；准备流程和剩余闸门已分别写入角色语音与 Cubism 舞台模型发布手册。
+
 ## 项目一览
 
 | 项目 | 当前状态 |
@@ -42,6 +48,8 @@ IndexedDB，BYOK 密钥只在当前标签页的 `sessionStorage` 中保存加密
 | 产品模块 | 沉浸式陪伴 + Codex 角色插件；旧内置助手仅作 legacy 调试 |
 | 知识系统 | FTS5 词法检索 + 本地中文向量 + RRF 融合 + 经审核图谱 |
 | 本地产品 | 浏览器聊天客户端、证据工作台、Electron Windows 测试壳 |
+| 公网产品 | `0.9.3` 独立沉浸式客户端；语音与 Cubism 舞台能力默认关闭 |
+| 安全边界 | 本机 API 令牌与同源写入校验；Agent 出站目标、重定向和 DNS 失效关闭 |
 | 质量保障 | 自动化回归、架构一致性检查、追加式反馈审计与问题族去重 |
 | 当前版本 | `v0.5.0`，本地单用户人格网关与 Codex 插件测试版 |
 
@@ -59,6 +67,7 @@ IndexedDB，BYOK 密钥只在当前标签页的 `sessionStorage` 中保存加密
 - **内部工作台 `/workspace/`**：用于证据检索、人格档案、关系/实体审核、反馈收件箱，以及旧对话和 Legacy Agent 调试。
 - **Electron 客户端**：安全加载本地 Web 产品，不复制语料、不保存模型密钥，也不向页面开放 Node 文件系统。
 - **后端 API**：负责角色注册、沉浸式检索与会话、反馈、版本化公共知识、独立用户事实和只读 Persona Gateway。
+- **公网客户端 `snow.xiaob.dev`**：由独立的 `public_main` 进程提供 `/public/v1`，不挂载本机 `/api/v1`、工作台或 Agent。
 
 ### v0.5.0 数据隔离与角色插件
 
@@ -76,6 +85,26 @@ IndexedDB，BYOK 密钥只在当前标签页的 `sessionStorage` 中保存加密
   也不能把任务消息、附件或推断写回 Snow。
 - 反馈处理先归入独立问题族并查找现有回归；已有测试通过的问题只标记 `fixed_verified`，不会反复叠加提示词。
   旧助手 UI 问题统一标记 `superseded_by_architecture`。
+
+### 公网安全与受控媒体
+
+- **本机 API**：原生服务默认只监听 `127.0.0.1`；所有 `/api/v1/**` 方法统一要求
+  `X-Project-Snow-Internal-Token`。开发代理、Nginx 和 Electron 主进程代为注入凭据，但浏览器写请求仍须
+  通过精确 loopback `Host`、`Origin` 与 `Sec-Fetch-Site` 校验，避免第三方网页借 localhost 代理发起写入。
+- **Agent 与连接器**：Legacy PowerShell 工具只解析少量只读命令，不再执行模型生成的任意命令串。网页、
+  HTTP 连接器、IMAP 与 SMTP 统一校验公网目标，拒绝内网/保留地址、危险重定向和 DNS 重绑定；审批只确认
+  用户意图，不会放宽目录、秘密文件或目标地址限制。
+- **角色语音**：公网 API 已具备绑定匿名主体、角色、文本与版本的两分钟一次性票据、完整 WAV 与增量 PCM
+  两种传输、跨实例配额、按角色灰度/撤销、匿名聚合遥测和浏览器 7 天/100 MiB LRU 缓存。浏览器不能自带
+  合成文本、SSML、URL、模型或供应商 voice ID；动作、拒答、含活动标记/URL 或过长回复不会获得票据。
+- **语音发布状态**：四个 Qwen3 候选 profile 仍为 `enabled:false`，没有样本或供应商 voice ID，审批清单为空。
+  只有样本权利/质量复核、盲测、哈希绑定审批、真实 provider 双通道预检和 rollout 证据全部通过后，单个角色
+  才能从 5% 灰度开始；任何角色或全局开关都可立即撤销并轮换缓存 epoch。
+- **Cubism 舞台**：服务端只把已校验动作映射到固定 cue/expression 枚举；浏览器不能从文本猜动作或提交舞台
+  控制字段。发布器要求完整 22 角色、不可变版本、Ed25519 签名、文件哈希、统一坐标比例、Cubism 引用闭包和
+  独立许可审批，缺一项即保持静态 poster。单角色内部样片永远不能进入公网目录、API 或 readiness。
+- **舞台发布状态**：仓库当前仅有待人工复核的截图派生准备流程与米娅工艺样片；它们不是 `.moc3` 导出、
+  不构成 Live2D SDK 接入，也不代表拥有公网分发许可。所有生产开关默认关闭。
 
 ## 设计目标
 
@@ -134,8 +163,9 @@ flowchart LR
     Vector --> Retrieval
     Persona --> Retrieval
     Graph --> Retrieval
-    Retrieval --> API["FastAPI\n沉浸式对话与 Persona Gateway"]
-    API --> Web["沉浸式客户端"]
+    Retrieval --> API["本机 FastAPI\n沉浸式对话与 Persona Gateway"]
+    Retrieval --> PublicAPI["独立公网 FastAPI\n/public/v1"]
+    API --> Web["本机沉浸式客户端"]
     API --> Workspace["证据/审核/反馈工作台"]
     Web --> Electron["Electron Windows 薄壳"]
     API <--> Runtime["隔离存储\n会话、用户事实、配对与反馈"]
@@ -144,6 +174,9 @@ flowchart LR
     Gateway --> Plugin["snow-role-assistant\nSkill + MCP"]
     Plugin --> Codex["Codex Agent\n工具、审批、附件与任务历史"]
     API --> Legacy["Legacy AgentRuntime\n仅工作台调试"]
+    PublicAPI --> PublicWeb["snow.xiaob.dev\n浏览器本地历史与 BYOK envelope"]
+    PublicAPI --> Voice["角色语音票据与流式传输\n默认关闭"]
+    PublicAPI --> Stage["签名 Cubism 发布包\n默认关闭 / 静态回退"]
 ```
 
 生成链路会先识别角色、问题焦点、模式、媒介、场景和时装语境，再执行受角色约束的混合检索。
@@ -157,9 +190,11 @@ Project_Snow/
 ├── App/                         可提交的应用层
 │   ├── backend/snow_app/        FastAPI、检索、对话、会话与规则
 │   ├── frontend/                正式聊天客户端和 /workspace/ 工作台
+│   ├── public_frontend/         独立公网沉浸式客户端、语音播放与舞台桥接
 │   ├── pipelines/               湖仓、索引、人格、图谱及模型审核管线
 │   ├── client/                  Electron Windows 安全薄壳
-│   ├── docs/                    架构、数据契约和人工审核指南
+│   ├── config/                  公共知识、语音与舞台的失效关闭式配置
+│   ├── docs/                    架构、数据契约、安全边界和发布手册
 │   ├── infra/                   Docker、Nginx 与数据库初始化配置
 │   ├── scripts/                 开发服务器、架构校验和辅助脚本
 │   ├── tests/                   unittest 应用与回归测试
@@ -180,21 +215,23 @@ Project_Snow/
 - `App/runtime/` 保存可重建或私密的内容，包括索引、审核队列、模型基准、日志、反馈和
   `chat/conversations.sqlite3`。
 - `.env`、API Key、Cookie、SQLite、用户反馈、测试截图、`node_modules/` 和 Electron 构建产物都不提交。
-- Wiki 图片和音频只在采集阶段保存 URL 或本地测试引用；角色头像缺失时客户端使用文字头像。
+- 私有语音样本、供应商 voice ID、签名私钥和正式媒体发布包不进入 Git；配置模板只保存哈希、空审批或禁用状态。
+- Wiki 图片、截图派生图和音频受各自许可约束；未确认可再分发时不得推送，角色/舞台资源缺失时客户端使用
+  文字头像或静态 poster。
 
 ## 技术栈
 
 | 层级 | 技术 | 用途 |
 |---|---|---|
 | 语言与运行时 | Python 3.11+、JavaScript、Node.js 20+ | 后端、管线、Web 与桌面测试壳 |
-| API | FastAPI、Pydantic、Uvicorn、HTTPX | 请求契约、异步兼容调用、服务与模型网关 |
+| API | FastAPI、Pydantic、Uvicorn、HTTPX、WebSockets | 请求契约、异步兼容调用、服务、模型与语音网关 |
 | 本地状态 | SQLite、JSONL、DuckDB | 会话、词法检索、湖仓派生表和可移植产物 |
 | 语义检索 | Sentence Transformers、Qdrant | 中文向量编码与可选向量服务 |
 | 图谱 | JSONL、Neo4j | 经审核关系的源文件与可选查询投影 |
-| 文本/媒体处理 | Beautiful Soup、Pillow、PyPDF、PyMuPDF、python-docx、openpyxl、python-pptx、Mutagen | Wiki、图片、扫描 PDF、文档和音频元数据 |
+| 文本/媒体处理 | Beautiful Soup、Pillow、psd-tools、PyPDF、PyMuPDF、python-docx、openpyxl、python-pptx、Mutagen | Wiki、图片/PSD、扫描 PDF、文档和音频元数据 |
 | Agent 与凭据 | Codex 插件、MCP、Windows Credential Manager / keyring | 外部 Agent 执行、只读人格接入与可撤销配对 |
 | 浏览器自动化 | Playwright / Chromium | 公开网页提取、表单填写与受控下载；最终提交始终审批 |
-| Web 客户端 | 原生 HTML、CSS、JavaScript、Lucide 图标 | 无前端框架依赖的聊天和工作台界面 |
+| Web 客户端 | 原生 HTML、CSS、JavaScript、Web Audio、IndexedDB、Lucide 图标 | 聊天、工作台、可撤销语音播放与本地缓存 |
 | 桌面客户端 | Electron、electron-builder | Windows 测试壳与 portable 构建 |
 | 测试 | Python `unittest`、Electron smoke、架构校验脚本 | API、对话规则、持久化、响应式界面和产物一致性 |
 | 可选服务 | Docker Compose、PostgreSQL、Qdrant、Neo4j、Nginx | 本地服务化和图谱/向量投影 |
@@ -351,6 +388,11 @@ cd Project_Snow\App
 python scripts/dev_server.py
 ```
 
+原生启动未显式配置 `INTERNAL_API_TOKEN` 时，会在 `App/runtime/internal_api_token` 创建并复用一个本机令牌；
+API 与 Web 代理必须读取同一令牌。Electron 主进程和开发代理只为本机 `/api/v1` 请求注入它，renderer 无法读取。
+如果直接调用 `127.0.0.1:8000/api/v1/**`，需自行提供该请求头；`/health` 不要求凭据。Compose 环境不会自动生成
+跨容器令牌，必须显式设置同一个至少 32 位 URL-safe ASCII 值。
+
 - 聊天客户端：<http://127.0.0.1:8080/>
 - 证据、关系、实体、反馈与调试工作台：<http://127.0.0.1:8080/workspace/>
 - Web 健康检查：<http://127.0.0.1:8080/health>
@@ -407,6 +449,9 @@ codex plugin add snow-role-assistant@personal
 - `GET /api/v1/relationships/{character_id}`：读取结构化关系与有效称呼。
 - `GET /api/v1/mvp/tools` 和 `/api/v1/agent/*`：保留一个版本的 Legacy Agent 调试接口。
 - `/api/v1/review/*`：内部关系和实体审核接口。
+
+以上 `/api/v1/**` 均位于统一令牌、loopback Host 和浏览器同源写入边界之后。公网服务是另一套进程与路由表，
+只暴露 `/public/v1`；语音、舞台模型、BYOK、反馈与健康检查的完整契约见相应发布手册和部署文档。
 
 沉浸式显示历史保存在 `App/runtime/chat/conversations.sqlite3`；结构化用户事实保存在相邻的
 `user_facts.sqlite3`；Persona 配对只保存于 `persona_pairings.sqlite3` 和 Windows 凭据库。三个存储没有
@@ -504,6 +549,8 @@ Codex 等成熟宿主的工具广度与恢复能力。项目因此停止在 Snow
 - 当前是本地测试产品，不包含公网认证、多用户隔离、跨设备同步或生产级密钥托管。
 - Codex 是第一个插件宿主；Hermes、AstrBot 与微信消息入口尚未适配。AstrBot 后续只作为消息网关，不管理人格或记忆。
 - Snow 内置 AgentRuntime 只保留 legacy 调试，不保证继续扩展其工具和客户端体验。
+- 公网角色语音尚未取得可启用的样本审批与 provider 双通道预检；当前四个 profile 均关闭。
+- 公网舞台尚无完整 22 角色 Cubism 导出包、获准发布的 Live2D Web SDK 和书面许可；当前始终回退静态 poster。
 - 低资料覆盖角色的自然度仍依赖后续资料补充和真实使用反馈。
 - 未审核关系不会自动成为人格事实；高风险或多义关系仍需要人工确认。
 - Electron portable 目前不打包 Python、语料和模型环境，使用前需先启动本地服务。
@@ -522,6 +569,8 @@ git diff --check
 
 - `Data/` 原始 Wiki 语料；
 - `App/runtime/`、SQLite、反馈、日志、模型基准和截图；
+- `Data/Voice/` 中的原始/处理后语音、转写、供应商 ID 与私有审核覆盖层；
+- 未获再分发许可的舞台截图、待审 PSD/PNG、正式媒体发布包和任何签名私钥；
 - `.env`、API Key、Cookie、证书和其他凭据；
 - `node_modules/`、Electron `dist/` 和缓存；
 - 未确认可再分发的 Wiki 图片、音频和视频。
