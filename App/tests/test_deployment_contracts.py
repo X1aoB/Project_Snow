@@ -2910,6 +2910,41 @@ require_runner_controller_binding
         self.assertIn("Tag reused embedding digest for the current main SHA", release)
         self.assertIn("release_manifest.py", release)
 
+    def test_nightly_health_and_candidate_image_security_are_distinct(self) -> None:
+        workflows = self.app_root.parent / ".github" / "workflows"
+        workflow = (workflows / "ci.yml").read_text(encoding="utf-8")
+        nightly = (workflows / "nightly-image-security.yml").read_text(encoding="utf-8")
+
+        embedding_start = workflow.index("\n  embedding-image:")
+        production_health_start = workflow.index("\n  production-health:", embedding_start)
+        embedding_job = workflow[embedding_start:production_health_start]
+        self.assertNotIn("github.event_name == 'schedule'", embedding_job)
+        self.assertIn("github.event_name == 'workflow_dispatch'", embedding_job)
+        self.assertLess(
+            embedding_job.index("Embedding container 512-dimension inference check"),
+            embedding_job.index("Enforce embedding vulnerability gate"),
+        )
+
+        self.assertIn("Nightly application health and regression checks", workflow)
+        self.assertIn("production-health:\n", workflow)
+        self.assertIn("https://snow.xiaob.dev/public/v1/health/live", workflow)
+        self.assertIn("      - production-health\n", workflow)
+
+        self.assertIn("name: nightly-image-security", nightly)
+        self.assertIn("Nightly candidate image security audit", nightly)
+        self.assertIn('cron: "37 18 * * *"', nightly)
+        self.assertIn("file: App/infra/public-api.Dockerfile", nightly)
+        self.assertIn("file: App/infra/embedding.Dockerfile", nightly)
+        self.assertEqual(nightly.count("pull: true"), 2)
+        self.assertEqual(nightly.count("no-cache: true"), 2)
+        self.assertIn("Public container liveness check", nightly)
+        self.assertIn("Embedding container 512-dimension inference check", nightly)
+        self.assertIn("Enforce public image vulnerability gate", nightly)
+        self.assertIn("Enforce embedding image vulnerability gate", nightly)
+        self.assertNotIn("packages: write", nightly)
+        self.assertNotIn("release_manifest.py", nightly)
+        self.assertNotIn("project-snow-release promote", nightly)
+
     def test_ci_and_local_validation_include_direct_origin_assets(self) -> None:
         workflow = (self.app_root.parent / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"

@@ -1,0 +1,116 @@
+name: nightly-image-security
+run-name: Nightly candidate image security audit
+
+on:
+  schedule:
+    - cron: "37 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-image-security-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  public-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: App
+          file: App/infra/public-api.Dockerfile
+          pull: true
+          push: false
+          load: true
+          tags: project-snow-public:nightly-security
+          no-cache: true
+          cache-to: type=gha,mode=max,scope=public-api
+      - name: Public container liveness check
+        shell: bash
+        run: |
+          cleanup() { docker rm -f snow-public-nightly >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run -d --name snow-public-nightly -p 18000:8000 \
+            -e PUBLIC_ALLOW_INSECURE_DEV=true \
+            -e PUBLIC_AUTO_CREATE_SCHEMA=true \
+            -e PUBLIC_DATABASE_URL=sqlite+pysqlite:////tmp/public.db \
+            -e PUBLIC_ENABLED_PROVIDERS= \
+            -e PUBLIC_CREDENTIAL_KEY=eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg \
+            -e PUBLIC_STATE_HMAC_KEY=eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg \
+            -e PUBLIC_IP_HMAC_KEY=eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg \
+            -e PUBLIC_QQ_KEY=eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg \
+            -e PUBLIC_ADMIN_TOKEN=ci-only \
+            project-snow-public:nightly-security
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18000/public/v1/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs snow-public-nightly
+          exit 1
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: project-snow-public:nightly-security
+          format: json
+          output: trivy-application.json
+          exit-code: "0"
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Enforce public image vulnerability gate
+        run: python App/scripts/report_trivy_findings.py trivy-application.json
+
+  embedding-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: App
+          file: App/infra/embedding.Dockerfile
+          pull: true
+          push: false
+          load: true
+          tags: project-snow-embedding:nightly-security
+          no-cache: true
+          cache-to: type=gha,mode=max,scope=embedding
+      - name: Embedding container 512-dimension inference check
+        shell: bash
+        run: |
+          cleanup() { docker rm -f snow-embedding-nightly >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          docker run -d --name snow-embedding-nightly -p 18001:8000 project-snow-embedding:nightly-security
+          ready=false
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:18001/health >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            docker logs snow-embedding-nightly
+            exit 1
+          fi
+          curl -fsS \
+            -H 'Content-Type: application/json' \
+            -d '{"inputs":["Project Snow nightly embedding health check"]}' \
+            http://127.0.0.1:18001/embed \
+            | python -c 'import json, math, sys; payload = json.load(sys.stdin); vectors = payload["vectors"]; assert len(vectors) == 1 and len(vectors[0]) == 512; assert all(math.isfinite(value) for value in vectors[0])'
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: project-snow-embedding:nightly-security
+          format: json
+          output: trivy-embedding.json
+          exit-code: "0"
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - name: Enforce embedding image vulnerability gate
+        run: python App/scripts/report_trivy_findings.py trivy-embedding.json

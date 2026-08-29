@@ -1,4 +1,10 @@
 name: required-checks
+run-name: >-
+  ${{ github.event_name == 'schedule'
+      && 'Nightly application health and regression checks'
+      || github.event_name == 'workflow_dispatch'
+      && 'Manual application health and regression checks'
+      || format('Required checks for {0}', github.ref_name) }}
 
 on:
   pull_request:
@@ -272,7 +278,7 @@ jobs:
     if: >-
       (github.event_name == 'pull_request' &&
        (needs.changes.outputs.embedding == 'true' || github.head_ref == 'codex/ci-risk-tiering')) ||
-      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      github.event_name == 'workflow_dispatch'
     needs: changes
     runs-on: ubuntu-latest
     steps:
@@ -285,7 +291,7 @@ jobs:
           push: false
           load: true
           tags: project-snow-embedding:ci
-          no-cache: ${{ github.event_name == 'schedule' }}
+          no-cache: ${{ github.event_name == 'workflow_dispatch' }}
           cache-from: type=gha,scope=embedding
           cache-to: type=gha,mode=max,scope=embedding
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -297,7 +303,6 @@ jobs:
           scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-      - run: python App/scripts/report_trivy_findings.py trivy-embedding.json
       - name: Embedding container 512-dimension inference check
         run: |
           cleanup() { docker rm -f snow-embedding >/dev/null 2>&1 || true; }
@@ -320,6 +325,21 @@ jobs:
             -d '{"inputs":["Project Snow 向量契约检查"]}' \
             http://127.0.0.1:18001/embed \
             | python -c 'import json, math, sys; payload = json.load(sys.stdin); vectors = payload["vectors"]; assert len(vectors) == 1 and len(vectors[0]) == 512; assert all(math.isfinite(value) for value in vectors[0])'
+      - name: Enforce embedding vulnerability gate
+        run: python App/scripts/report_trivy_findings.py trivy-embedding.json
+
+  production-health:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the deployed public liveness endpoint
+        shell: bash
+        run: |
+          curl --fail --silent --show-error \
+            --retry 3 --retry-delay 2 \
+            --connect-timeout 10 --max-time 20 \
+            https://snow.xiaob.dev/public/v1/health/live \
+            | python3 -c 'import json, sys; payload = json.load(sys.stdin); assert payload.get("status") == "ok"; assert payload.get("version")'
 
   full-validation:
     if: >-
@@ -407,6 +427,7 @@ jobs:
       - deploy
       - app-image
       - embedding-image
+      - production-health
       - full-validation
       - release
     runs-on: ubuntu-latest

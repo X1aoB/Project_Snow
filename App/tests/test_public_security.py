@@ -77,6 +77,14 @@ class PublicSecurityTests(TestCase):
             self.assertNotIn(excluded, requirements.casefold())
 
         embedding_dockerfile = (app_root / "infra" / "embedding.Dockerfile").read_text(encoding="utf-8")
+        self.assertIn(
+            "FROM python:3.12-slim@sha256:09f7da3bc104798d0afb40bc08d23ab2da20a76130cec1f2ef170848f5d85217 AS system-base",
+            embedding_dockerfile,
+        )
+        self.assertEqual(embedding_dockerfile.count("FROM system-base"), 2)
+        self.assertIn("apt-get update", embedding_dockerfile)
+        self.assertIn("apt-get upgrade -y --no-install-recommends", embedding_dockerfile)
+        self.assertIn("rm -rf /var/lib/apt/lists/*", embedding_dockerfile)
         self.assertIn("AS builder", embedding_dockerfile)
         self.assertIn("COPY --from=builder /opt/venv /opt/venv", embedding_dockerfile)
         self.assertIn("https://download.pytorch.org/whl/cpu", embedding_dockerfile)
