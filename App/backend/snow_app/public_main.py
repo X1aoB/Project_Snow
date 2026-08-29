@@ -54,7 +54,12 @@ from .public_security import (
     verify_turnstile,
 )
 from .mvp_service import MVPProviderError
-from .public_service import CharacterUnavailable, GenerationBusy, PublicChatService
+from .public_service import (
+    CharacterUnavailable,
+    GenerationBusy,
+    PublicChatService,
+    _normalize_public_immersive_punctuation,
+)
 from .public_store import (
     DuplicateFeedback,
     PublicStore,
@@ -222,7 +227,9 @@ def _public_content_blocks_payload(value: Any) -> list[dict[str, Any]]:
             block["display_animated"] = bool(item.get("display_animated"))
             block["animated"] = bool(item.get("animated"))
         else:
-            text_value = redact_sensitive_text(str(item.get("text") or ""), 1200)
+            text_value = _normalize_public_immersive_punctuation(
+                redact_sensitive_text(str(item.get("text") or ""), 1200)
+            )
             if not text_value:
                 continue
             block["text"] = text_value

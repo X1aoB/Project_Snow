@@ -227,10 +227,113 @@ function abortableDelay(milliseconds, signal) {
   });
 }
 function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
-function typewriterTiming(value) {
-  const length = plain(value).length;
-  const step = Math.max(1, Math.ceil(length / 90));
-  return { step, duration: Math.ceil(length / step) * 24 + 180 };
+const TYPEWRITER_TARGET_STEPS = 90;
+const TYPEWRITER_MAX_DURATION_MS = 5200;
+function codePointOf(value) { return plain(value).codePointAt(0) || 0; }
+function isRegionalIndicator(value) {
+  const point = codePointOf(value);
+  return point >= 0x1f1e6 && point <= 0x1f1ff;
+}
+function isEmojiModifier(value) {
+  const point = codePointOf(value);
+  return point >= 0x1f3fb && point <= 0x1f3ff;
+}
+function isVariationSelector(value) {
+  const point = codePointOf(value);
+  return point >= 0xfe00 && point <= 0xfe0f || point >= 0xe0100 && point <= 0xe01ef;
+}
+function isEmojiTag(value) {
+  const point = codePointOf(value);
+  return point >= 0xe0020 && point <= 0xe007f;
+}
+function isCombiningMark(value) { return /^\p{Mark}$/u.test(value); }
+function fallbackGraphemeSegments(value) {
+  const codePoints = Array.from(plain(value));
+  const segments = [];
+  let current = "";
+  for (const codePoint of codePoints) {
+    if (!current) {
+      current = codePoint;
+      continue;
+    }
+    const currentCodePoints = Array.from(current);
+    const attach = isCombiningMark(codePoint)
+      || isVariationSelector(codePoint)
+      || isEmojiModifier(codePoint)
+      || isEmojiTag(codePoint)
+      || codePoint === "\u200d"
+      || current.endsWith("\u200d")
+      || current === "\r" && codePoint === "\n"
+      || isRegionalIndicator(codePoint) && currentCodePoints.length === 1 && isRegionalIndicator(currentCodePoints[0]);
+    if (attach) current += codePoint;
+    else {
+      segments.push(current);
+      current = codePoint;
+    }
+  }
+  if (current) segments.push(current);
+  return segments;
+}
+function graphemeSegments(value) {
+  const text = plain(value);
+  const Segmenter = globalThis.Intl?.Segmenter;
+  if (typeof Segmenter === "function") {
+    try {
+      return Array.from(new Segmenter(undefined, { granularity: "grapheme" }).segment(text), (entry) => entry.segment);
+    } catch { /* Fall through to the compatibility segmenter. */ }
+  }
+  return fallbackGraphemeSegments(text);
+}
+function typewriterDelayAfter(character, nextCharacter = "", previousCharacter = "") {
+  const nextIsCloser = /[”’」』】》）)]/.test(nextCharacter);
+  if (character.includes("\n")) return 180;
+  if (character === "…" && nextCharacter === "…") return 24;
+  if (character === "…" || /[。！？!?]/.test(character)) return nextIsCloser ? 24 : 320;
+  if (/[”’」』】》）)]/.test(character) && /[。！？!?…]/.test(previousCharacter)) return 320;
+  if (/[；;]/.test(character)) return 220;
+  if (/[，,、：:]/.test(character)) return 110;
+  return 24;
+}
+function typewriterRevealPlan(graphemes, startIndex = 0) {
+  const remaining = Math.max(0, graphemes.length - startIndex);
+  if (!remaining) return { initialDelay: 0, steps: [] };
+  const batchSize = Math.max(1, Math.ceil(remaining / TYPEWRITER_TARGET_STEPS));
+  const steps = [];
+  let index = startIndex;
+  while (index < graphemes.length) {
+    const limit = Math.min(graphemes.length, index + batchSize);
+    let end = limit;
+    for (let cursor = index; cursor < limit; cursor += 1) {
+      const pause = typewriterDelayAfter(
+        graphemes[cursor],
+        graphemes[cursor + 1] || "",
+        graphemes[cursor - 1] || "",
+      );
+      if (pause > 24) {
+        end = cursor + 1;
+        break;
+      }
+    }
+    const last = end - 1;
+    steps.push({
+      end,
+      delayAfter: typewriterDelayAfter(
+        graphemes[last],
+        graphemes[end] || "",
+        graphemes[last - 1] || "",
+      ),
+    });
+    index = end;
+  }
+  const rawDuration = 24 + steps.slice(0, -1).reduce((total, step) => total + step.delayAfter, 0);
+  const scale = Math.min(1, TYPEWRITER_MAX_DURATION_MS / Math.max(1, rawDuration));
+  return {
+    initialDelay: Math.max(1, Math.round(24 * scale)),
+    steps: steps.map((step, index) => ({
+      ...step,
+      delayAfter: index === steps.length - 1 ? 0 : Math.max(1, Math.round(step.delayAfter * scale)),
+    })),
+  };
 }
 function requestDelay(requestId, salt, minimum, maximum) {
   const value = `${plain(requestId)}:${plain(salt)}`;
@@ -1264,7 +1367,7 @@ function cancelPresentationQueue(characterId = state.selected, requestId = "") {
   if (queue.timer) window.clearTimeout(queue.timer);
   state.presentationByCharacter.delete(characterId);
   if (characterId === state.selected) {
-    window.clearInterval(state.typewriter.timer);
+    window.clearTimeout(state.typewriter.timer);
     state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
     renderTimeline();
     renderStage();
@@ -1345,12 +1448,50 @@ function deriveDisplayBlocks(sourceBlocks, channel = "text") {
   return blocks;
 }
 function presentationBlocks(message) {
+  if (message?.communicationChannel === "in_person") {
+    return message?.contentBlocks?.length ? message.contentBlocks : message?.displayBlocks || [];
+  }
   return deriveDisplayBlocks(message?.displayBlocks?.length ? message.displayBlocks : message?.contentBlocks, message?.communicationChannel || "text");
+}
+function inPersonSurfaceText(blocks, type) {
+  const values = (blocks || []).map((block, index) => ({
+    index,
+    type: block?.type,
+    text: plain(block?.text).trim(),
+  })).filter((block) => block.type === type && block.text);
+  if (type === "action") return values.map((block) => block.text).join("\n");
+  let previous = null;
+  return values.reduce((combined, block) => {
+    if (!previous) {
+      previous = block;
+      return block.text;
+    }
+    let separator = "\n";
+    if (/\s$/.test(combined) || /^\s/.test(block.text)) separator = "";
+    else if (block.index === previous.index + 1) {
+      if (/[。！？…]$/.test(previous.text)) separator = /^[A-Za-z0-9]/.test(block.text) ? " " : "";
+      else if (/[.!?]$/.test(previous.text)) separator = " ";
+      else if (/[A-Za-z0-9][,;:]?$/.test(previous.text) && /^[A-Za-z0-9]/.test(block.text)) separator = " ";
+    }
+    previous = block;
+    return `${combined}${separator}${block.text}`;
+  }, "");
 }
 function visibleBlocksFor(message) {
   const queue = message ? presentationFor(message.characterId || state.selected) : null;
   if (queue && queue.messageId === message?.id) return queue.blocks.slice(0, queue.visibleCount);
+  if (message?.communicationChannel === "in_person") {
+    return message?.contentBlocks?.length ? message.contentBlocks : message?.displayBlocks || [];
+  }
   return message?.displayBlocks?.length ? message.displayBlocks : message?.contentBlocks || [];
+}
+function speechTypewriterKey(message) {
+  return [
+    plain(message?.characterId),
+    plain(message?.requestId),
+    plain(message?.id),
+    "complete-speech",
+  ].join(":");
 }
 function timelineTypingMarkup(characterId = state.selected) {
   const pending = typingStateFor(characterId);
@@ -1378,6 +1519,7 @@ async function preloadStickerBlock(block, timeoutMs = 900, signal = undefined) {
 async function presentAssistantTurn(characterId, requestId, message) {
   if (!ownsTypingState(characterId, requestId)) return false;
   const blocks = presentationBlocks(message);
+  const inPerson = message.communicationChannel === "in_person";
   cancelPresentationQueue(characterId);
   if (!blocks.length || !ownsTypingState(characterId, requestId)) return false;
   const queue = {
@@ -1385,7 +1527,7 @@ async function presentAssistantTurn(characterId, requestId, message) {
     requestId,
     messageId: message.id,
     blocks,
-    visibleCount: 1,
+    visibleCount: inPerson ? blocks.length : 1,
     timer: 0,
     cancelled: false,
     controller: new AbortController(),
@@ -1399,48 +1541,43 @@ async function presentAssistantTurn(characterId, requestId, message) {
     renderStage();
   }
   try {
-    if (
-      !reducedMotion()
-      && message.communicationChannel === "in_person"
-      && blocks[0]?.type === "speech"
-    ) {
-      await abortableDelay(typewriterTiming(blocks[0].text).duration, queue.controller.signal);
-    }
-    for (let step = 1; step < revealCounts.length; step += 1) {
-      if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
-      const previousCount = revealCounts[step - 1];
-      const visibleCount = revealCounts[step];
-      const revealed = blocks.slice(previousCount, visibleCount);
-      const block = revealed[0];
-      const hasSticker = revealed.some((item) => item.type === "sticker");
-      const previousTextLength = [...plain(blocks[Math.max(0, previousCount - 1)]?.text)].length;
-      const totalWait = hasSticker
-        ? requestDelay(requestId, `sticker:${step}`, 2200, 3000)
-        : Math.max(2800, Math.min(4200, 2200 + previousTextLength * 35));
-      const readingWait = Math.min(totalWait, requestDelay(requestId, `reading:${step}`, 800, 1400));
-      updateTypingPhase(characterId, requestId, "reading");
-      if (!reducedMotion()) await abortableDelay(readingWait, queue.controller.signal);
-      if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
-      updateTypingPhase(characterId, requestId, "segment");
-      const preload = hasSticker
-        ? Promise.all(revealed.filter((item) => item.type === "sticker").map((item) => preloadStickerBlock(item, 1200, queue.controller.signal)))
-        : Promise.resolve();
-      if (!reducedMotion()) await Promise.all([abortableDelay(totalWait - readingWait, queue.controller.signal), preload]);
-      else await preload;
-      if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
-      queue.visibleCount = visibleCount;
-      updateTypingPhase(characterId, requestId, "presenting");
-      if (characterId === state.selected) {
-        renderTimeline();
-        renderStage();
+    if (inPerson) {
+      const completeSpeech = inPersonSurfaceText(blocks, "speech");
+      if (characterId === state.selected && completeSpeech) {
+        await waitForTypewriterCompletion(
+          speechTypewriterKey(message),
+          completeSpeech,
+          queue.controller.signal,
+        );
       }
-      if (
-        !reducedMotion()
-        && message.communicationChannel === "in_person"
-        && block.type === "speech"
-        && step < revealCounts.length - 1
-      ) {
-        await abortableDelay(typewriterTiming(block.text).duration, queue.controller.signal);
+    } else {
+      for (let step = 1; step < revealCounts.length; step += 1) {
+        if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
+        const previousCount = revealCounts[step - 1];
+        const visibleCount = revealCounts[step];
+        const revealed = blocks.slice(previousCount, visibleCount);
+        const hasSticker = revealed.some((item) => item.type === "sticker");
+        const previousTextLength = [...plain(blocks[Math.max(0, previousCount - 1)]?.text)].length;
+        const totalWait = hasSticker
+          ? requestDelay(requestId, `sticker:${step}`, 2200, 3000)
+          : Math.max(2800, Math.min(4200, 2200 + previousTextLength * 35));
+        const readingWait = Math.min(totalWait, requestDelay(requestId, `reading:${step}`, 800, 1400));
+        updateTypingPhase(characterId, requestId, "reading");
+        if (!reducedMotion()) await abortableDelay(readingWait, queue.controller.signal);
+        if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
+        updateTypingPhase(characterId, requestId, "segment");
+        const preload = hasSticker
+          ? Promise.all(revealed.filter((item) => item.type === "sticker").map((item) => preloadStickerBlock(item, 1200, queue.controller.signal)))
+          : Promise.resolve();
+        if (!reducedMotion()) await Promise.all([abortableDelay(totalWait - readingWait, queue.controller.signal), preload]);
+        else await preload;
+        if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
+        queue.visibleCount = visibleCount;
+        updateTypingPhase(characterId, requestId, "presenting");
+        if (characterId === state.selected) {
+          renderTimeline();
+          renderStage();
+        }
       }
     }
   } catch (error) {
@@ -1969,7 +2106,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
       state.stickerCursor = null;
       state.stickerHasMore = true;
     }
-    window.clearInterval(state.typewriter.timer);
+    window.clearTimeout(state.typewriter.timer);
     state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
     if (preparedScene) state.sceneByCharacter.set(characterId, preparedScene);
     state.scene = preparedScene;
@@ -2188,59 +2325,152 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
 function latestInPersonMessage(role = "") {
   return [...(currentThread()?.messages || [])].reverse().find((message) => message.communicationChannel === "in_person" && message.status !== "failed" && (!role || message.role === role)) || null;
 }
+function typewriterCompleted(key, value) {
+  const announcement = value
+    ? `${currentCharacter()?.display_name || "角色"}：${value}`
+    : "";
+  return Boolean(
+    key
+    && state.typewriter.key === key
+    && state.typewriter.fullText === ""
+    && state.typewriter.displayedText === value
+    && $("stage-speech")?.textContent === value
+    && $("stage-announcer")?.dataset.key === key
+    && (!value || $("stage-announcer")?.textContent === announcement)
+  );
+}
+function waitForTypewriterCompletion(key, text, signal) {
+  const value = plain(text);
+  if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  if (typewriterCompleted(key, value)) return Promise.resolve(true);
+  return new Promise((resolve, reject) => {
+    const complete = () => {
+      if (!typewriterCompleted(key, value)) return;
+      cleanup();
+      resolve(true);
+    };
+    const abort = () => {
+      cleanup();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const cleanup = () => {
+      document.removeEventListener("project-snow:typewriter-complete", complete);
+      signal?.removeEventListener("abort", abort);
+    };
+    document.addEventListener("project-snow:typewriter-complete", complete);
+    signal?.addEventListener("abort", abort, { once: true });
+    complete();
+  });
+}
+function finishTypewriter(key, value) {
+  if (state.typewriter.key !== key) return false;
+  window.clearTimeout(state.typewriter.timer);
+  state.typewriter.timer = 0;
+  state.typewriter.displayedText = value;
+  state.typewriter.fullText = "";
+  const speechNode = $("stage-speech");
+  speechNode.classList.remove("is-typing");
+  speechNode.classList.remove("is-revealing");
+  speechNode.setAttribute("aria-busy", "false");
+  speechNode.textContent = value;
+  const announcement = value
+    ? `${currentCharacter()?.display_name || "角色"}：${value}`
+    : "";
+  if (
+    value
+    && (
+      $("stage-announcer").dataset.key !== key
+      || $("stage-announcer").textContent !== announcement
+    )
+  ) {
+    $("stage-announcer").dataset.key = key;
+    $("stage-announcer").textContent = announcement;
+  }
+  document.dispatchEvent(new Event("project-snow:typewriter-complete"));
+  return true;
+}
 function renderTypewriter(text, key) {
   const value = plain(text);
-  if (state.typewriter.key === key && (state.typewriter.fullText === value || state.typewriter.displayedText === value)) return;
+  const speechNode = $("stage-speech");
+  if (
+    state.typewriter.key === key
+    && (state.typewriter.fullText === value || state.typewriter.displayedText === value)
+  ) {
+    if (state.typewriter.fullText === value && state.typewriter.timer) {
+      if (reducedMotion()) {
+        finishTypewriter(key, value);
+        return;
+      }
+      speechNode.classList.remove("is-typing");
+      speechNode.classList.add("is-revealing");
+      speechNode.setAttribute("aria-busy", "true");
+      if (speechNode.textContent !== state.typewriter.displayedText) speechNode.textContent = state.typewriter.displayedText;
+      return;
+    }
+    if (typewriterCompleted(key, value)) return;
+    if (state.typewriter.displayedText === value) {
+      finishTypewriter(key, value);
+      return;
+    }
+  }
   const previousKey = state.typewriter.key;
   const previousDisplayed = state.typewriter.displayedText;
-  window.clearInterval(state.typewriter.timer);
+  window.clearTimeout(state.typewriter.timer);
   state.typewriter.key = key;
   state.typewriter.fullText = value;
   state.typewriter.displayedText = "";
   if (!value || reducedMotion()) {
-    $("stage-speech").textContent = value;
-    state.typewriter.displayedText = value;
-    state.typewriter.fullText = "";
-    if (value && $("stage-announcer").dataset.key !== key) {
-      $("stage-announcer").dataset.key = key;
-      $("stage-announcer").textContent = `${currentCharacter()?.display_name || "角色"}：${value}`;
-    }
+    finishTypewriter(key, value);
     return;
   }
   const prefix = previousKey === key && value.startsWith(previousDisplayed)
     ? previousDisplayed
     : "";
-  let index = prefix.length;
-  const { step } = typewriterTiming(value.slice(prefix.length));
-  $("stage-speech").textContent = prefix;
-  state.typewriter.timer = window.setInterval(() => {
-    index += step;
-    const displayed = value.slice(0, index);
-    $("stage-speech").textContent = displayed;
-    state.typewriter.displayedText = displayed;
-    if (index >= value.length) {
-      window.clearInterval(state.typewriter.timer);
-      state.typewriter.timer = 0;
-      state.typewriter.displayedText = value;
-      state.typewriter.fullText = "";
-      if ($("stage-announcer").dataset.key !== key) {
-        $("stage-announcer").dataset.key = key;
-        $("stage-announcer").textContent = `${currentCharacter()?.display_name || "角色"}：${value}`;
-      }
+  const characters = graphemeSegments(value);
+  let index = graphemeSegments(prefix).length;
+  let displayed = prefix;
+  const plan = typewriterRevealPlan(characters, index);
+  let planIndex = 0;
+  speechNode.classList.remove("is-typing");
+  speechNode.classList.add("is-revealing");
+  speechNode.setAttribute("aria-busy", "true");
+  speechNode.textContent = prefix;
+  const revealNext = () => {
+    if (state.typewriter.key !== key || state.typewriter.fullText !== value) return;
+    state.typewriter.timer = 0;
+    const step = plan.steps[planIndex];
+    if (!step) {
+      finishTypewriter(key, value);
+      return;
     }
-  }, 24);
+    displayed += characters.slice(index, step.end).join("");
+    index = step.end;
+    planIndex += 1;
+    speechNode.textContent = displayed;
+    state.typewriter.displayedText = displayed;
+    if (index >= characters.length) {
+      finishTypewriter(key, value);
+      return;
+    }
+    state.typewriter.timer = window.setTimeout(
+      revealNext,
+      step.delayAfter,
+    );
+  };
+  state.typewriter.timer = window.setTimeout(revealNext, plan.initialDelay);
 }
 function renderStage() {
   const pending = typingStateFor();
   const speechNode = $("stage-speech");
   if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {
-    window.clearInterval(state.typewriter.timer);
+    window.clearTimeout(state.typewriter.timer);
     state.typewriter.timer = 0;
     if (pending.phase !== "segment") {
       state.typewriter.key = "";
       state.typewriter.fullText = "";
       state.typewriter.displayedText = "";
     }
+    speechNode.classList.remove("is-revealing");
     speechNode.classList.add("is-typing");
     speechNode.setAttribute("aria-busy", "true");
     speechNode.innerHTML = typingIndicatorMarkup(characterById(pending.characterId), { includeAvatar: false });
@@ -2251,15 +2481,17 @@ function renderStage() {
   speechNode.classList.remove("is-typing");
   speechNode.setAttribute("aria-busy", "false");
   const assistantMessage = latestInPersonMessage("assistant");
-  const latestMessage = latestInPersonMessage();
   const visibleAssistantBlocks = assistantMessage ? visibleBlocksFor(assistantMessage) : [];
-  const visibleLatestBlocks = latestMessage ? visibleBlocksFor(latestMessage) : [];
-  const actions = visibleLatestBlocks.filter((block) => block.type === "action").map((block) => block.text);
-  const speeches = visibleAssistantBlocks.filter((block) => block.type === "speech").map((block) => block.text);
-  $("stage-narration").textContent = actions.at(-1) || plain(state.scene?.character_activity);
-  const speech = speeches.at(-1) || "场景已经建立。你可以说些什么，也可以只描述一个动作。";
-  const visibleSpeechIndex = Math.max(0, visibleAssistantBlocks.reduce((count, block) => count + Number(block.type === "speech"), 0) - 1);
-  renderTypewriter(speech, assistantMessage ? `${assistantMessage.id}:${visibleSpeechIndex}` : `scene:${state.selected}:${state.scene?.visual_key || "generic"}`);
+  const action = inPersonSurfaceText(visibleAssistantBlocks, "action");
+  const completeSpeech = inPersonSurfaceText(visibleAssistantBlocks, "speech");
+  $("stage-narration").textContent = action || plain(state.scene?.character_activity);
+  const speech = completeSpeech || "场景已经建立。你可以说些什么，也可以只描述一个动作。";
+  const speechKey = assistantMessage
+    ? completeSpeech
+      ? speechTypewriterKey(assistantMessage)
+      : `${plain(assistantMessage.characterId)}:${plain(assistantMessage.requestId)}:${plain(assistantMessage.id)}:placeholder`
+    : `scene:${state.selected}:${state.scene?.visual_key || "generic"}`;
+  renderTypewriter(speech, speechKey);
   $("stage-open-feedback").disabled = !assistantMessage || Boolean(presentationFor()?.messageId === assistantMessage?.id);
   $("stage-open-feedback").dataset.messageId = assistantMessage?.id || "";
 }

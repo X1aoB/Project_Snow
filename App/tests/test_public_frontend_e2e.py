@@ -22,6 +22,18 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOT = APP_ROOT / "public_frontend"
 SHARED_ROOT = APP_ROOT / "frontend" / "shared"
 IMMERSIVE_ROOT = APP_ROOT / "frontend" / "assets" / "immersive"
+COMPLEX_GRAPHEME_SAMPLE = "👨‍👩‍👧‍👦👍🏽🇭🇰e\u0301✈️"
+LONG_IN_PERSON_REPLY = "她望着雪说这一段很长，但会在句界停一下。" * 60 + COMPLEX_GRAPHEME_SAMPLE
+BOUNDARY_IN_PERSON_BLOCKS = [
+    {"type": "speech", "text": "第一句。"},
+    {"type": "speech", "text": "第二句。"},
+    {"type": "speech", "text": "Hello."},
+    {"type": "speech", "text": "World."},
+    {"type": "speech", "text": "第一段"},
+    {"type": "action", "text": "她停下来听雪。"},
+    {"type": "speech", "text": "第二段\n\n第三段"},
+]
+BOUNDARY_IN_PERSON_REPLY = "第一句。第二句。 Hello. World. 第一段\n第二段\n\n第三段"
 
 
 def _browser_launch_kwargs() -> dict[str, str]:
@@ -394,9 +406,10 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                         "display_animated": True,
                     },
                 ] if channel == "text" else [
-                    {"type": "action", "text": "凯茜娅抬起手。"},
                     {"type": "speech", "text": "第一句。"},
+                    {"type": "action", "text": "凯茜娅抬起手。"},
                     {"type": "speech", "text": "第二句。"},
+                    {"type": "action", "text": "凯茜娅轻轻一笑。"},
                 ]
                 delta_packets = []
                 for index, block in enumerate(blocks):
@@ -423,6 +436,37 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 remaining_packets = "".join(
                     (
                         f'event: delta\ndata: {json.dumps({"block_index": 0, "block_type": block_type, "text": sentence_text}, ensure_ascii=False)}\n\n',
+                        'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
+                        f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks}, ensure_ascii=False)}\n\n',
+                    )
+                ).encode()
+            elif payload.get("message") == "长台词字素测试":
+                blocks = [{"type": block_type, "text": LONG_IN_PERSON_REPLY}]
+                remaining_packets = "".join(
+                    (
+                        f'event: delta\ndata: {json.dumps({"block_index": 0, "block_type": block_type, "text": LONG_IN_PERSON_REPLY}, ensure_ascii=False)}\n\n',
+                        'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
+                        f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks}, ensure_ascii=False)}\n\n',
+                    )
+                ).encode()
+            elif payload.get("message") == "边界保真测试":
+                blocks = [dict(block) for block in BOUNDARY_IN_PERSON_BLOCKS]
+                delta_packets = [
+                    "event: delta\ndata: "
+                    + json.dumps(
+                        {
+                            "block_index": index,
+                            "block_type": block["type"],
+                            "text": block["text"],
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                    for index, block in enumerate(blocks)
+                ]
+                remaining_packets = "".join(
+                    (
+                        *delta_packets,
                         'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
                         f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks}, ensure_ascii=False)}\n\n',
                     )
@@ -1239,6 +1283,51 @@ class PublicFrontendE2ETests(TestCase):
             )
             browser.close()
 
+    def test_rendezvous_terminal_arrival_error_keeps_in_person_composer_usable(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+
+            page.locator("#open-movement-shortcuts").click()
+            page.locator('[data-movement-id="commercial_street"]').click()
+            page.locator("#send-movement-invitation").click()
+            page.locator("#timeline .rendezvous-card").wait_for(state="visible")
+
+            PublicFrontendHandler.arrival_mode = "terminal_error"
+            page.locator('[data-rendezvous-go]').click()
+            page.locator("#in-person-surface").wait_for(state="visible")
+            page.locator("#presence-arrival-loading").wait_for(state="hidden")
+            page.locator("#system-banner").get_by_text(
+                "位置切换已完成；她暂时没有作出到场回应，你可以直接开始对话。"
+            ).wait_for(state="visible")
+
+            self.assertNotIn(
+                "模型没有返回可用正文",
+                page.locator("#system-banner").inner_text(),
+            )
+            self.assertEqual(page.locator("#timeline .rendezvous-card").count(), 0)
+            page.wait_for_function(
+                "() => !document.querySelector('#send-message').disabled"
+            )
+            self.assertTrue(page.locator("#message-input").is_enabled())
+            self.assertTrue(page.locator("#toggle-action").is_enabled())
+
+            page.locator("#message-input").fill("我到了，我们继续聊吧。")
+            page.locator("#send-message").click()
+            page.locator("#stage-speech").get_by_text("晚上好，分析员。").wait_for(
+                state="visible"
+            )
+            sent = PublicFrontendHandler.chat_payloads[-1]
+            self.assertEqual(sent.get("communication_channel"), "in_person")
+            self.assertEqual(
+                sent.get("content_blocks"),
+                [{"type": "speech", "text": "我到了，我们继续聊吧。"}],
+            )
+            browser.close()
+
     def test_reload_recovers_persisted_request_id_without_a_second_generation(self) -> None:
         fixed_request_id = "de305d54-75b4-431b-adb2-eb6b9e546014"
         current_local_day = datetime.now(ZoneInfo("Asia/Hong_Kong")).date().isoformat()
@@ -1461,7 +1550,7 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
             browser.close()
 
-    def test_presentation_queue_shows_between_text_and_face_to_face_segments(self) -> None:
+    def test_presentation_queue_segments_text_but_uses_one_face_to_face_surface(self) -> None:
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
             page = browser.new_page()
@@ -1526,31 +1615,198 @@ class PublicFrontendE2ETests(TestCase):
             self.assertTrue(PublicFrontendHandler.chat_stream_started.wait(timeout=5))
             page.locator("#stage-speech .typing-indicator").wait_for(state="visible")
             page.evaluate(
-                """() => {
+                """({firstSentence, actionText}) => {
                     const speech = document.querySelector('#stage-speech');
-                    const trace = {seenFirst: false, sawTypingAfterFirst: false};
+                    const narration = document.querySelector('#stage-narration');
+                    const surface = document.querySelector('#in-person-surface');
+                    const trace = {
+                        actionAt: 0,
+                        firstCharacterAt: 0,
+                        boundaryAt: 0,
+                        resumedAt: 0,
+                        lastRevealedLength: 0,
+                        sawTextRegression: false,
+                        sawTypingAfterFirst: false,
+                        sawTranscriptBubble: false,
+                    };
                     const inspect = () => {
-                        if (speech.textContent.includes('第一句。')) trace.seenFirst = true;
-                        if (trace.seenFirst && speech.querySelector('.typing-indicator')) {
+                        const text = speech.textContent;
+                        if (narration.textContent === actionText && !trace.actionAt) {
+                            trace.actionAt = performance.now();
+                        }
+                        if (text && !speech.querySelector('.typing-indicator') && !trace.firstCharacterAt) {
+                            trace.firstCharacterAt = performance.now();
+                        }
+                        if (text === firstSentence && !trace.boundaryAt) {
+                            trace.boundaryAt = performance.now();
+                        }
+                        if (trace.boundaryAt && text.length > firstSentence.length && !trace.resumedAt) {
+                            trace.resumedAt = performance.now();
+                        }
+                        if (trace.boundaryAt && text.length < trace.lastRevealedLength) {
+                            trace.sawTextRegression = true;
+                        }
+                        if (trace.boundaryAt) trace.lastRevealedLength = Math.max(trace.lastRevealedLength, text.length);
+                        if (trace.boundaryAt && speech.querySelector('.typing-indicator')) {
                             trace.sawTypingAfterFirst = true;
                         }
+                        if (surface.querySelector('.content-speech')) trace.sawTranscriptBubble = true;
                     };
                     window.__facePresentationTrace = trace;
                     window.__facePresentationObserver = new MutationObserver(inspect);
-                    window.__facePresentationObserver.observe(speech, {
+                    window.__facePresentationObserver.observe(surface, {
                         childList: true,
                         characterData: true,
                         subtree: true,
                     });
                     inspect();
-                }"""
+                }""",
+                {
+                    "firstSentence": "第一句。",
+                    "actionText": "凯茜娅抬起手。\n凯茜娅轻轻一笑。",
+                },
             )
             PublicFrontendHandler.chat_stream_release.set()
-            page.locator("#stage-speech").get_by_text("第一句。").wait_for(state="visible")
-            page.wait_for_function("() => window.__facePresentationTrace?.sawTypingAfterFirst === true")
-            page.locator("#stage-speech").get_by_text("第二句。").wait_for(state="visible")
+            page.wait_for_function(
+                "() => document.querySelector('#stage-narration').textContent === '凯茜娅抬起手。\\n凯茜娅轻轻一笑。'"
+            )
+            page.wait_for_function(
+                "() => document.querySelector('#stage-speech').textContent === '第一句。\\n第二句。'"
+            )
             page.evaluate("() => window.__facePresentationObserver?.disconnect()")
-            self.assertEqual(page.locator("#stage-narration").inner_text(), "凯茜娅抬起手。")
+            trace = page.evaluate("() => window.__facePresentationTrace")
+            self.assertGreater(trace["actionAt"], 0, trace)
+            self.assertGreater(trace["firstCharacterAt"], 0, trace)
+            self.assertLessEqual(trace["actionAt"], trace["firstCharacterAt"], trace)
+            self.assertGreater(trace["boundaryAt"], 0, trace)
+            self.assertGreaterEqual(trace["resumedAt"] - trace["boundaryAt"], 250, trace)
+            self.assertFalse(trace["sawTextRegression"], trace)
+            self.assertFalse(trace["sawTypingAfterFirst"], trace)
+            self.assertFalse(trace["sawTranscriptBubble"], trace)
+            self.assertEqual(page.locator("#stage-speech").count(), 1)
+            self.assertEqual(page.locator("#stage-speech .typing-indicator").count(), 0)
+            self.assertEqual(page.locator("#in-person-surface .content-speech").count(), 0)
+            self.assertEqual(page.locator("#stage-speech").get_attribute("aria-busy"), "false")
+            self.assertEqual(
+                page.locator("#stage-narration").inner_text(),
+                "凯茜娅抬起手。\n凯茜娅轻轻一笑。",
+            )
+            page.locator("#message-input").fill("边界保真测试")
+            page.locator("#send-message").click()
+            page.wait_for_function(
+                "expected => document.querySelector('#stage-speech').textContent === expected",
+                arg=BOUNDARY_IN_PERSON_REPLY,
+            )
+            self.assertEqual(page.locator("#stage-speech").inner_text(), BOUNDARY_IN_PERSON_REPLY)
+            self.assertEqual(page.locator("#stage-narration").inner_text(), "她停下来听雪。")
+            browser.close()
+
+    def test_long_face_to_face_reply_is_bounded_and_never_splits_graphemes(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            context = browser.new_context()
+            context.add_init_script(
+                """(() => {
+                    Object.defineProperty(Intl, "Segmenter", {
+                        value: undefined,
+                        configurable: true,
+                    });
+                })();"""
+            )
+            page = context.new_page()
+            page.goto(self.base_url, wait_until="networkidle")
+            self.assertEqual(page.evaluate("() => typeof Intl.Segmenter"), "undefined")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#stage-speech").get_by_text("你来了。").wait_for(state="visible")
+            page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+            page.wait_for_function("() => !document.querySelector('#send-message').disabled")
+
+            PublicFrontendHandler.chat_stream_started = threading.Event()
+            PublicFrontendHandler.chat_stream_release = threading.Event()
+            page.locator("#message-input").fill("长台词字素测试")
+            page.locator("#send-message").click()
+            self.assertTrue(PublicFrontendHandler.chat_stream_started.wait(timeout=5))
+            page.locator("#stage-speech .typing-indicator").wait_for(state="visible")
+            page.evaluate(
+                """({fullText, graphemes}) => {
+                    const speech = document.querySelector("#stage-speech");
+                    const forbidden = new Set();
+                    for (const grapheme of graphemes) {
+                        const start = fullText.indexOf(grapheme);
+                        const points = Array.from(grapheme);
+                        for (let count = 1; count < points.length; count += 1) {
+                            forbidden.add(fullText.slice(0, start) + points.slice(0, count).join(""));
+                        }
+                    }
+                    const trace = {
+                        startedAt: 0,
+                        finishedAt: 0,
+                        mutationCount: 0,
+                        lastLength: 0,
+                        sawRegression: false,
+                        forbiddenHits: [],
+                    };
+                    const inspect = () => {
+                        const text = speech.textContent;
+                        const revealing = speech.classList.contains("is-revealing");
+                        if (revealing && !trace.startedAt) trace.startedAt = performance.now();
+                        if (!trace.startedAt) return;
+                        trace.mutationCount += 1;
+                        if (text.length < trace.lastLength) trace.sawRegression = true;
+                        trace.lastLength = Math.max(trace.lastLength, text.length);
+                        if (forbidden.has(text)) trace.forbiddenHits.push(text.slice(-24));
+                        if (!revealing && text === fullText && !trace.finishedAt) {
+                            trace.finishedAt = performance.now();
+                        }
+                    };
+                    window.__longGraphemeTrace = trace;
+                    window.__longGraphemeObserver = new MutationObserver(inspect);
+                    window.__longGraphemeObserver.observe(speech, {
+                        childList: true,
+                        characterData: true,
+                        subtree: true,
+                    });
+                    inspect();
+                }""",
+                {
+                    "fullText": LONG_IN_PERSON_REPLY,
+                    "graphemes": [
+                        "👨‍👩‍👧‍👦",
+                        "👍🏽",
+                        "🇭🇰",
+                        "e\u0301",
+                        "✈️",
+                    ],
+                },
+            )
+            released_at = page.evaluate("() => performance.now()")
+            PublicFrontendHandler.chat_stream_release.set()
+            page.wait_for_function(
+                "() => !document.querySelector('#send-message').disabled",
+                timeout=12000,
+            )
+            composer_elapsed = page.evaluate("started => performance.now() - started", released_at)
+            page.wait_for_function(
+                "expected => document.querySelector('#stage-speech').textContent === expected",
+                arg=LONG_IN_PERSON_REPLY,
+            )
+            page.evaluate("() => window.__longGraphemeObserver?.disconnect()")
+            trace = page.evaluate("() => window.__longGraphemeTrace")
+
+            self.assertGreater(trace["startedAt"], 0, trace)
+            self.assertGreater(trace["finishedAt"], trace["startedAt"], trace)
+            self.assertLess(trace["finishedAt"] - trace["startedAt"], 6500, trace)
+            self.assertLess(composer_elapsed, 8500)
+            self.assertLess(trace["mutationCount"], 200, trace)
+            self.assertFalse(trace["sawRegression"], trace)
+            self.assertEqual(trace["forbiddenHits"], [], trace)
+            self.assertEqual(page.locator("#stage-speech").inner_text(), LONG_IN_PERSON_REPLY)
+            self.assertEqual(page.locator("#stage-speech").get_attribute("aria-busy"), "false")
+            self.assertFalse(page.locator("#stage-speech").evaluate("node => node.classList.contains('is-revealing')"))
+            context.close()
             browser.close()
 
     def test_mobile_contacts_scroll_and_text_sticker_selection(self) -> None:

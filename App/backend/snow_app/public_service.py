@@ -74,6 +74,10 @@ class CharacterUnavailable(RuntimeError):
     pass
 
 
+_PUBLIC_CONTENT_CHARACTER_LIMIT = 1200
+_PUBLIC_JSON_CANDIDATE_LIMIT = 16
+
+
 # A locally generated answer is exposed only after the MVP has run the same
 # final hard-guard pass as a provider answer.  Recoverable empty/malformed
 # envelopes therefore no longer become a terminal public error merely because
@@ -96,6 +100,7 @@ _PUBLIC_NORMALIZATION_ADJUSTMENTS = frozenset({
     "address_alias_normalized",
     "relationship_address_normalized",
     "unsupported_quote_sanitized",
+    "public_punctuation_normalized",
 })
 
 
@@ -192,7 +197,7 @@ def _history_turns(history: list[HistoryTurn]) -> list[dict[str, Any]]:
 def _trim_content_blocks(
     blocks: list[dict[str, Any]],
     *,
-    limit: int = 1200,
+    limit: int = _PUBLIC_CONTENT_CHARACTER_LIMIT,
 ) -> tuple[list[dict[str, Any]], bool]:
     remaining = limit
     trimmed: list[dict[str, str]] = []
@@ -256,6 +261,170 @@ _STICKER_FILENAME_PATTERN = re.compile(
     r"(?<![\w-])[^\s，。！？!?；;（）()\[\]【】]{1,80}\.(?:gif|png|jpe?g|webp)(?![\w-])",
     re.IGNORECASE,
 )
+
+_PUBLIC_LITERAL_PATTERN = re.compile(
+    r"```.*?(?:```|\Z)"
+    r"|~~~.*?(?:~~~|\Z)"
+    r"|`[^`\r\n]*`"
+    r"|(?:https?|ftp)://[^\s<>\"']+"
+    r"|\bwww\.[^\s<>\"']+"
+    r"|\b(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,}"
+    r"(?::\d{1,5})?(?:[/?#][^\s<>\"']*)?"
+    r"|(?<![A-Z0-9_])(?:\.\.?/|/|\?[A-Z0-9_.~-]+=)[^\s<>\"']+"
+    r"|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_PUBLIC_CODE_LINE_PATTERN = re.compile(
+    r"(?:^\s*(?:>>>|PS>|\$\s|(?:def|class|return|import|from|const|let|var|"
+    r"function|SELECT|INSERT|UPDATE|DELETE|CREATE)\b|[A-Za-z_$][\w.$-]*\s*(?:=|:=)|"
+    r"</?[A-Za-z][^>]*>))"
+    r"|(?:\b[A-Za-z_$][\w.$]*\s*\([^()\r\n]*[\"'][^()\r\n]*\))",
+    re.IGNORECASE,
+)
+_PUBLIC_ASCII_PUNCTUATION = {
+    ",": "，",
+    "?": "？",
+    "!": "！",
+    ":": "：",
+    ";": "；",
+}
+_PUBLIC_LEFT_CONTEXT_SKIP = frozenset(" \t\r\n\"'”’）)]】》」』?!？！")
+_PUBLIC_RIGHT_CONTEXT_SKIP = frozenset(" \t\r\n\"'“‘（([【《「『")
+_PUBLIC_SENTENCE_TRAIL_SKIP = frozenset(
+    " \t\r\n\"'”’）)]】》」』."
+)
+
+
+def _is_han_character(value: str | None) -> bool:
+    if not value:
+        return False
+    point = ord(value)
+    return (
+        point == 0x3007
+        or 0x3400 <= point <= 0x4DBF
+        or 0x4E00 <= point <= 0x9FFF
+        or 0xF900 <= point <= 0xFAFF
+        or 0x20000 <= point <= 0x3134F
+    )
+
+
+def _is_emoji_symbol(value: str | None) -> bool:
+    if not value:
+        return False
+    point = ord(value)
+    return (
+        0x2600 <= point <= 0x27BF
+        or 0x1F000 <= point <= 0x1FAFF
+    )
+
+
+def _normalize_public_immersive_punctuation(value: str) -> str:
+    """Use Chinese punctuation in prose while preserving literal payloads.
+
+    Public model output occasionally mixes an ASCII comma or question mark
+    into otherwise Chinese dialogue. The replacement is deliberately
+    contextual: comma/colon/semicolon require Han text on both sides, while
+    question/exclamation runs may also terminate a Han sentence. URLs,
+    emails, Markdown code, code-like lines, and valid embedded JSON are masked
+    before that decision so display cleanup cannot mutate literal data.
+    """
+
+    original = str(value or "")
+    text = original[:_PUBLIC_CONTENT_CHARACTER_LIMIT]
+    suffix = original[_PUBLIC_CONTENT_CHARACTER_LIMIT:]
+    if not text or not any(mark in text for mark in _PUBLIC_ASCII_PUNCTUATION):
+        return original
+
+    stripped = text.strip()
+    if stripped and not suffix:
+        try:
+            json.loads(stripped)
+        except (TypeError, ValueError, RecursionError):
+            pass
+        else:
+            return original
+
+    protected = bytearray(len(text))
+
+    def protect(start: int, end: int) -> None:
+        protected[start:end] = b"\x01" * max(0, end - start)
+
+    for match in _PUBLIC_LITERAL_PATTERN.finditer(text):
+        protect(match.start(), match.end())
+
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        line_body = line.rstrip("\r\n")
+        if _PUBLIC_CODE_LINE_PATTERN.search(line_body):
+            protect(offset, offset + len(line_body))
+        offset += len(line)
+
+    decoder = json.JSONDecoder()
+    json_candidates = 0
+    for match in re.finditer(r"[\[{]", text):
+        start = match.start()
+        if protected[start]:
+            continue
+        if start and text[start - 1] in "[{":
+            continue
+        json_candidates += 1
+        if json_candidates > _PUBLIC_JSON_CANDIDATE_LIMIT:
+            break
+        try:
+            decoded, length = decoder.raw_decode(text[start:])
+        except RecursionError:
+            break
+        except (TypeError, ValueError):
+            continue
+        if isinstance(decoded, (dict, list)):
+            protect(start, start + length)
+
+    def context_left(index: int) -> str | None:
+        cursor = index - 1
+        while cursor >= 0 and text[cursor] in _PUBLIC_LEFT_CONTEXT_SKIP:
+            cursor -= 1
+        return text[cursor] if cursor >= 0 else None
+
+    def context_right(index: int, *, sentence_end: bool = False) -> str | None:
+        skip = _PUBLIC_SENTENCE_TRAIL_SKIP if sentence_end else _PUBLIC_RIGHT_CONTEXT_SKIP
+        cursor = index
+        while cursor < len(text) and text[cursor] in skip:
+            cursor += 1
+        return text[cursor] if cursor < len(text) else None
+
+    normalized = list(text)
+    index = 0
+    while index < len(text):
+        mark = text[index]
+        if protected[index] or mark not in _PUBLIC_ASCII_PUNCTUATION:
+            index += 1
+            continue
+        if mark in "?!":
+            run_end = index
+            while (
+                run_end < len(text)
+                and not protected[run_end]
+                and text[run_end] in "?!"
+            ):
+                run_end += 1
+            left = context_left(index)
+            right = context_right(run_end, sentence_end=True)
+            if _is_han_character(left) and (
+                right is None
+                or _is_han_character(right)
+                or _is_emoji_symbol(right)
+                or right in ",;:，。！？；：…"
+            ):
+                for cursor in range(index, run_end):
+                    normalized[cursor] = _PUBLIC_ASCII_PUNCTUATION[text[cursor]]
+            index = run_end
+            continue
+        if _is_han_character(context_left(index)) and _is_han_character(
+            context_right(index + 1)
+        ):
+            normalized[index] = _PUBLIC_ASCII_PUNCTUATION[mark]
+        index += 1
+    return "".join(normalized) + suffix
 
 
 def _strip_sticker_filenames(value: str) -> str:
@@ -1763,6 +1932,7 @@ class PublicChatService:
         blocks, answer, truncated, safety_category = self._public_generation_content(
             result,
             "in_person",
+            response_adjustments=adjustments,
         )
         if not any(block.get("type") == "speech" for block in blocks):
             return self.failed_presence_arrival(
@@ -2095,6 +2265,7 @@ class PublicChatService:
                 sticker_candidates=sticker_candidates,
                 explicit_sticker=_contains_any(request.message, _STICKER_EXPLICIT_TERMS),
                 sticker_diagnostics=sticker_diagnostics,
+                response_adjustments=adjustments,
             )
             if not content_blocks or (
                 not answer and not any(block.get("type") == "sticker" for block in content_blocks)
@@ -2146,7 +2317,12 @@ class PublicChatService:
             else:
                 generation_outcome = "valid_initial"
             validation_disposition = str(result.get("validation_disposition") or "")
-            if validation_disposition not in {"accepted", "normalized", "safe_fallback"}:
+            if (
+                validation_disposition == "accepted"
+                and set(adjustments).intersection(_PUBLIC_NORMALIZATION_ADJUSTMENTS)
+            ):
+                validation_disposition = "normalized"
+            elif validation_disposition not in {"accepted", "normalized", "safe_fallback"}:
                 validation_disposition = (
                     "safe_fallback"
                     if activity_fallback or bool(set(adjustments).difference(_PUBLIC_NORMALIZATION_ADJUSTMENTS | _PUBLIC_REWRITE_ADJUSTMENTS))
@@ -2282,6 +2458,7 @@ class PublicChatService:
         sticker_candidates: list[dict[str, Any]] | None = None,
         explicit_sticker: bool = False,
         sticker_diagnostics: dict[str, Any] | None = None,
+        response_adjustments: list[str] | None = None,
     ) -> tuple[list[dict[str, str]], str, bool, str | None]:
         allowed = {"message", "sticker"} if communication_channel == "text" else {"speech", "action"}
         text_blocks: list[dict[str, str]] = []
@@ -2375,6 +2552,23 @@ class PublicChatService:
             default_type = "message" if communication_channel == "text" else "speech"
             raw_blocks = [{"type": default_type, "text": safe_answer}]
         trimmed, truncated = _trim_content_blocks(raw_blocks)
+        # Normalize only final public display prose. Structured parsing and
+        # output security run against the provider's original bytes; trimming
+        # first keeps this cleanup bounded and gives blocks and answer the same
+        # normalized text.
+        punctuation_normalized = False
+        for block in trimmed:
+            if block.get("type") != "sticker" and str(block.get("text") or "").strip():
+                original_text = str(block["text"])
+                normalized_text = _normalize_public_immersive_punctuation(original_text)
+                block["text"] = normalized_text
+                punctuation_normalized = punctuation_normalized or normalized_text != original_text
+        if (
+            punctuation_normalized
+            and response_adjustments is not None
+            and "public_punctuation_normalized" not in response_adjustments
+        ):
+            response_adjustments.append("public_punctuation_normalized")
         # Enforce the product order even if a provider returned sticker first.
         trimmed = [
             *[block for block in trimmed if block.get("type") != "sticker"],
