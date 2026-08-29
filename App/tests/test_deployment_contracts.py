@@ -2924,6 +2924,8 @@ require_runner_controller_binding
             embedding_job.index("Embedding container 512-dimension inference check"),
             embedding_job.index("Enforce embedding vulnerability gate"),
         )
+        self.assertIn("steps.embedding-build.outcome == 'success'", embedding_job)
+        self.assertIn("steps.embedding-scan.outcome == 'success'", embedding_job)
 
         self.assertIn("Nightly application health and regression checks", workflow)
         self.assertIn("production-health:\n", workflow)
@@ -2941,6 +2943,11 @@ require_runner_controller_binding
         self.assertIn("Embedding container 512-dimension inference check", nightly)
         self.assertIn("Enforce public image vulnerability gate", nightly)
         self.assertIn("Enforce embedding image vulnerability gate", nightly)
+        self.assertIn("id: public-build", nightly)
+        self.assertIn("id: public-scan", nightly)
+        self.assertIn("id: embedding-build", nightly)
+        self.assertIn("id: embedding-scan", nightly)
+        self.assertEqual(nightly.count("always() && !cancelled()"), 4)
         self.assertNotIn("packages: write", nightly)
         self.assertNotIn("release_manifest.py", nightly)
         self.assertNotIn("project-snow-release promote", nightly)

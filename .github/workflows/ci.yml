@@ -238,7 +238,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - id: public-build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: App
           file: App/infra/public-api.Dockerfile
@@ -247,7 +248,8 @@ jobs:
           tags: project-snow-public:ci
           cache-from: type=gha,scope=public-api
           cache-to: type=gha,mode=max,scope=public-api
-      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      - id: public-scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: project-snow-public:ci
           format: json
@@ -256,9 +258,11 @@ jobs:
           scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-      - run: python App/scripts/report_trivy_findings.py trivy-application.json
-      - name: Container live check
+      - name: Public container live check
+        if: ${{ always() && !cancelled() && steps.public-build.outcome == 'success' }}
         run: |
+          cleanup() { docker rm -f snow-public >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
           docker run -d --name snow-public -p 18000:8000 \
             -e PUBLIC_ALLOW_INSECURE_DEV=true \
             -e PUBLIC_AUTO_CREATE_SCHEMA=true \
@@ -273,6 +277,9 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18000/public/v1/health/live && exit 0; sleep 1; done
           docker logs snow-public
           exit 1
+      - name: Enforce public image vulnerability gate
+        if: ${{ always() && !cancelled() && steps.public-scan.outcome == 'success' }}
+        run: python App/scripts/report_trivy_findings.py trivy-application.json
 
   embedding-image:
     if: >-
@@ -284,7 +291,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - id: embedding-build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: App
           file: App/infra/embedding.Dockerfile
@@ -294,7 +302,8 @@ jobs:
           no-cache: ${{ github.event_name == 'workflow_dispatch' }}
           cache-from: type=gha,scope=embedding
           cache-to: type=gha,mode=max,scope=embedding
-      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      - id: embedding-scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: project-snow-embedding:ci
           format: json
@@ -304,6 +313,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
       - name: Embedding container 512-dimension inference check
+        if: ${{ always() && !cancelled() && steps.embedding-build.outcome == 'success' }}
         run: |
           cleanup() { docker rm -f snow-embedding >/dev/null 2>&1 || true; }
           trap cleanup EXIT
@@ -326,6 +336,7 @@ jobs:
             http://127.0.0.1:18001/embed \
             | python -c 'import json, math, sys; payload = json.load(sys.stdin); vectors = payload["vectors"]; assert len(vectors) == 1 and len(vectors[0]) == 512; assert all(math.isfinite(value) for value in vectors[0])'
       - name: Enforce embedding vulnerability gate
+        if: ${{ always() && !cancelled() && steps.embedding-scan.outcome == 'success' }}
         run: python App/scripts/report_trivy_findings.py trivy-embedding.json
 
   production-health:
