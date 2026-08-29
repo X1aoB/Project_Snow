@@ -197,6 +197,8 @@ textarea { resize: none; }
 .stage-speech { min-height: 58px; padding: 10px 0 6px; color: #29485b; font-size: 1rem; line-height: 1.72; white-space: pre-wrap; }
 .stage-speech.is-typing { display: flex; align-items: center; }
 .stage-speech.is-typing .typing-indicator-bubble { width: 68px; height: 40px; border-radius: 16px 16px 16px 6px; background: #f8fbfd; }
+.stage-speech.is-revealing::after { content: ""; display: inline-block; width: 1px; height: 1.05em; margin-left: 2px; vertical-align: -.12em; background: currentColor; animation: stage-typewriter-caret 760ms steps(1,end) infinite; }
+@keyframes stage-typewriter-caret { 50% { opacity: 0; } }
 .stage-speech p { margin: 0; }
 .restore-stage-ui { position: absolute; z-index: 40; right: 14px; bottom: 14px; min-height: 40px; padding: 8px 12px; border: 1px solid #a7bdca; border-radius: 10px; color: #3f6175; background: rgba(250,253,254,.92); }
 .in-person-surface.ui-hidden .scene-hud, .in-person-surface.ui-hidden .stage-dialogue, .app-shell[data-channel="in_person"]:has(.in-person-surface.ui-hidden) .composer, .in-person-surface.ui-hidden .stage-narration { display: none !important; }
@@ -380,4 +382,5 @@ html.privacy-root body.privacy-page { height: auto; min-height: 100%; overflow: 
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
   .typing-dot { animation: none !important; opacity: .72; translate: 0 0; }
   .sidebar-toggle-icon { transition: none; }
+  .stage-speech.is-revealing::after { animation: none !important; }
 }

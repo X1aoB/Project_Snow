@@ -1194,7 +1194,13 @@ class PublicAPITests(TestCase):
         with patch.object(
             self.app.state.chat_service.mvp,
             "chat",
-            return_value={"answer": "你好，达令。", "retrieval": {}, "usage": {}, "response_adjustments": []},
+            return_value={
+                "answer": "你好,达令?",
+                "retrieval": {},
+                "usage": {},
+                "validation_disposition": "accepted",
+                "response_adjustments": [],
+            },
         ):
             chat_response = self.client.post(
                 "/public/v1/chat/stream",
@@ -1202,6 +1208,8 @@ class PublicAPITests(TestCase):
                 json=chat_payload,
             )
         self.assertEqual(chat_response.status_code, 200)
+        self.assertIn("你好，达令？", chat_response.text)
+        self.assertIn('"validation_disposition":"normalized"', chat_response.text)
         feedback_response = self.client.post(
             "/public/v1/feedback",
             headers={"Origin": "http://testserver"},
@@ -1215,7 +1223,11 @@ class PublicAPITests(TestCase):
         self.assertEqual(feedback_response.status_code, 200)
         context = self.store.feedback_rows()[0]["context"]
         self.assertEqual(context["chat_request_id"], chat_request_id)
-        self.assertEqual(context["generation_outcome"], "valid_initial")
+        self.assertEqual(context["generation_outcome"], "normalized")
+        self.assertEqual(
+            context["response_adjustments"],
+            ["public_punctuation_normalized"],
+        )
         self.assertIn("total", context["generation_diagnostics"]["timings_ms"])
         self.assertIn("model_calls", context["generation_diagnostics"]["timings_ms"])
         self.assertNotIn("sk-test-never-log-this", json.dumps(context, ensure_ascii=False))
@@ -1732,10 +1744,10 @@ class PublicAPITests(TestCase):
             "state_package": "",
         }
         generated = {
-            "answer": "她抬眼看向你。\n你来了。",
+            "answer": "她抬眼看向你,轻轻一笑。\n你来了?",
             "content_blocks": [
-                {"type": "action", "text": "她抬眼看向你。"},
-                {"type": "speech", "text": "你来了。"},
+                {"type": "action", "text": "她抬眼看向你,轻轻一笑。"},
+                {"type": "speech", "text": "你来了?"},
             ],
             "response_adjustments": [],
             "usage": {"total_tokens": 12},
@@ -1755,6 +1767,11 @@ class PublicAPITests(TestCase):
         self.assertTrue(response.json()["model_called"])
         self.assertEqual(response.json()["reaction"]["content_blocks"][0]["type"], "action")
         self.assertEqual(response.json()["reaction"]["content_blocks"][1]["type"], "speech")
+        self.assertEqual(
+            response.json()["reaction"]["answer"],
+            "她抬眼看向你，轻轻一笑。\n你来了？",
+        )
+        self.assertEqual(response.json()["diagnostics"]["generation_class"], "normalized")
         self.assertEqual(chat.call_count, 1)
         decision = chat.call_args.kwargs["thinking_decision"]
         self.assertEqual(decision["max_provider_http_calls"], 2)

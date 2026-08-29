@@ -3330,4 +3330,4 @@ seal_configuration_snapshot "$seal_root"
         )
         self.assertEqual(workflow.count("google-chrome --version"), 2)
         self.assertNotIn("playwright.chromium.launch()", frontend_tests)
-        self.assertEqual(frontend_tests.count("_launch_browser(playwright)"), 19)
+        self.assertEqual(frontend_tests.count("_launch_browser(playwright)"), 21)
