@@ -225,6 +225,11 @@ __marimo__/
 /App/runtime/
 /App/runtime_preview_*/
 
+# Sanitized persona bundles are portable integration artifacts, not source.
+# Real exports may contain redistributable public corpus excerpts and stay local.
+/persona-bundles/
+*.persona-bundle.zip
+
 # Wiki-derived avatar media is retained only for local, non-commercial testing.
 # The client has a text-avatar fallback, so do not redistribute these files in
 # the GPL source repository until their licence compatibility is confirmed.

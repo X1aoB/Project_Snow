@@ -2491,6 +2491,7 @@ exit 99
             git_run("config", "user.email", "contracts@example.invalid")
             git_run("config", "user.name", "Deployment Contracts")
             git_run("config", "core.autocrlf", "false")
+            git_run("config", "commit.gpgsign", "false")
             runner_path = repository / "App" / "ops" / "project-snow-release"
             runner_path.parent.mkdir(parents=True)
             predecessor_payload = b"#!/bin/sh\necho runner-n\n"
@@ -2652,6 +2653,7 @@ resolve_installed_runner_controller "$3" "$4" "$5"
             git_run("config", "user.email", "contracts@example.invalid")
             git_run("config", "user.name", "Deployment Contracts")
             git_run("config", "core.autocrlf", "false")
+            git_run("config", "commit.gpgsign", "false")
             tracked_runner = repository / "App" / "ops" / "project-snow-release"
             tracked_runner.parent.mkdir(parents=True)
             runner_payload = b"#!/bin/sh\necho bound-runner\n"

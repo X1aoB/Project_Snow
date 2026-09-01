@@ -71,14 +71,14 @@ after that reply, while an explicit current-state declaration such as “我现�
 - The Electron application is a sandboxed web shell with no Node or filesystem
   API exposed to page content.
 
-## v0.5.0 dual-surface multimodal Agent boundary
+## v0.5.0 immersive and legacy Agent boundary
 
-The browser product has a stable selector at `/`, a deep ice-blue immersive
-surface at `/immersive/`, a white/cobalt Agent surface at `/assistant/`, and a
-fixed-sidebar internal workspace at `/workspace/`. Immersive and assistant
-messages are queried and summarized separately. Only verified relationship,
-address, costume context and world state are shared; task traces and ordinary
-technical conversation never enter immersive generation context.
+The browser product has a stable entry page at `/`, a deep ice-blue immersive
+surface at `/immersive/`, and a fixed-sidebar internal workspace at
+`/workspace/`. The former standalone Agent surface has been removed. Historical
+assistant records and the legacy AgentRuntime remain isolated debugging data;
+task traces and ordinary technical conversation never enter immersive
+generation context.
 
 Provider and model configuration lives in `runtime/chat/agent.sqlite3`; secrets
 do not. The database stores an opaque credential reference while keyring uses

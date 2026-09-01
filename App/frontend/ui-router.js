@@ -1,14 +1,13 @@
-const SURFACES = new Set(["landing", "immersive", "assistant"]);
+const SURFACES = new Set(["landing", "immersive"]);
 
 export function surfaceFromPath(pathname = window.location.pathname) {
   const path = String(pathname || "/").replace(/\/+$/, "") || "/";
   if (path === "/immersive") return "immersive";
-  if (path === "/assistant") return "assistant";
   return "landing";
 }
 
-export function modeForSurface(surface) {
-  return surface === "assistant" ? "assistant" : "immersive";
+export function modeForSurface(_surface) {
+  return "immersive";
 }
 
 export function pathForSurface(surface) {

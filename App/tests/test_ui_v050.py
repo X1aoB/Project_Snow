@@ -15,11 +15,11 @@ class V050SurfaceTests(unittest.TestCase):
         application = (APP_ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
         self.assertIn("v0.5.0 · 本地测试版", html)
         self.assertIn('href="/immersive/"', html)
-        self.assertIn('href="/assistant/"', html)
+        self.assertNotIn('href="/assistant/"', html)
         self.assertIn('type="module" src="/app.js"', html)
         self.assertIn('rel="stylesheet" href="/styles.css"', html)
         self.assertIn('path === "/immersive"', router)
-        self.assertIn('path === "/assistant"', router)
+        self.assertNotIn('path === "/assistant"', router)
         self.assertNotIn("她们都在这里", html)
         self.assertNotIn("landing-character-marks", html)
         self.assertNotIn("character?.conversation ||", application)
@@ -51,19 +51,16 @@ class V050SurfaceTests(unittest.TestCase):
             application,
         )
 
-    def test_assistant_surface_is_a_codex_plugin_management_center(self) -> None:
+    def test_external_persona_plugin_is_not_a_project_snow_surface(self) -> None:
         html = (APP_ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
         application = (APP_ROOT / "frontend" / "app.js").read_text(encoding="utf-8")
-        self.assertIn('id="plugin-center"', html)
-        self.assertIn('id="plugin-character"', html)
-        self.assertIn('id="pair-codex"', html)
-        self.assertIn('id="revoke-codex"', html)
-        self.assertIn('id="test-persona-snapshot"', html)
-        self.assertIn("codex plugin add snow-role-assistant@personal", html)
+        self.assertNotIn('id="plugin-center"', html)
+        self.assertNotIn('id="plugin-character"', html)
+        self.assertNotIn('id="pair-codex"', html)
+        self.assertNotIn("codex plugin add", html)
         self.assertIn('byId("chat-app").hidden = state.surface !== "immersive"', application)
-        self.assertIn('byId("plugin-center").hidden = state.surface !== "assistant"', application)
-        self.assertIn("/api/v1/persona/pairings", application)
-        self.assertIn("/api/v1/persona/management/snapshot/", application)
+        self.assertNotIn("/api/v1/persona/", application)
+        self.assertNotIn("project_snow:plugin_", application)
 
     def test_immersive_surface_has_distinct_text_and_in_person_renderers(self) -> None:
         html = (APP_ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
@@ -112,11 +109,7 @@ class V050SurfaceTests(unittest.TestCase):
         builder = (APP_ROOT / "scripts" / "build_character_avatars.py").read_text(
             encoding="utf-8"
         )
-        manifest = json.loads(
-            (APP_ROOT / "frontend" / "assets" / "characters" / "avatars.json").read_text(
-                encoding="utf-8"
-            )
-        )
+        manifest_path = APP_ROOT / "frontend" / "assets" / "characters" / "avatars.json"
         self.assertIn('"stage_src": avatar.get("stage_src")', service)
         self.assertIn('"stage_src_deprecated": True', service)
         self.assertIn('"portrait_kind": portrait_kind', service)
@@ -124,9 +117,16 @@ class V050SurfaceTests(unittest.TestCase):
         self.assertIn('"publishable": avatar.get(', service)
         self.assertIn('"schema_version": "project-snow-avatar-1.2"', builder)
         self.assertIn('"stage_focus_x": 50', builder)
-        self.assertEqual(manifest["schema_version"], "project-snow-avatar-1.2")
-        self.assertTrue(all(item["portrait_kind"] in {"headshot", "full_body"} for item in manifest["characters"]))
-        self.assertTrue(any(item["portrait_kind"] == "full_body" for item in manifest["characters"]))
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["schema_version"], "project-snow-avatar-1.2")
+            self.assertTrue(all(item["portrait_kind"] in {"headshot", "full_body"} for item in manifest["characters"]))
+            self.assertTrue(any(item["portrait_kind"] == "full_body" for item in manifest["characters"]))
+        else:
+            # Clean GPL checkouts intentionally omit Wiki-derived avatar media.
+            # The text-avatar path is the required fail-safe in that state.
+            ui_core = (APP_ROOT / "frontend" / "ui-core.js").read_text(encoding="utf-8")
+            self.assertIn('name.slice(0, 1) || "?"', ui_core)
 
     def test_immersive_visual_novel_assets_cover_all_scene_keys(self) -> None:
         scene_root = APP_ROOT / "frontend" / "assets" / "immersive" / "scenes"

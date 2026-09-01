@@ -97,7 +97,6 @@ def main() -> None:
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), WorkspaceHandler)
     print(f"Project Snow chat client: http://127.0.0.1:{args.port}/")
     print(f"Project Snow immersive client: http://127.0.0.1:{args.port}/immersive/")
-    print(f"Project Snow assistant client: http://127.0.0.1:{args.port}/assistant/")
     print(f"Project Snow evidence workspace: http://127.0.0.1:{args.port}/workspace/")
     server.serve_forever()
 

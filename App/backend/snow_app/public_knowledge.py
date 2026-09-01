@@ -2,7 +2,7 @@
 
 The immutable source corpus under ``Data/`` remains read-only.  This module
 loads a small reviewed release artifact used by immersive generation and by
-the read-only Persona Gateway.  User conversations cannot mutate this data.
+portable public-data exports.  User conversations cannot mutate this data.
 """
 
 from __future__ import annotations

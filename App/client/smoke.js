@@ -6,7 +6,6 @@ const path = require("path");
 
 const LANDING_URL = "http://127.0.0.1:8080/";
 const IMMERSIVE_URL = "http://127.0.0.1:8080/immersive/";
-const ASSISTANT_URL = "http://127.0.0.1:8080/assistant/";
 const WORKSPACE_URL = "http://127.0.0.1:8080/workspace/";
 const SCREENSHOT_PATH = path.resolve(__dirname, "..", "runtime", "screenshots", "electron-mobile.png");
 const FACE_SCREENSHOT_PATH = path.resolve(__dirname, "..", "runtime", "screenshots", "electron-face-mobile.png");
@@ -31,25 +30,13 @@ async function waitForCharacters(window) {
 async function waitForLanding(window) {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const ready = await window.webContents.executeJavaScript(
-      "document.querySelectorAll('.experience-card').length === 2 && document.body.innerText.includes('v0.5.0')",
+      "document.querySelectorAll('.experience-card').length === 1 && document.body.innerText.includes('v0.5.0')",
       true,
     );
     if (ready) return;
     await delay(100);
   }
   throw new Error("Landing bootstrap did not finish.");
-}
-
-async function waitForPluginCenter(window) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const ready = await window.webContents.executeJavaScript(
-      "document.querySelectorAll('#plugin-character option').length === 23 && /人格网关|Codex 已配对/.test(document.getElementById('plugin-pairing-status').innerText)",
-      true,
-    );
-    if (ready) return;
-    await delay(100);
-  }
-  throw new Error("Plugin management center did not finish loading.");
 }
 
 async function waitForChatReady(window) {
@@ -104,18 +91,6 @@ async function run() {
     entries: document.querySelectorAll('.experience-card').length,
     versionVisible: document.body.innerText.includes('v0.5.0 · 本地测试版'),
     rosterRemoved: !document.body.innerText.includes('她们都在这里')
-  }))()`, true);
-
-  await window.loadURL(ASSISTANT_URL);
-  await waitForPluginCenter(window);
-  const assistant = await window.webContents.executeJavaScript(`(() => ({
-    surface: document.body.dataset.surface,
-    pluginVisible: !document.getElementById('plugin-center').hidden,
-    chatHidden: document.getElementById('chat-app').hidden,
-    characterOptions: document.querySelectorAll('#plugin-character option').length,
-    gatewayReady: /人格网关|Codex 已配对/.test(document.getElementById('plugin-pairing-status').innerText),
-    pairingControls: Boolean(document.getElementById('pair-codex') && document.getElementById('revoke-codex') && document.getElementById('test-persona-snapshot')),
-    horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
   }))()`, true);
 
   await window.loadURL(IMMERSIVE_URL);
@@ -270,18 +245,11 @@ async function run() {
     true,
   );
 
-  const result = { landing, assistant, immersive: metrics, faceMetrics, desktopFace, workspaceReady, consoleErrors, screenshots: [SCREENSHOT_PATH, FACE_SCREENSHOT_PATH, DESKTOP_SCREENSHOT_PATH] };
+  const result = { landing, immersive: metrics, faceMetrics, desktopFace, workspaceReady, consoleErrors, screenshots: [SCREENSHOT_PATH, FACE_SCREENSHOT_PATH, DESKTOP_SCREENSHOT_PATH] };
   const passed = landing.surface === "landing"
-    && landing.entries === 2
+    && landing.entries === 1
     && landing.versionVisible
     && landing.rosterRemoved
-    && assistant.surface === "assistant"
-    && assistant.pluginVisible
-    && assistant.chatHidden
-    && assistant.characterOptions === 23
-    && assistant.gatewayReady
-    && assistant.pairingControls
-    && !assistant.horizontalOverflow
     && metrics.mobileMedia
     && metrics.characterCount === 22
     && metrics.surface === "immersive"

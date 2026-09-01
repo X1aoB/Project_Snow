@@ -21,17 +21,16 @@ Production deployment, graph quarantine, data release, backups and the second-ap
 运行时检索索引，并提供 22 名角色的聊天测试客户端、证据工作台和安全的 Electron
 桌面壳。`Data/` 保持只读；所有可再生成或私密的产物均写入 `App/runtime/`。
 
-当前应用版本为 `v0.5.0`。`/` 是固定的体验选择页，`/immersive/` 与 `/assistant/` 分别保存
-角色选择、草稿和模式内历史；`/workspace/` 使用固定侧栏承载证据、审核、反馈与对话调试。角色助手
-保留 Provider Registry、多模态附件、STT/TTS、质量优先路由、持久化 Agent 状态机、授权目录工具、
-风险审批和可下载 Artifact；沉浸式模式只获得多模态理解，不开放系统工具或技术状态。
+当前本地应用版本为 `v0.5.0`。`/` 是固定入口页，正式聊天界面位于 `/immersive/`；
+`/workspace/` 使用固定侧栏承载证据、审核、反馈与对话调试。旧的通用 AgentRuntime、Provider
+Registry、多模态附件与审批状态机只保留为内部调试基线，不再拥有单独的正式产品入口。
 
 ## 目录
 
 ```text
 App/
 ├── backend/       FastAPI API、检索、会话与媒介规则
-├── frontend/      入口页、沉浸式/助手客户端和工作台
+├── frontend/      入口页、沉浸式客户端和工作台
 ├── pipelines/     湖仓、检索、人格资料、图谱与审核管线
 ├── client/        不含凭据的 Electron Windows 桌面壳
 ├── docs/          数据契约、架构与审核说明
@@ -113,6 +112,16 @@ python -m pipelines.build_vector_index
 
 上述命令只会写入 `App/runtime/`，不会改写 `Data/`、正式图谱边或原始资料。
 
+如需把审核后的公开人格资料交给独立集成端，可导出版本化、带 SHA-256 的脱敏 bundle：
+
+```powershell
+python -m backend.snow_app.persona_export `
+  --output ..\persona-bundles\project-snow.persona-bundle.zip
+```
+
+导出器不会打开私聊、用户事实或 Agent 数据库，也不会复制原始 `Data/` 或本机路径。完整边界与
+独立导入端见 [Snow Role Assistant](https://github.com/X1aoB/Snow_Role_Assistant)。
+
 ## 启动浏览器客户端
 
 先启动 API：
@@ -135,14 +144,10 @@ python scripts/dev_server.py
 - 证据、审核、反馈收件箱和对话调试工作台：<http://127.0.0.1:8080/workspace/>
 - API 健康检查：<http://127.0.0.1:8080/health>
 
-聊天客户端提供沉浸式陪伴/角色助手、面对面/文字通讯的正交切换。完整显示历史、
-当前场景和共享关系前提仅保存在本机 `runtime/chat/conversations.sqlite3`；生成时仅使用
-受限的当前模式历史和明确共享上下文。普通助手对话开放受后端白名单控制的只读工具：
-`get_current_time`、`calculator`、`web_search`、`research_current_info`、`fetch_web_page` 和
-`get_market_history`。天气、突发事件、运营状态和精确日线行情可以自动触发对应的只读查询；
-联网结果只作为临时外部资料，
-不会写入 `Data/`、人格档案或图谱。助手回复可以显示角色化的“工作摘要/步骤”，这是已经执行的
-工具、证据范围和结论依据，不是模型隐藏思维链；沉浸式模式不暴露工具或内部系统概念。
+聊天客户端提供沉浸式陪伴，并在面对面/文字通讯之间切换。完整显示历史、当前场景和共享关系前提
+仅保存在本机 `runtime/chat/conversations.sqlite3`；生成时仅使用受限历史和明确共享上下文。
+正式界面不暴露工具、Agent 状态或内部系统概念。旧的只读工具和 Agent 调试能力仍可在内部工作台
+检查，但联网结果不会写入 `Data/`、人格档案或图谱。
 
 在设置中新增 Provider 后，可以为会话选择已探测模型，也可勾选“仅本轮”。图片、文档和录音从
 输入区上传到 `runtime/chat/attachments/` 并按 SHA-256 去重；视觉或语音附件只有在 Provider
