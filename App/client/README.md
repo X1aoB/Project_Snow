@@ -30,8 +30,8 @@ npm start
 ```
 
 The client always opens the experience selector at `http://127.0.0.1:8080/`.
-The two chat surfaces are available at `/immersive/` and `/assistant/`; the evidence,
-review and feedback workspace remains available at
+The formal chat surface is available at `/immersive/`; the evidence, review and
+feedback workspace remains available at
 `http://127.0.0.1:8080/workspace/`. If either local service is unavailable, the
 client shows the startup commands and a retry button.
 
@@ -44,7 +44,7 @@ cd C:\Users\25685\Desktop\Myprojects\Project_Snow\App\client
 npm run smoke
 ```
 
-The test checks the selector, both chat routes, the 390-pixel composer hit target,
+The test checks the selector, the immersive route, the 390-pixel composer hit target,
 text portraits and `/workspace/`, then writes its screenshot to
 `App/runtime/screenshots/electron-mobile.png`.
 

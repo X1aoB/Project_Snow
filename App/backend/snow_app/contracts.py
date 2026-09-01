@@ -70,11 +70,6 @@ class ModelOverride(BaseModel):
     model_name: str = Field(min_length=1, max_length=200)
 
 
-class PersonaPairingRequest(BaseModel):
-    label: str = Field(default="Codex", min_length=1, max_length=120)
-    default_character_id: str | None = Field(default=None, max_length=120)
-
-
 class ProviderConfigRequest(BaseModel):
     provider_id: str | None = Field(default=None, max_length=120)
     display_name: str = Field(min_length=1, max_length=160)

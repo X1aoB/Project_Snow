@@ -10,10 +10,9 @@ Project Snow 是一个以《尘白禁区》公开 Wiki 资料为知识基础的�
 场景连续性、聊天产品和用户反馈拆成独立层。这样既能让角色保留游戏世界中的说话方式和情感关系，也能
 追踪回答用了什么资料，并在反馈出现时定位到检索、关系、提示词、媒介还是客户端层。
 
-当前 `v0.5.0` 明确拆开两类产品责任：Snow 的正式产品面负责沉浸式陪伴；角色助手改为 Codex
-插件，由 Codex 负责模型、工具、附件、审批和任务历史，Snow 只通过本机只读 Persona Gateway 提供
-版本化人格、称呼、关系与公开知识。旧的内置 AgentRuntime 保留一版作为 `/workspace/` 中的 legacy
-调试基线，不再继续作为正式助手扩建。
+当前仓库只负责 Project Snow 本身：沉浸式对话、角色/RAG 核心、公开客户端、证据工作台与通用的
+脱敏人格包导出。原角色插件、MCP、配对凭据和管理界面已经从本项目完全剥离；旧的通用
+AgentRuntime 仅作为 `/workspace/` 中的 legacy 调试基线保留，不再作为正式产品入口扩建。
 
 **导航：**
 [项目一览](#项目一览) ·
@@ -33,17 +32,34 @@ IndexedDB，BYOK 密钥只在当前标签页的 `sessionStorage` 中保存加密
 浏览器中的 envelope。公开服务与上述本地单用户产品具有不同的数据边界，详见
 [公开部署说明](App/docs/public_deployment.md)。
 
+### 2026-09-01 进展快照
+
+- 基线为执行时最新 `origin/main`：`38a8808`（Fix nightly health reporting and image security audit）。
+- 公网客户端 `0.9.3` 已把面对面移动提交放在可选到访反应之前；反应失败不会丢失位置变化或锁住输入框。
+- 分段对话的 `displayBlocks` 随 IndexedDB v4 消息持久化，切换角色、停止/恢复和重载后仍保持稳定排版；
+  标点、反馈与角色切换回归也已有自动化覆盖。
+- CI 将 `https://snow.xiaob.dev/public/v1/health/live` 作为定时生产存活检查；公网只暴露 live，ready/full
+  健康与管理接口仍限制在本机或 SSH 隧道。
+- 应用镜像和 512 维 embedding 镜像拥有独立的夜间无缓存构建、运行检查与 Trivy `HIGH/CRITICAL`
+  漏洞门禁；候选镜像检查不再和轻量生产健康检查混为一项。
+- 角色头像、贴纸和数据包采用独立版本、manifest、SHA-256 与来源许可的 fail-closed 发布；未确认许可的
+  Wiki 图片不会进入 GPL 应用镜像，缺失头像时继续使用文字头像。
+- 拆分后的无私有语料便携回归结果为 `421 passed, 1 skipped, 18 deselected`；导出器/UI 定向测试
+  `13 passed`，并已通过独立 Snow Role Assistant 的 ZIP 校验与原子导入契约。
+- 当前最新主线没有 Live2D/Cubism 运行时或模型资产；米娅 Live2D 修正仍是独立、暂停的迁移任务，
+  在 Codex 稳定性门禁通过前不会启动。现有客户端继续使用经许可验证的静态头像/场景与文字回退。
+
 ## 项目一览
 
 | 项目 | 当前状态 |
 |---|---|
 | 可对话角色 | 22 名统一注册角色，NPC 与重复全名不会进入选择器 |
 | 资料规模 | 当前验证基线包含 8,799 个文档、5,463 个节点与 6,642 条图谱边 |
-| 产品模块 | 沉浸式陪伴 + Codex 角色插件；旧内置助手仅作 legacy 调试 |
+| 产品模块 | 沉浸式陪伴 + 公开客户端 + 证据工作台；旧内置助手仅作 legacy 调试 |
 | 知识系统 | FTS5 词法检索 + 本地中文向量 + RRF 融合 + 经审核图谱 |
 | 本地产品 | 浏览器聊天客户端、证据工作台、Electron Windows 测试壳 |
 | 质量保障 | 自动化回归、架构一致性检查、追加式反馈审计与问题族去重 |
-| 当前版本 | `v0.5.0`，本地单用户人格网关与 Codex 插件测试版 |
+| 当前版本 | 本地应用 `v0.5.0`；公开沉浸式客户端 `0.9.3` |
 
 ### 它与普通角色 Prompt 有什么不同
 
@@ -53,27 +69,24 @@ IndexedDB，BYOK 密钥只在当前标签页的 `sessionStorage` 中保存加密
 
 ### 产品形态
 
-- **体验入口 `/`**：每次桌面客户端启动时显示沉浸式陪伴与角色助手两个独立入口。
+- **体验入口 `/`**：桌面客户端启动页，只进入 Project Snow 的沉浸式产品面。
 - **沉浸式 `/immersive/`**：深冰蓝陪伴界面；隐藏模型、Agent、工具步骤和用量，只在用户主动打开时展示依据。
-- **角色助手 `/assistant/`**：白色与钴蓝插件管理中心；配置默认角色、配对/撤销 Codex、预览人格快照和数据边界。
 - **内部工作台 `/workspace/`**：用于证据检索、人格档案、关系/实体审核、反馈收件箱，以及旧对话和 Legacy Agent 调试。
 - **Electron 客户端**：安全加载本地 Web 产品，不复制语料、不保存模型密钥，也不向页面开放 Node 文件系统。
-- **后端 API**：负责角色注册、沉浸式检索与会话、反馈、版本化公共知识、独立用户事实和只读 Persona Gateway。
+- **后端 API**：负责角色注册、沉浸式检索与会话、反馈、版本化公共知识和独立用户事实。
 
-### v0.5.0 数据隔离与角色插件
+### v0.5.0 数据隔离与外部导出
 
 - 正式恒约关系从业务代码迁移到 `App/config/public_knowledge/character_relationships.v1.json`，带独立
   `knowledge_version`；聊天无法修改公共设定。
 - 用户关系、有效称呼和未来稳定偏好进入独立的 `user_facts.sqlite3`，包含来源、作用域、版本与撤销审计，
   不保存原始消息、摘要、地点、时装或 Agent 轨迹。
-- Persona Gateway 只监听本机回环请求并要求可撤销的 Bearer 配对令牌；数据库只存令牌哈希，Codex 当前
-  令牌进入 Windows Credential Manager。
-- Gateway 只提供人格快照、公共知识检索和结构化关系。沉浸式消息、场景/地点、当前时装、附件、工具日志
-  和 Agent 历史明确不在接口返回范围内。
-- `plugins/snow-role-assistant/` 包含 Codex Skill 和只读 MCP 服务。每个 Codex 任务固定一个角色与人格版本；
-  任务事实先由 Codex 完成，再在不改变数字、公式、代码、路径、引用或工具结果的前提下进行角色化表达。
-- 插件只在用户明确使用 `@Snow` 或点名 Snow 角色助手时启用，不能扩大 Codex 的文件、Shell、网络与审批权限，
-  也不能把任务消息、附件或推断写回 Snow。
+- `persona_export.py` 只读取审核后的公共关系、可重建人格视图和明确关联角色的公开检索文档，输出
+  `snow-persona-bundle.v1` 数据包；它不打开私聊库、用户事实库或 Agent 状态库。
+- 导出包包含版本化 manifest、角色快照、公共关系、可检索文档、来源提交与逐文件 SHA-256；明确排除
+  私聊、用户事实、原始 `Data/`、本机路径、令牌和密钥。真实导出物由 Git 忽略。
+- 外部人格集成已迁移到独立仓库 [Snow Role Assistant](https://github.com/X1aoB/Snow_Role_Assistant)，
+  与 Project Snow 没有运行时依赖；该插件拆分后默认保持未安装/禁用。
 - 反馈处理先归入独立问题族并查找现有回归；已有测试通过的问题只标记 `fixed_verified`，不会反复叠加提示词。
   旧助手 UI 问题统一标记 `superseded_by_architecture`。
 
@@ -97,14 +110,13 @@ IndexedDB，BYOK 密钥只在当前标签页的 `sessionStorage` 中保存加密
 - 每个角色视图记录直接资料、关联资料、称呼证据、语气证据和资料覆盖等级。
 - 资料较少时采用保守、自然的表达，不把其他角色的偏好、口癖和私人关系复制过来。
 
-### 对话模式与交流媒介
+### 沉浸式对话与交流媒介
 
-人格模式和交流媒介是两条正交维度：
+正式产品面保持沉浸式人格，交流媒介独立切换：
 
 | 维度 | 选项 | 行为 |
 |---|---|---|
 | 人格模式 | `immersive` 沉浸式 | 角色生活在游戏世界中，不暴露模型、检索、提示词或工具概念 |
-| 人格模式 | `assistant` 助手 | 保持角色人格；普通聊天使用只读工具，显式 Agent 任务可在风险审批下执行本机与连接器工具 |
 | 交流媒介 | `in_person` 面对面 | 支持独立动作/神态与对白内容块，受当前地点约束 |
 | 交流媒介 | `text` 文字通讯 | 只允许消息块，不声称看见用户表情、衣着或已完成物理接触 |
 
@@ -134,15 +146,14 @@ flowchart LR
     Vector --> Retrieval
     Persona --> Retrieval
     Graph --> Retrieval
-    Retrieval --> API["FastAPI\n沉浸式对话与 Persona Gateway"]
+    Retrieval --> API["FastAPI\n沉浸式对话与公共服务"]
     API --> Web["沉浸式客户端"]
     API --> Workspace["证据/审核/反馈工作台"]
     Web --> Electron["Electron Windows 薄壳"]
-    API <--> Runtime["隔离存储\n会话、用户事实、配对与反馈"]
+    API <--> Runtime["隔离存储\n会话、用户事实与反馈"]
     API --> Router["Provider Registry\n能力探测与质量路由"]
-    API --> Gateway["只读 Persona Gateway\n人格、关系与公共知识"]
-    Gateway --> Plugin["snow-role-assistant\nSkill + MCP"]
-    Plugin --> Codex["Codex Agent\n工具、审批、附件与任务历史"]
+    Persona --> Export["脱敏人格包导出\n版本、公开关系、校验和"]
+    Export -. 独立契约 .-> External["外部集成\n不属于本仓库运行时"]
     API --> Legacy["Legacy AgentRuntime\n仅工作台调试"]
 ```
 
@@ -156,6 +167,7 @@ flowchart LR
 Project_Snow/
 ├── App/                         可提交的应用层
 │   ├── backend/snow_app/        FastAPI、检索、对话、会话与规则
+│   │   └── persona_export.py    与宿主无关的脱敏人格包导出器
 │   ├── frontend/                正式聊天客户端和 /workspace/ 工作台
 │   ├── pipelines/               湖仓、索引、人格、图谱及模型审核管线
 │   ├── client/                  Electron Windows 安全薄壳
@@ -166,8 +178,6 @@ Project_Snow/
 │   ├── runtime/                 本地派生产物和私密状态（Git 忽略）
 │   ├── requirements.txt         完整 Python 本地运行依赖
 │   └── .env.example             不含密钥的配置模板
-├── plugins/snow-role-assistant/ Codex Skill 与只读 Persona MCP
-├── .agents/plugins/             仓库内本地 Codex marketplace
 ├── Data/                        本机 Wiki 原始资料与采集结果（Git 忽略）
 ├── README.md                    项目总览
 ├── LICENSE                      GPL-3.0
@@ -192,7 +202,7 @@ Project_Snow/
 | 语义检索 | Sentence Transformers、Qdrant | 中文向量编码与可选向量服务 |
 | 图谱 | JSONL、Neo4j | 经审核关系的源文件与可选查询投影 |
 | 文本/媒体处理 | Beautiful Soup、Pillow、PyPDF、PyMuPDF、python-docx、openpyxl、python-pptx、Mutagen | Wiki、图片、扫描 PDF、文档和音频元数据 |
-| Agent 与凭据 | Codex 插件、MCP、Windows Credential Manager / keyring | 外部 Agent 执行、只读人格接入与可撤销配对 |
+| 集成边界 | 版本化 JSON/JSONL、ZIP、SHA-256 | 脱敏人格包导出；外部宿主不进入本仓库运行时 |
 | 浏览器自动化 | Playwright / Chromium | 公开网页提取、表单填写与受控下载；最终提交始终审批 |
 | Web 客户端 | 原生 HTML、CSS、JavaScript、Lucide 图标 | 无前端框架依赖的聊天和工作台界面 |
 | 桌面客户端 | Electron、electron-builder | Windows 测试壳与 portable 构建 |
@@ -376,20 +386,21 @@ npm run package:win
 Electron 只是沙箱化的浏览器薄壳，不包含 Python、`Data/`、API Key 或另一套聊天实现。
 生成物位于 `App/client/dist/`，且仍要求本机 API 与 Web 服务处于运行状态。
 
-### 安装与配对 Codex 角色插件
+### 导出脱敏人格包
 
-先启动 API 和 Web，然后打开 `http://127.0.0.1:8080/assistant/`，选择默认角色并点击“配对 Codex”。
-配对令牌只在数据库中保存 SHA-256 哈希；当前 Codex 凭据由 Windows Credential Manager 保存。
-
-首次开发安装在仓库根目录执行：
+先按“构建运行时资料”生成角色视图和对话风格证据，再从 `App/` 执行：
 
 ```powershell
-codex plugin marketplace add .
-codex plugin add snow-role-assistant@personal
+python -m backend.snow_app.persona_export `
+  --output ..\persona-bundles\project-snow.persona-bundle.zip
 ```
 
-之后新建 Codex 任务并输入 `@Snow`。若修改了插件，先运行 `plugin-creator` 提供的 cachebuster 更新脚本，
-重新安装插件并新建任务，使 Codex 加载新的 Skill 与 MCP。撤销配对可在 `/assistant/` 完成。
+可重复传入 `--character-id <角色 ID 或规范名称>` 缩小范围，并用 `--default-character-id` 指定默认角色。
+导出器拒绝覆盖已有目标；输出前会移除私密字段和本机路径，只复制与所选角色有明确关联的文档，
+不会把全局语料库当作整库转储。真实 bundle 已被 `.gitignore` 排除。
+
+bundle 契约和独立导入端见 [Snow Role Assistant](https://github.com/X1aoB/Snow_Role_Assistant)。
+Project Snow 不负责安装、启动或管理该外部插件。
 
 ## API 与本地持久化
 
@@ -401,16 +412,12 @@ codex plugin add snow-role-assistant@personal
 - `GET /api/v1/mvp/conversations/{character_id}`：分页读取某角色本地历史。
 - `DELETE /api/v1/mvp/conversations/{character_id}`：清理所选本地聊天历史。
 - `POST /api/v1/mvp/feedback`：提交带角色、模式、媒介、版本和消息上下文的反馈。
-- `POST/DELETE /api/v1/persona/pairings*`：创建或撤销本机 Codex 配对。
-- `GET /api/v1/persona/snapshot/{character_id}`：读取版本化、无聊天历史的人格快照。
-- `GET /api/v1/knowledge/search`：按角色检索可追溯的公共知识。
-- `GET /api/v1/relationships/{character_id}`：读取结构化关系与有效称呼。
 - `GET /api/v1/mvp/tools` 和 `/api/v1/agent/*`：保留一个版本的 Legacy Agent 调试接口。
 - `/api/v1/review/*`：内部关系和实体审核接口。
 
 沉浸式显示历史保存在 `App/runtime/chat/conversations.sqlite3`；结构化用户事实保存在相邻的
-`user_facts.sqlite3`；Persona 配对只保存于 `persona_pairings.sqlite3` 和 Windows 凭据库。三个存储没有
-原始消息复制关系。Legacy Agent 的任务和附件仍留在旧运行时数据库，仅供工作台对照调试，Codex 插件不读取它们。
+`user_facts.sqlite3`。两者没有原始消息复制关系。Legacy Agent 的任务和附件仍留在旧运行时数据库，
+仅供工作台对照调试；人格包导出器不会打开这些数据库。
 
 反馈源文件保持追加式审计。系统在读取时把旧的宽泛问题族投影为精确问题族，并记录验证测试、代码版本和验证时间；
 不会改写历史 `feedback.jsonl`。只有当前版本可复现且能形成失败测试的问题才重新进入代码修改。
@@ -492,18 +499,19 @@ NPC 与导航页被拆开处理，避免把“推荐说明”“类型”“未�
 “更像角色”提示改为可测试的问题焦点、上下文卡片、局部校验器和有限兜底，并给反馈建立稳定问题标识，
 区分已修复与真实回归，避免反复修改同一问题。
 
-### 9. 将正式助手收敛为外部 Agent 人格插件
+### 9. 将人格插件彻底拆为独立项目
 
-内置助手逐步加入联网、附件、工具、审批和执行过程后，实际上开始重复实现一个通用 Agent，同时仍难以达到
-Codex 等成熟宿主的工具广度与恢复能力。项目因此停止在 Snow 内继续扩建正式 Agent：公共设定、用户事实、
-沉浸式历史和 Agent 数据被拆成独立域，Snow 通过只读 Persona Gateway 与 Codex Skill/MCP 提供角色层。
-这使基础恒约设定可以共享，而个人聊天、场景与任务历史不会跨模块流动。
+内置助手逐步加入联网、附件、工具、审批和执行过程后，开始重复实现通用 Agent；第一版外部插件又把
+配对数据库、MCP 子进程和管理界面放回 Project Snow，扩大了崩溃排查面。项目最终将插件历史、服务端、
+MCP、管理 UI 和导入逻辑迁移到独立仓库，并从本仓库删除全部插件运行时与凭据路径。Project Snow 只
+保留宿主无关的脱敏导出契约，因此可以共享审核后的公开设定，而私聊、用户事实、场景和任务历史不会跨项目流动。
 
 ## 当前限制与后续方向
 
 - 当前是本地测试产品，不包含公网认证、多用户隔离、跨设备同步或生产级密钥托管。
-- Codex 是第一个插件宿主；Hermes、AstrBot 与微信消息入口尚未适配。AstrBot 后续只作为消息网关，不管理人格或记忆。
+- 外部人格宿主的安装和路线图由独立 Snow Role Assistant 项目管理；Project Snow 不自动安装或启动它。
 - Snow 内置 AgentRuntime 只保留 legacy 调试，不保证继续扩展其工具和客户端体验。
+- 当前主线未集成 Live2D/Cubism；相关迁移任务通过独立稳定性门禁后再决定是否合并。
 - 低资料覆盖角色的自然度仍依赖后续资料补充和真实使用反馈。
 - 未审核关系不会自动成为人格事实；高风险或多义关系仍需要人工确认。
 - Electron portable 目前不打包 Python、语料和模型环境，使用前需先启动本地服务。

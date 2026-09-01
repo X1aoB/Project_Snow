@@ -33,7 +33,6 @@ const state = {
   models: [],
   modelDefaults: {},
   recording: null,
-  personaGateway: null,
   sceneByCharacter: new Map(),
   presenceDialogCharacterId: "",
   transitionPending: false,
@@ -1781,128 +1780,11 @@ async function saveModelDefaults() {
   }
 }
 
-function setPluginStatus(message, kind = "") {
-  const target = byId("plugin-pairing-status");
-  if (target) {
-    target.textContent = message;
-    target.className = `plugin-status ${kind}`.trim();
-  }
-}
-
-function renderPluginCharacters() {
-  const select = byId("plugin-character");
-  if (!select) return;
-  const saved = storageGet("project_snow:plugin_default_character", "");
-  select.innerHTML = '<option value="">请选择默认角色</option>' + state.characters.map((character) => (
-    `<option value="${escapeHtml(character.character_id)}">${escapeHtml(character.character_name)}</option>`
-  )).join("");
-  if (state.characterMap.has(saved)) select.value = saved;
-  else select.value = "";
-}
-
-async function loadPersonaGatewayStatus() {
-  const indicator = byId("plugin-service-status");
-  try {
-    const result = await api("/api/v1/persona/status", {}, 15000);
-    state.personaGateway = result;
-    if (indicator) {
-      indicator.className = "connection-pill online";
-      indicator.textContent = "人格网关已连接";
-    }
-    const configured = Boolean(result.codex_credential_configured);
-    setPluginStatus(
-      configured
-        ? `Codex 已配对 · 公共知识 ${result.knowledge?.knowledge_version || "版本未知"} · 当前 ${result.active_pairing_count || 0} 个有效令牌`
-        : `人格网关已就绪，但 Codex 尚未配对 · 公共知识 ${result.knowledge?.knowledge_version || "版本未知"}`,
-      configured ? "success" : "",
-    );
-  } catch (error) {
-    if (indicator) {
-      indicator.className = "connection-pill offline";
-      indicator.textContent = "人格网关未连接";
-    }
-    setPluginStatus(`无法读取人格网关：${error.message}`, "error");
-  }
-}
-
-async function pairCodex() {
-  const characterId = byId("plugin-character")?.value || "";
-  if (!characterId) {
-    setPluginStatus("请先选择默认角色。", "error");
-    return;
-  }
-  const button = byId("pair-codex");
-  button.disabled = true;
-  setPluginStatus("正在创建可撤销配对并写入 Windows 凭据库…");
-  try {
-    const result = await api("/api/v1/persona/pairings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label: "Codex snow-role-assistant", default_character_id: characterId }),
-    });
-    storageSet("project_snow:plugin_default_character", characterId);
-    const manual = byId("plugin-manual-token");
-    if (result.credential_saved) {
-      manual.hidden = true;
-      manual.textContent = "";
-      setPluginStatus("配对完成。令牌已写入 Windows 凭据库；现在安装插件并在新任务中输入 @Snow。", "success");
-    } else {
-      manual.hidden = false;
-      manual.textContent = `$env:SNOW_PERSONA_TOKEN='${result.pairing_token}'\n# 仅在启动 Codex 的同一 PowerShell 会话中有效`;
-      setPluginStatus(`配对已创建，但 Windows 凭据库写入失败：${result.credential_error || "未知原因"}。可临时使用下方环境变量。`, "error");
-    }
-    await loadPersonaGatewayStatus();
-  } catch (error) {
-    setPluginStatus(`配对失败：${error.message}`, "error");
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function revokeCodexPairing() {
-  if (!window.confirm("撤销后，已安装的 Codex 插件将无法再读取 Snow 人格。继续吗？")) return;
-  try {
-    await api("/api/v1/persona/pairings/current", { method: "DELETE" });
-    byId("plugin-manual-token").hidden = true;
-    setPluginStatus("当前 Codex 配对已撤销。", "success");
-    await loadPersonaGatewayStatus();
-  } catch (error) {
-    setPluginStatus(`撤销失败：${error.message}`, "error");
-  }
-}
-
-function renderPersonaSnapshot(snapshot) {
-  const target = byId("plugin-snapshot");
-  const forbidden = (snapshot.forbidden_data_types || []).join("、");
-  target.innerHTML = `<dl>
-    <dt>角色</dt><dd>${escapeHtml(snapshot.character?.display_name || "未知")}</dd>
-    <dt>人格版本</dt><dd>${escapeHtml(snapshot.profile_version || "未知")}</dd>
-    <dt>关系</dt><dd>${escapeHtml(snapshot.relationship?.status || "未确认")}</dd>
-    <dt>有效称呼</dt><dd>${escapeHtml(snapshot.relationship?.preferred_address || "分析员")}</dd>
-    <dt>历史写回</dt><dd>${snapshot.relationship?.write_back_allowed ? "允许" : "禁止"}</dd>
-    <dt>明确排除</dt><dd>${escapeHtml(forbidden || "沉浸式与 Agent 私有数据")}</dd>
-  </dl>`;
-}
-
-async function testPersonaSnapshot() {
-  const characterId = byId("plugin-character")?.value || "";
-  if (!characterId) return;
-  setPluginStatus("正在使用 Windows 凭据中的当前配对读取人格快照…");
-  try {
-    const snapshot = await api(`/api/v1/persona/management/snapshot/${encodeURIComponent(characterId)}`, {}, 15000);
-    renderPersonaSnapshot(snapshot);
-    setPluginStatus("人格快照测试通过；沉浸式历史和 Agent 数据均不在返回范围内。", "success");
-  } catch (error) {
-    setPluginStatus(`人格快照测试失败：${error.message}`, "error");
-  }
-}
-
 async function bootstrap() {
   document.body.dataset.surface = state.surface;
   byId("landing-view").hidden = state.surface !== "landing";
-  byId("plugin-center").hidden = state.surface !== "assistant";
   byId("chat-app").hidden = state.surface !== "immersive";
-  byId("surface-label").textContent = state.mode === "assistant" ? "角色助手" : "沉浸式陪伴";
+  byId("surface-label").textContent = "沉浸式陪伴";
   try {
     const result = await api("/api/v1/mvp/bootstrap", {}, 30000);
     state.clientVersion = result.client_version || state.clientVersion;
@@ -1913,15 +1795,10 @@ async function bootstrap() {
     state.feedbackCategories = result.feedback_categories || [];
     state.worldSessionId = storageGet("project_snow:world_session_id", "") || newWorldSessionId();
     storageSet("project_snow:world_session_id", state.worldSessionId);
-    if (state.surface !== "assistant") await Promise.all([loadModels(), loadProviders()]);
+    await Promise.all([loadModels(), loadProviders()]);
     setConnection(true, state.enabled ? `已连接 · ${result.model || "模型已配置"}` : "已连接 · 模型未开启");
     renderFeedbackCategories();
     if (state.surface === "landing") return;
-    if (state.surface === "assistant") {
-      renderPluginCharacters();
-      await loadPersonaGatewayStatus();
-      return;
-    }
     const savedCharacter = storageGet(`project_snow:selected_character:${state.mode}`, "");
     const selected = state.characterMap.has(savedCharacter) ? savedCharacter : state.characters[0]?.character_id;
     renderCharacterList();
@@ -2043,13 +1920,6 @@ byId("drawer-scrim").addEventListener("click", closeDrawers);
 byId("open-global-feedback").addEventListener("click", () => openFeedback(null));
 byId("floating-feedback").addEventListener("click", () => openFeedback(null, state.surface === "landing"));
 byId("landing-open-feedback").addEventListener("click", () => openFeedback(null, true));
-byId("plugin-open-feedback").addEventListener("click", () => openFeedback(null, true));
-byId("plugin-character").addEventListener("change", (event) => {
-  storageSet("project_snow:plugin_default_character", event.target.value);
-});
-byId("pair-codex").addEventListener("click", pairCodex);
-byId("revoke-codex").addEventListener("click", revokeCodexPairing);
-byId("test-persona-snapshot").addEventListener("click", testPersonaSnapshot);
 [byId("open-settings"), byId("landing-open-settings")].forEach((button) => button?.addEventListener("click", () => byId("settings-dialog").showModal()));
 const allAttachmentTypes = "image/jpeg,image/png,image/webp,image/gif,.pdf,.txt,.md,.csv,.json,.docx,.xlsx,.pptx,.py,.js,.ts,.html,.css,audio/wav,audio/mpeg,audio/mp4,audio/webm,audio/ogg";
 byId("add-image").addEventListener("click", () => {
