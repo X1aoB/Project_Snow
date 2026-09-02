@@ -115,6 +115,13 @@ class PublicAPITests(TestCase):
         self.assertTrue(payload["providers"][0]["privacy_url"].startswith("https://"))
         self.assertIn("Project Snow", self.client.get("/").text)
 
+    def test_public_webp_assets_have_an_explicit_image_media_type(self) -> None:
+        response = self.client.get(
+            "/assets/expressions/mia/angry.d30e58bcf8885d08.webp"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/webp")
+
     def test_joint_move_requires_named_current_request_and_immediate_acceptance(self) -> None:
         service: PublicChatService = self.app.state.chat_service
         character = MVP_CHARACTERS[0]

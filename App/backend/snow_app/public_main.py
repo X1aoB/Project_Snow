@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import logging
+import mimetypes
 import secrets
 import time
 from pathlib import Path
@@ -66,6 +67,12 @@ from .public_store import (
     PublicStoreUnavailable,
     RateLimitExceeded,
 )
+
+# Minimal production images do not necessarily ship a mime.types entry for
+# WebP. StaticFiles inherits Python's process-wide mapping, so register the
+# public format before any FileResponse is constructed.
+mimetypes.add_type("image/webp", ".webp")
+
 ANONYMOUS_COOKIE = "__Host-snow_anon"
 DEVELOPMENT_ANONYMOUS_COOKIE = "snow_anon_dev"
 MAX_BODY_BYTES = 64 * 1024
