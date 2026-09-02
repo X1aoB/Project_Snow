@@ -119,6 +119,46 @@ const errorMessages = {
 };
 
 const STATE_PACKAGE_RECOVERY_CODES = new Set(["state_subject_mismatch", "state_invalid"]);
+const MIA_CHARACTER_ID = "702f4375675b";
+const MIA_EXPRESSION_ASSETS = Object.freeze({
+  neutral: "/assets/expressions/mia/neutral.208818121225b3d1.webp",
+  gentle_smile: "/assets/expressions/mia/gentle_smile.4ad4764940e683e9.webp",
+  happy: "/assets/expressions/mia/happy.1b3a1ba7d49cbde9.webp",
+  amused: "/assets/expressions/mia/amused.6235b0f7cff6fb0e.webp",
+  teasing: "/assets/expressions/mia/teasing.033f5b38d32b6718.webp",
+  relieved: "/assets/expressions/mia/relieved.fc684841c1ed6b73.webp",
+  serious: "/assets/expressions/mia/serious.6252a05c60ec1fe9.webp",
+  focused: "/assets/expressions/mia/focused.a7da8d4656ca141c.webp",
+  thinking: "/assets/expressions/mia/thinking.b50e58c4c787f54b.webp",
+  confused: "/assets/expressions/mia/confused.a99f0aab911e22c5.webp",
+  skeptical: "/assets/expressions/mia/skeptical.01e31836c2656e6c.webp",
+  concerned: "/assets/expressions/mia/concerned.715d5da0c6c009fa.webp",
+  surprised: "/assets/expressions/mia/surprised.cf52252f798e900e.webp",
+  embarrassed: "/assets/expressions/mia/embarrassed.d6946cb29cc560eb.webp",
+  sad: "/assets/expressions/mia/sad.89f4b7099edd6343.webp",
+  disappointed: "/assets/expressions/mia/disappointed.52c6af53a6f40798.webp",
+  annoyed: "/assets/expressions/mia/annoyed.db1a9cb01af07381.webp",
+  angry: "/assets/expressions/mia/angry.d30e58bcf8885d08.webp",
+});
+const MIA_EXPRESSION_RULES = Object.freeze([
+  ["angry", /(?:愤怒|大怒|暴怒|怒火|生气|咬牙|厉声|拍桌|喝道|angry|furious)/iu],
+  ["annoyed", /(?:不耐烦|烦躁|恼火|皱眉|啧|抱怨|annoyed|irritated)/iu],
+  ["disappointed", /(?:失望|落空|垂下眼|垂下目光|叹了口气|叹气|disappointed)/iu],
+  ["sad", /(?:难过|悲伤|低落|眼眶|哭泣|哭了|sad|sorrowful)/iu],
+  ["embarrassed", /(?:害羞|脸红|不好意思|尴尬|embarrassed|blush)/iu],
+  ["surprised", /(?:惊讶|愕然|一怔|愣住|睁大|没想到|surprised|startled)/iu],
+  ["concerned", /(?:担心|关切|紧张|还好吗|没事吧|concerned|worried)/iu],
+  ["skeptical", /(?:怀疑|质疑|挑眉|半信半疑|skeptical|doubtful)/iu],
+  ["confused", /(?:困惑|疑惑|不解|歪头|confused|puzzled)/iu],
+  ["thinking", /(?:想了想|沉吟|思索|思考|让我想想|thinking|thoughtful)/iu],
+  ["focused", /(?:专注|凝神|集中注意|目不转睛|focused|concentrating)/iu],
+  ["serious", /(?:严肃|郑重|正色|认真地说|serious|solemn)/iu],
+  ["relieved", /(?:松了口气|松一口气|放心|终于|如释重负|relieved|with relief)/iu],
+  ["teasing", /(?:调侃|打趣|坏笑|逗你|戏谑|开玩笑|teasing|playfully)/iu],
+  ["amused", /(?:莞尔|忍俊不禁|轻笑|觉得有趣|amused|chuckle)/iu],
+  ["happy", /(?:开心|高兴|太好了|笑起来|欢快|喜悦|happy|delighted)/iu],
+  ["gentle_smile", /(?:温柔地?笑|轻轻地?笑|微微一笑|微笑|嘴角.{0,8}(?:扬|弯)|gentle smile|smiling softly)/iu],
+]);
 
 function id() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
@@ -183,7 +223,7 @@ function fitPublicRequestPayload(payload, { arrays = [], texts = [], targetBytes
 }
 if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
   Object.defineProperty(window, "__projectSnowTest", {
-    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder }),
+    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, miaExpressionAssets: MIA_EXPRESSION_ASSETS }),
     configurable: false,
     writable: false,
   });
@@ -1106,7 +1146,7 @@ function renderMobileProviderOptions() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.9.3";
+  $("version-badge").textContent = state.config.app_version || "0.9.4";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
@@ -1868,7 +1908,48 @@ function fillAvatar(node, character, { thumbnail = true, priority = false } = {}
   node.className = `${source.className} ${node.id === "stage-header-avatar" ? "" : ""}`.trim();
   node.style.cssText = source.getAttribute("style") || "";
   node.innerHTML = source.innerHTML;
+  delete node.dataset.stagePortraitKey;
+  delete node.dataset.expressionCharacterId;
+  delete node.dataset.expressionState;
   bindAvatarImages(node.parentElement || node);
+}
+function expressionStateForMessage(message) {
+  const explicitState = plain(message?.expressionState || message?.expression_state).trim().toLocaleLowerCase("en-US");
+  if (Object.hasOwn(MIA_EXPRESSION_ASSETS, explicitState)) return explicitState;
+  const blocks = message?.contentBlocks?.length ? message.contentBlocks : message?.displayBlocks || [];
+  const text = blocks.map((block) => plain(block?.text)).join("\n");
+  for (const [expressionState, pattern] of MIA_EXPRESSION_RULES) {
+    if (pattern.test(text)) return expressionState;
+  }
+  return "neutral";
+}
+function fillStagePortrait(node, character, message = null) {
+  if (!node || !character) return;
+  if (character.character_id !== MIA_CHARACTER_ID) {
+    const stagePortraitKey = `avatar:${plain(character.character_id)}:${plain(character.avatar?.src)}`;
+    if (node.dataset.stagePortraitKey === stagePortraitKey) return;
+    fillAvatar(node, character, { thumbnail: false, priority: true });
+    node.dataset.stagePortraitKey = stagePortraitKey;
+    return;
+  }
+  const expressionState = expressionStateForMessage(message);
+  const stagePortraitKey = `expression:${MIA_CHARACTER_ID}:${expressionState}`;
+  if (node.dataset.stagePortraitKey === stagePortraitKey && node.querySelector("img")) return;
+  const src = MIA_EXPRESSION_ASSETS[expressionState] || MIA_EXPRESSION_ASSETS.neutral;
+  const expressionCharacter = {
+    ...character,
+    avatar: {
+      src,
+      thumbnail_src: src,
+      portrait_focus_x: 50,
+      portrait_focus_y: 50,
+      portrait_scale: 1,
+    },
+  };
+  fillAvatar(node, expressionCharacter, { thumbnail: false, priority: true });
+  node.dataset.stagePortraitKey = stagePortraitKey;
+  node.dataset.expressionCharacterId = MIA_CHARACTER_ID;
+  node.dataset.expressionState = expressionState;
 }
 async function resolvePresenceAttempt(characterId, signal, stateRecoveryAttempt = 0) {
   try {
@@ -2114,7 +2195,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     renderCharacters();
     $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: false, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
     fillAvatar($("stage-header-avatar"), character, { thumbnail: true, priority: true });
-    fillAvatar($("stage-portrait-avatar"), character, { thumbnail: false, priority: true });
+    fillStagePortrait($("stage-portrait-avatar"), character, latestInPersonMessage("assistant"));
     $("stage-character-name").textContent = character.display_name;
     $("stage-speaker").textContent = character.display_name;
 
@@ -2460,6 +2541,7 @@ function renderTypewriter(text, key) {
   state.typewriter.timer = window.setTimeout(revealNext, plan.initialDelay);
 }
 function renderStage() {
+  fillStagePortrait($("stage-portrait-avatar"), currentCharacter(), latestInPersonMessage("assistant"));
   const pending = typingStateFor();
   const speechNode = $("stage-speech");
   if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {

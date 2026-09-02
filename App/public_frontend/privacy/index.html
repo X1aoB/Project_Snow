@@ -14,7 +14,7 @@
       <a class="secondary-button link-button" href="/">返回体验</a>
     </header>
     <main class="privacy-main">
-      <section class="privacy-hero"><span class="panel-kicker">隐私版本 0.9.2 · 2026-08-20 生效</span><h1>隐私、模型调用与素材来源</h1><p>Project Snow 是非官方、非商业的 AI 角色互动实验。模型回答可能出错或偏离原作，请勿输入真实密码、证件、财务或其他敏感信息。</p></section>
+      <section class="privacy-hero"><span class="panel-kicker">隐私版本 0.9.2 · 素材说明 2026-09-02 更新</span><h1>隐私、模型调用与素材来源</h1><p>Project Snow 是非官方、非商业的 AI 角色互动实验。模型回答可能出错或偏离原作，请勿输入真实密码、证件、财务或其他敏感信息。</p></section>
       <div class="privacy-grid">
         <article><h2>API Key 与模型供应商</h2><p>Key 会经过 Project Snow 服务器内存并发送给你选择的官方模型接口，但不写入数据库、磁盘、反馈或日志。服务器签发的凭证只保存在当前标签页，采用固定绝对期限且最长有效 12 小时，不会滑动续期；它由服务器加密，并非端到端加密。关闭标签页或清除会话存储即可移除。</p><div id="provider-privacy-links" class="source-links"></div></article>
         <article><h2>发送给模型的内容</h2><p>一次对话最多携带当前消息、最近 24 条消息、连续性摘要、角色系统指令和检索到的公开剧情资料。每次用户操作最多发起两次模型请求，可能包括一次受控重写；到场反应和每 12 轮一次的可关闭摘要也会消耗你的模型额度。</p></article>
@@ -24,6 +24,7 @@
         <article><h2>反馈与 QQ</h2><p>“附带相关对话上下文”默认勾选，但可在提交前取消并预览。取消后服务器会丢弃对话、模型、阶段和诊断字段。反馈正文与可选的加密 QQ 保存 30 天；加密备份最多额外保留 7 天。如已启用通知邮件，邮件只含反馈编号和时间，不含正文、对话、诊断或 QQ。</p></article>
       </div>
       <section class="privacy-section"><h2>角色头像来源与许可</h2><p>头像作为独立、不可变媒体包部署，不进入 GPL 应用镜像。每个头像都必须记录 BWiki 文件页、固定修订、上传者、原始 URL/哈希和裁剪转换；缺少任一项时整个包不会公开。</p><div id="avatar-attribution" class="attribution-list"><p>正在读取公开署名索引……</p></div></section>
+      <section class="privacy-section"><h2>米娅舞台表情（0.9.4）</h2><p>面对面舞台使用 18 张由操作者逐一确认的米娅静态表情派生图。按照操作者在 2026-09-02 的明确指示，本次首次发布跳过独立素材权利核验；这不表示 Project Snow 已确认相关原始美术权属或获得额外授权。该豁免仅适用于这 18 张派生图，权利人可通过页面底部邮箱请求更正或下架。</p><p><a href="/assets/expressions/mia/manifest.json">查看表情选择、哈希、转换与豁免清单（JSON）</a></p></section>
       <section class="privacy-section"><h2>表情资源</h2><p id="sticker-attribution-summary">正在读取表情署名信息……</p><p><a id="download-attributions" href="/public/v1/attributions">下载完整头像与表情署名索引（JSON）</a></p></section>
       <section class="privacy-section"><h2>知识数据</h2><p id="knowledge-attribution-summary">正在读取知识数据署名信息……</p><p><a id="download-data-attributions" href="/public/v1/attributions/data">下载逐页固定修订与校验索引（JSON）</a></p></section>
       <section class="privacy-section"><h2>许可边界</h2><p>BWiki 首页固定修订 21546 表示：若无特殊说明，Wiki 内容按 CC BY-NC-SA 提供。Project Snow 对逐个文件页检查特别例外，并按 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh-hans" rel="noreferrer">CC BY-NC-SA 4.0</a>署名、标注处理并保持非商业与相同方式共享。该说明不代表游戏原始美术权属已经由 Project Snow 确认，也不表示官方认可；文件页的特殊声明优先。</p></section>

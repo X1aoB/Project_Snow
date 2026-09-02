@@ -1,0 +1,223 @@
+{
+  "schema_version": "project-snow-mia-expression-runtime-1",
+  "character_id": "702f4375675b",
+  "display_name": "米娅",
+  "expression_state_count": 18,
+  "publication_status": "public_runtime_enabled_by_explicit_operator_rights_waiver",
+  "rights": {
+    "independent_verification": false,
+    "verification_status": "not_performed",
+    "ownership_claimed_by_project": false,
+    "waiver": {
+      "granted": true,
+      "recorded_date": "2026-09-02",
+      "instruction": "skip_material_rights_and_continue_to_first_release",
+      "scope": "these_18_user_approved_mia_static_expression_derivatives_only"
+    },
+    "takedown_contact": "admin@xiaob.dev"
+  },
+  "source_package": {
+    "path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18",
+    "candidate_manifest_sha256": "298a1286a5ac73ca27e50f91d957ee8509ca8c9bedf52e4fd0dfc5702537c0ce",
+    "approval_snapshot_sha256": "e131dd2935c684ff9bdbac12555b8f081ddafaac7f0de2d8cc32f05de6d45842",
+    "approved_state_count": 18
+  },
+  "transform": {
+    "crop_box_xyxy": [
+      440,
+      145,
+      635,
+      340
+    ],
+    "output_dimensions": {
+      "width": 384,
+      "height": 384
+    },
+    "format": "lossless_webp",
+    "mode": "RGBA",
+    "resampling": "lanczos",
+    "metadata_copied": false
+  },
+  "expressions": {
+    "neutral": {
+      "approved_variant": "neutral",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/neutral/neutral.pending.png",
+      "source_sha256": "c1d075418f22c25ebb008600e4a1fab2bea9e4ea171857fd7f2be9751869d4b6",
+      "source_reference": "",
+      "source_reference_sha256": "",
+      "asset_path": "/assets/expressions/mia/neutral.208818121225b3d1.webp",
+      "asset_sha256": "208818121225b3d17b3243dab60031d29455f92478165a809587f9eb0e28c30d"
+    },
+    "gentle_smile": {
+      "approved_variant": "B",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/gentle_smile/B.pending.png",
+      "source_sha256": "3882b0844d3674d32822438423020522d95cc031bddf4054e44cfb30bda5bde1",
+      "source_reference": "generated_refs/gentle_smile/B.imagegen-reference.pending.png",
+      "source_reference_sha256": "19df4129766fb42072dce212f52ba7f77eb29b0141b8c588b3a49fde22dad7de",
+      "asset_path": "/assets/expressions/mia/gentle_smile.4ad4764940e683e9.webp",
+      "asset_sha256": "4ad4764940e683e9efe3cb1201033a758db39962cbc6e94c6666e409ec6bcb2e"
+    },
+    "happy": {
+      "approved_variant": "B",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/happy/B.pending.png",
+      "source_sha256": "2ffcbccbed950564ffe8ca259c1b311f8436bb02adc54f78193f1153eb6adbb3",
+      "source_reference": "generated_refs/happy/B.imagegen-reference.pending.png",
+      "source_reference_sha256": "333761973521045affaca94c3dc61654133ff4f7ff47ed1ee5f9a7c5f5f798a0",
+      "asset_path": "/assets/expressions/mia/happy.1b3a1ba7d49cbde9.webp",
+      "asset_sha256": "1b3a1ba7d49cbde94d2e5665cc322e02910b2bb49575fce20abc61d5a65377fb"
+    },
+    "amused": {
+      "approved_variant": "C",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/amused/C.pending.png",
+      "source_sha256": "1a4d8156fdfb674e06bf31d128b9fe95b2b6f962ecf8d8e3b84cadba9390b403",
+      "source_reference": "generated_refs/amused/C.imagegen-reference.pending.png",
+      "source_reference_sha256": "bf2608143c04fa2d8e120d6b1f77aa94687ae9d7c36bb0615cb20cbb43c5f339",
+      "asset_path": "/assets/expressions/mia/amused.6235b0f7cff6fb0e.webp",
+      "asset_sha256": "6235b0f7cff6fb0ef2871fb50c09a9b2a4812831de786cdb3f7754044ee8112a"
+    },
+    "teasing": {
+      "approved_variant": "R4",
+      "approved_round": 5,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/teasing/R4.pending.png",
+      "source_sha256": "c87686cc2fc6d65829471eb00317bbaa812047a85deefc810b0c0d0c22efaf54",
+      "source_reference": "generated_refs/teasing/R4.imagegen-reference.pending.png",
+      "source_reference_sha256": "879f18b09fa50a8553b9936da469f07406b27e31a0dee53a9d7942dd445df189",
+      "asset_path": "/assets/expressions/mia/teasing.033f5b38d32b6718.webp",
+      "asset_sha256": "033f5b38d32b67183e49928cc9ffb2bb1ae64ef4c7e79efea6ec270d5512c7b9"
+    },
+    "relieved": {
+      "approved_variant": "B",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/relieved/B.pending.png",
+      "source_sha256": "758a7f61ec832f02a0800e3ab0bbc878838e0fe2e402e9c62302ba8795335e7f",
+      "source_reference": "generated_refs/relieved/B.imagegen-reference.pending.png",
+      "source_reference_sha256": "5b5abaffe6055091de27d613142214f3152081444cc252b70ca37239088c5150",
+      "asset_path": "/assets/expressions/mia/relieved.fc684841c1ed6b73.webp",
+      "asset_sha256": "fc684841c1ed6b73485ca245628e7a432140f22195be53f2d9d6ca18eb8a9aba"
+    },
+    "serious": {
+      "approved_variant": "A",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/serious/A.pending.png",
+      "source_sha256": "770215c8223a107f450f319525da880c13b0816d696140dfd4e3a84bb6246257",
+      "source_reference": "generated_refs/serious/A.imagegen-reference.pending.png",
+      "source_reference_sha256": "c8614dd694d79f1501fd3cdec647fe26642eeaafa9a3e2348aae1a523b7ec8be",
+      "asset_path": "/assets/expressions/mia/serious.6252a05c60ec1fe9.webp",
+      "asset_sha256": "6252a05c60ec1fe9944cc7c3c60f6da93c72aa9c5dd7ba0032258a6ce66b558d"
+    },
+    "focused": {
+      "approved_variant": "R1",
+      "approved_round": 2,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/focused/R1.pending.png",
+      "source_sha256": "a8ad794d042c7be86175c8bc96e084691442436b5a73a843a245b6cf1723ac6f",
+      "source_reference": "generated_refs/focused/R1.imagegen-reference.pending.png",
+      "source_reference_sha256": "5ac1720db2fd5f897c752c41f66f416978e78ad185494d035e755301b28fad0e",
+      "asset_path": "/assets/expressions/mia/focused.a7da8d4656ca141c.webp",
+      "asset_sha256": "a7da8d4656ca141c6f7433c7e66c1ded0b9fde7bbbe0a90fb11aded62f2af7c5"
+    },
+    "thinking": {
+      "approved_variant": "B",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/thinking/B.pending.png",
+      "source_sha256": "e8bfc7cb07db0fb853b30220e5f945fe25f4fe6b95980b2cd1d2a63fb4dc56cc",
+      "source_reference": "generated_refs/thinking/B.imagegen-reference.pending.png",
+      "source_reference_sha256": "2eab358a6c4bc8d4d3fc246746f5f3145245b20cc5ebf876fd8b455acf2fc94f",
+      "asset_path": "/assets/expressions/mia/thinking.b50e58c4c787f54b.webp",
+      "asset_sha256": "b50e58c4c787f54ba1d8433227f7ce776d45a0cce45428f36c385a0e5826d0c7"
+    },
+    "confused": {
+      "approved_variant": "A",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/confused/A.pending.png",
+      "source_sha256": "8b89e2e544f8e2893370fa5a33135bfcab8fe50cd99ec6bfa1e5cfe007b6b4c8",
+      "source_reference": "generated_refs/confused/A.imagegen-reference.pending.png",
+      "source_reference_sha256": "b01ab59f2f876e7aaa6324d5a86160d1dd2428653231bf964dc1eea9f7791477",
+      "asset_path": "/assets/expressions/mia/confused.a99f0aab911e22c5.webp",
+      "asset_sha256": "a99f0aab911e22c50c89631db6e0fa4acf0ab988e1a0b9d79349e04da55ad900"
+    },
+    "skeptical": {
+      "approved_variant": "B",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/skeptical/B.pending.png",
+      "source_sha256": "65bc8e6753c8876ff76ffa484ad1aa5e5e9de6077bd4fe9c9111c708113b1159",
+      "source_reference": "generated_refs/skeptical/B.imagegen-reference.pending.png",
+      "source_reference_sha256": "2f947fa2b9b490dd3eafd335633aae80d78af5a5a4dff67de3d59b20c7f14539",
+      "asset_path": "/assets/expressions/mia/skeptical.01e31836c2656e6c.webp",
+      "asset_sha256": "01e31836c2656e6cb4bf4a278eb8f94a000fa9678115a7b5853471fd12166ff1"
+    },
+    "concerned": {
+      "approved_variant": "A",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/concerned/A.pending.png",
+      "source_sha256": "9b37d7e873271364bff17114542beccc981f884f7c8b10e947f2eef22d0a0e94",
+      "source_reference": "generated_refs/concerned/A.imagegen-reference.pending.png",
+      "source_reference_sha256": "210d7f140a14ee0fefc7cf51969e4822bd0d793e77a73dcd7b87f36d91483868",
+      "asset_path": "/assets/expressions/mia/concerned.715d5da0c6c009fa.webp",
+      "asset_sha256": "715d5da0c6c009fa68f728cedde966b05f94b834f507266eb5092b2e1d2e6bbd"
+    },
+    "surprised": {
+      "approved_variant": "R1",
+      "approved_round": 4,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/surprised/R1.pending.png",
+      "source_sha256": "a4b1901cbcec48af7f8d8c15425725fc8b25f3d0b09525c1e0786507bc613a1c",
+      "source_reference": "generated_refs/surprised/R1.imagegen-reference.pending.png",
+      "source_reference_sha256": "cf06a5c1546ca0cb659b4ba7523fc97cf8b8c6ac3208b30b402bae9abb96c8ee",
+      "asset_path": "/assets/expressions/mia/surprised.cf52252f798e900e.webp",
+      "asset_sha256": "cf52252f798e900ed0030b5e03a267f501faae9a25b20e7455078f80e76cd095"
+    },
+    "embarrassed": {
+      "approved_variant": "A",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/embarrassed/A.pending.png",
+      "source_sha256": "5df4b4b94bf65dd9deccdb23c00e36ca9c167e850a4469dc4fff9d24227dca5a",
+      "source_reference": "generated_refs/embarrassed/A.imagegen-reference.pending.png",
+      "source_reference_sha256": "2440128ade1620e744bcd9da87d150a38b76e86218623cb155ef1f0f7291cbe6",
+      "asset_path": "/assets/expressions/mia/embarrassed.d6946cb29cc560eb.webp",
+      "asset_sha256": "d6946cb29cc560ebb21f6ad559c4d9364e436813ee96fd5afd5676170ee889f5"
+    },
+    "sad": {
+      "approved_variant": "A",
+      "approved_round": 1,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/sad/A.pending.png",
+      "source_sha256": "ea93014f660c990b05de6e89bf1e92b646d8f2d3b7b41c678a9ca0c39d70356d",
+      "source_reference": "generated_refs/sad/A.imagegen-reference.pending.png",
+      "source_reference_sha256": "1ab5aa78fd9e418de83184aa51b0f5c41a70cb8d0588dd6d5c5aa3e6dba49b72",
+      "asset_path": "/assets/expressions/mia/sad.89f4b7099edd6343.webp",
+      "asset_sha256": "89f4b7099edd63438a198007e1c5e530ec650a74e1afc8e05d615d343c14802c"
+    },
+    "disappointed": {
+      "approved_variant": "R1",
+      "approved_round": 2,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/disappointed/R1.pending.png",
+      "source_sha256": "4309abe3a07a37d3bd25fd01bd737bdcf7ab9ccbdaa9407e518371be0077b846",
+      "source_reference": "generated_refs/disappointed/R1.imagegen-reference.pending.png",
+      "source_reference_sha256": "fcacb16427c5a7906c028b548b0a1845f9b7a18e3f033e854d7f29084ec8fc5d",
+      "asset_path": "/assets/expressions/mia/disappointed.52c6af53a6f40798.webp",
+      "asset_sha256": "52c6af53a6f407988f05ccd1768e46b0905395e91506537f07c9a77840360ec2"
+    },
+    "annoyed": {
+      "approved_variant": "R4",
+      "approved_round": 5,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/annoyed/R4.pending.png",
+      "source_sha256": "c56857d52d0a3d4ed5de08e4cbb9417fed2ab0d5baae869ca2f9ad361ec6560d",
+      "source_reference": "generated_refs/annoyed/R4.imagegen-reference.pending.png",
+      "source_reference_sha256": "b2d01dc4d3ca17e571497d249a31531a56c92c11fa5edfca4705c7f0a6777c8c",
+      "asset_path": "/assets/expressions/mia/annoyed.db1a9cb01af07381.webp",
+      "asset_sha256": "db1a9cb01af073811254aba0b14ed45b617deb71c80050e4988d4f4faf9f9358"
+    },
+    "angry": {
+      "approved_variant": "R5",
+      "approved_round": 6,
+      "source_path": "media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18/candidates/angry/R5.pending.png",
+      "source_sha256": "9955e104bfc53372ba101cbf469e7366d4eda44d10ccb4376e588c15ab9283c3",
+      "source_reference": "generated_refs/angry/R5.imagegen-reference.pending.png",
+      "source_reference_sha256": "69552903d0a27ba2d6a91f0203c96a4b958a5a9693f7b804ba07d48c9f4398df",
+      "asset_path": "/assets/expressions/mia/angry.d30e58bcf8885d08.webp",
+      "asset_sha256": "d30e58bcf8885d0874c7dd56bc7acb99949d6133139000e67c5b82e9ee931cd1"
+    }
+  }
+}

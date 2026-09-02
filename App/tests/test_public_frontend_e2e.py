@@ -198,6 +198,21 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+        if path.startswith("/assets/expressions/"):
+            candidate = PUBLIC_ROOT / path.lstrip("/")
+            if candidate.is_file():
+                body = candidate.read_bytes()
+                content_type = (
+                    "application/json"
+                    if candidate.suffix == ".json"
+                    else "image/webp"
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
         filename = assets.get(path)
         if path.startswith("/assets/immersive/scenes/") and path.endswith(".svg"):
             candidate = PUBLIC_ROOT / path.lstrip("/")
@@ -602,6 +617,63 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator(".analyst-portrait img").count(), 0)
             self.assertIsNotNone(page.locator("#toggle-action").get_attribute("hidden"))
             self.assertIsNone(page.locator("#toggle-sticker").get_attribute("hidden"))
+            browser.close()
+
+    def test_mia_expression_classifier_and_assets_cover_all_approved_states(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            page.goto(self.base_url, wait_until="networkidle")
+            samples = {
+                "neutral": "今天的风很轻。",
+                "gentle_smile": "她微笑着看向你。",
+                "happy": "她看起来很开心。",
+                "amused": "她忍俊不禁。",
+                "teasing": "她带着坏笑打趣你。",
+                "relieved": "她松了口气。",
+                "serious": "她严肃地开口。",
+                "focused": "她专注地看着屏幕。",
+                "thinking": "她想了想。",
+                "confused": "她疑惑地歪头。",
+                "skeptical": "她半信半疑地挑眉。",
+                "concerned": "她担心地问你还好吗。",
+                "surprised": "她没想到会这样，愣住了。",
+                "embarrassed": "她有些脸红，不好意思。",
+                "sad": "她看起来很难过。",
+                "disappointed": "她失望地叹了口气。",
+                "annoyed": "她不耐烦地皱眉。",
+                "angry": "她生气地咬牙。",
+            }
+            result = page.evaluate(
+                """async (samples) => {
+                    const hooks = window.__projectSnowTest;
+                    const classified = Object.fromEntries(
+                        Object.entries(samples).map(([state, text]) => [
+                            state,
+                            hooks.expressionStateForMessage({contentBlocks: [{type: 'action', text}]}),
+                        ]),
+                    );
+                    const assetResponses = await Promise.all(
+                        Object.entries(hooks.miaExpressionAssets).map(async ([state, url]) => {
+                            const response = await fetch(url);
+                            return [state, response.status, response.headers.get('content-type') || ''];
+                        }),
+                    );
+                    const explicit = hooks.expressionStateForMessage({
+                        expressionState: 'surprised',
+                        contentBlocks: [{type: 'action', text: '她生气地咬牙。'}],
+                    });
+                    return {classified, assetResponses, explicit};
+                }""",
+                samples,
+            )
+            self.assertEqual(result["classified"], {state: state for state in samples})
+            self.assertEqual(result["explicit"], "surprised")
+            self.assertEqual(len(result["assetResponses"]), 18)
+            for state, status, content_type in result["assetResponses"]:
+                self.assertIn(state, samples)
+                self.assertEqual(status, 200, state)
+                self.assertEqual(content_type, "image/webp", state)
             browser.close()
 
     def test_text_and_in_person_surfaces_share_local_continuity(self) -> None:

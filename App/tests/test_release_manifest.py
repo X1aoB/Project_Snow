@@ -20,7 +20,7 @@ class ReleaseManifestTests(TestCase):
             app_root=app_root,
         )
         self.assertEqual(manifest["schema_version"], "project-snow-release-1")
-        self.assertEqual(manifest["app_version"], "0.9.3")
+        self.assertEqual(manifest["app_version"], "0.9.4")
         self.assertEqual(manifest["data_version"], "2026.08.19.1")
         self.assertEqual(manifest["media_version"], "2026.08.19.avatar.1")
         self.assertEqual(manifest["sticker_version"], "2026.08.19.sticker.1")
