@@ -919,25 +919,46 @@ verified_version_array() {
   fi
 }
 
+root_authorized_keys_safe() {
+  root_ssh_directory=/root/.ssh
+  root_authorized_keys="$root_ssh_directory/authorized_keys"
+  [ -d "$root_ssh_directory" ] && [ ! -L "$root_ssh_directory" ] &&
+    [ "$(stat -c %u:%g "$root_ssh_directory" 2>/dev/null)" = 0:0 ] &&
+    [ -z "$(find "$root_ssh_directory" -maxdepth 0 -perm /022 -print -quit 2>/dev/null)" ] &&
+    [ -s "$root_authorized_keys" ] && [ -f "$root_authorized_keys" ] &&
+    [ ! -L "$root_authorized_keys" ] &&
+    [ "$(stat -c %u:%g:%h "$root_authorized_keys" 2>/dev/null)" = 0:0:1 ] &&
+    [ -z "$(find "$root_authorized_keys" -maxdepth 0 -perm /022 -print -quit 2>/dev/null)" ]
+}
+
+sshd_allowed_users_are_exact() {
+  [ "$(printf '%s\n' "$1" | sed -n 's/^allowusers //p' | LC_ALL=C sort | tr '\n' ' ')" = 'deploy root ' ]
+}
+
 sshd_policy_active() {
+  root_authorized_keys_safe || return 1
   effective_deploy="$(sshd -T -C user=deploy,host=localhost,addr=127.0.0.1 2>/dev/null)" || return 1
   for required_setting in \
     'passwordauthentication no' \
     'kbdinteractiveauthentication no' \
-    'permitrootlogin no' \
+    'permitrootlogin without-password' \
     'pubkeyauthentication yes' \
     'maxauthtries 3' \
     'maxsessions 4' \
     'allowtcpforwarding yes' \
-    'x11forwarding no' \
-    'allowusers deploy'; do
+    'x11forwarding no'; do
     printf '%s\n' "$effective_deploy" | grep -Fxq "$required_setting" || return 1
   done
+  sshd_allowed_users_are_exact "$effective_deploy" || return 1
   [ "$(printf '%s\n' "$effective_deploy" | sed -n 's/^port //p')" = 43556 ] || return 1
   effective_root="$(sshd -T -C user=root,host=localhost,addr=127.0.0.1 2>/dev/null)" || return 1
-  printf '%s\n' "$effective_root" | grep -Fxq 'permitrootlogin no' &&
+  printf '%s\n' "$effective_root" | grep -Fxq 'permitrootlogin without-password' &&
+    printf '%s\n' "$effective_root" | grep -Fxq 'pubkeyauthentication yes' &&
     printf '%s\n' "$effective_root" | grep -Fxq 'passwordauthentication no' &&
-    printf '%s\n' "$effective_root" | grep -Fxq 'kbdinteractiveauthentication no'
+    printf '%s\n' "$effective_root" | grep -Fxq 'kbdinteractiveauthentication no' &&
+    printf '%s\n' "$effective_root" | grep -Fxq 'maxsessions 4' &&
+    printf '%s\n' "$effective_root" | grep -Fxq 'x11forwarding no' &&
+    sshd_allowed_users_are_exact "$effective_root"
 }
 
 ufw_policy_active() {

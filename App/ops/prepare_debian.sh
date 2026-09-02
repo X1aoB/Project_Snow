@@ -120,6 +120,19 @@ touch /etc/project-snow/secrets/feedback_smtp_password
 chown root:root /etc/project-snow/secrets/feedback_smtp_password
 chmod 0400 /etc/project-snow/secrets/feedback_smtp_password
 
+root_ssh_directory=/root/.ssh
+root_authorized_keys="$root_ssh_directory/authorized_keys"
+[ -d "$root_ssh_directory" ] && [ ! -L "$root_ssh_directory" ] &&
+  [ "$(stat -c %u:%g "$root_ssh_directory")" = 0:0 ] &&
+  [ -z "$(find "$root_ssh_directory" -maxdepth 0 -perm /022 -print -quit)" ] &&
+  [ -s "$root_authorized_keys" ] && [ -f "$root_authorized_keys" ] &&
+  [ ! -L "$root_authorized_keys" ] &&
+  [ "$(stat -c %u:%g:%h "$root_authorized_keys")" = 0:0:1 ] &&
+  [ -z "$(find "$root_authorized_keys" -maxdepth 0 -perm /022 -print -quit)" ] || {
+    echo 'Root public-key SSH requires one safe non-empty root-owned authorized_keys file.' >&2
+    exit 78
+  }
+
 deploy_ssh_directory=/home/deploy/.ssh
 deploy_authorized_keys="$deploy_ssh_directory/authorized_keys"
 [ ! -L "$deploy_ssh_directory" ] || {
@@ -135,15 +148,7 @@ if [ -e "$deploy_authorized_keys" ] || [ -L "$deploy_authorized_keys" ]; then
     }
 fi
 if [ ! -s "$deploy_authorized_keys" ]; then
-  [ -s /root/.ssh/authorized_keys ] && [ -f /root/.ssh/authorized_keys ] &&
-    [ ! -L /root/.ssh/authorized_keys ] &&
-    [ "$(stat -c %h /root/.ssh/authorized_keys)" -eq 1 ] &&
-    [ "$(stat -c %u /root/.ssh/authorized_keys)" -eq 0 ] &&
-    [ -z "$(find /root/.ssh/authorized_keys -maxdepth 0 -perm /022 -print -quit)" ] || {
-      echo 'No safe non-empty authorized_keys source is available for deploy.' >&2
-      exit 78
-    }
-  install -o deploy -g deploy -m 0600 /root/.ssh/authorized_keys "$deploy_authorized_keys"
+  install -o deploy -g deploy -m 0600 "$root_authorized_keys" "$deploy_authorized_keys"
 else
   # Preserve the already-working deployment key set during migration; only
   # normalize its ownership and mode before hardening SSH.
@@ -151,7 +156,7 @@ else
   chmod 0600 "$deploy_authorized_keys"
 fi
 if [ ! -s "$deploy_authorized_keys" ]; then
-  echo 'Refusing to disable root SSH before deploy has a non-empty authorized_keys file.' >&2
+  echo 'Refusing SSH hardening before deploy has a non-empty authorized_keys file.' >&2
   exit 78
 fi
 
@@ -186,11 +191,11 @@ fi
 cat >> "$ssh_hardening_tmp" <<'EOF'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
-PermitRootLogin no
+PermitRootLogin prohibit-password
 PubkeyAuthentication yes
 MaxAuthTries 3
 MaxSessions 4
-AllowUsers deploy
+AllowUsers deploy root
 AllowTcpForwarding yes
 X11Forwarding no
 EOF
@@ -201,26 +206,33 @@ if [ -f /etc/ssh/sshd_config.d/60-project-snow.conf ]; then
   cp /etc/ssh/sshd_config.d/60-project-snow.conf "$previous_ssh_config"
 fi
 mv "$ssh_hardening_tmp" /etc/ssh/sshd_config.d/60-project-snow.conf
+sshd_allowed_users_are_exact() {
+  [ "$(printf '%s\n' "$1" | sed -n 's/^allowusers //p' | LC_ALL=C sort | tr '\n' ' ')" = 'deploy root ' ]
+}
 validate_effective_sshd() {
   effective_sshd="$(sshd -T -C user=deploy,host=localhost,addr=127.0.0.1)" || return 1
   for required_setting in \
     'passwordauthentication no' \
     'kbdinteractiveauthentication no' \
-    'permitrootlogin no' \
+    'permitrootlogin without-password' \
     'pubkeyauthentication yes' \
     'maxauthtries 3' \
     'maxsessions 4' \
     'allowtcpforwarding yes' \
-    'x11forwarding no' \
-    'allowusers deploy'; do
+    'x11forwarding no'; do
     printf '%s\n' "$effective_sshd" | grep -Fxq "$required_setting" || return 1
   done
+  sshd_allowed_users_are_exact "$effective_sshd" || return 1
   effective_ports="$(printf '%s\n' "$effective_sshd" | sed -n 's/^port //p')"
   [ "$effective_ports" = 43556 ] || return 1
   effective_root_sshd="$(sshd -T -C user=root,host=localhost,addr=127.0.0.1)" || return 1
-  printf '%s\n' "$effective_root_sshd" | grep -Fxq 'permitrootlogin no' &&
+  printf '%s\n' "$effective_root_sshd" | grep -Fxq 'permitrootlogin without-password' &&
+    printf '%s\n' "$effective_root_sshd" | grep -Fxq 'pubkeyauthentication yes' &&
     printf '%s\n' "$effective_root_sshd" | grep -Fxq 'passwordauthentication no' &&
-    printf '%s\n' "$effective_root_sshd" | grep -Fxq 'kbdinteractiveauthentication no'
+    printf '%s\n' "$effective_root_sshd" | grep -Fxq 'kbdinteractiveauthentication no' &&
+    printf '%s\n' "$effective_root_sshd" | grep -Fxq 'maxsessions 4' &&
+    printf '%s\n' "$effective_root_sshd" | grep -Fxq 'x11forwarding no' &&
+    sshd_allowed_users_are_exact "$effective_root_sshd"
 }
 if ! sshd -t || ! validate_effective_sshd; then
   if [ -n "$previous_ssh_config" ]; then
