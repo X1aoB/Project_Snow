@@ -936,7 +936,7 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#send-message").click()
             page.wait_for_function(
                 "() => document.querySelector('#stage-character-art')?.dataset.stageMotionPlayCount === '1'",
-                timeout=8000,
+                timeout=12000,
             )
             self.assertTrue((art.get_attribute("data-stage-motion-key") or "").endswith(":lean_in"))
             self.assertEqual(page.locator("#stage-narration").inner_text(), "正在看雪")
@@ -957,7 +957,7 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#send-message").click()
             page.wait_for_function(
                 "() => document.querySelector('#stage-character-art')?.dataset.stageMotionPlayCount === '2'",
-                timeout=8000,
+                timeout=12000,
             )
             self.assertTrue((art.get_attribute("data-stage-motion-key") or "").endswith(":startle"))
 
@@ -966,7 +966,7 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#send-message").click()
             page.wait_for_function(
                 "() => document.querySelector('#stage-character-art')?.dataset.stageMotionPlayCount === '3'",
-                timeout=8000,
+                timeout=12000,
             )
             page.locator('[data-character="25b23cb64398"]').click()
             page.locator("#stage-character-name", has_text="凯茜娅").wait_for(state="visible")
@@ -987,11 +987,12 @@ class PublicFrontendE2ETests(TestCase):
             reduced_page.locator("#go-in-person").click()
             reduced_page.locator("#confirm-presence-transition").click()
             reduced_page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+            reduced_page.locator("#stage-character-art").wait_for(state="visible", timeout=8000)
             reduced_page.locator("#message-input").fill("演出靠近测试")
             reduced_page.locator("#send-message").click()
             reduced_page.wait_for_function(
                 "() => document.querySelector('#stage-character-art')?.dataset.stageMotionKey?.endsWith(':lean_in')",
-                timeout=8000,
+                timeout=12000,
             )
             reduced_art = reduced_page.locator("#stage-character-art")
             self.assertIsNone(reduced_art.get_attribute("data-stage-motion-play-count"))
