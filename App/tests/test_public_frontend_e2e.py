@@ -83,6 +83,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
     arrival_started: threading.Event | None = None
     arrival_release: threading.Event | None = None
     feedback_payload: dict[str, object] | None = None
+    feedback_attempts = 0
+    feedback_mode = "success"
+    turnstile_site_key = ""
     chat_payloads: list[dict[str, object]] = []
     chat_attempts: dict[str, int] = {}
     presence_resolve_count = 0
@@ -108,7 +111,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 {
                     "app_version": "e2e",
                     "data_version": "fixture",
-                    "turnstile_site_key": "",
+                    "turnstile_site_key": type(self).turnstile_site_key,
                     "experience_notice_version": "0.9.2",
                     "analyst_avatar": {
                         "asset_id": "analyst-default",
@@ -155,7 +158,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
         if path == "/public/v1/characters":
             self._json(
                 {
-                    "count": 2,
+                    "count": 3,
                     "characters": [
                         {
                             "character_id": "25b23cb64398",
@@ -170,6 +173,14 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                             "display_name": "安卡希雅",
                             "aliases": ["安卡希雅"],
                             "search_tokens": ["akxy", "ankaxiya"],
+                            "avatar": None,
+                            "license": "fixture",
+                        },
+                        {
+                            "character_id": "702f4375675b",
+                            "display_name": "米娅",
+                            "aliases": ["米娅"],
+                            "search_tokens": ["my", "miya"],
                             "avatar": None,
                             "license": "fixture",
                         },
@@ -486,6 +497,37 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                         f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks}, ensure_ascii=False)}\n\n',
                     )
                 ).encode()
+            elif payload.get("message") == "显式动作标签回归":
+                blocks = [
+                    {
+                        "type": "action",
+                        "text": "米娅眼睛一亮，头顶的耳朵轻轻抖了抖，随即又有些不好意思地抿了抿嘴。",
+                    },
+                    {
+                        "type": "speech",
+                        "text": "诶？去、去我房间吗......好啊！\n\n我正好想给你看我新贴的照片墙呢！",
+                    },
+                ]
+                delta_packets = [
+                    "event: delta\ndata: "
+                    + json.dumps(
+                        {
+                            "block_index": index,
+                            "block_type": block["type"],
+                            "text": block["text"],
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                    for index, block in enumerate(blocks)
+                ]
+                remaining_packets = "".join(
+                    (
+                        *delta_packets,
+                        'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
+                        f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks}, ensure_ascii=False)}\n\n',
+                    )
+                ).encode()
             else:
                 remaining_packets = "".join(
                     (
@@ -508,6 +550,10 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
             return
         if self.path == "/public/v1/feedback":
+            type(self).feedback_attempts += 1
+            if type(self).feedback_mode == "http_error":
+                self._json({"detail": {"code": "request_failed"}}, status=503)
+                return
             type(self).feedback_payload = payload
             self._json({"feedback_code": "SNOW-E2E", "suppressed": False})
             return
@@ -535,6 +581,9 @@ class PublicFrontendE2ETests(TestCase):
         PublicFrontendHandler.arrival_started = None
         PublicFrontendHandler.arrival_release = None
         PublicFrontendHandler.feedback_payload = None
+        PublicFrontendHandler.feedback_attempts = 0
+        PublicFrontendHandler.feedback_mode = "success"
+        PublicFrontendHandler.turnstile_site_key = ""
         PublicFrontendHandler.chat_payloads = []
         PublicFrontendHandler.chat_attempts = {}
         PublicFrontendHandler.presence_resolve_count = 0
@@ -654,9 +703,12 @@ class PublicFrontendE2ETests(TestCase):
                         ]),
                     );
                     const assetResponses = await Promise.all(
-                        Object.entries(hooks.miaExpressionAssets).map(async ([state, url]) => {
+                        Object.entries(hooks.miaExpressionAssets).flatMap(([state, faceUrl]) => [
+                            [state, 'face', faceUrl],
+                            [state, 'stage', hooks.miaStageExpressionAssets[state]],
+                        ]).map(async ([state, kind, url]) => {
                             const response = await fetch(url);
-                            return [state, response.status, response.headers.get('content-type') || ''];
+                            return [state, kind, response.status, response.headers.get('content-type') || ''];
                         }),
                     );
                     const explicit = hooks.expressionStateForMessage({
@@ -669,11 +721,214 @@ class PublicFrontendE2ETests(TestCase):
             )
             self.assertEqual(result["classified"], {state: state for state in samples})
             self.assertEqual(result["explicit"], "surprised")
-            self.assertEqual(len(result["assetResponses"]), 18)
-            for state, status, content_type in result["assetResponses"]:
+            self.assertEqual(len(result["assetResponses"]), 36)
+            for state, kind, status, content_type in result["assetResponses"]:
                 self.assertIn(state, samples)
-                self.assertEqual(status, 200, state)
-                self.assertEqual(content_type, "image/webp", state)
+                self.assertIn(kind, {"face", "stage"})
+                self.assertEqual(status, 200, f"{state}/{kind}")
+                self.assertEqual(content_type, "image/webp", f"{state}/{kind}")
+            browser.close()
+
+    def test_mia_stage_art_syncs_all_states_and_actions_stay_out_of_dialogue(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator('[data-character="702f4375675b"]').click()
+            self._configure_model(page)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#in-person-surface").wait_for(state="visible")
+            page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+            page.wait_for_function(
+                "() => document.querySelector('#stage-speech').textContent === '你来了。'"
+            )
+            page.locator("#stage-character-art").wait_for(state="visible")
+
+            states = page.evaluate(
+                """async () => {
+                    const hooks = window.__projectSnowTest;
+                    const character = {character_id: '702f4375675b', display_name: '米娅', avatar: null};
+                    const art = document.querySelector('#stage-character-art');
+                    const portrait = document.querySelector('#stage-portrait-avatar');
+                    const result = {};
+                    for (const state of Object.keys(hooks.miaExpressionAssets)) {
+                        await hooks.updateStageCharacterArt(art, character, state);
+                        hooks.fillStagePortrait(portrait, character, state);
+                        result[state] = {
+                            portraitState: portrait.dataset.expressionState,
+                            portraitSrc: portrait.querySelector('img')?.getAttribute('src') || '',
+                            artState: art.dataset.expressionState,
+                            artSrc: art.getAttribute('src') || '',
+                            hidden: art.hidden,
+                        };
+                    }
+                    return result;
+                }"""
+            )
+            self.assertEqual(len(states), 18)
+            for state, values in states.items():
+                self.assertEqual(values["portraitState"], state)
+                self.assertRegex(values["portraitSrc"], rf"/{state}\.[0-9a-f]{{16}}\.webp$")
+                self.assertEqual(values["artState"], state)
+                self.assertIn(f"/{state}.stage.", values["artSrc"])
+                self.assertFalse(values["hidden"])
+
+            non_mia_hidden = page.evaluate(
+                """async () => {
+                    const hooks = window.__projectSnowTest;
+                    const art = document.querySelector('#stage-character-art');
+                    await hooks.updateStageCharacterArt(
+                        art,
+                        {character_id: '25b23cb64398', display_name: '凯茜娅', avatar: null},
+                        'neutral',
+                    );
+                    return art.hidden && !art.hasAttribute('src');
+                }"""
+            )
+            self.assertTrue(non_mia_hidden)
+            page.evaluate(
+                """async () => window.__projectSnowTest.updateStageCharacterArt(
+                    document.querySelector('#stage-character-art'),
+                    {character_id: '702f4375675b', display_name: '米娅', avatar: null},
+                    'neutral',
+                )"""
+            )
+            fallback_state = page.evaluate(
+                """async () => {
+                    const NativeImage = window.Image;
+                    class FallbackProbe {
+                        constructor() { this.complete = false; this.naturalWidth = 0; }
+                        set src(value) {
+                            queueMicrotask(() => {
+                                if (value.includes('/angry.stage.')) this.onerror?.();
+                                else { this.naturalWidth = 620; this.onload?.(); }
+                            });
+                        }
+                    }
+                    window.Image = FallbackProbe;
+                    try {
+                        const art = document.querySelector('#stage-character-art');
+                        await window.__projectSnowTest.updateStageCharacterArt(
+                            art,
+                            {character_id: '702f4375675b', display_name: '米娅', avatar: null},
+                            'angry',
+                        );
+                        return {state: art.dataset.expressionState, src: art.getAttribute('src') || ''};
+                    } finally {
+                        window.Image = NativeImage;
+                    }
+                }"""
+            )
+            self.assertEqual(fallback_state["state"], "neutral")
+            self.assertIn("/neutral.stage.", fallback_state["src"])
+            page.locator("#toggle-stage-ui").click()
+            self.assertTrue(page.locator("#stage-character-art").is_visible())
+            page.locator("#restore-stage-ui").click()
+
+            page.locator("#message-input").fill("显式动作标签回归")
+            page.locator("#send-message").click()
+            page.wait_for_function(
+                "() => document.querySelector('#stage-narration').textContent.includes('米娅眼睛一亮')"
+            )
+            page.wait_for_function(
+                "() => document.querySelector('#stage-speech').textContent.includes('我正好想给你看我新贴的照片墙呢！')"
+            )
+            self.assertNotIn("〔动作〕", page.locator("#stage-speech").inner_text())
+            self.assertNotIn("米娅眼睛一亮", page.locator("#stage-speech").inner_text())
+
+            page.set_viewport_size({"width": 390, "height": 844})
+            bounds = page.evaluate(
+                """() => {
+                    const stage = document.querySelector('#scene-stage').getBoundingClientRect();
+                    const art = document.querySelector('#stage-character-art').getBoundingClientRect();
+                    const dialogue = document.querySelector('#stage-dialogue').getBoundingClientRect();
+                    return {stage, art, dialogue};
+                }"""
+            )
+            self.assertLessEqual(bounds["art"]["width"], bounds["stage"]["width"] * 0.9 + 1)
+            self.assertGreaterEqual(bounds["art"]["left"], bounds["stage"]["left"] - 1)
+            self.assertLessEqual(bounds["art"]["right"], bounds["stage"]["right"] + 1)
+            self.assertLessEqual(bounds["art"]["bottom"], bounds["dialogue"]["top"] + 1)
+            browser.close()
+
+    def test_feedback_turnstile_is_visible_retryable_and_preserves_the_form(self) -> None:
+        PublicFrontendHandler.turnstile_site_key = "e2e-site-key"
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page.route(
+                "https://challenges.cloudflare.com/**",
+                lambda route: route.fulfill(status=200, content_type="application/javascript", body=""),
+            )
+            page.add_init_script(
+                """
+                window.__turnstileMode = 'error';
+                window.__turnstileInsideFeedbackDialog = false;
+                window.__turnstileOptions = null;
+                window.turnstile = {
+                    render(container, options) {
+                        if (window.__turnstileMode === 'unavailable') throw new Error('load failed');
+                        window.__turnstileInsideFeedbackDialog = Boolean(container.closest('#feedback-dialog'));
+                        window.__turnstileOptions = options;
+                        const challenge = document.createElement('div');
+                        challenge.dataset.mockTurnstile = 'true';
+                        challenge.textContent = '人机验证测试';
+                        container.append(challenge);
+                        return 17;
+                    },
+                    execute() {
+                        queueMicrotask(() => {
+                            if (window.__turnstileMode === 'error') window.__turnstileOptions['error-callback']();
+                            else if (window.__turnstileMode === 'expired') window.__turnstileOptions['expired-callback']();
+                            else window.__turnstileOptions.callback('turnstile-e2e-token');
+                        });
+                    },
+                    remove() {},
+                };
+                """
+            )
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator("#open-global-feedback").click()
+            page.locator("#feedback-body").fill("验证失败后必须保留的反馈正文")
+            submit = page.locator("#feedback-form button[type=submit]")
+            retry = page.locator("#feedback-retry-verification")
+
+            submit.click()
+            retry.wait_for(state="visible")
+            self.assertTrue(page.evaluate("() => window.__turnstileInsideFeedbackDialog"))
+            self.assertIn("验证", page.locator("#feedback-error").inner_text())
+            self.assertEqual(page.locator("#feedback-body").input_value(), "验证失败后必须保留的反馈正文")
+            self.assertTrue(submit.is_enabled())
+            self.assertEqual(PublicFrontendHandler.feedback_attempts, 0)
+
+            page.evaluate("() => { window.__turnstileMode = 'expired'; }")
+            retry.click()
+            page.locator("#feedback-error").get_by_text("人机验证已过期").wait_for(state="visible")
+            self.assertEqual(PublicFrontendHandler.feedback_attempts, 0)
+
+            page.evaluate("() => { window.__turnstileMode = 'unavailable'; }")
+            retry.click()
+            page.locator("#feedback-error").get_by_text("验证组件加载失败").wait_for(state="visible")
+            self.assertEqual(page.locator("#feedback-body").input_value(), "验证失败后必须保留的反馈正文")
+            self.assertEqual(PublicFrontendHandler.feedback_attempts, 0)
+
+            PublicFrontendHandler.feedback_mode = "http_error"
+            page.evaluate("() => { window.__turnstileMode = 'success'; }")
+            retry.click()
+            page.locator("#feedback-error").get_by_text("请求失败").wait_for(state="visible")
+            self.assertEqual(PublicFrontendHandler.feedback_attempts, 1)
+            self.assertEqual(page.locator("#feedback-body").input_value(), "验证失败后必须保留的反馈正文")
+
+            PublicFrontendHandler.feedback_mode = "success"
+            retry.click()
+            page.locator("#feedback-dialog").wait_for(state="hidden")
+            self.assertEqual(PublicFrontendHandler.feedback_attempts, 2)
+            payload = PublicFrontendHandler.feedback_payload or {}
+            self.assertEqual(payload.get("turnstile_token"), "turnstile-e2e-token")
+            self.assertEqual(payload.get("body"), "验证失败后必须保留的反馈正文")
             browser.close()
 
     def test_text_and_in_person_surfaces_share_local_continuity(self) -> None:

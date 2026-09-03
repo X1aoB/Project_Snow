@@ -1,5 +1,5 @@
 {
-  "schema_version": "project-snow-mia-expression-runtime-1",
+  "schema_version": "project-snow-mia-expression-runtime-2",
   "character_id": "702f4375675b",
   "display_name": "米娅",
   "expression_state_count": 18,
@@ -22,16 +22,29 @@
     "approval_snapshot_sha256": "e131dd2935c684ff9bdbac12555b8f081ddafaac7f0de2d8cc32f05de6d45842",
     "approved_state_count": 18
   },
-  "transform": {
-    "crop_box_xyxy": [
-      440,
-      145,
-      635,
-      340
-    ],
-    "output_dimensions": {
-      "width": 384,
-      "height": 384
+  "transforms": {
+    "face": {
+      "crop_box_xyxy": [
+        440,
+        145,
+        635,
+        340
+      ],
+      "output_dimensions": {
+        "width": 384,
+        "height": 384
+      }
+    },
+    "stage": {
+      "resize_mode": "contain_no_padding",
+      "source_dimensions": {
+        "width": 877,
+        "height": 1449
+      },
+      "output_dimensions": {
+        "width": 620,
+        "height": 1024
+      }
     },
     "format": "lossless_webp",
     "mode": "RGBA",
@@ -46,8 +59,10 @@
       "source_sha256": "c1d075418f22c25ebb008600e4a1fab2bea9e4ea171857fd7f2be9751869d4b6",
       "source_reference": "",
       "source_reference_sha256": "",
-      "asset_path": "/assets/expressions/mia/neutral.208818121225b3d1.webp",
-      "asset_sha256": "208818121225b3d17b3243dab60031d29455f92478165a809587f9eb0e28c30d"
+      "face_asset_path": "/assets/expressions/mia/neutral.208818121225b3d1.webp",
+      "face_asset_sha256": "208818121225b3d17b3243dab60031d29455f92478165a809587f9eb0e28c30d",
+      "stage_asset_path": "/assets/expressions/mia/neutral.stage.1e407adfc93e1803.webp",
+      "stage_asset_sha256": "1e407adfc93e180306dc3d1191a63157838000c1b0f0c624bac3098366a6ef50"
     },
     "gentle_smile": {
       "approved_variant": "B",
@@ -56,8 +71,10 @@
       "source_sha256": "3882b0844d3674d32822438423020522d95cc031bddf4054e44cfb30bda5bde1",
       "source_reference": "generated_refs/gentle_smile/B.imagegen-reference.pending.png",
       "source_reference_sha256": "19df4129766fb42072dce212f52ba7f77eb29b0141b8c588b3a49fde22dad7de",
-      "asset_path": "/assets/expressions/mia/gentle_smile.4ad4764940e683e9.webp",
-      "asset_sha256": "4ad4764940e683e9efe3cb1201033a758db39962cbc6e94c6666e409ec6bcb2e"
+      "face_asset_path": "/assets/expressions/mia/gentle_smile.4ad4764940e683e9.webp",
+      "face_asset_sha256": "4ad4764940e683e9efe3cb1201033a758db39962cbc6e94c6666e409ec6bcb2e",
+      "stage_asset_path": "/assets/expressions/mia/gentle_smile.stage.ba1b5f87cb0d2fe7.webp",
+      "stage_asset_sha256": "ba1b5f87cb0d2fe78645b2b653a5785e780fe9852ac09e3380274af9689c80ce"
     },
     "happy": {
       "approved_variant": "B",
@@ -66,8 +83,10 @@
       "source_sha256": "2ffcbccbed950564ffe8ca259c1b311f8436bb02adc54f78193f1153eb6adbb3",
       "source_reference": "generated_refs/happy/B.imagegen-reference.pending.png",
       "source_reference_sha256": "333761973521045affaca94c3dc61654133ff4f7ff47ed1ee5f9a7c5f5f798a0",
-      "asset_path": "/assets/expressions/mia/happy.1b3a1ba7d49cbde9.webp",
-      "asset_sha256": "1b3a1ba7d49cbde94d2e5665cc322e02910b2bb49575fce20abc61d5a65377fb"
+      "face_asset_path": "/assets/expressions/mia/happy.1b3a1ba7d49cbde9.webp",
+      "face_asset_sha256": "1b3a1ba7d49cbde94d2e5665cc322e02910b2bb49575fce20abc61d5a65377fb",
+      "stage_asset_path": "/assets/expressions/mia/happy.stage.75ba817720ebe113.webp",
+      "stage_asset_sha256": "75ba817720ebe113a018fcee0b2a34aa30553e02c0a1ec8159ba6059d246e5e7"
     },
     "amused": {
       "approved_variant": "C",
@@ -76,8 +95,10 @@
       "source_sha256": "1a4d8156fdfb674e06bf31d128b9fe95b2b6f962ecf8d8e3b84cadba9390b403",
       "source_reference": "generated_refs/amused/C.imagegen-reference.pending.png",
       "source_reference_sha256": "bf2608143c04fa2d8e120d6b1f77aa94687ae9d7c36bb0615cb20cbb43c5f339",
-      "asset_path": "/assets/expressions/mia/amused.6235b0f7cff6fb0e.webp",
-      "asset_sha256": "6235b0f7cff6fb0ef2871fb50c09a9b2a4812831de786cdb3f7754044ee8112a"
+      "face_asset_path": "/assets/expressions/mia/amused.6235b0f7cff6fb0e.webp",
+      "face_asset_sha256": "6235b0f7cff6fb0ef2871fb50c09a9b2a4812831de786cdb3f7754044ee8112a",
+      "stage_asset_path": "/assets/expressions/mia/amused.stage.e469e7049030c2d8.webp",
+      "stage_asset_sha256": "e469e7049030c2d8178701414f540fd4c6bd0060179c87277d8ce57aece4efa9"
     },
     "teasing": {
       "approved_variant": "R4",
@@ -86,8 +107,10 @@
       "source_sha256": "c87686cc2fc6d65829471eb00317bbaa812047a85deefc810b0c0d0c22efaf54",
       "source_reference": "generated_refs/teasing/R4.imagegen-reference.pending.png",
       "source_reference_sha256": "879f18b09fa50a8553b9936da469f07406b27e31a0dee53a9d7942dd445df189",
-      "asset_path": "/assets/expressions/mia/teasing.033f5b38d32b6718.webp",
-      "asset_sha256": "033f5b38d32b67183e49928cc9ffb2bb1ae64ef4c7e79efea6ec270d5512c7b9"
+      "face_asset_path": "/assets/expressions/mia/teasing.033f5b38d32b6718.webp",
+      "face_asset_sha256": "033f5b38d32b67183e49928cc9ffb2bb1ae64ef4c7e79efea6ec270d5512c7b9",
+      "stage_asset_path": "/assets/expressions/mia/teasing.stage.e8cedef547992a63.webp",
+      "stage_asset_sha256": "e8cedef547992a63dd48cb255fa751e161d59bb6d2f8651418c2d76e12067192"
     },
     "relieved": {
       "approved_variant": "B",
@@ -96,8 +119,10 @@
       "source_sha256": "758a7f61ec832f02a0800e3ab0bbc878838e0fe2e402e9c62302ba8795335e7f",
       "source_reference": "generated_refs/relieved/B.imagegen-reference.pending.png",
       "source_reference_sha256": "5b5abaffe6055091de27d613142214f3152081444cc252b70ca37239088c5150",
-      "asset_path": "/assets/expressions/mia/relieved.fc684841c1ed6b73.webp",
-      "asset_sha256": "fc684841c1ed6b73485ca245628e7a432140f22195be53f2d9d6ca18eb8a9aba"
+      "face_asset_path": "/assets/expressions/mia/relieved.fc684841c1ed6b73.webp",
+      "face_asset_sha256": "fc684841c1ed6b73485ca245628e7a432140f22195be53f2d9d6ca18eb8a9aba",
+      "stage_asset_path": "/assets/expressions/mia/relieved.stage.823f23dadac37909.webp",
+      "stage_asset_sha256": "823f23dadac379096815408bf68f3ec2aa8162e61b6bcabe0c1f54b266432e24"
     },
     "serious": {
       "approved_variant": "A",
@@ -106,8 +131,10 @@
       "source_sha256": "770215c8223a107f450f319525da880c13b0816d696140dfd4e3a84bb6246257",
       "source_reference": "generated_refs/serious/A.imagegen-reference.pending.png",
       "source_reference_sha256": "c8614dd694d79f1501fd3cdec647fe26642eeaafa9a3e2348aae1a523b7ec8be",
-      "asset_path": "/assets/expressions/mia/serious.6252a05c60ec1fe9.webp",
-      "asset_sha256": "6252a05c60ec1fe9944cc7c3c60f6da93c72aa9c5dd7ba0032258a6ce66b558d"
+      "face_asset_path": "/assets/expressions/mia/serious.6252a05c60ec1fe9.webp",
+      "face_asset_sha256": "6252a05c60ec1fe9944cc7c3c60f6da93c72aa9c5dd7ba0032258a6ce66b558d",
+      "stage_asset_path": "/assets/expressions/mia/serious.stage.234218ddd8872f08.webp",
+      "stage_asset_sha256": "234218ddd8872f0828938458fa181b2676e88527a7b36dc77d40e8dbe0997999"
     },
     "focused": {
       "approved_variant": "R1",
@@ -116,8 +143,10 @@
       "source_sha256": "a8ad794d042c7be86175c8bc96e084691442436b5a73a843a245b6cf1723ac6f",
       "source_reference": "generated_refs/focused/R1.imagegen-reference.pending.png",
       "source_reference_sha256": "5ac1720db2fd5f897c752c41f66f416978e78ad185494d035e755301b28fad0e",
-      "asset_path": "/assets/expressions/mia/focused.a7da8d4656ca141c.webp",
-      "asset_sha256": "a7da8d4656ca141c6f7433c7e66c1ded0b9fde7bbbe0a90fb11aded62f2af7c5"
+      "face_asset_path": "/assets/expressions/mia/focused.a7da8d4656ca141c.webp",
+      "face_asset_sha256": "a7da8d4656ca141c6f7433c7e66c1ded0b9fde7bbbe0a90fb11aded62f2af7c5",
+      "stage_asset_path": "/assets/expressions/mia/focused.stage.2af00a3b3550b4b6.webp",
+      "stage_asset_sha256": "2af00a3b3550b4b6d4b76c3ab705de17b19fbc400b611c990a51efa3b0d5b242"
     },
     "thinking": {
       "approved_variant": "B",
@@ -126,8 +155,10 @@
       "source_sha256": "e8bfc7cb07db0fb853b30220e5f945fe25f4fe6b95980b2cd1d2a63fb4dc56cc",
       "source_reference": "generated_refs/thinking/B.imagegen-reference.pending.png",
       "source_reference_sha256": "2eab358a6c4bc8d4d3fc246746f5f3145245b20cc5ebf876fd8b455acf2fc94f",
-      "asset_path": "/assets/expressions/mia/thinking.b50e58c4c787f54b.webp",
-      "asset_sha256": "b50e58c4c787f54ba1d8433227f7ce776d45a0cce45428f36c385a0e5826d0c7"
+      "face_asset_path": "/assets/expressions/mia/thinking.b50e58c4c787f54b.webp",
+      "face_asset_sha256": "b50e58c4c787f54ba1d8433227f7ce776d45a0cce45428f36c385a0e5826d0c7",
+      "stage_asset_path": "/assets/expressions/mia/thinking.stage.656d6837cdcd8528.webp",
+      "stage_asset_sha256": "656d6837cdcd8528cf65c091adf7a08f0ec3ab1d3cf32eb3dbff9112970913cd"
     },
     "confused": {
       "approved_variant": "A",
@@ -136,8 +167,10 @@
       "source_sha256": "8b89e2e544f8e2893370fa5a33135bfcab8fe50cd99ec6bfa1e5cfe007b6b4c8",
       "source_reference": "generated_refs/confused/A.imagegen-reference.pending.png",
       "source_reference_sha256": "b01ab59f2f876e7aaa6324d5a86160d1dd2428653231bf964dc1eea9f7791477",
-      "asset_path": "/assets/expressions/mia/confused.a99f0aab911e22c5.webp",
-      "asset_sha256": "a99f0aab911e22c50c89631db6e0fa4acf0ab988e1a0b9d79349e04da55ad900"
+      "face_asset_path": "/assets/expressions/mia/confused.a99f0aab911e22c5.webp",
+      "face_asset_sha256": "a99f0aab911e22c50c89631db6e0fa4acf0ab988e1a0b9d79349e04da55ad900",
+      "stage_asset_path": "/assets/expressions/mia/confused.stage.d60c119eb51c833b.webp",
+      "stage_asset_sha256": "d60c119eb51c833b4bf705533fa497febcf7deea57846cc2f20bb75177034af8"
     },
     "skeptical": {
       "approved_variant": "B",
@@ -146,8 +179,10 @@
       "source_sha256": "65bc8e6753c8876ff76ffa484ad1aa5e5e9de6077bd4fe9c9111c708113b1159",
       "source_reference": "generated_refs/skeptical/B.imagegen-reference.pending.png",
       "source_reference_sha256": "2f947fa2b9b490dd3eafd335633aae80d78af5a5a4dff67de3d59b20c7f14539",
-      "asset_path": "/assets/expressions/mia/skeptical.01e31836c2656e6c.webp",
-      "asset_sha256": "01e31836c2656e6cb4bf4a278eb8f94a000fa9678115a7b5853471fd12166ff1"
+      "face_asset_path": "/assets/expressions/mia/skeptical.01e31836c2656e6c.webp",
+      "face_asset_sha256": "01e31836c2656e6cb4bf4a278eb8f94a000fa9678115a7b5853471fd12166ff1",
+      "stage_asset_path": "/assets/expressions/mia/skeptical.stage.c72ca6c8753be88b.webp",
+      "stage_asset_sha256": "c72ca6c8753be88bf788f40562e7c69bf1c05ec02566c07869c7db8f1bbc729e"
     },
     "concerned": {
       "approved_variant": "A",
@@ -156,8 +191,10 @@
       "source_sha256": "9b37d7e873271364bff17114542beccc981f884f7c8b10e947f2eef22d0a0e94",
       "source_reference": "generated_refs/concerned/A.imagegen-reference.pending.png",
       "source_reference_sha256": "210d7f140a14ee0fefc7cf51969e4822bd0d793e77a73dcd7b87f36d91483868",
-      "asset_path": "/assets/expressions/mia/concerned.715d5da0c6c009fa.webp",
-      "asset_sha256": "715d5da0c6c009fa68f728cedde966b05f94b834f507266eb5092b2e1d2e6bbd"
+      "face_asset_path": "/assets/expressions/mia/concerned.715d5da0c6c009fa.webp",
+      "face_asset_sha256": "715d5da0c6c009fa68f728cedde966b05f94b834f507266eb5092b2e1d2e6bbd",
+      "stage_asset_path": "/assets/expressions/mia/concerned.stage.b01ac02cef7ccc76.webp",
+      "stage_asset_sha256": "b01ac02cef7ccc76c55fc7ed011aea37d9de87b22198f930fd7541de2517498e"
     },
     "surprised": {
       "approved_variant": "R1",
@@ -166,8 +203,10 @@
       "source_sha256": "a4b1901cbcec48af7f8d8c15425725fc8b25f3d0b09525c1e0786507bc613a1c",
       "source_reference": "generated_refs/surprised/R1.imagegen-reference.pending.png",
       "source_reference_sha256": "cf06a5c1546ca0cb659b4ba7523fc97cf8b8c6ac3208b30b402bae9abb96c8ee",
-      "asset_path": "/assets/expressions/mia/surprised.cf52252f798e900e.webp",
-      "asset_sha256": "cf52252f798e900ed0030b5e03a267f501faae9a25b20e7455078f80e76cd095"
+      "face_asset_path": "/assets/expressions/mia/surprised.cf52252f798e900e.webp",
+      "face_asset_sha256": "cf52252f798e900ed0030b5e03a267f501faae9a25b20e7455078f80e76cd095",
+      "stage_asset_path": "/assets/expressions/mia/surprised.stage.68c69038701dc824.webp",
+      "stage_asset_sha256": "68c69038701dc8241c19a7bd8825cbb63c94a6ef66ce61542bf51b80bc23b23c"
     },
     "embarrassed": {
       "approved_variant": "A",
@@ -176,8 +215,10 @@
       "source_sha256": "5df4b4b94bf65dd9deccdb23c00e36ca9c167e850a4469dc4fff9d24227dca5a",
       "source_reference": "generated_refs/embarrassed/A.imagegen-reference.pending.png",
       "source_reference_sha256": "2440128ade1620e744bcd9da87d150a38b76e86218623cb155ef1f0f7291cbe6",
-      "asset_path": "/assets/expressions/mia/embarrassed.d6946cb29cc560eb.webp",
-      "asset_sha256": "d6946cb29cc560ebb21f6ad559c4d9364e436813ee96fd5afd5676170ee889f5"
+      "face_asset_path": "/assets/expressions/mia/embarrassed.d6946cb29cc560eb.webp",
+      "face_asset_sha256": "d6946cb29cc560ebb21f6ad559c4d9364e436813ee96fd5afd5676170ee889f5",
+      "stage_asset_path": "/assets/expressions/mia/embarrassed.stage.6321a8285c2f502b.webp",
+      "stage_asset_sha256": "6321a8285c2f502b30f3134cf7a6d7c7f9a5f2ce131b1cdbcab271a7c6611886"
     },
     "sad": {
       "approved_variant": "A",
@@ -186,8 +227,10 @@
       "source_sha256": "ea93014f660c990b05de6e89bf1e92b646d8f2d3b7b41c678a9ca0c39d70356d",
       "source_reference": "generated_refs/sad/A.imagegen-reference.pending.png",
       "source_reference_sha256": "1ab5aa78fd9e418de83184aa51b0f5c41a70cb8d0588dd6d5c5aa3e6dba49b72",
-      "asset_path": "/assets/expressions/mia/sad.89f4b7099edd6343.webp",
-      "asset_sha256": "89f4b7099edd63438a198007e1c5e530ec650a74e1afc8e05d615d343c14802c"
+      "face_asset_path": "/assets/expressions/mia/sad.89f4b7099edd6343.webp",
+      "face_asset_sha256": "89f4b7099edd63438a198007e1c5e530ec650a74e1afc8e05d615d343c14802c",
+      "stage_asset_path": "/assets/expressions/mia/sad.stage.92cccf0885f090b9.webp",
+      "stage_asset_sha256": "92cccf0885f090b9e84972e30c0ff5a0e2366f517a9275dddc9bb7fbac437fbb"
     },
     "disappointed": {
       "approved_variant": "R1",
@@ -196,8 +239,10 @@
       "source_sha256": "4309abe3a07a37d3bd25fd01bd737bdcf7ab9ccbdaa9407e518371be0077b846",
       "source_reference": "generated_refs/disappointed/R1.imagegen-reference.pending.png",
       "source_reference_sha256": "fcacb16427c5a7906c028b548b0a1845f9b7a18e3f033e854d7f29084ec8fc5d",
-      "asset_path": "/assets/expressions/mia/disappointed.52c6af53a6f40798.webp",
-      "asset_sha256": "52c6af53a6f407988f05ccd1768e46b0905395e91506537f07c9a77840360ec2"
+      "face_asset_path": "/assets/expressions/mia/disappointed.52c6af53a6f40798.webp",
+      "face_asset_sha256": "52c6af53a6f407988f05ccd1768e46b0905395e91506537f07c9a77840360ec2",
+      "stage_asset_path": "/assets/expressions/mia/disappointed.stage.1bf71d0ecfdafeef.webp",
+      "stage_asset_sha256": "1bf71d0ecfdafeef68cbd85d2a64204b3085f15c3ba254d27a628f840f333dde"
     },
     "annoyed": {
       "approved_variant": "R4",
@@ -206,8 +251,10 @@
       "source_sha256": "c56857d52d0a3d4ed5de08e4cbb9417fed2ab0d5baae869ca2f9ad361ec6560d",
       "source_reference": "generated_refs/annoyed/R4.imagegen-reference.pending.png",
       "source_reference_sha256": "b2d01dc4d3ca17e571497d249a31531a56c92c11fa5edfca4705c7f0a6777c8c",
-      "asset_path": "/assets/expressions/mia/annoyed.db1a9cb01af07381.webp",
-      "asset_sha256": "db1a9cb01af073811254aba0b14ed45b617deb71c80050e4988d4f4faf9f9358"
+      "face_asset_path": "/assets/expressions/mia/annoyed.db1a9cb01af07381.webp",
+      "face_asset_sha256": "db1a9cb01af073811254aba0b14ed45b617deb71c80050e4988d4f4faf9f9358",
+      "stage_asset_path": "/assets/expressions/mia/annoyed.stage.2c07b11ff1b9736d.webp",
+      "stage_asset_sha256": "2c07b11ff1b9736d9549d52edb701f1d94a588d4b9007f89f3d2e4e36f776682"
     },
     "angry": {
       "approved_variant": "R5",
@@ -216,8 +263,10 @@
       "source_sha256": "9955e104bfc53372ba101cbf469e7366d4eda44d10ccb4376e588c15ab9283c3",
       "source_reference": "generated_refs/angry/R5.imagegen-reference.pending.png",
       "source_reference_sha256": "69552903d0a27ba2d6a91f0203c96a4b958a5a9693f7b804ba07d48c9f4398df",
-      "asset_path": "/assets/expressions/mia/angry.d30e58bcf8885d08.webp",
-      "asset_sha256": "d30e58bcf8885d0874c7dd56bc7acb99949d6133139000e67c5b82e9ee931cd1"
+      "face_asset_path": "/assets/expressions/mia/angry.d30e58bcf8885d08.webp",
+      "face_asset_sha256": "d30e58bcf8885d0874c7dd56bc7acb99949d6133139000e67c5b82e9ee931cd1",
+      "stage_asset_path": "/assets/expressions/mia/angry.stage.01f3b6eb3d2de00e.webp",
+      "stage_asset_sha256": "01f3b6eb3d2de00eb0178b6ea15a1a1d2d562dbf42fbaf5a66d0cb76dc6d097b"
     }
   }
 }

@@ -141,6 +141,70 @@ class FeedbackRegressionTests(unittest.TestCase):
         # callers; the public facade checks the rejection flag before exposing
         # any block, so no assistant message is rendered on the web surface.
 
+    def test_explicit_action_label_is_split_from_following_dialogue(self) -> None:
+        service = self._service()
+        source = (
+            "〔动作〕米娅眼睛一亮，头顶的耳朵轻轻抖了抖，"
+            "随即又有些不好意思地抿了抿嘴。\n\n"
+            "诶？去、去我房间吗......好啊！\n\n"
+            "我正好想给你看我新贴的照片墙呢！"
+        )
+
+        blocks, reclassified = service._normalize_content_blocks_with_diagnostics(
+            {"content_blocks": [{"type": "speech", "text": source}]},
+            "in_person",
+            "",
+            "米娅",
+        )
+
+        self.assertTrue(reclassified)
+        self.assertEqual(
+            blocks,
+            [
+                {
+                    "type": "action",
+                    "text": "米娅眼睛一亮，头顶的耳朵轻轻抖了抖，随即又有些不好意思地抿了抿嘴。",
+                },
+                {
+                    "type": "speech",
+                    "text": "诶？去、去我房间吗......好啊！\n\n我正好想给你看我新贴的照片墙呢！",
+                },
+            ],
+        )
+        self.assertNotIn("〔动作〕", service._render_content_blocks(blocks))
+
+    def test_explicit_action_label_variants_are_supported(self) -> None:
+        service = self._service()
+        for label in ("〔动作〕", "【动作】", "[动作]", "（动作）", "(动作)"):
+            with self.subTest(label=label):
+                blocks = service._normalize_content_blocks(
+                    {"content_blocks": [{"type": "speech", "text": f"{label}米娅点了点头。\n\n好呀。"}]},
+                    "in_person",
+                    "",
+                    "米娅",
+                )
+                self.assertEqual(
+                    blocks,
+                    [
+                        {"type": "action", "text": "米娅点了点头。"},
+                        {"type": "speech", "text": "好呀。"},
+                    ],
+                )
+
+    def test_mixed_explicit_action_paragraph_remains_a_guard_violation(self) -> None:
+        for source in (
+            "〔动作〕米娅抬起手说道：我们走吧。",
+            "先等等。\n\n〔动作〕米娅抬起手说道：我们走吧。",
+        ):
+            with self.subTest(source=source):
+                violations = MVPService._communication_block_violations(
+                    "出发吧。",
+                    source,
+                    "in_person",
+                    [{"type": "speech", "text": source}],
+                )
+                self.assertIn("in_person_speech_contains_action", violations)
+
     def test_rendezvous_intent_exposes_character_location_but_greeting_does_not(self) -> None:
         """“去找你” is an intentional location request, unlike a greeting."""
 

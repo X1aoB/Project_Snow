@@ -15,7 +15,7 @@
         <header class="product-header">
           <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
             <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="version-badge">0.9.4</small></span>
+            <span><strong>Project Snow</strong><small id="version-badge">0.9.5</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
         </header>
@@ -82,6 +82,7 @@
             <div class="scene-decoration scene-decoration-back" aria-hidden="true"></div>
             <div class="scene-decoration scene-decoration-front" aria-hidden="true"></div>
             <div class="snow-atmosphere" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <img id="stage-character-art" class="stage-character-art" alt="" aria-hidden="true" decoding="async" hidden />
             <div id="presence-arrival-loading" class="presence-arrival-loading" role="status" aria-live="polite" hidden>
               <div class="presence-arrival-loading-card"><div class="transition-footsteps" aria-hidden="true"></div><strong>正在靠近……</strong><span>她会在场景准备好后回应</span><div class="transition-dots" aria-hidden="true"><span></span><span></span><span></span></div></div>
             </div>
@@ -205,7 +206,7 @@
     </aside>
 
     <dialog id="feedback-dialog" class="modal">
-      <form id="feedback-form" method="dialog"><header><div><span class="panel-kicker">反馈</span><h2>告诉我们哪里需要改进</h2></div><button class="icon-button" type="button" data-close-dialog="feedback-dialog">×</button></header><label class="feedback-context-choice"><span><strong>附带相关对话上下文</strong><small>默认开启，可在提交前取消</small></span><input id="feedback-include-context" type="checkbox" checked /></label><p id="feedback-context" class="modal-context">将附带当前一问一答和请求编号；服务端按编号关联内部诊断。</p><details id="feedback-context-preview" class="feedback-context-preview"><summary>预览将附带的内容</summary><pre id="feedback-context-preview-text"></pre></details><label>具体说明<textarea id="feedback-body" rows="5" maxlength="1000" required placeholder="请描述问题、期望表现或复现步骤。"></textarea></label><label>QQ（可选）<input id="feedback-qq" inputmode="numeric" pattern="[0-9]{5,12}" maxlength="12" placeholder="如愿意进一步交流，可留下 QQ" /></label><p class="modal-context">QQ 将加密保存，并随反馈在 30 天后删除。</p><p id="feedback-error" class="form-error" role="alert"></p><div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="feedback-dialog">取消</button><button type="submit" class="primary-button">提交反馈</button></div></form>
+      <form id="feedback-form" method="dialog"><header><div><span class="panel-kicker">反馈</span><h2>告诉我们哪里需要改进</h2></div><button class="icon-button" type="button" data-close-dialog="feedback-dialog">×</button></header><label class="feedback-context-choice"><span><strong>附带相关对话上下文</strong><small>默认开启，可在提交前取消</small></span><input id="feedback-include-context" type="checkbox" checked /></label><p id="feedback-context" class="modal-context">将附带当前一问一答和请求编号；服务端按编号关联内部诊断。</p><details id="feedback-context-preview" class="feedback-context-preview"><summary>预览将附带的内容</summary><pre id="feedback-context-preview-text"></pre></details><label>具体说明<textarea id="feedback-body" rows="5" maxlength="1000" required placeholder="请描述问题、期望表现或复现步骤。"></textarea></label><label>QQ（可选）<input id="feedback-qq" inputmode="numeric" pattern="[0-9]{5,12}" maxlength="12" placeholder="如愿意进一步交流，可留下 QQ" /></label><p class="modal-context">QQ 将加密保存，并随反馈在 30 天后删除。</p><section id="feedback-verification" class="feedback-verification" aria-label="人机验证"><p id="feedback-verification-status">提交时将在这里完成人机验证。</p><div id="feedback-turnstile" class="feedback-turnstile" aria-live="polite"></div><button id="feedback-retry-verification" class="secondary-button" type="button" hidden>重新验证并提交</button></section><p id="feedback-error" class="form-error" role="alert"></p><div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="feedback-dialog">取消</button><button type="submit" class="primary-button">提交反馈</button></div></form>
     </dialog>
 
     <dialog id="settings-dialog" class="modal settings-modal">
@@ -220,6 +221,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=0.9.4"></script>
+    <script type="module" src="/app.js?v=0.9.5"></script>
   </body>
 </html>

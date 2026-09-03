@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build the approved Mia stage-expression assets for the public client.
+"""Build the approved Mia expression assets for the public client.
 
 The source review package remains an internal provenance artifact.  This script
-copies only the approved face crop into the public application image and records
-the explicit operator rights waiver without presenting it as verification.
+copies only approved face and full-body derivatives into the public application
+image and records the explicit operator rights waiver without presenting it as
+verification.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 
 CHARACTER_ID = "702f4375675b"
@@ -39,7 +40,8 @@ EXPECTED_STATES = (
 SOURCE_PACKAGE = Path("media/stage_art_candidates/702f4375675b/2026-09-02-balanced-18")
 OUTPUT_DIRECTORY = Path("public_frontend/assets/expressions/mia")
 FACE_CROP = (440, 145, 635, 340)
-OUTPUT_SIZE = (384, 384)
+FACE_OUTPUT_SIZE = (384, 384)
+STAGE_OUTPUT_SIZE = (620, 1024)
 
 
 def sha256(path: Path) -> str:
@@ -52,6 +54,22 @@ def sha256(path: Path) -> str:
 
 def load_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_hashed_webp(image: Image.Image, output_root: Path, stem: str) -> tuple[str, str]:
+    staging_path = output_root / f"{stem}.webp"
+    image.save(
+        staging_path,
+        format="WEBP",
+        lossless=True,
+        quality=100,
+        method=4,
+        exact=True,
+    )
+    digest = sha256(staging_path)
+    asset_name = f"{stem}.{digest[:16]}.webp"
+    staging_path.replace(output_root / asset_name)
+    return asset_name, digest
 
 
 def main() -> int:
@@ -109,21 +127,31 @@ def main() -> int:
                     f"source image contract mismatch for {state}/{variant}: "
                     f"{source.size=} {source.mode=}"
                 )
-            derivative = source.crop(FACE_CROP).resize(OUTPUT_SIZE, Image.Resampling.LANCZOS)
+            face_derivative = source.crop(FACE_CROP).resize(
+                FACE_OUTPUT_SIZE,
+                Image.Resampling.LANCZOS,
+            )
+            stage_derivative = ImageOps.contain(
+                source,
+                STAGE_OUTPUT_SIZE,
+                method=Image.Resampling.LANCZOS,
+            )
+        if stage_derivative.size != STAGE_OUTPUT_SIZE:
+            raise RuntimeError(
+                f"stage derivative size mismatch for {state}/{variant}: "
+                f"{stage_derivative.size!r}"
+            )
 
-        staging_path = output_root / f"{state}.webp"
-        derivative.save(
-            staging_path,
-            format="WEBP",
-            lossless=True,
-            quality=100,
-            method=4,
-            exact=True,
+        face_asset_name, face_asset_digest = write_hashed_webp(
+            face_derivative,
+            output_root,
+            state,
         )
-        asset_digest = sha256(staging_path)
-        asset_name = f"{state}.{asset_digest[:16]}.webp"
-        asset_path = output_root / asset_name
-        staging_path.replace(asset_path)
+        stage_asset_name, stage_asset_digest = write_hashed_webp(
+            stage_derivative,
+            output_root,
+            f"{state}.stage",
+        )
         expressions[state] = {
             "approved_variant": variant,
             "approved_round": rounds[state],
@@ -131,12 +159,14 @@ def main() -> int:
             "source_sha256": source_digest,
             "source_reference": str(record.get("source_reference") or ""),
             "source_reference_sha256": str(record.get("source_reference_sha256") or ""),
-            "asset_path": f"/assets/expressions/mia/{asset_name}",
-            "asset_sha256": asset_digest,
+            "face_asset_path": f"/assets/expressions/mia/{face_asset_name}",
+            "face_asset_sha256": face_asset_digest,
+            "stage_asset_path": f"/assets/expressions/mia/{stage_asset_name}",
+            "stage_asset_sha256": stage_asset_digest,
         }
 
     manifest = {
-        "schema_version": "project-snow-mia-expression-runtime-1",
+        "schema_version": "project-snow-mia-expression-runtime-2",
         "character_id": CHARACTER_ID,
         "display_name": "米娅",
         "expression_state_count": len(expressions),
@@ -159,9 +189,22 @@ def main() -> int:
             "approval_snapshot_sha256": sha256(approval_path),
             "approved_state_count": len(selections),
         },
-        "transform": {
-            "crop_box_xyxy": list(FACE_CROP),
-            "output_dimensions": {"width": OUTPUT_SIZE[0], "height": OUTPUT_SIZE[1]},
+        "transforms": {
+            "face": {
+                "crop_box_xyxy": list(FACE_CROP),
+                "output_dimensions": {
+                    "width": FACE_OUTPUT_SIZE[0],
+                    "height": FACE_OUTPUT_SIZE[1],
+                },
+            },
+            "stage": {
+                "resize_mode": "contain_no_padding",
+                "source_dimensions": {"width": 877, "height": 1449},
+                "output_dimensions": {
+                    "width": STAGE_OUTPUT_SIZE[0],
+                    "height": STAGE_OUTPUT_SIZE[1],
+                },
+            },
             "format": "lossless_webp",
             "mode": "RGBA",
             "resampling": "lanczos",
@@ -180,8 +223,9 @@ def main() -> int:
                 "manifest": str(manifest_path),
                 "expression_state_count": len(expressions),
                 "total_asset_bytes": sum(
-                    (output_root / Path(item["asset_path"]).name).stat().st_size
+                    (output_root / Path(item[asset_key]).name).stat().st_size
                     for item in expressions.values()
+                    for asset_key in ("face_asset_path", "stage_asset_path")
                 ),
             },
             indent=2,

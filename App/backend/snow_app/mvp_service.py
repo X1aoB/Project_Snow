@@ -1105,6 +1105,10 @@ _IN_PERSON_ACTION_PREDICATES = (
     "唇角",
     "眉梢",
 )
+_IN_PERSON_ACTION_LABEL_PREFIX = re.compile(
+    r"^\s*(?:〔\s*动作\s*〕|【\s*动作\s*】|\[\s*动作\s*\]|（\s*动作\s*）|\(\s*动作\s*\))\s*[:：]?\s*",
+    re.IGNORECASE,
+)
 _IN_PERSON_SPOKEN_MARKERS = (
     "说道",
     "说着",
@@ -7317,6 +7321,36 @@ class MVPService:
                 remainder = match.group(2).strip()
             return actions, remainder
 
+        def split_labeled_action_paragraphs(value: str) -> tuple[list[str], str]:
+            actions: list[str] = []
+            speech_paragraphs: list[str] = []
+            for paragraph in re.split(r"\r?\n\s*\r?\n+", value.strip()):
+                paragraph = paragraph.strip()
+                if not paragraph:
+                    continue
+                match = _IN_PERSON_ACTION_LABEL_PREFIX.match(paragraph)
+                if not match:
+                    speech_paragraphs.append(paragraph)
+                    continue
+                candidate = paragraph[match.end():].strip()
+                # A labelled paragraph that also contains dialogue is not safe
+                # to split automatically. Leave it in speech so the final
+                # communication guard requests one model rewrite instead.
+                if (
+                    not candidate
+                    or "\n" in candidate
+                    or any(marker in candidate for marker in _IN_PERSON_SPOKEN_MARKERS)
+                    or any(mark in candidate for mark in ('“', '”', '「', '」', '『', '』', '"'))
+                ):
+                    speech_paragraphs.append(paragraph)
+                    continue
+                action = normalize_action(candidate)
+                if action:
+                    actions.append(action)
+                else:
+                    speech_paragraphs.append(paragraph)
+            return actions, "\n\n".join(speech_paragraphs)
+
         def append_block(block_type: str, text: str) -> None:
             nonlocal reclassified
             if communication_channel == "in_person" and block_type == "action":
@@ -7325,7 +7359,9 @@ class MVPService:
                     blocks.append({"type": "action", "text": normalized})
                 return
             if communication_channel == "in_person" and block_type == "speech":
-                actions, speech = split_leading_actions(text)
+                actions, speech = split_labeled_action_paragraphs(text)
+                parenthesized_actions, speech = split_leading_actions(speech)
+                actions.extend(parenthesized_actions)
                 sentence_actions, speech = split_leading_action_sentences(speech)
                 actions.extend(sentence_actions)
                 if actions:
@@ -7457,7 +7493,11 @@ class MVPService:
             for block_type, block_text in normalized_blocks:
                 compact_block = _compact(block_text)
                 if block_type == "speech":
-                    if re.match(r"^[（(【\[]", block_text):
+                    contains_action_label = any(
+                        _IN_PERSON_ACTION_LABEL_PREFIX.match(paragraph)
+                        for paragraph in re.split(r"\r?\n\s*\r?\n+", block_text)
+                    )
+                    if contains_action_label or re.match(r"^[（(【\[]", block_text):
                         violations.append("in_person_speech_contains_action")
                         continue
                     first_sentence = re.split(r"(?<=[。！？!?])", block_text, maxsplit=1)[0]

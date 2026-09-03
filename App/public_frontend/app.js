@@ -45,6 +45,7 @@ const state = {
   autoSummaryEnabled: true,
   selectionSequence: 0,
   selectionController: null,
+  stageArtRequestSequence: 0,
   typewriter: { key: "", timer: 0, fullText: "", displayedText: "" },
   summaryInFlight: new Set(),
   continuityPrompt: null,
@@ -105,6 +106,7 @@ const errorMessages = {
   invalid_presence_transition: "场景转换参数不正确。",
   invalid_presence_request: "当前场景请求无效。",
   turnstile_required: "人机验证未完成，请稍后重试。",
+  turnstile_expired: "人机验证已过期，请重新验证。",
   turnstile_unavailable: "人机验证组件加载失败，请刷新页面后重试。",
   chat_failed: "对话请求失败，请稍后重试。",
   request_failed: "请求失败，请稍后重试。",
@@ -139,6 +141,26 @@ const MIA_EXPRESSION_ASSETS = Object.freeze({
   disappointed: "/assets/expressions/mia/disappointed.52c6af53a6f40798.webp",
   annoyed: "/assets/expressions/mia/annoyed.db1a9cb01af07381.webp",
   angry: "/assets/expressions/mia/angry.d30e58bcf8885d08.webp",
+});
+const MIA_STAGE_EXPRESSION_ASSETS = Object.freeze({
+  neutral: "/assets/expressions/mia/neutral.stage.1e407adfc93e1803.webp",
+  gentle_smile: "/assets/expressions/mia/gentle_smile.stage.ba1b5f87cb0d2fe7.webp",
+  happy: "/assets/expressions/mia/happy.stage.75ba817720ebe113.webp",
+  amused: "/assets/expressions/mia/amused.stage.e469e7049030c2d8.webp",
+  teasing: "/assets/expressions/mia/teasing.stage.e8cedef547992a63.webp",
+  relieved: "/assets/expressions/mia/relieved.stage.823f23dadac37909.webp",
+  serious: "/assets/expressions/mia/serious.stage.234218ddd8872f08.webp",
+  focused: "/assets/expressions/mia/focused.stage.2af00a3b3550b4b6.webp",
+  thinking: "/assets/expressions/mia/thinking.stage.656d6837cdcd8528.webp",
+  confused: "/assets/expressions/mia/confused.stage.d60c119eb51c833b.webp",
+  skeptical: "/assets/expressions/mia/skeptical.stage.c72ca6c8753be88b.webp",
+  concerned: "/assets/expressions/mia/concerned.stage.b01ac02cef7ccc76.webp",
+  surprised: "/assets/expressions/mia/surprised.stage.68c69038701dc824.webp",
+  embarrassed: "/assets/expressions/mia/embarrassed.stage.6321a8285c2f502b.webp",
+  sad: "/assets/expressions/mia/sad.stage.92cccf0885f090b9.webp",
+  disappointed: "/assets/expressions/mia/disappointed.stage.1bf71d0ecfdafeef.webp",
+  annoyed: "/assets/expressions/mia/annoyed.stage.2c07b11ff1b9736d.webp",
+  angry: "/assets/expressions/mia/angry.stage.01f3b6eb3d2de00e.webp",
 });
 const MIA_EXPRESSION_RULES = Object.freeze([
   ["angry", /(?:愤怒|大怒|暴怒|怒火|生气|咬牙|厉声|拍桌|喝道|angry|furious)/iu],
@@ -223,7 +245,7 @@ function fitPublicRequestPayload(payload, { arrays = [], texts = [], targetBytes
 }
 if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
   Object.defineProperty(window, "__projectSnowTest", {
-    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, miaExpressionAssets: MIA_EXPRESSION_ASSETS }),
+    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, fillStagePortrait, updateStageCharacterArt, miaExpressionAssets: MIA_EXPRESSION_ASSETS, miaStageExpressionAssets: MIA_STAGE_EXPRESSION_ASSETS }),
     configurable: false,
     writable: false,
   });
@@ -1056,6 +1078,73 @@ async function tokenFor(action) {
     } catch { cleanup(); reject(new Error("turnstile_unavailable")); }
   });
 }
+let feedbackTurnstileWidget = null;
+let feedbackTurnstileAbort = null;
+function removeFeedbackTurnstileWidget() {
+  if (feedbackTurnstileWidget !== null && window.turnstile) {
+    try { window.turnstile.remove(feedbackTurnstileWidget); } catch { /* Widget may already be gone. */ }
+  }
+  feedbackTurnstileWidget = null;
+  const container = $("feedback-turnstile");
+  container?.replaceChildren();
+  container?.setAttribute("aria-busy", "false");
+}
+function prepareFeedbackVerification({ cancelPending = false } = {}) {
+  if (cancelPending && feedbackTurnstileAbort) {
+    feedbackTurnstileAbort();
+  } else {
+    removeFeedbackTurnstileWidget();
+  }
+  feedbackTurnstileAbort = null;
+  const verification = $("feedback-verification");
+  if (!verification) return;
+  verification.hidden = !state.config?.turnstile_site_key;
+  $("feedback-verification-status").textContent = "提交时将在这里完成人机验证。";
+  $("feedback-retry-verification").hidden = true;
+}
+async function tokenForFeedback() {
+  const sitekey = state.config?.turnstile_site_key;
+  if (!sitekey) return "development-bypass";
+  const turnstile = await waitForTurnstile();
+  if (!turnstile) throw new Error("turnstile_unavailable");
+  removeFeedbackTurnstileWidget();
+  const container = $("feedback-turnstile");
+  if (!container) throw new Error("turnstile_unavailable");
+  $("feedback-verification").hidden = false;
+  $("feedback-verification-status").textContent = "请在此完成验证；验证成功后会自动提交。";
+  $("feedback-retry-verification").hidden = true;
+  container.setAttribute("aria-busy", "true");
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (callback, value, status) => {
+      if (settled) return;
+      settled = true;
+      feedbackTurnstileAbort = null;
+      removeFeedbackTurnstileWidget();
+      $("feedback-verification-status").textContent = status;
+      callback(value);
+    };
+    feedbackTurnstileAbort = () => {
+      const error = new Error("feedback_verification_cancelled");
+      error.name = "AbortError";
+      settle(reject, error, "提交已取消。再次提交时会重新验证。");
+    };
+    try {
+      feedbackTurnstileWidget = turnstile.render(container, {
+        sitekey,
+        action: "feedback",
+        execution: "execute",
+        appearance: "interaction-only",
+        callback: (token) => settle(resolve, token, "验证完成，正在提交…"),
+        "error-callback": () => settle(reject, new Error("turnstile_required"), "验证失败，请重新验证。"),
+        "expired-callback": () => settle(reject, new Error("turnstile_expired"), "验证已过期，请重新验证。"),
+      });
+      turnstile.execute(feedbackTurnstileWidget);
+    } catch {
+      settle(reject, new Error("turnstile_unavailable"), "验证组件加载失败，请重新验证。");
+    }
+  });
+}
 function attachTurnstile() {
   if (!state.config?.turnstile_site_key || document.querySelector("script[data-turnstile]")) return;
   const script = document.createElement("script");
@@ -1146,7 +1235,7 @@ function renderMobileProviderOptions() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.9.4";
+  $("version-badge").textContent = state.config.app_version || "0.9.5";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
@@ -1923,7 +2012,7 @@ function expressionStateForMessage(message) {
   }
   return "neutral";
 }
-function fillStagePortrait(node, character, message = null) {
+function fillStagePortrait(node, character, expressionState = "neutral") {
   if (!node || !character) return;
   if (character.character_id !== MIA_CHARACTER_ID) {
     const stagePortraitKey = `avatar:${plain(character.character_id)}:${plain(character.avatar?.src)}`;
@@ -1932,10 +2021,10 @@ function fillStagePortrait(node, character, message = null) {
     node.dataset.stagePortraitKey = stagePortraitKey;
     return;
   }
-  const expressionState = expressionStateForMessage(message);
-  const stagePortraitKey = `expression:${MIA_CHARACTER_ID}:${expressionState}`;
+  const resolvedExpressionState = Object.hasOwn(MIA_EXPRESSION_ASSETS, expressionState) ? expressionState : "neutral";
+  const stagePortraitKey = `expression:${MIA_CHARACTER_ID}:${resolvedExpressionState}`;
   if (node.dataset.stagePortraitKey === stagePortraitKey && node.querySelector("img")) return;
-  const src = MIA_EXPRESSION_ASSETS[expressionState] || MIA_EXPRESSION_ASSETS.neutral;
+  const src = MIA_EXPRESSION_ASSETS[resolvedExpressionState];
   const expressionCharacter = {
     ...character,
     avatar: {
@@ -1949,7 +2038,59 @@ function fillStagePortrait(node, character, message = null) {
   fillAvatar(node, expressionCharacter, { thumbnail: false, priority: true });
   node.dataset.stagePortraitKey = stagePortraitKey;
   node.dataset.expressionCharacterId = MIA_CHARACTER_ID;
-  node.dataset.expressionState = expressionState;
+  node.dataset.expressionState = resolvedExpressionState;
+}
+function preloadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => resolve(src);
+    image.onerror = () => reject(new Error("image_load_failed"));
+    image.src = src;
+    if (image.complete && image.naturalWidth > 0) resolve(src);
+  });
+}
+async function updateStageCharacterArt(node, character, expressionState) {
+  if (!node) return;
+  if (character?.character_id !== MIA_CHARACTER_ID) {
+    state.stageArtRequestSequence += 1;
+    node.hidden = true;
+    node.removeAttribute("src");
+    delete node.dataset.stageArtKey;
+    delete node.dataset.stageArtFailedKey;
+    delete node.dataset.expressionState;
+    return;
+  }
+  const requestedState = Object.hasOwn(MIA_STAGE_EXPRESSION_ASSETS, expressionState) ? expressionState : "neutral";
+  const stageArtKey = `${MIA_CHARACTER_ID}:${requestedState}`;
+  if (node.dataset.stageArtKey === stageArtKey && node.getAttribute("src") && !node.hidden) return;
+  if (node.dataset.stageArtFailedKey === stageArtKey) return;
+  const requestSequence = ++state.stageArtRequestSequence;
+  const candidates = requestedState === "neutral" ? ["neutral"] : [requestedState, "neutral"];
+  let loadedState = "";
+  for (const candidate of candidates) {
+    try {
+      await preloadImage(MIA_STAGE_EXPRESSION_ASSETS[candidate]);
+      loadedState = candidate;
+      break;
+    } catch {
+      // The neutral derivative is the final fallback below.
+    }
+  }
+  if (requestSequence !== state.stageArtRequestSequence || currentCharacter()?.character_id !== MIA_CHARACTER_ID) return;
+  if (!loadedState) {
+    node.hidden = true;
+    node.removeAttribute("src");
+    node.dataset.stageArtFailedKey = stageArtKey;
+    delete node.dataset.stageArtKey;
+    delete node.dataset.expressionState;
+    return;
+  }
+  node.src = MIA_STAGE_EXPRESSION_ASSETS[loadedState];
+  node.dataset.stageArtKey = stageArtKey;
+  node.dataset.expressionState = loadedState;
+  delete node.dataset.stageArtFailedKey;
+  node.hidden = false;
 }
 async function resolvePresenceAttempt(characterId, signal, stateRecoveryAttempt = 0) {
   try {
@@ -2541,7 +2682,11 @@ function renderTypewriter(text, key) {
   state.typewriter.timer = window.setTimeout(revealNext, plan.initialDelay);
 }
 function renderStage() {
-  fillStagePortrait($("stage-portrait-avatar"), currentCharacter(), latestInPersonMessage("assistant"));
+  const character = currentCharacter();
+  const assistantMessage = latestInPersonMessage("assistant");
+  const expressionState = expressionStateForMessage(assistantMessage);
+  fillStagePortrait($("stage-portrait-avatar"), character, expressionState);
+  void updateStageCharacterArt($("stage-character-art"), character, expressionState);
   const pending = typingStateFor();
   const speechNode = $("stage-speech");
   if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {
@@ -2562,7 +2707,6 @@ function renderStage() {
   }
   speechNode.classList.remove("is-typing");
   speechNode.setAttribute("aria-busy", "false");
-  const assistantMessage = latestInPersonMessage("assistant");
   const visibleAssistantBlocks = assistantMessage ? visibleBlocksFor(assistantMessage) : [];
   const action = inPersonSurfaceText(visibleAssistantBlocks, "action");
   const completeSpeech = inPersonSurfaceText(visibleAssistantBlocks, "speech");
@@ -3484,6 +3628,8 @@ function openSettings(tab = "models") {
 function openFeedback(messageId = "") {
   state.feedbackMessageId = messageId;
   $("feedback-include-context").checked = true;
+  showError("feedback-error", "");
+  prepareFeedbackVerification();
   renderFeedbackContextPreview();
   $("feedback-dialog").showModal();
 }
@@ -3522,17 +3668,24 @@ async function submitFeedback(event) {
     submitButton.textContent = "正在提交…";
   }
   showError("feedback-error", "");
+  $("feedback-retry-verification").hidden = true;
   const { thread, target, userMessage, latest, chatRequestId, userBlocks, assistantBlocks } = feedbackContextSelection();
   const includeContext = $("feedback-include-context").checked;
   const assistantSpeech = renderBlocksText(assistantBlocks.filter((block) => block.type !== "action"));
   try {
     const contextual = includeContext ? { chat_request_id: chatRequestId || null, character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: assistantSpeech, user_content_blocks: userBlocks, assistant_content_blocks: assistantBlocks, error_code: latest.errorCode || userMessage.errorCode || "" } : {};
-    const payload = await api("/feedback", { method: "POST", timeoutMs: 20000, body: JSON.stringify({ request_id: id(), body: $("feedback-body").value, qq: $("feedback-qq").value, turnstile_token: await tokenFor("feedback"), include_conversation_context: includeContext, request_stage: target?.communicationChannel || thread.channel || "immersive-web", ui_surface: "immersive-web", ...contextual }) });
+    const payload = await api("/feedback", { method: "POST", timeoutMs: 20000, body: JSON.stringify({ request_id: id(), body: $("feedback-body").value, qq: $("feedback-qq").value, turnstile_token: await tokenForFeedback(), include_conversation_context: includeContext, request_stage: target?.communicationChannel || thread.channel || "immersive-web", ui_surface: "immersive-web", ...contextual }) });
     $("feedback-dialog").close();
     $("feedback-form").reset();
     toast(`反馈已提交，编号：${payload.feedback_code}`);
   } catch (error) {
-    showError("feedback-error", error);
+    if (error?.name !== "AbortError") {
+      showError("feedback-error", error);
+      $("feedback-retry-verification").hidden = false;
+      if (!$("feedback-verification-status").textContent.includes("失败") && !$("feedback-verification-status").textContent.includes("过期")) {
+        $("feedback-verification-status").textContent = "反馈尚未提交，请重新验证后再试。";
+      }
+    }
   } finally {
     if (submitButton) {
       submitButton.disabled = false;
@@ -3583,6 +3736,7 @@ $("timeline").addEventListener("scroll", () => {
   if (timelineNearBottom()) $("new-replies").hidden = true;
 }, { passive: true });
 $("feedback-include-context").onchange = renderFeedbackContextPreview;
+$("feedback-retry-verification").onclick = () => $("feedback-form").requestSubmit();
 $("next-onboarding").onclick = advanceOnboarding;
 $("skip-onboarding").onclick = finishOnboarding;
 $("load-more-stickers").onclick = () => { void loadStickers(); };
@@ -3666,6 +3820,7 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   if (!button.getAttribute("aria-label")) button.setAttribute("aria-label", "关闭对话框");
   button.onclick = () => $(button.dataset.closeDialog).close();
 });
+$("feedback-dialog").addEventListener("close", () => prepareFeedbackVerification({ cancelPending: true }));
 $("sticker-picker").addEventListener("close", () => $("toggle-sticker").setAttribute("aria-expanded", "false"));
 window.addEventListener("keydown", (event) => {
   if (trapDrawerFocus(event)) return;
