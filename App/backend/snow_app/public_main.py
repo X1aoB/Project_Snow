@@ -54,7 +54,7 @@ from .public_security import (
     subject_hash,
     verify_turnstile,
 )
-from .mvp_service import MVPProviderError
+from .mvp_service import MVPProviderError, _normalize_stage_motion
 from .public_service import (
     CharacterUnavailable,
     GenerationBusy,
@@ -1217,6 +1217,10 @@ def create_app(
                     "usage": safe_usage,
                     "safety_category": result_payload.get("safety_category"),
                     "communication_channel": result_payload.get("communication_channel", "text"),
+                    "stage_motion": _normalize_stage_motion(
+                        result_payload.get("stage_motion"),
+                        str(result_payload.get("communication_channel") or "text"),
+                    ),
                     "content_blocks": content_blocks,
                     "validation_disposition": str(
                         result_payload.get("validation_disposition")

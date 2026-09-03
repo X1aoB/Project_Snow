@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="light" />
     <title>Project Snow · 沉浸式体验</title>
     <link rel="stylesheet" href="/shared/immersive.css?v=0.9.2" />
-    <link rel="stylesheet" href="/app.css?v=0.9.2" />
+    <link rel="stylesheet" href="/app.css?v=0.9.6" />
   </head>
   <body>
     <div id="chat-app" class="app-shell" data-channel="text">
@@ -15,7 +15,7 @@
         <header class="product-header">
           <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
             <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="version-badge">0.9.5</small></span>
+            <span><strong>Project Snow</strong><small id="version-badge">0.9.6</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
         </header>
@@ -92,7 +92,6 @@
             <button id="restore-stage-ui" class="restore-stage-ui" type="button" hidden>显示界面</button>
           </div>
           <section id="stage-dialogue" class="stage-dialogue" aria-label="角色对白">
-            <div id="stage-portrait" class="stage-portrait" aria-label="角色头像"><span id="stage-portrait-avatar" class="stage-portrait-avatar">?</span></div>
             <div class="stage-dialogue-copy">
               <div class="stage-speaker-line"><strong id="stage-speaker">Project Snow</strong><span>面对面</span></div>
               <div id="stage-speech" class="stage-speech"><p>选择一位角色，开始一段面对面的对话。</p></div>
@@ -103,7 +102,7 @@
 
         <div id="system-banner" class="system-banner" role="status" hidden></div>
         <form id="composer" class="composer" autocomplete="off">
-          <div class="request-status-row">
+          <div class="request-status-row" hidden>
             <div id="request-status" class="request-status" role="status" aria-live="polite" aria-atomic="true" aria-busy="false"></div>
             <button id="stop-waiting" class="stop-waiting" type="button" hidden>停止等待</button>
           </div>
@@ -116,16 +115,16 @@
             <span class="selected-sticker-copy"><strong>已选择表情</strong><small id="selected-sticker-caption"></small><span>发送时会单独作为一条消息</span></span>
             <button id="clear-sticker" class="icon-button" type="button" aria-label="清除已选择表情" title="清除已选择表情">×</button>
           </div>
-          <div class="composer-shortcuts">
-            <button id="open-movement-shortcuts" class="shortcut-button" type="button" aria-haspopup="dialog">一起去……</button>
-          </div>
           <div class="composer-row">
-            <button id="toggle-sticker" class="primary-button text-only composer-tool-button" type="button" aria-expanded="false" aria-controls="sticker-picker" title="发送表情包">表情包</button>
-            <button id="toggle-action" class="primary-button face-only composer-tool-button" type="button" aria-expanded="false" aria-controls="analyst-action-field" title="添加动作或神态">动作</button>
+            <div class="composer-tools" aria-label="输入工具">
+              <button id="toggle-sticker" class="primary-button text-only composer-tool-button" type="button" aria-label="选择表情包" aria-expanded="false" aria-controls="sticker-picker" title="发送表情包"><span class="composer-tool-icon" aria-hidden="true">☺</span><span class="composer-tool-label">表情包</span></button>
+              <button id="toggle-action" class="primary-button face-only composer-tool-button" type="button" aria-label="添加动作或神态" aria-expanded="false" aria-controls="analyst-action-field" title="添加动作或神态"><span class="composer-tool-icon" aria-hidden="true">✦</span><span class="composer-tool-label">动作</span></button>
+              <button id="open-movement-shortcuts" class="shortcut-button composer-tool-button" type="button" aria-label="邀请角色一起去其他地点" aria-haspopup="dialog"><span class="composer-tool-icon" aria-hidden="true">↗</span><span class="composer-tool-label">一起去</span></button>
+            </div>
             <textarea id="message-input" rows="1" maxlength="2000" aria-label="输入对白或消息" placeholder="选择角色后输入消息……" disabled></textarea>
-            <button id="send-message" class="send-button" type="submit" aria-label="发送消息" disabled>发送</button>
+            <button id="send-message" class="send-button" type="submit" aria-label="发送消息" disabled><span class="composer-tool-icon" aria-hidden="true">➤</span><span class="composer-tool-label">发送</span></button>
           </div>
-          <div class="composer-foot"><p>Enter 发送 · Shift+Enter 换行 · 单轮合计不超过 2,000 字</p><span id="input-count">0 / 2000</span></div>
+          <div class="composer-foot" hidden><p>Enter 发送 · Shift+Enter 换行 · 单轮合计不超过 2,000 字</p><span id="input-count">0 / 2000</span></div>
         </form>
         <div id="mode-transition-layer" class="mode-transition-layer" data-phase="idle" hidden role="status" aria-live="polite" aria-busy="false">
           <div class="transition-card"><div class="transition-dots" aria-hidden="true"><span></span><span></span><span></span></div><strong id="mode-transition-title">正在切换场景</strong><span id="mode-transition-detail">请稍候</span></div>
@@ -221,6 +220,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=0.9.5"></script>
+    <script type="module" src="/app.js?v=0.9.6"></script>
   </body>
 </html>

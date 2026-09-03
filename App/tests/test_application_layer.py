@@ -23,6 +23,7 @@ from backend.snow_app.mvp_service import (
     MVPProviderError,
     MVPRequestInProgress,
     MVPService,
+    _normalize_stage_motion,
     _parse_model_json,
 )
 from backend.snow_app.repository import RuntimeRepository
@@ -2784,6 +2785,7 @@ class ApplicationLayerTests(unittest.TestCase):
         rewritten = json.dumps(
             {
                 "answer": "如果你没有特别想看的，我就和平时一样。衣服会让心情有些不同，但我不会因此变成另一个人。",
+                "stage_motion": "lean_in",
                 "confidence": "medium",
                 "used_document_ids": [],
                 "used_relation_candidate_ids": [],
@@ -2803,6 +2805,7 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertEqual(call_model.call_count, 2)
         self.assertIn("answer_guardrail_retry", result["response_adjustments"])
         self.assertNotIn("immersive_boundary_fallback", result["response_adjustments"])
+        self.assertEqual(result["stage_motion"], "lean_in")
         for forbidden in ("本体设定", "对应语境", "改变语气", "资料库", "提示词"):
             self.assertNotIn(forbidden, result["answer"])
         self.assertEqual(result["usage"]["total_tokens"], 33)
@@ -2813,6 +2816,7 @@ class ApplicationLayerTests(unittest.TestCase):
         leaking = json.dumps(
             {
                 "answer": "系统会读取时装语境并保持角色设定。",
+                "stage_motion": "tremble",
                 "confidence": "low",
                 "used_document_ids": [],
             },
@@ -2826,6 +2830,7 @@ class ApplicationLayerTests(unittest.TestCase):
             result = service.chat("ca0144ccd81b", question, session_id="meta-boundary-fallback")
 
         self.assertIn("immersive_boundary_fallback", result["response_adjustments"])
+        self.assertEqual(result["stage_motion"], "none")
         self.assertEqual(result["citations"], [])
         for forbidden in ("系统", "设定", "语境", "模型", "检索"):
             self.assertNotIn(forbidden, result["answer"])
@@ -2835,6 +2840,7 @@ class ApplicationLayerTests(unittest.TestCase):
         answer: str = "收到。",
         block_type: str = "speech",
         block_text: str | None = None,
+        stage_motion: object = "none",
     ) -> str:
         return json.dumps(
             {
@@ -2842,12 +2848,38 @@ class ApplicationLayerTests(unittest.TestCase):
                 "content_blocks": [
                     {"type": block_type, "text": block_text or answer}
                 ],
+                "stage_motion": stage_motion,
                 "confidence": "medium",
                 "used_document_ids": [],
                 "used_relation_candidate_ids": [],
             },
             ensure_ascii=False,
         )
+
+    def test_stage_motion_normalization_is_strict_and_channel_scoped(self) -> None:
+        for motion in ("none", "lean_in", "tremble", "recoil", "startle"):
+            self.assertEqual(_normalize_stage_motion(motion, "in_person"), motion)
+        for invalid in (None, True, 1, [], {}, "LEAN_IN", "unknown", ""):
+            self.assertEqual(_normalize_stage_motion(invalid, "in_person"), "none")
+        self.assertEqual(_normalize_stage_motion("lean_in", "text"), "none")
+
+    def test_mvp_system_prompt_keeps_stage_motion_independent_and_sparse(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        character = next(item for item in MVP_CHARACTERS if item.character_id == "ca0144ccd81b")
+        in_person = service._system_prompt(
+            character,
+            None,
+            communication_channel="in_person",
+        )
+        self.assertIn('"stage_motion":"none|lean_in|tremble|recoil|startle"', in_person)
+        self.assertIn("大多数普通回复必须使用 none", in_person)
+        self.assertIn("不得为了证明演出合理而刻意增加 action", in_person)
+        text_prompt = service._system_prompt(
+            character,
+            None,
+            communication_channel="text",
+        )
+        self.assertIn('stage_motion 必须返回 "none"', text_prompt)
 
     def test_mvp_communication_channel_defaults_and_retains_turn_blocks(self) -> None:
         service = MVPService(self.settings, self.repository)
@@ -2865,9 +2897,37 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertEqual(snapshot["turns"][0]["communication_channel"], "in_person")
         self.assertEqual(snapshot["turns"][0]["content_blocks"][0]["type"], "speech")
 
+    def test_mvp_chat_preserves_valid_stage_motion_and_idempotent_replay(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        payload = self._communication_model_payload(stage_motion="lean_in")
+        request_id = "stage-motion-idempotent"
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", return_value=(payload, {})
+        ) as call_model:
+            first = service.chat(
+                "ca0144ccd81b",
+                "你好",
+                session_id="stage-motion-session",
+                client_message_id=request_id,
+            )
+            replay = service.chat(
+                "ca0144ccd81b",
+                "你好",
+                session_id="stage-motion-session",
+                client_message_id=request_id,
+            )
+        self.assertEqual(first["stage_motion"], "lean_in")
+        self.assertEqual(replay["stage_motion"], "lean_in")
+        self.assertTrue(replay["idempotent_replay"])
+        self.assertEqual(call_model.call_count, 1)
+
     def test_mvp_text_channel_bypasses_location_and_accepts_message_blocks(self) -> None:
         service = MVPService(self.settings, self.repository)
-        payload = self._communication_model_payload("我看到了你的消息。", "message")
+        payload = self._communication_model_payload(
+            "我看到了你的消息。",
+            "message",
+            stage_motion="startle",
+        )
         with patch.object(service, "chat_enabled", return_value=True), patch.object(
             service, "_call_model", return_value=(payload, {})
         ):
@@ -2879,6 +2939,7 @@ class ApplicationLayerTests(unittest.TestCase):
                 world_session_id="channel-text-world",
             )
         self.assertEqual(result["communication_channel"], "text")
+        self.assertEqual(result["stage_motion"], "none")
         self.assertEqual(result["content_blocks"][0]["type"], "message")
         self.assertFalse(result["scene_state"]["co_located"])
 

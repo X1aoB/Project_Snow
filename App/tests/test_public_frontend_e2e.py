@@ -347,6 +347,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     if terminal_error
                     else {
                         "message_id": "arrival-e2e-message",
+                        "stage_motion": "none",
                         "content_blocks": [
                             {"type": "action", "text": "凯茜娅转过身看向你。"},
                             {"type": "speech", "text": "你来了。"},
@@ -415,6 +416,52 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                         f'event: delta\ndata: {json.dumps({"block_index": 0, "block_type": "message", "text": blocks[0]["text"]}, ensure_ascii=False)}\n\n',
                         f'event: state\ndata: {json.dumps(state_packet, ensure_ascii=False)}\n\n',
                         f'event: done\ndata: {json.dumps(done_packet, ensure_ascii=False)}\n\n',
+                    )
+                ).encode()
+            elif payload.get("message") in {
+                "演出靠近测试",
+                "动作无演出测试",
+                "第二次演出测试",
+                "颤动切换测试",
+            }:
+                motion = {
+                    "演出靠近测试": "lean_in",
+                    "动作无演出测试": "none",
+                    "第二次演出测试": "startle",
+                    "颤动切换测试": "tremble",
+                }[payload["message"]]
+                blocks = (
+                    [
+                        {"type": "action", "text": "米娅轻轻抬起手。"},
+                        {"type": "speech", "text": "动作文字不会自动触发演出。"},
+                    ]
+                    if payload.get("message") == "动作无演出测试"
+                    else [{
+                        "type": "speech",
+                        "text": {
+                            "lean_in": "我想离你近一点说。",
+                            "startle": "吓了一跳，不过已经没事了。",
+                            "tremble": "我会认真听你说完。",
+                        }[motion],
+                    }]
+                )
+                remaining_packets = "".join(
+                    (
+                        *(
+                            "event: delta\ndata: "
+                            + json.dumps(
+                                {
+                                    "block_index": index,
+                                    "block_type": block["type"],
+                                    "text": block["text"],
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n\n"
+                            for index, block in enumerate(blocks)
+                        ),
+                        'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
+                        f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks, "stage_motion": motion}, ensure_ascii=False)}\n\n',
                     )
                 ).encode()
             elif payload.get("message") == "多段测试":
@@ -751,14 +798,10 @@ class PublicFrontendE2ETests(TestCase):
                     const hooks = window.__projectSnowTest;
                     const character = {character_id: '702f4375675b', display_name: '米娅', avatar: null};
                     const art = document.querySelector('#stage-character-art');
-                    const portrait = document.querySelector('#stage-portrait-avatar');
                     const result = {};
                     for (const state of Object.keys(hooks.miaExpressionAssets)) {
                         await hooks.updateStageCharacterArt(art, character, state);
-                        hooks.fillStagePortrait(portrait, character, state);
                         result[state] = {
-                            portraitState: portrait.dataset.expressionState,
-                            portraitSrc: portrait.querySelector('img')?.getAttribute('src') || '',
                             artState: art.dataset.expressionState,
                             artSrc: art.getAttribute('src') || '',
                             hidden: art.hidden,
@@ -769,11 +812,11 @@ class PublicFrontendE2ETests(TestCase):
             )
             self.assertEqual(len(states), 18)
             for state, values in states.items():
-                self.assertEqual(values["portraitState"], state)
-                self.assertRegex(values["portraitSrc"], rf"/{state}\.[0-9a-f]{{16}}\.webp$")
                 self.assertEqual(values["artState"], state)
                 self.assertIn(f"/{state}.stage.", values["artSrc"])
                 self.assertFalse(values["hidden"])
+            self.assertEqual(page.locator("#stage-portrait").count(), 0)
+            self.assertEqual(page.locator("#stage-portrait-avatar").count(), 0)
 
             non_mia_hidden = page.evaluate(
                 """async () => {
@@ -838,20 +881,122 @@ class PublicFrontendE2ETests(TestCase):
             self.assertNotIn("〔动作〕", page.locator("#stage-speech").inner_text())
             self.assertNotIn("米娅眼睛一亮", page.locator("#stage-speech").inner_text())
 
-            page.set_viewport_size({"width": 390, "height": 844})
-            bounds = page.evaluate(
-                """() => {
-                    const stage = document.querySelector('#scene-stage').getBoundingClientRect();
-                    const art = document.querySelector('#stage-character-art').getBoundingClientRect();
-                    const dialogue = document.querySelector('#stage-dialogue').getBoundingClientRect();
-                    return {stage, art, dialogue};
-                }"""
-            )
-            self.assertLessEqual(bounds["art"]["width"], bounds["stage"]["width"] * 0.9 + 1)
-            self.assertGreaterEqual(bounds["art"]["left"], bounds["stage"]["left"] - 1)
-            self.assertLessEqual(bounds["art"]["right"], bounds["stage"]["right"] + 1)
-            self.assertLessEqual(bounds["art"]["bottom"], bounds["dialogue"]["top"] + 1)
+            for viewport in (
+                {"width": 1440, "height": 900},
+                {"width": 1280, "height": 800},
+                {"width": 390, "height": 844},
+                {"width": 320, "height": 720},
+            ):
+                page.set_viewport_size(viewport)
+                bounds = page.evaluate(
+                    """() => {
+                        const stage = document.querySelector('#scene-stage').getBoundingClientRect();
+                        const art = document.querySelector('#stage-character-art').getBoundingClientRect();
+                        const dialogue = document.querySelector('#stage-dialogue').getBoundingClientRect();
+                        const narration = document.querySelector('#stage-narration').getBoundingClientRect();
+                        const composer = document.querySelector('.composer-row').getBoundingClientRect();
+                        return {
+                            stage, art, dialogue, narration, composer,
+                            overflow: document.documentElement.scrollWidth - innerWidth,
+                        };
+                    }"""
+                )
+                expected_dialogue_height = min(
+                    210 if viewport["width"] > 560 else 168,
+                    max(
+                        148 if viewport["width"] > 560 else 116,
+                        viewport["height"] * (0.23 if viewport["width"] > 560 else 0.21),
+                    ),
+                )
+                self.assertAlmostEqual(bounds["dialogue"]["height"], expected_dialogue_height, delta=2)
+                self.assertGreaterEqual(bounds["art"]["top"], bounds["stage"]["top"] - 1)
+                self.assertAlmostEqual(bounds["art"]["bottom"], bounds["stage"]["bottom"], delta=1)
+                self.assertGreater(bounds["art"]["bottom"], bounds["dialogue"]["top"] + 20)
+                self.assertLessEqual(bounds["narration"]["bottom"], bounds["dialogue"]["top"] + 1)
+                self.assertAlmostEqual(bounds["dialogue"]["width"], bounds["composer"]["width"], delta=1)
+                self.assertLessEqual(bounds["overflow"], 1)
             browser.close()
+
+    def test_model_stage_motion_is_decoupled_one_shot_and_reduced_motion_safe(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator('[data-character="702f4375675b"]').click()
+            self._configure_model(page)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#in-person-surface").wait_for(state="visible")
+            page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+            page.locator("#stage-character-art").wait_for(state="visible")
+
+            art = page.locator("#stage-character-art")
+            page.locator("#message-input").fill("演出靠近测试")
+            page.locator("#send-message").click()
+            page.wait_for_function(
+                "() => document.querySelector('#stage-character-art')?.dataset.stageMotionPlayCount === '1'",
+                timeout=8000,
+            )
+            self.assertTrue((art.get_attribute("data-stage-motion-key") or "").endswith(":lean_in"))
+            self.assertEqual(page.locator("#stage-narration").inner_text(), "正在看雪")
+            self.assertNotIn("stage_motion", page.locator("#stage-speech").inner_text())
+            page.evaluate("() => { window.__projectSnowTest.renderStage(); window.__projectSnowTest.renderStage(); }")
+            page.wait_for_timeout(700)
+            self.assertEqual(art.get_attribute("data-stage-motion-play-count"), "1")
+
+            page.wait_for_function("() => !document.querySelector('#send-message').disabled")
+            page.locator("#message-input").fill("动作无演出测试")
+            page.locator("#send-message").click()
+            page.locator("#stage-speech").get_by_text("动作文字不会自动触发演出。").wait_for(state="visible", timeout=8000)
+            self.assertIn("米娅轻轻抬起手。", page.locator("#stage-narration").inner_text())
+            self.assertEqual(art.get_attribute("data-stage-motion-play-count"), "1")
+
+            page.wait_for_function("() => !document.querySelector('#send-message').disabled")
+            page.locator("#message-input").fill("第二次演出测试")
+            page.locator("#send-message").click()
+            page.wait_for_function(
+                "() => document.querySelector('#stage-character-art')?.dataset.stageMotionPlayCount === '2'",
+                timeout=8000,
+            )
+            self.assertTrue((art.get_attribute("data-stage-motion-key") or "").endswith(":startle"))
+
+            page.wait_for_function("() => !document.querySelector('#send-message').disabled")
+            page.locator("#message-input").fill("颤动切换测试")
+            page.locator("#send-message").click()
+            page.wait_for_function(
+                "() => document.querySelector('#stage-character-art')?.dataset.stageMotionPlayCount === '3'",
+                timeout=8000,
+            )
+            page.locator('[data-character="25b23cb64398"]').click()
+            page.locator("#stage-character-name", has_text="凯茜娅").wait_for(state="visible")
+            self.assertTrue(art.is_hidden())
+            self.assertEqual(art.evaluate("element => element.getAnimations().length"), 0)
+            browser.close()
+
+            reduced_browser = _launch_browser(playwright)
+            reduced_page = reduced_browser.new_page(
+                viewport={"width": 390, "height": 844},
+                reduced_motion="reduce",
+            )
+            reduced_page.goto(self.base_url, wait_until="networkidle")
+            reduced_page.locator("#accept-experience-notice").click()
+            reduced_page.locator("#open-contacts").click()
+            self._configure_model(reduced_page)
+            reduced_page.locator('[data-character="702f4375675b"]').click()
+            reduced_page.locator("#go-in-person").click()
+            reduced_page.locator("#confirm-presence-transition").click()
+            reduced_page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+            reduced_page.locator("#message-input").fill("演出靠近测试")
+            reduced_page.locator("#send-message").click()
+            reduced_page.wait_for_function(
+                "() => document.querySelector('#stage-character-art')?.dataset.stageMotionKey?.endsWith(':lean_in')",
+                timeout=8000,
+            )
+            reduced_art = reduced_page.locator("#stage-character-art")
+            self.assertIsNone(reduced_art.get_attribute("data-stage-motion-play-count"))
+            self.assertEqual(reduced_art.evaluate("element => element.getAnimations().length"), 0)
+            reduced_browser.close()
 
     def test_feedback_turnstile_is_visible_retryable_and_preserves_the_form(self) -> None:
         PublicFrontendHandler.turnstile_site_key = "e2e-site-key"
@@ -969,6 +1114,10 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator("#stage-speech .typing-indicator").count(), 0)
             page.locator("#toggle-action").click()
             page.locator("#action-input").fill("向她挥了挥手")
+            page.locator("#toggle-action").click()
+            self.assertFalse(page.locator("#analyst-action-field").is_visible())
+            page.locator("#toggle-action").click()
+            self.assertEqual(page.locator("#action-input").input_value(), "向她挥了挥手")
             page.locator("#send-message").click()
             page.locator("#stage-speech").get_by_text("晚上好，分析员。").wait_for(state="visible")
             page.locator("#open-transcript").click()

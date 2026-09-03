@@ -101,19 +101,16 @@ class MiaExpressionRuntimeTests(TestCase):
             self.assertIn(f'{state}: "{record["stage_asset_path"]}"', self.javascript, state)
         self.assertIn('const MIA_CHARACTER_ID = "702f4375675b"', self.javascript)
         self.assertIn("function expressionStateForMessage(message)", self.javascript)
-        self.assertIn("function fillStagePortrait(node, character, expressionState = \"neutral\")", self.javascript)
         self.assertIn("function updateStageCharacterArt(node, character, expressionState)", self.javascript)
         self.assertIn('const candidates = requestedState === "neutral" ? ["neutral"] : [requestedState, "neutral"]', self.javascript)
         self.assertIn(
-            "if (character.character_id !== MIA_CHARACTER_ID)",
+            "if (character?.character_id !== MIA_CHARACTER_ID)",
             self.javascript,
         )
-        self.assertIn(
-            'fillStagePortrait($("stage-portrait-avatar"), character, expressionState)',
-            self.javascript,
-        )
-        self.assertIn('void updateStageCharacterArt($("stage-character-art"), character, expressionState)', self.javascript)
-        self.assertNotIn('fillStagePortrait($("stage-header-avatar")', self.javascript)
+        self.assertIn('const artNode = $("stage-character-art")', self.javascript)
+        self.assertIn("updateStageCharacterArt(artNode, character, expressionState)", self.javascript)
+        self.assertNotIn("stage-portrait-avatar", self.javascript)
+        self.assertNotIn("function fillStagePortrait", self.javascript)
 
     def test_public_materials_page_discloses_the_waiver_and_manifest(self) -> None:
         self.assertIn("米娅舞台表情（0.9.5）", self.privacy_html)

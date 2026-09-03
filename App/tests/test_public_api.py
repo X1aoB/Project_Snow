@@ -910,6 +910,7 @@ class PublicAPITests(TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertIn("event: done", first.text)
         self.assertIn('"safety_category":"illegal_instructions"', first.text)
+        self.assertIn('"stage_motion":"none"', first.text)
         self.assertIn('"idempotent_replay":true', second.text)
 
     def test_sse_emits_meta_and_heartbeat_while_model_is_slow(self) -> None:
@@ -1580,6 +1581,7 @@ class PublicAPITests(TestCase):
                 {"type": "action", "text": "她轻轻点头。"},
                 {"type": "speech", "text": "晚上好。"},
             ],
+            "stage_motion": "lean_in",
             "response_adjustments": [],
         }
         with patch.object(self.app.state.chat_service.mvp, "chat", return_value=generated) as chat:
@@ -1588,8 +1590,16 @@ class PublicAPITests(TestCase):
                 headers={"Origin": "http://testserver"},
                 json=payload,
             )
+            replay = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
         self.assertEqual(response.status_code, 200)
         self.assertIn('"communication_channel":"in_person"', response.text)
+        self.assertIn('"stage_motion":"lean_in"', response.text)
+        self.assertIn('"stage_motion":"lean_in"', replay.text)
+        self.assertIn('"idempotent_replay":true', replay.text)
         self.assertIn('"type":"action"', response.text)
         self.assertIn('"block_index":0', response.text)
         self.assertIn('"block_type":"action"', response.text)
@@ -1602,6 +1612,7 @@ class PublicAPITests(TestCase):
             chat.call_args.kwargs["thinking_decision"]["request_fields"],
             {},
         )
+        self.assertEqual(chat.call_count, 1)
 
     def test_presence_transition_moves_analyst_and_replays(self) -> None:
         character = MVP_CHARACTERS[0]
@@ -1756,6 +1767,7 @@ class PublicAPITests(TestCase):
                 {"type": "action", "text": "她抬眼看向你,轻轻一笑。"},
                 {"type": "speech", "text": "你来了?"},
             ],
+            "stage_motion": "startle",
             "response_adjustments": [],
             "usage": {"total_tokens": 12},
         }
@@ -1774,6 +1786,7 @@ class PublicAPITests(TestCase):
         self.assertTrue(response.json()["model_called"])
         self.assertEqual(response.json()["reaction"]["content_blocks"][0]["type"], "action")
         self.assertEqual(response.json()["reaction"]["content_blocks"][1]["type"], "speech")
+        self.assertEqual(response.json()["reaction"]["stage_motion"], "startle")
         self.assertEqual(
             response.json()["reaction"]["answer"],
             "她抬眼看向你，轻轻一笑。\n你来了？",

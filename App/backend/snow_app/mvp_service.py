@@ -956,6 +956,16 @@ def _contains_term(value: Any, term: str) -> bool:
 
 _CONVERSATION_MODES = {"immersive", "assistant"}
 _COMMUNICATION_CHANNELS = {"in_person", "text"}
+_STAGE_MOTIONS = frozenset({"none", "lean_in", "tremble", "recoil", "startle"})
+
+
+def _normalize_stage_motion(value: Any, communication_channel: str) -> str:
+    """Return a presentation-only motion cue without affecting response validity."""
+
+    if communication_channel != "in_person" or not isinstance(value, str):
+        return "none"
+    normalized = value.strip()
+    return normalized if normalized in _STAGE_MOTIONS else "none"
 
 _CHANNEL_FUTURE_MARKERS = ("晚点", "稍后", "等会", "之后", "以后", "回头", "到时候", "有空再")
 _TEXT_CHANNEL_TERMS = (
@@ -1485,6 +1495,7 @@ _MODEL_ENVELOPE_KEYS = frozenset(
     {
         "answer",
         "content_blocks",
+        "stage_motion",
         "confidence",
         "used_document_ids",
         "narrative_scope",
@@ -6627,6 +6638,7 @@ class MVPService:
             communication_rule = f"""
 【交流媒介：文字通讯】
 当前不是面对面场景，只能输出 type=message 的内容块；可以输出多条消息，但每条都必须是文字。
+stage_motion 必须返回 "none"；文字通讯不播放立绘演出。
 不得声称看见分析员未在消息中说明的表情、衣着、动作或环境；不得把触碰、拥抱、靠近、牵手等写成已经发生。
 “真想抱抱你”“希望现在能抱抱你”这类愿望或情绪表达可以保留，但必须明确它只是文字里的想法，不是已经完成的动作。
 历史剧情中的通讯或见面只能作为回忆，不能改变当前媒介。当前可见空间状态：{json.dumps(scene_for_rules, ensure_ascii=False)}。
@@ -6636,6 +6648,7 @@ class MVPService:
 【交流媒介：面对面】
 当前与分析员面对面交谈，只能输出 type=speech 或 type=action 的内容块。action 只能是角色自身在当前地点可以完成的动作或神态，必须用角色名开头的第三人称描述，禁止使用“我/我的”作为动作主语，且不得编造分析员的反应、动作或感受。
 沉浸式的自然陪伴对话中，只要语境合适，通常先用一条简短的 action 写出你自己的目光、神态或小动作，再用 speech 接住分析员的话；它应当让对话更有在场感，而不是每句都写成舞台剧。不要为了动作强行加入触碰、靠近、戏剧化情绪或剧情回顾。
+先自然完成本轮回答，再根据整轮语境独立选择 stage_motion。可选值只有 none、lean_in、tremble、recoil、startle；大多数普通回复必须使用 none。只有情绪转折、突然反应、主动拉近距离等确实值得强调的时刻才选择非 none。不得为了证明演出合理而刻意增加 action，不得从 action 的有无反推演出，也不得仅因表情变化自动播放演出。
 如果本轮“分析员输入块”含 type=action，那是分析员已经明确写下的动作；可以自然回应这一动作，但仍不能补写分析员没有声明的反应、感受或后续动作。
 不要因为历史剧情出现通讯，就把当前回答写成消息；历史剧情中的通讯或见面只能作为回忆，不能改变当前媒介。当前可见空间状态：{json.dumps(scene_for_rules, ensure_ascii=False)}。
 """
@@ -6717,7 +6730,7 @@ class MVPService:
 {dual_persona_rule}
 
 仅返回 JSON 对象，不要输出 Markdown 代码围栏。answer 必须与 content_blocks 按顺序拼接后的可读文本一致；content_blocks 是本轮媒介的唯一渲染依据。助手模式必须返回 analysis_process，并可继续返回 work_summary/work_steps 供旧客户端兼容。analysis_process 只能记录可复核的分析说明，不能包含隐藏思维链：
-{{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message|sticker","text":"...","asset_id":"仅在 sticker 时填写","caption":"仅在 sticker 时填写"}}],"state_updates":[],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
+{{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message|sticker","text":"...","asset_id":"仅在 sticker 时填写","caption":"仅在 sticker 时填写"}}],"stage_motion":"none|lean_in|tremble|recoil|startle","state_updates":[],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
 """
 
     def _prompt(self, character: Any, message: str, context: dict[str, Any]) -> str:
@@ -10815,6 +10828,23 @@ class MVPService:
         ]
         if unresolved_hard_violations:
             content_block_guard_rejected = True
+        stage_motion = _normalize_stage_motion(
+            generated.get("stage_motion"),
+            active_channel,
+        )
+        if (
+            content_block_guard_rejected
+            or deterministic_fallback
+            or relationship_repaired
+            or latest_state_repaired
+            or address_alias_normalized
+            or relationship_address_normalized
+            or unsupported_quote_sanitized
+        ):
+            # Presentation metadata may only survive on the final, accepted
+            # model envelope. Deterministic repairs and local/safety fallbacks
+            # never inherit a cue from superseded text.
+            stage_motion = "none"
         validation_disposition = (
             "rejected"
             if content_block_guard_rejected
@@ -10952,6 +10982,7 @@ class MVPService:
             "coverage": (context.get("view") or {}).get("coverage", {}),
             "mode": mode,
             "communication_channel": active_channel,
+            "stage_motion": stage_motion,
             "question_focus": str(context.get("question_focus") or ""),
             "analyst_content_blocks": normalized_analyst_blocks,
             "content_blocks": content_blocks,

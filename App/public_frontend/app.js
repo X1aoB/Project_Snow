@@ -46,6 +46,10 @@ const state = {
   selectionSequence: 0,
   selectionController: null,
   stageArtRequestSequence: 0,
+  stageMotionRequestSequence: 0,
+  stageMotionAnimation: null,
+  stageMotionCharacterId: "",
+  playedStageMotionKeys: new Set(),
   typewriter: { key: "", timer: 0, fullText: "", displayedText: "" },
   summaryInFlight: new Set(),
   continuityPrompt: null,
@@ -181,6 +185,13 @@ const MIA_EXPRESSION_RULES = Object.freeze([
   ["happy", /(?:开心|高兴|太好了|笑起来|欢快|喜悦|happy|delighted)/iu],
   ["gentle_smile", /(?:温柔地?笑|轻轻地?笑|微微一笑|微笑|嘴角.{0,8}(?:扬|弯)|gentle smile|smiling softly)/iu],
 ]);
+const STAGE_MOTIONS = new Set(["none", "lean_in", "tremble", "recoil", "startle"]);
+
+function normalizeStageMotion(value, communicationChannel = "text") {
+  if (communicationChannel !== "in_person" || typeof value !== "string") return "none";
+  const normalized = value.trim();
+  return STAGE_MOTIONS.has(normalized) ? normalized : "none";
+}
 
 function id() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
@@ -245,7 +256,7 @@ function fitPublicRequestPayload(payload, { arrays = [], texts = [], targetBytes
 }
 if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
   Object.defineProperty(window, "__projectSnowTest", {
-    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, fillStagePortrait, updateStageCharacterArt, miaExpressionAssets: MIA_EXPRESSION_ASSETS, miaStageExpressionAssets: MIA_STAGE_EXPRESSION_ASSETS }),
+    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, normalizeStageMotion, updateStageCharacterArt, playStageMotion, cancelStageMotion, renderStage, miaExpressionAssets: MIA_EXPRESSION_ASSETS, miaStageExpressionAssets: MIA_STAGE_EXPRESSION_ASSETS }),
     configurable: false,
     writable: false,
   });
@@ -749,6 +760,7 @@ function normalizeMessage(message) {
     contentBlocks: blocks,
     displayBlocks,
     communicationChannel: channel,
+    stageMotion: normalizeStageMotion(message.stageMotion ?? message.stage_motion, channel),
     createdAt: hasCreatedAt ? parsedCreatedAt : Date.now(),
     createdAtEstimated: Boolean(message.createdAtEstimated || message.created_at_estimated || !hasCreatedAt),
     status: ["sent", "pending", "failed"].includes(message.status) ? message.status : "sent",
@@ -1235,7 +1247,7 @@ function renderMobileProviderOptions() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
-  $("version-badge").textContent = state.config.app_version || "0.9.5";
+  $("version-badge").textContent = state.config.app_version || "0.9.6";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
@@ -1490,10 +1502,15 @@ function presentationFor(characterId = state.selected) {
 }
 function cancelPresentationQueue(characterId = state.selected, requestId = "") {
   const queue = presentationFor(characterId);
-  if (!queue || (requestId && queue.requestId !== requestId)) return false;
+  if (!queue) {
+    cancelStageMotion(characterId);
+    return false;
+  }
+  if (requestId && queue.requestId !== requestId) return false;
   queue.cancelled = true;
   queue.controller?.abort();
   if (queue.timer) window.clearTimeout(queue.timer);
+  cancelStageMotion(characterId);
   state.presentationByCharacter.delete(characterId);
   if (characterId === state.selected) {
     window.clearTimeout(state.typewriter.timer);
@@ -1762,6 +1779,8 @@ function renderRequestStatus() {
   }
   const stop = $("stop-waiting");
   if (stop) stop.hidden = !pending || ["arrival", "presenting"].includes(pending.phase);
+  const row = target.closest(".request-status-row");
+  if (row) row.hidden = !target.textContent.trim() && (!stop || stop.hidden);
 }
 function setRequestStatus(characterId, message, requestId = "", recoveryAction = "") {
   if (!characterId) return;
@@ -1813,14 +1832,14 @@ function clearTypingState(characterId, requestId) {
   updateComposerAvailability();
 }
 function bindAvatarImages(root = document) {
-  root.querySelectorAll(".portrait img, .stage-portrait img").forEach((image) => {
+  root.querySelectorAll(".portrait img").forEach((image) => {
     if (image.dataset.bound) return;
     image.dataset.bound = "1";
     image.addEventListener("error", () => {
-      image.closest(".portrait, .stage-portrait")?.classList.remove("has-image");
+      image.closest(".portrait")?.classList.remove("has-image");
       image.remove();
     }, { once: true });
-    image.addEventListener("load", () => image.closest(".portrait, .stage-portrait")?.classList.add("has-image"), { once: true });
+    image.addEventListener("load", () => image.closest(".portrait")?.classList.add("has-image"), { once: true });
   });
   root.querySelectorAll(".content-sticker img").forEach((image) => {
     if (image.dataset.bound) return;
@@ -2012,46 +2031,26 @@ function expressionStateForMessage(message) {
   }
   return "neutral";
 }
-function fillStagePortrait(node, character, expressionState = "neutral") {
-  if (!node || !character) return;
-  if (character.character_id !== MIA_CHARACTER_ID) {
-    const stagePortraitKey = `avatar:${plain(character.character_id)}:${plain(character.avatar?.src)}`;
-    if (node.dataset.stagePortraitKey === stagePortraitKey) return;
-    fillAvatar(node, character, { thumbnail: false, priority: true });
-    node.dataset.stagePortraitKey = stagePortraitKey;
-    return;
-  }
-  const resolvedExpressionState = Object.hasOwn(MIA_EXPRESSION_ASSETS, expressionState) ? expressionState : "neutral";
-  const stagePortraitKey = `expression:${MIA_CHARACTER_ID}:${resolvedExpressionState}`;
-  if (node.dataset.stagePortraitKey === stagePortraitKey && node.querySelector("img")) return;
-  const src = MIA_EXPRESSION_ASSETS[resolvedExpressionState];
-  const expressionCharacter = {
-    ...character,
-    avatar: {
-      src,
-      thumbnail_src: src,
-      portrait_focus_x: 50,
-      portrait_focus_y: 50,
-      portrait_scale: 1,
-    },
-  };
-  fillAvatar(node, expressionCharacter, { thumbnail: false, priority: true });
-  node.dataset.stagePortraitKey = stagePortraitKey;
-  node.dataset.expressionCharacterId = MIA_CHARACTER_ID;
-  node.dataset.expressionState = resolvedExpressionState;
-}
 function preloadImage(src) {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.decoding = "async";
-    image.onload = () => resolve(src);
+    const decoded = async () => {
+      try {
+        if (image.decode) await image.decode();
+        resolve(src);
+      } catch {
+        reject(new Error("image_decode_failed"));
+      }
+    };
+    image.onload = decoded;
     image.onerror = () => reject(new Error("image_load_failed"));
     image.src = src;
-    if (image.complete && image.naturalWidth > 0) resolve(src);
+    if (image.complete && image.naturalWidth > 0) void decoded();
   });
 }
 async function updateStageCharacterArt(node, character, expressionState) {
-  if (!node) return;
+  if (!node) return false;
   if (character?.character_id !== MIA_CHARACTER_ID) {
     state.stageArtRequestSequence += 1;
     node.hidden = true;
@@ -2059,12 +2058,12 @@ async function updateStageCharacterArt(node, character, expressionState) {
     delete node.dataset.stageArtKey;
     delete node.dataset.stageArtFailedKey;
     delete node.dataset.expressionState;
-    return;
+    return false;
   }
   const requestedState = Object.hasOwn(MIA_STAGE_EXPRESSION_ASSETS, expressionState) ? expressionState : "neutral";
   const stageArtKey = `${MIA_CHARACTER_ID}:${requestedState}`;
-  if (node.dataset.stageArtKey === stageArtKey && node.getAttribute("src") && !node.hidden) return;
-  if (node.dataset.stageArtFailedKey === stageArtKey) return;
+  if (node.dataset.stageArtKey === stageArtKey && node.getAttribute("src") && !node.hidden) return true;
+  if (node.dataset.stageArtFailedKey === stageArtKey) return false;
   const requestSequence = ++state.stageArtRequestSequence;
   const candidates = requestedState === "neutral" ? ["neutral"] : [requestedState, "neutral"];
   let loadedState = "";
@@ -2077,20 +2076,104 @@ async function updateStageCharacterArt(node, character, expressionState) {
       // The neutral derivative is the final fallback below.
     }
   }
-  if (requestSequence !== state.stageArtRequestSequence || currentCharacter()?.character_id !== MIA_CHARACTER_ID) return;
+  if (requestSequence !== state.stageArtRequestSequence || currentCharacter()?.character_id !== MIA_CHARACTER_ID) return false;
   if (!loadedState) {
     node.hidden = true;
     node.removeAttribute("src");
     node.dataset.stageArtFailedKey = stageArtKey;
     delete node.dataset.stageArtKey;
     delete node.dataset.expressionState;
-    return;
+    return false;
   }
   node.src = MIA_STAGE_EXPRESSION_ASSETS[loadedState];
   node.dataset.stageArtKey = stageArtKey;
   node.dataset.expressionState = loadedState;
   delete node.dataset.stageArtFailedKey;
   node.hidden = false;
+  return true;
+}
+function cancelStageMotion(characterId = "") {
+  if (characterId && state.stageMotionCharacterId && state.stageMotionCharacterId !== characterId) return false;
+  state.stageMotionRequestSequence += 1;
+  const animation = state.stageMotionAnimation;
+  state.stageMotionAnimation = null;
+  state.stageMotionCharacterId = "";
+  animation?.cancel();
+  const node = $("stage-character-art");
+  if (node) delete node.dataset.stageMotion;
+  return Boolean(animation);
+}
+function stageMotionFrames(stageMotion) {
+  if (stageMotion === "lean_in") return {
+    duration: 560,
+    frames: [
+      { transform: "translateY(0) scale(1)", offset: 0 },
+      { transform: "translateY(10px) scale(1.06)", offset: 0.5 },
+      { transform: "translateY(0) scale(1)", offset: 1 },
+    ],
+  };
+  if (stageMotion === "tremble") return {
+    duration: 480,
+    frames: [
+      { transform: "translateX(0)" },
+      { transform: "translateX(-10px)" }, { transform: "translateX(10px)" },
+      { transform: "translateX(-10px)" }, { transform: "translateX(10px)" },
+      { transform: "translateX(-10px)" }, { transform: "translateX(10px)" },
+      { transform: "translateX(-10px)" }, { transform: "translateX(10px)" },
+      { transform: "translateX(0)" },
+    ],
+  };
+  if (stageMotion === "recoil") return {
+    duration: 420,
+    frames: [
+      { transform: "translateY(0) scale(1)", offset: 0 },
+      { transform: "translateY(-5px) scale(.95)", offset: 0.48 },
+      { transform: "translateY(0) scale(1)", offset: 1 },
+    ],
+  };
+  if (stageMotion === "startle") return {
+    duration: 460,
+    frames: [
+      { transform: "translateY(0) scale(1)", offset: 0 },
+      { transform: "translateY(-14px) scale(1.04)", offset: 0.42 },
+      { transform: "translateY(0) scale(1)", offset: 1 },
+    ],
+  };
+  return null;
+}
+function playStageMotion(node, message, presentation, requestSequence = state.stageMotionRequestSequence) {
+  const stageMotion = normalizeStageMotion(message?.stageMotion, message?.communicationChannel);
+  if (!node || !presentation || presentation.cancelled || stageMotion === "none") return false;
+  if (requestSequence !== state.stageMotionRequestSequence) return false;
+  if (message?.id !== presentation.messageId || message?.id !== latestInPersonMessage("assistant")?.id) return false;
+  if (message?.characterId !== state.selected || node.hidden || !node.getAttribute("src")) return false;
+  const playKey = `${plain(message.id)}:${stageMotion}`;
+  if (state.playedStageMotionKeys.has(playKey)) return false;
+  state.playedStageMotionKeys.add(playKey);
+  while (state.playedStageMotionKeys.size > 500) {
+    state.playedStageMotionKeys.delete(state.playedStageMotionKeys.values().next().value);
+  }
+  node.dataset.stageMotionKey = playKey;
+  node.dataset.stageMotion = reducedMotion() ? "suppressed" : stageMotion;
+  if (reducedMotion() || typeof node.animate !== "function") return false;
+  const definition = stageMotionFrames(stageMotion);
+  if (!definition) return false;
+  state.stageMotionAnimation?.cancel();
+  const animation = node.animate(definition.frames, {
+    duration: definition.duration,
+    easing: "cubic-bezier(.22,.78,.24,1)",
+    iterations: 1,
+  });
+  state.stageMotionAnimation = animation;
+  state.stageMotionCharacterId = message.characterId;
+  node.dataset.stageMotionPlayCount = String(Number(node.dataset.stageMotionPlayCount || 0) + 1);
+  animation.finished.catch(() => {}).finally(() => {
+    if (state.stageMotionAnimation !== animation) return;
+    state.stageMotionAnimation = null;
+    state.stageMotionCharacterId = "";
+    delete node.dataset.stageMotion;
+  });
+  return true;
 }
 async function resolvePresenceAttempt(characterId, signal, stateRecoveryAttempt = 0) {
   try {
@@ -2336,7 +2419,6 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     renderCharacters();
     $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: false, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
     fillAvatar($("stage-header-avatar"), character, { thumbnail: true, priority: true });
-    fillStagePortrait($("stage-portrait-avatar"), character, latestInPersonMessage("assistant"));
     $("stage-character-name").textContent = character.display_name;
     $("stage-speaker").textContent = character.display_name;
 
@@ -2685,8 +2767,15 @@ function renderStage() {
   const character = currentCharacter();
   const assistantMessage = latestInPersonMessage("assistant");
   const expressionState = expressionStateForMessage(assistantMessage);
-  fillStagePortrait($("stage-portrait-avatar"), character, expressionState);
-  void updateStageCharacterArt($("stage-character-art"), character, expressionState);
+  const artNode = $("stage-character-art");
+  const livePresentation = presentationFor();
+  const motionPresentation = livePresentation?.messageId === assistantMessage?.id ? livePresentation : null;
+  const motionRequestSequence = state.stageMotionRequestSequence;
+  void updateStageCharacterArt(artNode, character, expressionState).then((ready) => {
+    if (ready && motionPresentation) {
+      playStageMotion(artNode, assistantMessage, motionPresentation, motionRequestSequence);
+    }
+  });
   const pending = typingStateFor();
   const speechNode = $("stage-speech");
   if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {
@@ -2893,6 +2982,8 @@ function updateInputCount() {
   const count = $("message-input").value.length + ($("action-input").value.length || 0);
   $("input-count").textContent = `${count} / 2000`;
   $("input-count").style.color = count > 2000 ? "#ff9dac" : "";
+  const foot = $("input-count").closest(".composer-foot");
+  if (foot) foot.hidden = count === 0;
 }
 function renderSelectedSticker() {
   const root = $("selected-sticker");
@@ -2997,6 +3088,7 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
   let pendingStateEvent = null;
   let movementStatus = null;
   let recoveryAction = "none";
+  let stageMotion = "none";
   const handlePacket = async (packet) => {
     const event = (packet.match(/^event: (.+)$/m) || [])[1];
     const data = (packet.match(/^data: (.+)$/m) || [])[1];
@@ -3033,6 +3125,7 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       movementStatus = payload.movement_status && typeof payload.movement_status === "object" ? payload.movement_status : null;
       recoveryAction = plain(payload.recovery_action || "none");
       returnedChannel = payload.communication_channel || returnedChannel;
+      stageMotion = normalizeStageMotion(payload.stage_motion, returnedChannel);
       contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
     }
     if (event === "error") throw new Error(payload.code || "chat_failed");
@@ -3049,7 +3142,7 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
   if (!completed) throw new Error("stream_disconnected");
   if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, renderBlocksText([...streamedBlocks.values()]));
   if (!contentBlocks.length) throw new Error("upstream_invalid_response");
-  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction };
+  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction, stageMotion };
 }
 
 function recoverableChatError(error) {
@@ -3207,7 +3300,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       if (visibleFor < 1200) await abortableDelay(1200 - visibleFor, requestController.signal);
     }
     userMessage.status = "sent";
-    const assistantMessage = normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, communicationChannel: result.returnedChannel, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
+    const assistantMessage = normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, communicationChannel: result.returnedChannel, stageMotion: result.stageMotion, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
     thread.messages.push(assistantMessage);
     thread.messageCount = Number(thread.messageCount || 0) + 1;
     thread.turnCount += 1;
@@ -3283,23 +3376,29 @@ async function submitUserBlocks(blocks, { clearComposer = false, onAccepted = nu
   }
   const thread = await dbGetThread(state.selected);
   if (!(await ensureContinuityDecision(thread))) return false;
+  const submittedDraft = clearComposer ? {
+    message: $("message-input").value,
+    action: $("action-input").value,
+    stickerId: plain(state.selectedSticker?.asset_id),
+  } : null;
   const userMessage = normalizeMessage({ id: id(), characterId: thread.characterId, role: "user", contentBlocks: blocks, communicationChannel: thread.channel, createdAt: Date.now(), status: "pending", conversationSegmentId: thread.conversationSegmentId, movementLocationId });
   thread.messages.push(userMessage);
   thread.messageCount = Number(thread.messageCount || 0) + 1;
   onAccepted?.();
-  if (clearComposer) {
-    $("message-input").value = "";
-    $("action-input").value = "";
-    clearSelectedSticker();
-    state.actionComposerOpen = false;
-    state.drafts.set(draftKey(thread.characterId, thread.channel, "message"), "");
-    state.drafts.set(draftKey(thread.characterId, thread.channel, "action"), "");
+  await runChat(thread, userMessage);
+  if (clearComposer && userMessage.status === "sent") {
+    if ($("message-input").value === submittedDraft.message) $("message-input").value = "";
+    if ($("action-input").value === submittedDraft.action) $("action-input").value = "";
+    if (plain(state.selectedSticker?.asset_id) === submittedDraft.stickerId) clearSelectedSticker();
+    if (!$("action-input").value) state.actionComposerOpen = false;
+    state.drafts.set(draftKey(thread.characterId, thread.channel, "message"), $("message-input").value);
+    state.drafts.set(draftKey(thread.characterId, thread.channel, "action"), $("action-input").value);
     void storePut("app_state", { key: "drafts", values: Object.fromEntries(state.drafts) });
     $("toggle-sticker").setAttribute("aria-expanded", "false");
     updateInputCount();
+    updateComposerAvailability();
   }
-  await runChat(thread, userMessage);
-  return true;
+  return userMessage.status === "sent";
 }
 async function sendMessage(event) {
   event.preventDefault();
@@ -3461,7 +3560,7 @@ async function arriveInPerson() {
     if (ownsVisibleArrival()) state.scene = result.scene_state;
     if (thread) thread.channel = "in_person";
     if (thread && result.reaction) {
-      arrivalMessage = normalizeMessage({ id: result.reaction.message_id || id(), characterId, role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId });
+      arrivalMessage = normalizeMessage({ id: result.reaction.message_id || id(), characterId, role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", stageMotion: result.reaction.stage_motion, createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId });
       thread.messages.push(arrivalMessage);
       thread.messageCount = Number(thread.messageCount || 0) + 1;
     }
@@ -3702,7 +3801,7 @@ $("message-input").onkeydown = (event) => { if (event.key === "Enter" && !event.
 $("toggle-action").onclick = () => {
   if (globalRequestBusy() || currentThread()?.channel !== "in_person") return;
   state.actionComposerOpen = !state.actionComposerOpen;
-  if (!state.actionComposerOpen) $("action-input").value = "";
+  if (!state.actionComposerOpen) scheduleDraftSave();
   updateComposerAvailability();
   if (state.actionComposerOpen) $("action-input").focus();
   updateInputCount();

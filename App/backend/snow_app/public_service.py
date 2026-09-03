@@ -20,7 +20,14 @@ from zoneinfo import ZoneInfo
 
 from .config import PublicSettings, Settings
 from .mvp_policy import MVP_CHARACTERS, scene_visual_key
-from .mvp_service import MVPService, _SESSION_STATES, _SESSION_LOCK, _WORLD_STATES, _WORLD_STATE_LOCK
+from .mvp_service import (
+    MVPService,
+    _SESSION_LOCK,
+    _SESSION_STATES,
+    _WORLD_STATE_LOCK,
+    _WORLD_STATES,
+    _normalize_stage_motion,
+)
 from .provider_registry import ProviderRegistry
 from .public_contracts import (
     ChatRequest,
@@ -1953,6 +1960,10 @@ class PublicChatService:
             ).hexdigest()[:16],
             "character_id": request.character_id,
             "communication_channel": "in_person",
+            "stage_motion": _normalize_stage_motion(
+                result.get("stage_motion"),
+                "in_person",
+            ),
             "answer": answer,
             "content_blocks": blocks,
             "source": "presence_arrival",
@@ -2094,6 +2105,7 @@ class PublicChatService:
             "model": redact_sensitive_text(request.model, 200),
             "answer": answer,
             "communication_channel": request.communication_channel,
+            "stage_motion": "none",
             "content_blocks": [
                 {
                     "type": "message" if request.communication_channel == "text" else "speech",
@@ -2377,6 +2389,10 @@ class PublicChatService:
                 "model": redact_sensitive_text(request.model, 200),
                 "answer": answer,
                 "communication_channel": request.communication_channel,
+                "stage_motion": _normalize_stage_motion(
+                    result.get("stage_motion"),
+                    request.communication_channel,
+                ),
                 "content_blocks": content_blocks,
                 "truncated": truncated,
                 "state_package": sign_state(self.public_settings, next_state),
