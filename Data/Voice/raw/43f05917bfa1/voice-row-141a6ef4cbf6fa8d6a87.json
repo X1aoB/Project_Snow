@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-141a6ef4cbf6fa8d6a87",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 36,
+  "trigger": "看板娘展示1",
+  "transcript": "来听姐姐讲故事吧。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/8/83/fhgkkhj9gu721zxsmrv5cmqw20x9xfx.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 174542,
+  "content_sha256": "0da539598139e594b7055db9839eef7bb01bd4f5e71f9ac205be6e616f04c573",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

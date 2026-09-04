@@ -1,0 +1,81 @@
+{
+  "schema_version": "project-snow-local-voice-preference-decision-receipt-1",
+  "round_id": "voice-preference-round-77f40486985a7f7304bb",
+  "round_index": 1,
+  "source_round_manifest_sha256": "f67610e8f9cb1ac9dc6cf8d5ad95fceca0420d5b26fe855b78a56edda8fad669",
+  "source_round_manifest_byte_sha256": "bf886b6a130936e12fcdc8235e49a52c1cd87e31e90869ddd675ff2e5fb39a0c",
+  "submission_schema_version": "project-snow-local-voice-preference-decision-1",
+  "submission_manifest_binding_sha256": "33ae35b8795f87252454da16bbe59ef5c1e79495dc30fda02cb911f9678fd13b",
+  "submission_saved_at": "2026-09-04T03:04:52.330Z",
+  "submission_byte_sha256": "9f9ac5d24234b50acd8ea8fad50c1cbdcae67189fa1009d87f70cd7adec25a62",
+  "decision_set_sha256": "0e77d7d25c08d481eda66764d5aea6db15702eccb677fe30ed10787c4e0abea3",
+  "decisions": {
+    "vidya-neutral-short": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-xkby",
+      "winning_sample_usable": "not_usable",
+      "rejection_reasons": [
+        "wrong_expression_or_character_fit"
+      ]
+    },
+    "vidya-breathy-lexical": {
+      "relative_choice": "reject_both",
+      "selected_opaque_label_id": null,
+      "winning_sample_usable": "not_usable",
+      "rejection_reasons": [
+        "wrong_voice_identity",
+        "wrong_expression_or_character_fit"
+      ]
+    },
+    "vidya-heightened": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-xkby",
+      "winning_sample_usable": "not_usable",
+      "rejection_reasons": [
+        "wrong_expression_or_character_fit"
+      ]
+    },
+    "chenxing-neutral-short": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-5kmz",
+      "winning_sample_usable": "not_usable",
+      "rejection_reasons": [
+        "wrong_expression_or_character_fit"
+      ]
+    },
+    "chenxing-breathy-lexical": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-5kmz",
+      "winning_sample_usable": "not_usable",
+      "rejection_reasons": [
+        "wrong_voice_identity",
+        "wrong_expression_or_character_fit"
+      ]
+    },
+    "chenxing-heightened": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-5kmz",
+      "winning_sample_usable": "not_usable",
+      "rejection_reasons": [
+        "wrong_expression_or_character_fit"
+      ]
+    }
+  },
+  "summary": {
+    "case_count": 6,
+    "relative_choice_counts": {
+      "first_sample": 0,
+      "second_sample": 5,
+      "reject_both": 1
+    },
+    "usable_case_count": 0,
+    "not_usable_case_count": 6,
+    "rejection_reason_counts": {
+      "wrong_voice_identity": 2,
+      "wrong_expression_or_character_fit": 6,
+      "pronunciation_or_segmentation_error": 0,
+      "synthesis_artifact": 0
+    }
+  },
+  "receipt_sha256": "3bff4d6aabc0646a721db06f0a7b6be4ae3283147aa45cef7bf9f3bf071817b0"
+}

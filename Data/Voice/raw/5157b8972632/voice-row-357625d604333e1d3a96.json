@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-357625d604333e1d3a96",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 12,
+  "trigger": "交换1",
+  "transcript": "让我来吧，很快就好。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/b5/i43c6hnetdm0ixm55z1cim5qmflqth4.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 108713,
+  "content_sha256": "acfa5d911dc866403b1629b3ec0d7fe2036e8ab17ce3438cb551eaed1fe8583a",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

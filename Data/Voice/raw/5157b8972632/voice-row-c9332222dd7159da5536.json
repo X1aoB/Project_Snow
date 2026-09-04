@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-c9332222dd7159da5536",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 37,
+  "trigger": "常规技1-2",
+  "transcript": "接下来。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/8/84/4dy38085n57v5tht6an9mbgmwx4e9vb.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 27211,
+  "content_sha256": "9892a4a835d370677a9adf59a4b4d73d533f9eae7bb9fbaaf65c857805c9befa",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

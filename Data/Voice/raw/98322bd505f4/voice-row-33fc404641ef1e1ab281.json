@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-33fc404641ef1e1ab281",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 12,
+  "trigger": "交换1",
+  "transcript": "此刻，已掌握战局。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/5/5e/cej6ldaj8pkg9415ycsvvycn953oo7c.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 100354,
+  "content_sha256": "be360c50aff7d4a54b851cb2e61b142ee8e7887f08363843473c35e8c662440e",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

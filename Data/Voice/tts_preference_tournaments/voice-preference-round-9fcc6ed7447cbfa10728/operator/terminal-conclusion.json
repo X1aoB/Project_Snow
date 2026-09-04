@@ -1,0 +1,104 @@
+{
+  "schema_version": "project-snow-private-voice-preference-terminal-conclusion-1",
+  "policy_version": "project-snow-current-clone-pool-terminal-selection-1",
+  "conclusion_id": "voice-preference-terminal-conclusion-9d8f74ef5ed6406a74c3",
+  "concluded_at": "2026-09-04T22:20:00+08:00",
+  "status": "terminal_current_clone_pool_concluded",
+  "source": {
+    "round_id": "voice-preference-round-9fcc6ed7447cbfa10728",
+    "round_manifest_sha256": "3b01a1e49e1b8d8dc7358d0d09fbc604e56c7180feaeef440ebbe4c52b90ca78",
+    "round_manifest_byte_sha256": "ac92d930cb9e2589d04790297fb04ecff1c10ff2d8408f886df467634b5da5e8",
+    "decision_receipt_sha256": "08b308dc876a274b7c1fef2b282d944dd466c5a7898b34528d75b23d42c06971",
+    "decision_receipt_byte_sha256": "dc78b897764c4fa7ff30ad09ffb7695abf2ab7d55b4788cb0f463382ad4ce31e",
+    "decision_set_sha256": "6fe83cbc9a1197d0708d697fcb76ee9a5a31de4a33777ef816e7588c64a3fb77",
+    "candidate_map_sha256": "36ab3489daf1b743daa3a9e86d47ebf923283c8b56b8315e6461b2c74668a036",
+    "candidate_map_byte_sha256": "b1fb566f0ac385c688c0e24257f4ae1d38d9321a2e3c01b3639740bf80c713ae"
+  },
+  "terminal_contract": {
+    "terminal_for_current_existing_clone_pool": true,
+    "automatic_additional_pairwise_rounds_allowed": false,
+    "paused_slots_trigger_resampling": false,
+    "reopen_requires": "new_source_material_or_new_model_or_explicit_user_instruction",
+    "provider_calls_performed": false,
+    "incremental_provider_cost_usd": "0"
+  },
+  "summary": {
+    "slot_count": 6,
+    "locked_slot_count": 5,
+    "paused_slot_count": 1,
+    "paused_case_ids": [
+      "vidya-breathy-lexical"
+    ]
+  },
+  "slots": [
+    {
+      "sequence": 1,
+      "case_id": "vidya-neutral-short",
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "style_anchor": "neutral",
+      "disposition": "locked_for_slot",
+      "runtime_candidate_ref": "vidya-b",
+      "relative_preference_candidate_ref": "vidya-b",
+      "rejection_reasons": []
+    },
+    {
+      "sequence": 2,
+      "case_id": "vidya-breathy-lexical",
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "style_anchor": "restrained_breathy_lexical",
+      "disposition": "paused_not_qualified",
+      "runtime_candidate_ref": null,
+      "relative_preference_candidate_ref": "vidya-b",
+      "rejection_reasons": [
+        "wrong_expression_or_character_fit"
+      ]
+    },
+    {
+      "sequence": 3,
+      "case_id": "vidya-heightened",
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "style_anchor": "heightened",
+      "disposition": "locked_for_slot",
+      "runtime_candidate_ref": "vidya-b",
+      "relative_preference_candidate_ref": "vidya-b",
+      "rejection_reasons": []
+    },
+    {
+      "sequence": 4,
+      "case_id": "chenxing-neutral-short",
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "style_anchor": "neutral",
+      "disposition": "locked_for_slot",
+      "runtime_candidate_ref": "chenxing-b",
+      "relative_preference_candidate_ref": "chenxing-b",
+      "rejection_reasons": []
+    },
+    {
+      "sequence": 5,
+      "case_id": "chenxing-breathy-lexical",
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "style_anchor": "restrained_breathy_lexical",
+      "disposition": "locked_for_slot",
+      "runtime_candidate_ref": "chenxing-b",
+      "relative_preference_candidate_ref": "chenxing-b",
+      "rejection_reasons": []
+    },
+    {
+      "sequence": 6,
+      "case_id": "chenxing-heightened",
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "style_anchor": "heightened",
+      "disposition": "locked_for_slot",
+      "runtime_candidate_ref": "chenxing-a",
+      "relative_preference_candidate_ref": "chenxing-a",
+      "rejection_reasons": []
+    }
+  ],
+  "manifest_sha256": "4a523ff36a6340a250acba8dba0e6b284d93a9e6a5d777c8efc6a93e6f1d4aec"
+}

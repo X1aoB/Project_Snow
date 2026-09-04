@@ -1,0 +1,2259 @@
+{
+  "schema_version": "project-snow-private-local-voice-recording-intake-1",
+  "intake_id": "voice-recording-intake-e68f765f1395a48eb339",
+  "recorded_at": "2026-08-29T12:16:08.292520+00:00",
+  "source_inventory": {
+    "schema_version": "project-snow-private-local-voice-recording-scan-1",
+    "source_root": "C:\\Users\\25685\\Desktop\\Snow_audio",
+    "registry_version": "mvp-22.2",
+    "entry_count": 23,
+    "shared_source_count": 1,
+    "entries": [
+      {
+        "ordinal": 1,
+        "source_id": "voice-recording-source-fc44a110b03ed6c6b7c4",
+        "role_name": "伊切尔",
+        "batch_name": "观后感",
+        "source_kind": "mail",
+        "character_id": "78aa7ab99154",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-49a30ad0fbcecd452a84",
+        "metadata": {
+          "角色": "伊切尔",
+          "邮件标题": "观后感",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "伊切尔/观后感/original.mkv",
+          "bytes": 4971295,
+          "sha256": "481d4998ebca7950293286da1ac2d8b42e1d3334501d2be21cc16380010a9975",
+          "probe": {
+            "duration_seconds": 104.544,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "伊切尔/观后感/displayed_text.txt",
+          "bytes": 1306,
+          "sha256": "602df3975970a8e4fd274b1502422509ee79c51b9f3af9941106e75a7d1bd7db"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "伊切尔/观后感/displayed_text.txt",
+          "bytes": 1306,
+          "sha256": "602df3975970a8e4fd274b1502422509ee79c51b9f3af9941106e75a7d1bd7db",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 2,
+        "source_id": "voice-recording-source-a7e423223d90ff4dbe30",
+        "role_name": "克罗瑞娜",
+        "batch_name": "绯月·大厅语音",
+        "source_kind": "hall_voice",
+        "character_id": "d5ecfceba959",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-be54ed1446ccc1bdd752",
+        "metadata": {
+          "角色": "克罗瑞娜",
+          "邮件标题": "不适用",
+          "素材标题": "绯月·大厅语音（抽卡获得及互动1–5）",
+          "素材类型": "角色大厅语音",
+          "装甲": "绯月",
+          "角色ID": "d5ecfceba959",
+          "装甲ID": "769fbc872631",
+          "语音页ID": "2acaa632adc8",
+          "游戏版本": "3.6",
+          "邮件日期": "不适用",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "文本来源": "游戏内截图与本地角色语音索引",
+          "录制顺序": "大厅互动1；抽卡获得；大厅互动2；大厅互动3；大厅互动4；大厅互动5",
+          "备注": "原始录音保持不变；文本按实际录制顺序登记，并经角色语音页数据核对。"
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "克罗瑞娜/绯月·大厅语音/original.mkv",
+          "bytes": 5283477,
+          "sha256": "3952a894d37e25613b9d10b9ad4b594b3054b0a650f59471ce80ad9dc248d770",
+          "probe": {
+            "duration_seconds": 93.792,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "克罗瑞娜/绯月·大厅语音/displayed_text.txt",
+          "bytes": 752,
+          "sha256": "bef2acb345666a193eea29ba2d7907dd1e1ca3374b940fc1e2345faa79edf731"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "克罗瑞娜/绯月·大厅语音/displayed_text.txt",
+          "bytes": 752,
+          "sha256": "bef2acb345666a193eea29ba2d7907dd1e1ca3374b940fc1e2345faa79edf731",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 3,
+        "source_id": "voice-recording-source-99d5a49c6fb7783fecc1",
+        "role_name": "凯茜娅",
+        "batch_name": "一生一世",
+        "source_kind": "mail",
+        "character_id": "25b23cb64398",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-79a4943b61142743f4a6",
+        "metadata": {
+          "角色": "凯茜娅",
+          "邮件标题": "一生一世",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "凯茜娅/一生一世/original.mkv",
+          "bytes": 4566997,
+          "sha256": "cd7476eaa5815ca998b68a3e0af19e4a87ac5654fde103fa3da4bafa592c6a8c",
+          "probe": {
+            "duration_seconds": 109.95,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "凯茜娅/一生一世/displayed_text.txt",
+          "bytes": 1125,
+          "sha256": "0acab16fa6eb3885d35d51130502b8af5d85696961b3632c718bf4d4097c4920"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "凯茜娅/一生一世/displayed_text.txt",
+          "bytes": 1125,
+          "sha256": "0acab16fa6eb3885d35d51130502b8af5d85696961b3632c718bf4d4097c4920",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 4,
+        "source_id": "voice-recording-source-993160ec5124e5e35196",
+        "role_name": "卜卜",
+        "batch_name": "恋恋账簿",
+        "source_kind": "mail",
+        "character_id": "6455a5dcff6a",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-7b3d3270293864d2c570",
+        "metadata": {
+          "角色": "卜卜",
+          "邮件标题": "恋恋账簿",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "卜卜/恋恋账簿/original.mkv",
+          "bytes": 5297740,
+          "sha256": "c37d9263cee60527279a50d1649789db1e07b418bdaeb4af5b8ad02c2e230ead",
+          "probe": {
+            "duration_seconds": 111.3,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "卜卜/恋恋账簿/displayed_text.txt",
+          "bytes": 1306,
+          "sha256": "94337701b1b2550f1f806b0b26d751aade9b456ebe95868985cca06cedef08f7"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "卜卜/恋恋账簿/displayed_text.txt",
+          "bytes": 1306,
+          "sha256": "94337701b1b2550f1f806b0b26d751aade9b456ebe95868985cca06cedef08f7",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 5,
+        "source_id": "voice-recording-source-9ad002074b79ff222ff8",
+        "role_name": "奈莉德",
+        "batch_name": "自投罗网的猎人",
+        "source_kind": "mail",
+        "character_id": "41b7444e39cc",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-9235c9ed50f064f27fc3",
+        "metadata": {
+          "角色": "奈莉德",
+          "邮件标题": "自投罗网的猎人",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "奈莉德/自投罗网的猎人/original.mkv",
+          "bytes": 6003327,
+          "sha256": "4949a8895c4ef6e282cd5e6abf16e6ee880e3d4b7f9dbb7b56dc68bbfd7ab1a9",
+          "probe": {
+            "duration_seconds": 149.76,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "奈莉德/自投罗网的猎人/displayed_text.txt",
+          "bytes": 1277,
+          "sha256": "b6272270cd077ceba3b85476e4ebf2a84130f8b6927a6671be53859ca67124d8"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "奈莉德/自投罗网的猎人/displayed_text.txt",
+          "bytes": 1277,
+          "sha256": "b6272270cd077ceba3b85476e4ebf2a84130f8b6927a6671be53859ca67124d8",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 6,
+        "source_id": "voice-recording-source-cfaf1d30ffac2a823654",
+        "role_name": "妮塔",
+        "batch_name": "从入门到放弃",
+        "source_kind": "mail",
+        "character_id": "4370a74d6fda",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-d88853a7611336427b84",
+        "metadata": {
+          "角色": "妮塔",
+          "邮件标题": "从入门到放弃",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "妮塔/从入门到放弃/original.mkv",
+          "bytes": 5053421,
+          "sha256": "4e97be79525a7bd7efdae68827d1b34dcb5fce643e92fb78048da78a3fcdcf9c",
+          "probe": {
+            "duration_seconds": 114.336,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "妮塔/从入门到放弃/displayed_text.txt",
+          "bytes": 1262,
+          "sha256": "cebb3212de9f45bd1988bc0195dd18efa3119cfd765f46bf6f70eec2e58a9073"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "妮塔/从入门到放弃/displayed_text.txt",
+          "bytes": 1262,
+          "sha256": "cebb3212de9f45bd1988bc0195dd18efa3119cfd765f46bf6f70eec2e58a9073",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 7,
+        "source_id": "voice-recording-source-eda523b90d5566e6f5a4",
+        "role_name": "安卡希雅",
+        "batch_name": "恋爱补丁",
+        "source_kind": "mail",
+        "character_id": "9f5804761c56",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-9313582a3482b9b1c099",
+        "metadata": {
+          "角色": "安卡希雅",
+          "邮件标题": "恋爱补丁",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "安卡希雅/恋爱补丁/original.mkv",
+          "bytes": 4330381,
+          "sha256": "7721e4b292d62ed9a2ab744c8507e4b16408a0285f2ae13f3a346bb0cb09f566",
+          "probe": {
+            "duration_seconds": 86.592,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "安卡希雅/恋爱补丁/displayed_text.txt",
+          "bytes": 1149,
+          "sha256": "e72506c44333761a2a9b8ed195301b1a7b48037a598bd38725bdc138152e40b3"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "安卡希雅/恋爱补丁/displayed_text.txt",
+          "bytes": 1149,
+          "sha256": "e72506c44333761a2a9b8ed195301b1a7b48037a598bd38725bdc138152e40b3",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 8,
+        "source_id": "voice-recording-source-48202ab87e3c5e245114",
+        "role_name": "恩雅",
+        "batch_name": "心底的潮意",
+        "source_kind": "mail",
+        "character_id": "43f05917bfa1",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-e0b527b9daaeaf450b5b",
+        "metadata": {
+          "角色": "恩雅",
+          "邮件标题": "心底的潮意",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "恩雅/心底的潮意/original.mkv",
+          "bytes": 5130781,
+          "sha256": "c1f02b6b1bdc99939f476d7539c67e43b9d5a2f5fae1ecd6e7c517e874a905c6",
+          "probe": {
+            "duration_seconds": 124.32,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "恩雅/心底的潮意/displayed_text.txt",
+          "bytes": 1163,
+          "sha256": "841a20ddfae19ae7295784f451458118a6d635171562a4da64537d6ebb01816f"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "恩雅/心底的潮意/displayed_text.txt",
+          "bytes": 1163,
+          "sha256": "841a20ddfae19ae7295784f451458118a6d635171562a4da64537d6ebb01816f",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 9,
+        "source_id": "voice-recording-source-0a717cd3a9bf6e887745",
+        "role_name": "晴",
+        "batch_name": "今日晴好",
+        "source_kind": "mail",
+        "character_id": "921f9ef0cc4e",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-6e9ca80e7a757890a8ad",
+        "metadata": {
+          "角色": "晴",
+          "邮件标题": "今日晴好",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "晴/今日晴好/original.mkv",
+          "bytes": 5346768,
+          "sha256": "cf94a1db23c36cf3a66b00bb9235b84e4e9e67875493871fde53515aa8e3219a",
+          "probe": {
+            "duration_seconds": 130.56,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "晴/今日晴好/displayed_text.txt",
+          "bytes": 1155,
+          "sha256": "3258abee05d4a1e89716a6baff2f083a0d1fed59d12ef5b81b75ab812f2db047"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "晴/今日晴好/displayed_text.txt",
+          "bytes": 1155,
+          "sha256": "3258abee05d4a1e89716a6baff2f083a0d1fed59d12ef5b81b75ab812f2db047",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 10,
+        "source_id": "voice-recording-source-0dc68426679c910b6d27",
+        "role_name": "猫汐尔",
+        "batch_name": "护理预约",
+        "source_kind": "mail",
+        "character_id": "6862c43d2ac9",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-a47a8779e03c51ab370d",
+        "metadata": {
+          "角色": "猫汐尔",
+          "邮件标题": "护理预约",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "猫汐尔/护理预约/original.mkv",
+          "bytes": 4966086,
+          "sha256": "1e1ea943813b3b4650bc33263749c13817d24f1ac7bbaa359c18472c823e7474",
+          "probe": {
+            "duration_seconds": 108.384,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "猫汐尔/护理预约/displayed_text.txt",
+          "bytes": 1124,
+          "sha256": "058036be7629b67cd4a1eca68a485b4e0fca4f80d55184762fc3038640c68f95"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "猫汐尔/护理预约/displayed_text.txt",
+          "bytes": 1124,
+          "sha256": "058036be7629b67cd4a1eca68a485b4e0fca4f80d55184762fc3038640c68f95",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 11,
+        "source_id": "voice-recording-source-669c124caabebaa84cfe",
+        "role_name": "琴诺",
+        "batch_name": "战术讨论",
+        "source_kind": "speaker_aggregate",
+        "character_id": "8d5b5c3912bb",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-7634bf0971f0108309b0",
+        "metadata": {
+          "角色": "琴诺",
+          "邮件标题": "战术讨论",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "否",
+          "完整且未经剪辑": "是",
+          "基础录制元数据适用对象": "共享原始MKV",
+          "角色专属音频": "speaker_aggregate.wav",
+          "角色专属逐字稿": "speaker_aggregate.txt",
+          "角色专属分段清单": "speaker_aggregate.segments.json",
+          "角色专属音频编码": "PCM s16le",
+          "角色专属采样率": "24000",
+          "角色专属声道": "单声道",
+          "角色专属音频性质": "由共享原始录音按角色剪辑聚合",
+          "训练逐字稿来源": "speaker_aggregate.txt；displayed_text.txt仅作游戏显示参考",
+          "备注": "共享原始录音位于 ../../_shared_originals/琴诺与莫尔索/战术讨论/original.mkv；人物专属剪辑请使用 speaker_aggregate.wav、speaker_aggregate.txt 和 speaker_aggregate.segments.json。"
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "琴诺/战术讨论/speaker_aggregate.wav",
+          "bytes": 3385038,
+          "sha256": "9895b0544c982640ea6cce162b8b85a6e8b9a3df0fb47b391f162ebf361d7fcc",
+          "probe": {
+            "duration_seconds": 70.52,
+            "codec_name": "pcm_s16le",
+            "sample_format": "s16",
+            "sample_rate_hz": 24000,
+            "channels": 1,
+            "bits_per_sample": 16,
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "琴诺/战术讨论/displayed_text.txt",
+          "bytes": 1229,
+          "sha256": "458c31296ed923749fde824e178ca5ff7024af3e1ee78fdaaf45b4b0a442de64"
+        },
+        "transcript_reference": {
+          "kind": "transcript_reference",
+          "source_relative_path": "琴诺/战术讨论/speaker_aggregate.txt",
+          "bytes": 741,
+          "sha256": "6fffac6c7601d172560f5d2d556dbac711e3070ee7339634f81a55d18817517a",
+          "reference_kind": "operator_reviewed_role_aggregate",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [
+          {
+            "kind": "transcript_reference",
+            "source_relative_path": "琴诺/战术讨论/speaker_aggregate.txt",
+            "bytes": 741,
+            "sha256": "6fffac6c7601d172560f5d2d556dbac711e3070ee7339634f81a55d18817517a"
+          },
+          {
+            "kind": "segment_provenance",
+            "source_relative_path": "琴诺/战术讨论/speaker_aggregate.segments.json",
+            "bytes": 3184,
+            "sha256": "51b391257f8d8bb098e1347f8e243f2223f7a6850e0633588b8efe1296bc6284"
+          }
+        ],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 12,
+        "source_id": "voice-recording-source-0887ab8d09373848be83",
+        "role_name": "瑟瑞斯",
+        "batch_name": "换种风格怎么样",
+        "source_kind": "mail",
+        "character_id": "85b205f6f623",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-aae7af7603aaf1f00f79",
+        "metadata": {
+          "角色": "瑟瑞斯",
+          "邮件标题": "换种风格怎么样",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "瑟瑞斯/换种风格怎么样/original.mkv",
+          "bytes": 5626728,
+          "sha256": "50c1a35cd54cc2a43eceb8ea108f9dd95b2a43d7be45920cb678de6eabbe0f14",
+          "probe": {
+            "duration_seconds": 120.384,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "瑟瑞斯/换种风格怎么样/displayed_text.txt",
+          "bytes": 1312,
+          "sha256": "094553c8b4fc9d5ec651df8513eb50f1a455881e1a43c1432e5a51448e042f21"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "瑟瑞斯/换种风格怎么样/displayed_text.txt",
+          "bytes": 1312,
+          "sha256": "094553c8b4fc9d5ec651df8513eb50f1a455881e1a43c1432e5a51448e042f21",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 13,
+        "source_id": "voice-recording-source-c3ccdc7ba3c8137a6066",
+        "role_name": "米娅",
+        "batch_name": "星彩·大厅语音",
+        "source_kind": "hall_voice",
+        "character_id": "702f4375675b",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-927ac8be446ee103c639",
+        "metadata": {
+          "角色": "米娅",
+          "邮件标题": "不适用",
+          "素材标题": "星彩·大厅语音（录制段1–6）",
+          "素材类型": "角色大厅语音",
+          "装甲": "星彩",
+          "角色ID": "702f4375675b",
+          "装甲ID": "3fd369f66d59",
+          "装甲页ID": "2acc4b465fce",
+          "游戏版本": "3.6",
+          "装甲实装版本": "3.3",
+          "装甲实装日期": "2025/11/6",
+          "邮件日期": "不适用",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "当前游戏版本语音（配音演员姓名未核验）",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "文本来源": "游戏内截图；本地资料用于核对角色与装甲",
+          "录制顺序": "录制段1；录制段2；录制段3；录制段4；录制段5；录制段6",
+          "备注": "原始录音保持不变；本地角色语音索引尚无星彩语音页，因此未猜测触发名或语音页ID。"
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "米娅/星彩·大厅语音/original.mkv",
+          "bytes": 5168936,
+          "sha256": "4cf271af515c5fd85a6ae84cceb88e68fc1bd14313b7c3859458d1b62a3e7958",
+          "probe": {
+            "duration_seconds": 81.888,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "米娅/星彩·大厅语音/displayed_text.txt",
+          "bytes": 740,
+          "sha256": "fce0b4dc8bcdc2d57691d0e69ac393d7600d00c9b3d66c3476fca3faac06c192"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "米娅/星彩·大厅语音/displayed_text.txt",
+          "bytes": 740,
+          "sha256": "fce0b4dc8bcdc2d57691d0e69ac393d7600d00c9b3d66c3476fca3faac06c192",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 14,
+        "source_id": "voice-recording-source-e31dcd95ef55cb17dbbf",
+        "role_name": "肴",
+        "batch_name": "一起醒来，一起下班",
+        "source_kind": "mail",
+        "character_id": "cf0569ac6de9",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-27dd820c7a6451214560",
+        "metadata": {
+          "角色": "肴",
+          "邮件标题": "一起醒来，一起下班",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "肴/一起醒来，一起下班/original.mkv",
+          "bytes": 5464645,
+          "sha256": "bb97d9756688f94c9d809952f10c4b9ab047f28a74fcf5c6bb7e86985260ccc0",
+          "probe": {
+            "duration_seconds": 117.216,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "肴/一起醒来，一起下班/displayed_text.txt",
+          "bytes": 1205,
+          "sha256": "4a8bf35d9c7511f91431307ca0004d048a4767d853d9c8c8c6b55f9563364a97"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "肴/一起醒来，一起下班/displayed_text.txt",
+          "bytes": 1205,
+          "sha256": "4a8bf35d9c7511f91431307ca0004d048a4767d853d9c8c8c6b55f9563364a97",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 15,
+        "source_id": "voice-recording-source-d19168613d2ab16052e6",
+        "role_name": "胧嫣",
+        "batch_name": "瑞狐·大厅语音",
+        "source_kind": "hall_voice",
+        "character_id": "447ed3c401c9",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-6153352f7f2cf512d150",
+        "metadata": {
+          "角色": "胧嫣",
+          "邮件标题": "不适用",
+          "素材标题": "瑞狐·大厅语音（录制段1–4）",
+          "素材类型": "角色大厅语音",
+          "装甲": "瑞狐",
+          "角色ID": "447ed3c401c9",
+          "装甲ID": "58e0559909b6",
+          "装甲页ID": "9a46c3a875c0",
+          "游戏版本": "3.6",
+          "邮件日期": "不适用",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "文本来源": "游戏内截图；本地资料用于核对角色与装甲",
+          "录制顺序": "录制段1；录制段2；录制段3；录制段4",
+          "备注": "原始录音保持不变；本地角色语音索引尚无瑞狐语音页，因此未猜测触发名或语音页ID。"
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "胧嫣/瑞狐·大厅语音/original.mkv",
+          "bytes": 3414722,
+          "sha256": "b8b059615178a3c7eedf0127cf4e02ed34694b9f5bd5919a043ed7d3dd4dea08",
+          "probe": {
+            "duration_seconds": 59.424,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "胧嫣/瑞狐·大厅语音/displayed_text.txt",
+          "bytes": 496,
+          "sha256": "249a61dad9f00ed225d2608f7647dfd367475f3281d9a30bacb28ec68424efba"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "胧嫣/瑞狐·大厅语音/displayed_text.txt",
+          "bytes": 496,
+          "sha256": "249a61dad9f00ed225d2608f7647dfd367475f3281d9a30bacb28ec68424efba",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 16,
+        "source_id": "voice-recording-source-825d88ce028712f91d0f",
+        "role_name": "芙提雅",
+        "batch_name": "灵感大爆发",
+        "source_kind": "mail",
+        "character_id": "a2ffc5b44d7f",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-5dbf339276bcbf2da744",
+        "metadata": {
+          "角色": "芙提雅",
+          "邮件标题": "灵感大爆发",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "芙提雅/灵感大爆发/original.mkv",
+          "bytes": 4894137,
+          "sha256": "276709bb587f29ba129b5eb357f4263e1af8e82e4401f8cfda3e465956d1686d",
+          "probe": {
+            "duration_seconds": 103.296,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "芙提雅/灵感大爆发/displayed_text.txt",
+          "bytes": 1264,
+          "sha256": "d2b21e9d7473d43dac170ab2a4117f869758a939e59d94df5f138fc749cc2097"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "芙提雅/灵感大爆发/displayed_text.txt",
+          "bytes": 1264,
+          "sha256": "d2b21e9d7473d43dac170ab2a4117f869758a939e59d94df5f138fc749cc2097",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 17,
+        "source_id": "voice-recording-source-e925835d1ba54f489580",
+        "role_name": "芬妮",
+        "batch_name": "幸福眩晕",
+        "source_kind": "mail",
+        "character_id": "1b0a6b35719a",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-524a3db1516a8b7c757a",
+        "metadata": {
+          "角色": "芬妮",
+          "邮件标题": "幸福眩晕",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "芬妮/幸福眩晕/original.mkv",
+          "bytes": 4894525,
+          "sha256": "3cff31fe749e58673c3544243a7ba87921c3de7b4f0c338a6f58e0fccbc5e565",
+          "probe": {
+            "duration_seconds": 122.688,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "芬妮/幸福眩晕/displayed_text.txt",
+          "bytes": 1097,
+          "sha256": "17306d2b0203c9a54d0ad56f39dffc7e4aa9eb802f29a98358065c521af2f263"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "芬妮/幸福眩晕/displayed_text.txt",
+          "bytes": 1097,
+          "sha256": "17306d2b0203c9a54d0ad56f39dffc7e4aa9eb802f29a98358065c521af2f263",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 18,
+        "source_id": "voice-recording-source-4c9340fb9cab941449fa",
+        "role_name": "苔丝",
+        "batch_name": "完美闭环",
+        "source_kind": "mail",
+        "character_id": "673ba6851b05",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-bd7a1505162b01301649",
+        "metadata": {
+          "角色": "苔丝",
+          "邮件标题": "完美闭环",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "苔丝/完美闭环/original.mkv",
+          "bytes": 4722703,
+          "sha256": "3818982dafca0b67fc959ae023cab9d9e40468d1817197ea3f5134c9c541c142",
+          "probe": {
+            "duration_seconds": 98.592,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "苔丝/完美闭环/displayed_text.txt",
+          "bytes": 1103,
+          "sha256": "4a7cb991330f15b5356323963be3f6e39e79357052c3a52854ae11f3c0fb1121"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "苔丝/完美闭环/displayed_text.txt",
+          "bytes": 1103,
+          "sha256": "4a7cb991330f15b5356323963be3f6e39e79357052c3a52854ae11f3c0fb1121",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 19,
+        "source_id": "voice-recording-source-c60bf8ff619e14bb8267",
+        "role_name": "茉莉安",
+        "batch_name": "共探终极",
+        "source_kind": "mail",
+        "character_id": "daab0f4cceb4",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-9b817e45ad7a70822e80",
+        "metadata": {
+          "角色": "茉莉安",
+          "邮件标题": "共探终极",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "茉莉安/共探终极/original.mkv",
+          "bytes": 5399021,
+          "sha256": "067420608f062403741e277731f4555b643e7a7510058424a45506471990c26d",
+          "probe": {
+            "duration_seconds": 121.35,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "茉莉安/共探终极/displayed_text.txt",
+          "bytes": 1107,
+          "sha256": "f734da09e07b534c82fffa15653f8116b004856af7133097ff14b8873e22452b"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "茉莉安/共探终极/displayed_text.txt",
+          "bytes": 1107,
+          "sha256": "f734da09e07b534c82fffa15653f8116b004856af7133097ff14b8873e22452b",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 20,
+        "source_id": "voice-recording-source-852763f4a1bde344b629",
+        "role_name": "莫尔索",
+        "batch_name": "战术讨论",
+        "source_kind": "speaker_aggregate",
+        "character_id": "8d5b5c3912bb",
+        "speaker_variant": "morso",
+        "speaker_identity_id": "voice-speaker-675fa549ece988b4ef85",
+        "metadata": {
+          "角色": "莫尔索",
+          "邮件标题": "战术讨论",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "否",
+          "完整且未经剪辑": "是",
+          "基础录制元数据适用对象": "共享原始MKV",
+          "角色专属音频": "speaker_aggregate.wav",
+          "角色专属逐字稿": "speaker_aggregate.txt",
+          "角色专属分段清单": "speaker_aggregate.segments.json",
+          "角色专属音频编码": "PCM s16le",
+          "角色专属采样率": "24000",
+          "角色专属声道": "单声道",
+          "角色专属音频性质": "由共享原始录音按角色剪辑聚合",
+          "训练逐字稿来源": "speaker_aggregate.txt；displayed_text.txt仅作游戏显示参考",
+          "备注": "共享原始录音位于 ../../_shared_originals/琴诺与莫尔索/战术讨论/original.mkv；人物专属剪辑请使用 speaker_aggregate.wav、speaker_aggregate.txt 和 speaker_aggregate.segments.json。"
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "莫尔索/战术讨论/speaker_aggregate.wav",
+          "bytes": 1531278,
+          "sha256": "2b2a01aecec93f3ea3662bba4b73df3e09866736befde53d95b2b1504f8f82e8",
+          "probe": {
+            "duration_seconds": 31.9,
+            "codec_name": "pcm_s16le",
+            "sample_format": "s16",
+            "sample_rate_hz": 24000,
+            "channels": 1,
+            "bits_per_sample": 16,
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "莫尔索/战术讨论/displayed_text.txt",
+          "bytes": 1229,
+          "sha256": "458c31296ed923749fde824e178ca5ff7024af3e1ee78fdaaf45b4b0a442de64"
+        },
+        "transcript_reference": {
+          "kind": "transcript_reference",
+          "source_relative_path": "莫尔索/战术讨论/speaker_aggregate.txt",
+          "bytes": 392,
+          "sha256": "2af01d46af7b3b9616d258e587b295382e26c51a7633453cbf321c4ed600b6ef",
+          "reference_kind": "operator_reviewed_role_aggregate",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [
+          {
+            "kind": "transcript_reference",
+            "source_relative_path": "莫尔索/战术讨论/speaker_aggregate.txt",
+            "bytes": 392,
+            "sha256": "2af01d46af7b3b9616d258e587b295382e26c51a7633453cbf321c4ed600b6ef"
+          },
+          {
+            "kind": "segment_provenance",
+            "source_relative_path": "莫尔索/战术讨论/speaker_aggregate.segments.json",
+            "bytes": 2768,
+            "sha256": "01afc68614244078daa8fb6f09dffb488e4bcc0b84937c9aa187b92eb4a09050"
+          }
+        ],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 21,
+        "source_id": "voice-recording-source-b2330588b1201580e636",
+        "role_name": "薇蒂雅",
+        "batch_name": "呈堂证供",
+        "source_kind": "mail",
+        "character_id": "5157b8972632",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-6bc237757f1daa61a7e9",
+        "metadata": {
+          "角色": "薇蒂雅",
+          "邮件标题": "呈堂证供",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "薇蒂雅/呈堂证供/original.mkv",
+          "bytes": 5850191,
+          "sha256": "248b781e0e12d2300a3041b2351ff5011eaa0226a0638349d000c79541db2ca8",
+          "probe": {
+            "duration_seconds": 125.568,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "薇蒂雅/呈堂证供/displayed_text.txt",
+          "bytes": 1149,
+          "sha256": "f12fb95220b7c975bd25875bff76318cb9fb98af80f757b4cd399e4bba19e99d"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "薇蒂雅/呈堂证供/displayed_text.txt",
+          "bytes": 1149,
+          "sha256": "f12fb95220b7c975bd25875bff76318cb9fb98af80f757b4cd399e4bba19e99d",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 22,
+        "source_id": "voice-recording-source-c70246ddfece3fb4e016",
+        "role_name": "辰星",
+        "batch_name": "再来一次？",
+        "source_kind": "mail",
+        "character_id": "98322bd505f4",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-2884519dbf41c62769ba",
+        "metadata": {
+          "角色": "辰星",
+          "邮件标题": "再来一次？",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "辰星/再来一次？/original.mkv",
+          "bytes": 5882592,
+          "sha256": "a694f0783f564629b68d71d2f1671cb077fbedc315bb999ccf8cd8d4b4ba16c8",
+          "probe": {
+            "duration_seconds": 142.884,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "辰星/再来一次？/displayed_text.txt",
+          "bytes": 1271,
+          "sha256": "cba49985231366ba4d4071ff1491662134b49cf56f74745417126bcf2db4cc3d"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "辰星/再来一次？/displayed_text.txt",
+          "bytes": 1271,
+          "sha256": "cba49985231366ba4d4071ff1491662134b49cf56f74745417126bcf2db4cc3d",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      },
+      {
+        "ordinal": 23,
+        "source_id": "voice-recording-source-6d452739b5d86fe9883d",
+        "role_name": "里芙",
+        "batch_name": "海姆达尔最广阔的天地",
+        "source_kind": "mail",
+        "character_id": "ca0144ccd81b",
+        "speaker_variant": null,
+        "speaker_identity_id": "voice-speaker-74df0795797fa376cb77",
+        "metadata": {
+          "角色": "里芙",
+          "邮件标题": "海姆达尔最广阔的天地",
+          "游戏版本": "3.6",
+          "邮件日期": "2025/7/20",
+          "录制日期": "2026/8/29",
+          "语音语言": "中文",
+          "CV状态": "新CV",
+          "录制软件": "OBS Studio",
+          "录制格式": "MKV",
+          "音频编码": "FLAC 16-bit",
+          "采样率": "48000",
+          "声道": "立体声",
+          "角色语音音量": "100",
+          "BGM音量": "0",
+          "SFX音量": "0",
+          "麦克风已关闭": "是",
+          "单一说话人": "是",
+          "完整且未经剪辑": "是",
+          "备注": ""
+        },
+        "primary_audio": {
+          "kind": "primary_audio",
+          "source_relative_path": "里芙/海姆达尔最广阔的天地/original.mkv",
+          "bytes": 4938391,
+          "sha256": "417dffe082e4c7cff5a8bb3d956d622568cc915e2c708c2db3e48940d688bae8",
+          "probe": {
+            "duration_seconds": 110.976,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "displayed_text_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "里芙/海姆达尔最广阔的天地/displayed_text.txt",
+          "bytes": 1239,
+          "sha256": "dd785368cc9264e526a4de7bc593c78bc8e360a5696584556f6fe10ab6597b8e"
+        },
+        "transcript_reference": {
+          "kind": "displayed_text_reference",
+          "source_relative_path": "里芙/海姆达尔最广阔的天地/displayed_text.txt",
+          "bytes": 1239,
+          "sha256": "dd785368cc9264e526a4de7bc593c78bc8e360a5696584556f6fe10ab6597b8e",
+          "reference_kind": "displayed_game_text_reference_only",
+          "transcript_truth": false,
+          "audio_only_asr_required": true
+        },
+        "support_files": [],
+        "processing_state": {
+          "source_integrity_checked": true,
+          "full_decode_passed": true,
+          "requires_segmentation": true,
+          "whole_track_enrollment_eligible": false,
+          "human_transcript_review_completed": false
+        }
+      }
+    ],
+    "shared_sources": [
+      {
+        "shared_source_id": "voice-recording-shared-057ac6b8d5fa203add3b",
+        "roles": [
+          "琴诺",
+          "莫尔索"
+        ],
+        "original": {
+          "kind": "shared_original",
+          "source_relative_path": "_shared_originals/琴诺与莫尔索/战术讨论/original.mkv",
+          "bytes": 5094820,
+          "sha256": "057ac6b8d5fa203add3b9c5e7a2bf246041e79deaf24f0852ed8991b252a0108",
+          "probe": {
+            "duration_seconds": 114.267,
+            "codec_name": "flac",
+            "sample_format": "s16",
+            "sample_rate_hz": 48000,
+            "channels": 2,
+            "bits_per_sample": "16",
+            "full_decode_passed": true
+          }
+        },
+        "source_manifest": {
+          "kind": "shared_source_manifest",
+          "source_relative_path": "_shared_originals/琴诺与莫尔索/战术讨论/source_manifest.json",
+          "bytes": 2092,
+          "sha256": "df669f114dc60b2c9c9f516b470fa81119ff88505074d887ba194dc5c18369c6"
+        },
+        "role_specific_derivatives": [
+          "voice-recording-source-669c124caabebaa84cfe",
+          "voice-recording-source-852763f4a1bde344b629"
+        ]
+      }
+    ],
+    "audio_set_sha256": "96ad59fb8c74385022a025827793bb7a77afc895e46b31e15332e7beb8263990",
+    "reference_text_set_sha256": "873789da4d1641ba17d1220d89afec24121c7b930e0bc2a1d791efae359de247",
+    "scope_limits": {
+      "source_files_modified": false,
+      "transcript_truth_claimed": false,
+      "segmentation_approved": false,
+      "training_use_approved": false,
+      "rights_accepted": false,
+      "publication_approved": false,
+      "provider_enrollment_allowed": false
+    },
+    "inventory_sha256": "e68f765f1395a48eb339b32d4cfce98dfa9f805c88aa2ac20ad328a406b354cf"
+  },
+  "source_inventory_sha256": "e68f765f1395a48eb339b32d4cfce98dfa9f805c88aa2ac20ad328a406b354cf",
+  "copied_file_count": 75,
+  "copied_files": [
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "伊切尔/观后感/original.mkv",
+      "stored_relative_path": "sources/伊切尔/观后感/original.mkv",
+      "bytes": 4971295,
+      "sha256": "481d4998ebca7950293286da1ac2d8b42e1d3334501d2be21cc16380010a9975"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "伊切尔/观后感/displayed_text.txt",
+      "stored_relative_path": "sources/伊切尔/观后感/displayed_text.txt",
+      "bytes": 1306,
+      "sha256": "602df3975970a8e4fd274b1502422509ee79c51b9f3af9941106e75a7d1bd7db"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "伊切尔/观后感/metadata.txt",
+      "stored_relative_path": "sources/伊切尔/观后感/metadata.txt",
+      "bytes": 378,
+      "sha256": "f729c380cce7dcc52205fa5a0038c4bb46f767a855e3fcfdc5b83f9078cbf98d"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "克罗瑞娜/绯月·大厅语音/original.mkv",
+      "stored_relative_path": "sources/克罗瑞娜/绯月·大厅语音/original.mkv",
+      "bytes": 5283477,
+      "sha256": "3952a894d37e25613b9d10b9ad4b594b3054b0a650f59471ce80ad9dc248d770"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "克罗瑞娜/绯月·大厅语音/displayed_text.txt",
+      "stored_relative_path": "sources/克罗瑞娜/绯月·大厅语音/displayed_text.txt",
+      "bytes": 752,
+      "sha256": "bef2acb345666a193eea29ba2d7907dd1e1ca3374b940fc1e2345faa79edf731"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "克罗瑞娜/绯月·大厅语音/metadata.txt",
+      "stored_relative_path": "sources/克罗瑞娜/绯月·大厅语音/metadata.txt",
+      "bytes": 814,
+      "sha256": "5eea0f21b4fc295473221a746b2882de2d9d69eaf9de64fdf6f7ed4bf0eb4902"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "凯茜娅/一生一世/original.mkv",
+      "stored_relative_path": "sources/凯茜娅/一生一世/original.mkv",
+      "bytes": 4566997,
+      "sha256": "cd7476eaa5815ca998b68a3e0af19e4a87ac5654fde103fa3da4bafa592c6a8c"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "凯茜娅/一生一世/displayed_text.txt",
+      "stored_relative_path": "sources/凯茜娅/一生一世/displayed_text.txt",
+      "bytes": 1125,
+      "sha256": "0acab16fa6eb3885d35d51130502b8af5d85696961b3632c718bf4d4097c4920"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "凯茜娅/一生一世/metadata.txt",
+      "stored_relative_path": "sources/凯茜娅/一生一世/metadata.txt",
+      "bytes": 381,
+      "sha256": "a29b8a24683da2f006b49587887e818dd5cb502737dcd43981835fd578400c24"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "卜卜/恋恋账簿/original.mkv",
+      "stored_relative_path": "sources/卜卜/恋恋账簿/original.mkv",
+      "bytes": 5297740,
+      "sha256": "c37d9263cee60527279a50d1649789db1e07b418bdaeb4af5b8ad02c2e230ead"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "卜卜/恋恋账簿/displayed_text.txt",
+      "stored_relative_path": "sources/卜卜/恋恋账簿/displayed_text.txt",
+      "bytes": 1306,
+      "sha256": "94337701b1b2550f1f806b0b26d751aade9b456ebe95868985cca06cedef08f7"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "卜卜/恋恋账簿/metadata.txt",
+      "stored_relative_path": "sources/卜卜/恋恋账簿/metadata.txt",
+      "bytes": 378,
+      "sha256": "6168f0c5899f87ea3eb5295ff7474f2fbf0ebd5b954466a0b8272cec71320c8b"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "奈莉德/自投罗网的猎人/original.mkv",
+      "stored_relative_path": "sources/奈莉德/自投罗网的猎人/original.mkv",
+      "bytes": 6003327,
+      "sha256": "4949a8895c4ef6e282cd5e6abf16e6ee880e3d4b7f9dbb7b56dc68bbfd7ab1a9"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "奈莉德/自投罗网的猎人/displayed_text.txt",
+      "stored_relative_path": "sources/奈莉德/自投罗网的猎人/displayed_text.txt",
+      "bytes": 1277,
+      "sha256": "b6272270cd077ceba3b85476e4ebf2a84130f8b6927a6671be53859ca67124d8"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "奈莉德/自投罗网的猎人/metadata.txt",
+      "stored_relative_path": "sources/奈莉德/自投罗网的猎人/metadata.txt",
+      "bytes": 390,
+      "sha256": "4b89f19def66c813bd0047a9c5605336719097c139d19a408b2c28d73110a3bc"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "妮塔/从入门到放弃/original.mkv",
+      "stored_relative_path": "sources/妮塔/从入门到放弃/original.mkv",
+      "bytes": 5053421,
+      "sha256": "4e97be79525a7bd7efdae68827d1b34dcb5fce643e92fb78048da78a3fcdcf9c"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "妮塔/从入门到放弃/displayed_text.txt",
+      "stored_relative_path": "sources/妮塔/从入门到放弃/displayed_text.txt",
+      "bytes": 1262,
+      "sha256": "cebb3212de9f45bd1988bc0195dd18efa3119cfd765f46bf6f70eec2e58a9073"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "妮塔/从入门到放弃/metadata.txt",
+      "stored_relative_path": "sources/妮塔/从入门到放弃/metadata.txt",
+      "bytes": 384,
+      "sha256": "152287a274386893bbb666e352a7a1acca82dc503df269ba8026c25f1968f3b7"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "安卡希雅/恋爱补丁/original.mkv",
+      "stored_relative_path": "sources/安卡希雅/恋爱补丁/original.mkv",
+      "bytes": 4330381,
+      "sha256": "7721e4b292d62ed9a2ab744c8507e4b16408a0285f2ae13f3a346bb0cb09f566"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "安卡希雅/恋爱补丁/displayed_text.txt",
+      "stored_relative_path": "sources/安卡希雅/恋爱补丁/displayed_text.txt",
+      "bytes": 1149,
+      "sha256": "e72506c44333761a2a9b8ed195301b1a7b48037a598bd38725bdc138152e40b3"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "安卡希雅/恋爱补丁/metadata.txt",
+      "stored_relative_path": "sources/安卡希雅/恋爱补丁/metadata.txt",
+      "bytes": 384,
+      "sha256": "7919ce8c2d4d3fe14b64bd0ace9ed616d8007a902c34057d7f1291fbde86fd0a"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "恩雅/心底的潮意/original.mkv",
+      "stored_relative_path": "sources/恩雅/心底的潮意/original.mkv",
+      "bytes": 5130781,
+      "sha256": "c1f02b6b1bdc99939f476d7539c67e43b9d5a2f5fae1ecd6e7c517e874a905c6"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "恩雅/心底的潮意/displayed_text.txt",
+      "stored_relative_path": "sources/恩雅/心底的潮意/displayed_text.txt",
+      "bytes": 1163,
+      "sha256": "841a20ddfae19ae7295784f451458118a6d635171562a4da64537d6ebb01816f"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "恩雅/心底的潮意/metadata.txt",
+      "stored_relative_path": "sources/恩雅/心底的潮意/metadata.txt",
+      "bytes": 381,
+      "sha256": "4ed1817bc31f70b97d2b881336463f3e600b3ce4cff7489c41a1e01f7c88b74e"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "晴/今日晴好/original.mkv",
+      "stored_relative_path": "sources/晴/今日晴好/original.mkv",
+      "bytes": 5346768,
+      "sha256": "cf94a1db23c36cf3a66b00bb9235b84e4e9e67875493871fde53515aa8e3219a"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "晴/今日晴好/displayed_text.txt",
+      "stored_relative_path": "sources/晴/今日晴好/displayed_text.txt",
+      "bytes": 1155,
+      "sha256": "3258abee05d4a1e89716a6baff2f083a0d1fed59d12ef5b81b75ab812f2db047"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "晴/今日晴好/metadata.txt",
+      "stored_relative_path": "sources/晴/今日晴好/metadata.txt",
+      "bytes": 375,
+      "sha256": "6ae04d2630c0978f7013f19d8fc816653d3c246f4fa39c23790245bff020c27c"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "猫汐尔/护理预约/original.mkv",
+      "stored_relative_path": "sources/猫汐尔/护理预约/original.mkv",
+      "bytes": 4966086,
+      "sha256": "1e1ea943813b3b4650bc33263749c13817d24f1ac7bbaa359c18472c823e7474"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "猫汐尔/护理预约/displayed_text.txt",
+      "stored_relative_path": "sources/猫汐尔/护理预约/displayed_text.txt",
+      "bytes": 1124,
+      "sha256": "058036be7629b67cd4a1eca68a485b4e0fca4f80d55184762fc3038640c68f95"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "猫汐尔/护理预约/metadata.txt",
+      "stored_relative_path": "sources/猫汐尔/护理预约/metadata.txt",
+      "bytes": 381,
+      "sha256": "ea3be72821f09edee3c55a02182bcd5dcda926d799dcb7023090e4382e5bcba1"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "琴诺/战术讨论/speaker_aggregate.wav",
+      "stored_relative_path": "sources/琴诺/战术讨论/speaker_aggregate.wav",
+      "bytes": 3385038,
+      "sha256": "9895b0544c982640ea6cce162b8b85a6e8b9a3df0fb47b391f162ebf361d7fcc"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "琴诺/战术讨论/displayed_text.txt",
+      "stored_relative_path": "sources/琴诺/战术讨论/displayed_text.txt",
+      "bytes": 1229,
+      "sha256": "458c31296ed923749fde824e178ca5ff7024af3e1ee78fdaaf45b4b0a442de64"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "琴诺/战术讨论/metadata.txt",
+      "stored_relative_path": "sources/琴诺/战术讨论/metadata.txt",
+      "bytes": 1027,
+      "sha256": "5ea20054b31102a66409b3003b22f3af13a47b76bf54db3d09acbcc93881ee6a"
+    },
+    {
+      "kind": "transcript_reference",
+      "source_relative_path": "琴诺/战术讨论/speaker_aggregate.txt",
+      "stored_relative_path": "sources/琴诺/战术讨论/speaker_aggregate.txt",
+      "bytes": 741,
+      "sha256": "6fffac6c7601d172560f5d2d556dbac711e3070ee7339634f81a55d18817517a"
+    },
+    {
+      "kind": "segment_provenance",
+      "source_relative_path": "琴诺/战术讨论/speaker_aggregate.segments.json",
+      "stored_relative_path": "sources/琴诺/战术讨论/speaker_aggregate.segments.json",
+      "bytes": 3184,
+      "sha256": "51b391257f8d8bb098e1347f8e243f2223f7a6850e0633588b8efe1296bc6284"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "瑟瑞斯/换种风格怎么样/original.mkv",
+      "stored_relative_path": "sources/瑟瑞斯/换种风格怎么样/original.mkv",
+      "bytes": 5626728,
+      "sha256": "50c1a35cd54cc2a43eceb8ea108f9dd95b2a43d7be45920cb678de6eabbe0f14"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "瑟瑞斯/换种风格怎么样/displayed_text.txt",
+      "stored_relative_path": "sources/瑟瑞斯/换种风格怎么样/displayed_text.txt",
+      "bytes": 1312,
+      "sha256": "094553c8b4fc9d5ec651df8513eb50f1a455881e1a43c1432e5a51448e042f21"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "瑟瑞斯/换种风格怎么样/metadata.txt",
+      "stored_relative_path": "sources/瑟瑞斯/换种风格怎么样/metadata.txt",
+      "bytes": 390,
+      "sha256": "8f44394755a5b024fc50640bc5bae79efd73efbacf751524cc1de25d88cbd61f"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "米娅/星彩·大厅语音/original.mkv",
+      "stored_relative_path": "sources/米娅/星彩·大厅语音/original.mkv",
+      "bytes": 5168936,
+      "sha256": "4cf271af515c5fd85a6ae84cceb88e68fc1bd14313b7c3859458d1b62a3e7958"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "米娅/星彩·大厅语音/displayed_text.txt",
+      "stored_relative_path": "sources/米娅/星彩·大厅语音/displayed_text.txt",
+      "bytes": 740,
+      "sha256": "fce0b4dc8bcdc2d57691d0e69ac393d7600d00c9b3d66c3476fca3faac06c192"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "米娅/星彩·大厅语音/metadata.txt",
+      "stored_relative_path": "sources/米娅/星彩·大厅语音/metadata.txt",
+      "bytes": 907,
+      "sha256": "eb5604a0707e51f23b7aa3e08a0f2593b3616cc458dc76a0822287c8aeac12d4"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "肴/一起醒来，一起下班/original.mkv",
+      "stored_relative_path": "sources/肴/一起醒来，一起下班/original.mkv",
+      "bytes": 5464645,
+      "sha256": "bb97d9756688f94c9d809952f10c4b9ab047f28a74fcf5c6bb7e86985260ccc0"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "肴/一起醒来，一起下班/displayed_text.txt",
+      "stored_relative_path": "sources/肴/一起醒来，一起下班/displayed_text.txt",
+      "bytes": 1205,
+      "sha256": "4a8bf35d9c7511f91431307ca0004d048a4767d853d9c8c8c6b55f9563364a97"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "肴/一起醒来，一起下班/metadata.txt",
+      "stored_relative_path": "sources/肴/一起醒来，一起下班/metadata.txt",
+      "bytes": 390,
+      "sha256": "fb2c01704f4ac01d1684bd81237143e70787f670312e190af66cd9bb3def2776"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "胧嫣/瑞狐·大厅语音/original.mkv",
+      "stored_relative_path": "sources/胧嫣/瑞狐·大厅语音/original.mkv",
+      "bytes": 3414722,
+      "sha256": "b8b059615178a3c7eedf0127cf4e02ed34694b9f5bd5919a043ed7d3dd4dea08"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "胧嫣/瑞狐·大厅语音/displayed_text.txt",
+      "stored_relative_path": "sources/胧嫣/瑞狐·大厅语音/displayed_text.txt",
+      "bytes": 496,
+      "sha256": "249a61dad9f00ed225d2608f7647dfd367475f3281d9a30bacb28ec68424efba"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "胧嫣/瑞狐·大厅语音/metadata.txt",
+      "stored_relative_path": "sources/胧嫣/瑞狐·大厅语音/metadata.txt",
+      "bytes": 785,
+      "sha256": "ad858a0b07b3ec41e86eb780bd120b34462530625ae58448636f9060202e7ef4"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "芙提雅/灵感大爆发/original.mkv",
+      "stored_relative_path": "sources/芙提雅/灵感大爆发/original.mkv",
+      "bytes": 4894137,
+      "sha256": "276709bb587f29ba129b5eb357f4263e1af8e82e4401f8cfda3e465956d1686d"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "芙提雅/灵感大爆发/displayed_text.txt",
+      "stored_relative_path": "sources/芙提雅/灵感大爆发/displayed_text.txt",
+      "bytes": 1264,
+      "sha256": "d2b21e9d7473d43dac170ab2a4117f869758a939e59d94df5f138fc749cc2097"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "芙提雅/灵感大爆发/metadata.txt",
+      "stored_relative_path": "sources/芙提雅/灵感大爆发/metadata.txt",
+      "bytes": 384,
+      "sha256": "adff61cf9739fecf14340e1cf031e70f5211de89dcc4db68483d5d0dcfe74206"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "芬妮/幸福眩晕/original.mkv",
+      "stored_relative_path": "sources/芬妮/幸福眩晕/original.mkv",
+      "bytes": 4894525,
+      "sha256": "3cff31fe749e58673c3544243a7ba87921c3de7b4f0c338a6f58e0fccbc5e565"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "芬妮/幸福眩晕/displayed_text.txt",
+      "stored_relative_path": "sources/芬妮/幸福眩晕/displayed_text.txt",
+      "bytes": 1097,
+      "sha256": "17306d2b0203c9a54d0ad56f39dffc7e4aa9eb802f29a98358065c521af2f263"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "芬妮/幸福眩晕/metadata.txt",
+      "stored_relative_path": "sources/芬妮/幸福眩晕/metadata.txt",
+      "bytes": 378,
+      "sha256": "2b8f2d364ef182e0f4c6926767c1a7bd4b31db3970e036d70d2b92724da83a3a"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "苔丝/完美闭环/original.mkv",
+      "stored_relative_path": "sources/苔丝/完美闭环/original.mkv",
+      "bytes": 4722703,
+      "sha256": "3818982dafca0b67fc959ae023cab9d9e40468d1817197ea3f5134c9c541c142"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "苔丝/完美闭环/displayed_text.txt",
+      "stored_relative_path": "sources/苔丝/完美闭环/displayed_text.txt",
+      "bytes": 1103,
+      "sha256": "4a7cb991330f15b5356323963be3f6e39e79357052c3a52854ae11f3c0fb1121"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "苔丝/完美闭环/metadata.txt",
+      "stored_relative_path": "sources/苔丝/完美闭环/metadata.txt",
+      "bytes": 378,
+      "sha256": "ccbc199c4b9e65c087a303d94bb3868b202ec18a51877f6d323745d5ae07db1c"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "茉莉安/共探终极/original.mkv",
+      "stored_relative_path": "sources/茉莉安/共探终极/original.mkv",
+      "bytes": 5399021,
+      "sha256": "067420608f062403741e277731f4555b643e7a7510058424a45506471990c26d"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "茉莉安/共探终极/displayed_text.txt",
+      "stored_relative_path": "sources/茉莉安/共探终极/displayed_text.txt",
+      "bytes": 1107,
+      "sha256": "f734da09e07b534c82fffa15653f8116b004856af7133097ff14b8873e22452b"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "茉莉安/共探终极/metadata.txt",
+      "stored_relative_path": "sources/茉莉安/共探终极/metadata.txt",
+      "bytes": 381,
+      "sha256": "74ea63ca2cd05cd89109e954795b2bf998cd2c31d9035b245be02630fd6b22de"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "莫尔索/战术讨论/speaker_aggregate.wav",
+      "stored_relative_path": "sources/莫尔索/战术讨论/speaker_aggregate.wav",
+      "bytes": 1531278,
+      "sha256": "2b2a01aecec93f3ea3662bba4b73df3e09866736befde53d95b2b1504f8f82e8"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "莫尔索/战术讨论/displayed_text.txt",
+      "stored_relative_path": "sources/莫尔索/战术讨论/displayed_text.txt",
+      "bytes": 1229,
+      "sha256": "458c31296ed923749fde824e178ca5ff7024af3e1ee78fdaaf45b4b0a442de64"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "莫尔索/战术讨论/metadata.txt",
+      "stored_relative_path": "sources/莫尔索/战术讨论/metadata.txt",
+      "bytes": 1030,
+      "sha256": "f0fa47f528b78f587e82f36d6b583c35eb52c9b9f85ae76e82374b54e5fa6f66"
+    },
+    {
+      "kind": "transcript_reference",
+      "source_relative_path": "莫尔索/战术讨论/speaker_aggregate.txt",
+      "stored_relative_path": "sources/莫尔索/战术讨论/speaker_aggregate.txt",
+      "bytes": 392,
+      "sha256": "2af01d46af7b3b9616d258e587b295382e26c51a7633453cbf321c4ed600b6ef"
+    },
+    {
+      "kind": "segment_provenance",
+      "source_relative_path": "莫尔索/战术讨论/speaker_aggregate.segments.json",
+      "stored_relative_path": "sources/莫尔索/战术讨论/speaker_aggregate.segments.json",
+      "bytes": 2768,
+      "sha256": "01afc68614244078daa8fb6f09dffb488e4bcc0b84937c9aa187b92eb4a09050"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "薇蒂雅/呈堂证供/original.mkv",
+      "stored_relative_path": "sources/薇蒂雅/呈堂证供/original.mkv",
+      "bytes": 5850191,
+      "sha256": "248b781e0e12d2300a3041b2351ff5011eaa0226a0638349d000c79541db2ca8"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "薇蒂雅/呈堂证供/displayed_text.txt",
+      "stored_relative_path": "sources/薇蒂雅/呈堂证供/displayed_text.txt",
+      "bytes": 1149,
+      "sha256": "f12fb95220b7c975bd25875bff76318cb9fb98af80f757b4cd399e4bba19e99d"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "薇蒂雅/呈堂证供/metadata.txt",
+      "stored_relative_path": "sources/薇蒂雅/呈堂证供/metadata.txt",
+      "bytes": 381,
+      "sha256": "f3e9aa1f797d403152b779ed0d6e71d85c4b2074221e3f106e4bdce42ec71897"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "辰星/再来一次？/original.mkv",
+      "stored_relative_path": "sources/辰星/再来一次？/original.mkv",
+      "bytes": 5882592,
+      "sha256": "a694f0783f564629b68d71d2f1671cb077fbedc315bb999ccf8cd8d4b4ba16c8"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "辰星/再来一次？/displayed_text.txt",
+      "stored_relative_path": "sources/辰星/再来一次？/displayed_text.txt",
+      "bytes": 1271,
+      "sha256": "cba49985231366ba4d4071ff1491662134b49cf56f74745417126bcf2db4cc3d"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "辰星/再来一次？/metadata.txt",
+      "stored_relative_path": "sources/辰星/再来一次？/metadata.txt",
+      "bytes": 381,
+      "sha256": "6cb12511f31a4410356d3a4326c3b223ff6310f10382f4fefeb10e9f0989a014"
+    },
+    {
+      "kind": "primary_audio",
+      "source_relative_path": "里芙/海姆达尔最广阔的天地/original.mkv",
+      "stored_relative_path": "sources/里芙/海姆达尔最广阔的天地/original.mkv",
+      "bytes": 4938391,
+      "sha256": "417dffe082e4c7cff5a8bb3d956d622568cc915e2c708c2db3e48940d688bae8"
+    },
+    {
+      "kind": "displayed_text_reference",
+      "source_relative_path": "里芙/海姆达尔最广阔的天地/displayed_text.txt",
+      "stored_relative_path": "sources/里芙/海姆达尔最广阔的天地/displayed_text.txt",
+      "bytes": 1239,
+      "sha256": "dd785368cc9264e526a4de7bc593c78bc8e360a5696584556f6fe10ab6597b8e"
+    },
+    {
+      "kind": "metadata",
+      "source_relative_path": "里芙/海姆达尔最广阔的天地/metadata.txt",
+      "stored_relative_path": "sources/里芙/海姆达尔最广阔的天地/metadata.txt",
+      "bytes": 396,
+      "sha256": "851d314fe22fc4923b436f78aa996ebd1775737d908dab7da2f2c011a10e2fb0"
+    },
+    {
+      "kind": "shared_original",
+      "source_relative_path": "_shared_originals/琴诺与莫尔索/战术讨论/original.mkv",
+      "stored_relative_path": "sources/_shared_originals/琴诺与莫尔索/战术讨论/original.mkv",
+      "bytes": 5094820,
+      "sha256": "057ac6b8d5fa203add3b9c5e7a2bf246041e79deaf24f0852ed8991b252a0108"
+    },
+    {
+      "kind": "shared_source_manifest",
+      "source_relative_path": "_shared_originals/琴诺与莫尔索/战术讨论/source_manifest.json",
+      "stored_relative_path": "sources/_shared_originals/琴诺与莫尔索/战术讨论/source_manifest.json",
+      "bytes": 2092,
+      "sha256": "df669f114dc60b2c9c9f516b470fa81119ff88505074d887ba194dc5c18369c6"
+    }
+  ],
+  "scope_limits": {
+    "purpose": "private_local_recording_intake_only",
+    "source_files_modified": false,
+    "audio_only_asr_completed": false,
+    "human_transcript_review_completed": false,
+    "segmentation_approved": false,
+    "training_use_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false
+  },
+  "executed": true,
+  "manifest_sha256": "d04e1fe4436e516c38e75183abb1991762d5644c9fbab6cadb82799eed8ad8aa"
+}

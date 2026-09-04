@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-f41cf1b726e2b47cc935",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 25,
+  "trigger": "互动1",
+  "transcript": "我不想和别人有太多牵扯，也不想制造更多回忆。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/9/9f/dk5gzi27b8g5trd6l6zaxk0zgq8h21x.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 176631,
+  "content_sha256": "ee019706c85cc94e1c5d04579fa3cd9a5fdf25feb1ff8e93b83ad1d5a96e4092",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

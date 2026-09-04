@@ -1,0 +1,112 @@
+{
+  "schema_version": "project-snow-private-voice-composite-1",
+  "sample_id": "voice-sample-fritia-provisional-a",
+  "character_id": "a2ffc5b44d7f",
+  "source_candidate_ids": [
+    "voice-row-250bea99b157a52fbd12",
+    "voice-row-7b0512ddf1ed64a6d8d7"
+  ],
+  "source_form": {
+    "armor_id": "6e4cda85e2ad",
+    "armor_name": "小太阳",
+    "armor_semantics": "explicit_selected_armor_voice_source"
+  },
+  "source_clean_sha256": [
+    "e2b431016da4c106a6b0b29850319cfde282fc2fab2718e937ea5566e1e74d58",
+    "b5aaad98fc43d8b82072b63d4b57daf9db8b387b52aef8ad1a4bf02d352dd7fa"
+  ],
+  "composition_processing": {
+    "method": {
+      "join_silence_ms": 150,
+      "internal_boundary_trim": {
+        "method": "reviewed_active_bounds_adaptive_v1",
+        "active_threshold_dbfs": -50.0,
+        "outer_boundaries_preserved": true,
+        "maximum_padding_ms": 300,
+        "minimum_padding_ms": 0,
+        "padding_step_ms": 10,
+        "selection": "largest_padding_that_passes_all_non_true_peak_qc_gates"
+      }
+    },
+    "selected_internal_padding_ms": 300,
+    "segment_boundaries": [
+      {
+        "candidate_id": "voice-row-250bea99b157a52fbd12",
+        "input_frame_count": 180559,
+        "kept_start_frame": 0,
+        "kept_end_frame_exclusive": 180559,
+        "trimmed_leading_frames": 0,
+        "trimmed_trailing_frames": 0
+      },
+      {
+        "candidate_id": "voice-row-7b0512ddf1ed64a6d8d7",
+        "input_frame_count": 102720,
+        "kept_start_frame": 0,
+        "kept_end_frame_exclusive": 102720,
+        "trimmed_leading_frames": 0,
+        "trimmed_trailing_frames": 0
+      }
+    ]
+  },
+  "output_sha256": "ff8daf42a488c257f9c4a56a3944b5915e21d49eee3feeff599e4e7c01805913",
+  "transcript_sha256": "ddda8644ad14c39bd5f4e7a662a89961f71c124508c80653653bffae9fc71c01",
+  "concatenation": {
+    "approved": true,
+    "purpose": "ab_voice_sample_internal_evaluation_only",
+    "ab_slot": "A",
+    "approval_id": "voice-composition-approval-20260827T070901664905Z-xiaob",
+    "approval_receipt_sha256": "7e5e5ad35960b36c638244ca1f28dd3376abfaf9bb1402d543b505ad35f1f09f",
+    "approved_by": "xiaob",
+    "source_policy": {
+      "decision_id": "single-selected-armor-source-per-character-20260826",
+      "file_sha256": "9bb8018f7e0f0f4360a15ba7f028fe83bccc4687eaea9e439f3c11c2fdaae885"
+    },
+    "silence_between_segments_ms": 150
+  },
+  "qc": {
+    "duration_seconds": 11.953292,
+    "sample_rate": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "sample_peak_dbfs": -2.671,
+    "true_peak_dbfs": -2.6,
+    "true_peak_measurement": "ffmpeg_ebur128_4x_oversampled",
+    "clipping_ratio": 0.0,
+    "silence_ratio": 0.185162,
+    "silence_ratio_measurement": {
+      "measurement": "qualifying_contiguous_low_rms_frames_over_total_pcm_frames",
+      "threshold_dbfs": -45.0,
+      "window_ms": 20,
+      "minimum_run_ms": 200,
+      "minimum_run_frames": 4800,
+      "qualifying_run_count": 5,
+      "qualifying_silence_frames": 53119
+    },
+    "estimated_snr_db": 37.659,
+    "automated_checks": {
+      "duration_10_to_20_seconds": true,
+      "estimated_snr_at_least_25_db": true,
+      "silence_ratio_at_most_0_20": true,
+      "true_peak_at_most_minus_1_dbfs": true,
+      "no_clipped_samples": true
+    },
+    "automated_qc_pass": true,
+    "manual_single_speaker_music_sfx_transcript_review_required": true
+  },
+  "manual_review": {
+    "single_speaker": null,
+    "music_or_sfx": null,
+    "transcript_verified": null,
+    "reviewer": null,
+    "decision": "pending"
+  },
+  "waveform_review": {
+    "review_id": "voice-waveform-review-20260827T075045897807Z-xiaob",
+    "review_receipt_sha256": "80dec5f7ef07c8fc9a0a6116674a3d05cea45e768ed0e358ee1f2070b18b57c7",
+    "reviewed_at": "2026-08-27T07:50:45.897807+00:00",
+    "reviewer": "xiaob",
+    "decision": "pass",
+    "scope": "internal_ab_listening_only",
+    "operator_note": ""
+  }
+}

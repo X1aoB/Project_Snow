@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-d2225af3bf3108e0ca3a",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 19,
+  "trigger": "重伤",
+  "transcript": "我还能坚持。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/1/11/kqs88qewxo6g1xx2lki005ovopp30xo.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 236191,
+  "content_sha256": "69128977083681e49889b457635a0a01b9880bb3fa5b6b5e98037e6d6d32fe11",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

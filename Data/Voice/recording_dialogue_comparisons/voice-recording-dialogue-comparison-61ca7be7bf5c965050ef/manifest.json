@@ -1,0 +1,699 @@
+{
+  "schema_version": "project-snow-private-local-voice-dialogue-comparison-1",
+  "package_id": "voice-recording-dialogue-comparison-61ca7be7bf5c965050ef",
+  "created_at": "2026-08-31T13:49:09.177444+00:00",
+  "artifact_purpose": "offline_natural_vs_safely_compacted_dialogue_qc_only",
+  "source_boundary_adjudication": {
+    "receipt_id": "voice-recording-boundary-adjudication-3c4102db6ee3378a7862",
+    "manifest_sha256": "771450af8423090ca972ba481fab9ff8b0a9c0bb950b275eedf38311b4d52c33",
+    "decision_set_sha256": "8016e4b63b84f593230f847cb0b2f01135a00110230913327876a4f009288db0",
+    "candidate_count": 161,
+    "accepted_candidate_count": 129,
+    "excluded_candidate_count": 32
+  },
+  "quality_policy": {
+    "audio_format": {
+      "encoding": "pcm_s16le",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "sample_width_bytes": 2
+    },
+    "energy_frame_ms": 20,
+    "adaptive_cut_threshold": {
+      "noise_percentile": 0.2,
+      "margin_db": 8.0,
+      "minimum_dbfs": -55.0,
+      "maximum_dbfs": -45.0
+    },
+    "outer_padding_ms": 120,
+    "minimum_compactable_internal_gap_ms": 1000,
+    "normal_pause_allowance_per_quiet_run_ms": 750,
+    "synthetic_join_silence_ms": 240,
+    "target_retained_pause_ms": 480,
+    "cut_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+    "legacy_raw_silence_measurement": {
+      "method": "20ms_frame_rms",
+      "threshold_dbfs": -45.0,
+      "gate": false
+    },
+    "sustained_silence_measurement": {
+      "method": "quiet_run_duration_exceeding_750ms_v1",
+      "threshold_dbfs": -45.0,
+      "maximum_excess_ratio": 0.2,
+      "gate": true
+    },
+    "duration_seconds": {
+      "minimum": 10.0,
+      "maximum": 20.0,
+      "applies_to": "compacted_audio"
+    },
+    "true_peak": {
+      "oversample_factor": 4,
+      "interpolator": "catmull_rom_cubic",
+      "maximum_dbtp": -1.0
+    },
+    "maximum_clipped_sample_count": 0,
+    "snr": {
+      "method": "energy_vad_rms_v1_source_only",
+      "minimum_db": 25.0,
+      "synthetic_join_silence_excluded": true
+    }
+  },
+  "authoritative_assertions": {
+    "screen_text_is_authoritative": true,
+    "authoritative_transcript_modified": false,
+    "asr_used_as_transcript_source": false,
+    "all_detected_voiced_regions_retained": true,
+    "only_low_energy_silence_compacted": true,
+    "normal_pauses_up_to_750ms_tolerated": true,
+    "legacy_raw_silence_ratio_used_as_gate": false,
+    "parent_candidate_count_separate_from_internal_cut_count": true,
+    "excluded_candidates_reintroduced": false,
+    "new_runtime_character_created": false
+  },
+  "sample_count": 2,
+  "samples": [
+    {
+      "slot": "A",
+      "parent_candidate_count": 1,
+      "internal_silence_compaction_cut_count": 1,
+      "candidate_ordinal": 31,
+      "revision_id": "voice-recording-boundary-revision-e7c379b85852c0674af0",
+      "original_candidate_id": "voice-recording-alignment-candidate-0928194f5afa48b468bf",
+      "source_id": "voice-recording-source-df1f78ab14819ac93051",
+      "source_kind": "mail",
+      "role_name": "奈莉德",
+      "batch_name": "自投罗网的猎人",
+      "runtime_character_id": "41b7444e39cc",
+      "runtime_character_name": "奈莉德",
+      "source_persona_id": "41b7444e39cc",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "authoritative_locator": {
+        "block_index": 0,
+        "start_char": 75,
+        "end_char_exclusive": 133
+      },
+      "authoritative_transcript_utf8_sha256": "371923bc44071f0a64cc46a8802aed7104b24cbfb57d9c5af07d9736f216d96d",
+      "displayed_text": {
+        "relative_path": "A/displayed_text.txt",
+        "utf8_sha256": "371923bc44071f0a64cc46a8802aed7104b24cbfb57d9c5af07d9736f216d96d",
+        "byte_count": 174
+      },
+      "input_candidate_audio": {
+        "wav_sha256": "f29a7da6beefe6c6d993ede73ad83e4862647c90744f8bb61bd55682e4cfbaac",
+        "pcm_sha256": "6c7f133edf1b377c1585113c110323c96bc762509a1ff3d5eae9f9026800551d",
+        "byte_count": 883244,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 441600,
+          "duration_seconds": 18.4
+        },
+        "source_frame_range": {
+          "start_frame": 695880,
+          "end_frame_exclusive": 1137480,
+          "start_seconds": 28.995,
+          "end_seconds": 47.395,
+          "duration_seconds": 18.4
+        }
+      },
+      "adaptive_cut_threshold_dbfs": -55.0,
+      "detected_active_island_count": 15,
+      "outer_trim": {
+        "candidate_local_retained_range": {
+          "start_frame": 11628,
+          "end_frame_exclusive": 424800
+        },
+        "source_retained_range": {
+          "start_frame": 707508,
+          "end_frame_exclusive": 1120680,
+          "start_seconds": 29.4795,
+          "end_seconds": 46.695
+        },
+        "left_removed_frames": 11628,
+        "right_removed_frames": 16800,
+        "left_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -66.079,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 108
+        },
+        "right_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -98.796,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 0
+        }
+      },
+      "internal_silence_compaction_cuts": [
+        {
+          "after_active_island_index": 8,
+          "candidate_local_removed_range": {
+            "start_frame": 261950,
+            "end_frame_exclusive": 285598
+          },
+          "source_removed_range": {
+            "start_frame": 957830,
+            "end_frame_exclusive": 981478,
+            "start_seconds": 39.909583,
+            "end_seconds": 40.894917
+          },
+          "source_gap_duration_ms": 1220.0,
+          "removed_source_duration_ms": 985.333,
+          "inserted_silence_ms": 240,
+          "net_duration_reduction_ms": 745.333,
+          "left_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -56.328,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 130
+          },
+          "right_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -61.924,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 2
+          },
+          "compacted_join_output_range": {
+            "start_frame": 250322,
+            "end_frame_exclusive": 256082
+          }
+        }
+      ],
+      "retained_long_gaps": [],
+      "compacted_source_spans": [
+        {
+          "candidate_local_range": {
+            "start_frame": 11628,
+            "end_frame_exclusive": 261950
+          },
+          "source_range": {
+            "start_frame": 707508,
+            "end_frame_exclusive": 957830,
+            "start_seconds": 29.4795,
+            "end_seconds": 39.909583
+          },
+          "compacted_output_range": {
+            "start_frame": 0,
+            "end_frame_exclusive": 250322
+          }
+        },
+        {
+          "candidate_local_range": {
+            "start_frame": 285598,
+            "end_frame_exclusive": 424800
+          },
+          "source_range": {
+            "start_frame": 981478,
+            "end_frame_exclusive": 1120680,
+            "start_seconds": 40.894917,
+            "end_seconds": 46.695
+          },
+          "compacted_output_range": {
+            "start_frame": 256082,
+            "end_frame_exclusive": 395284
+          }
+        }
+      ],
+      "natural_audio": {
+        "relative_path": "A/natural.wav",
+        "wav_sha256": "718e06962244732a6d521d43dd884a886e80481f031fd1047a82a16ef1c3a186",
+        "pcm_sha256": "d10e42d2f6219f6e434d1b2ae755d59432b761539f56451f0817e8a6d13a704d",
+        "byte_count": 826388,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 413172,
+          "duration_seconds": 17.2155
+        },
+        "metrics": {
+          "duration_seconds": 17.2155,
+          "true_peak_4x_dbtp": -8.97,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.400697,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 32.035,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 15,
+          "quiet_runs_exceeding_allowance_count": 4,
+          "sustained_silence_excess_seconds": 1.86,
+          "sustained_silence_excess_ratio": 0.108042
+        }
+      },
+      "compacted_audio": {
+        "relative_path": "A/compacted.wav",
+        "wav_sha256": "a9428635f23137fc5f82f9ee03486bb31e3d5f274507ebee2aa83832f1321644",
+        "pcm_sha256": "87fbea7b6cd7baeed0f3d8ae30412678896f01f2f3daf9ba48bbca84777fd4bb",
+        "byte_count": 790612,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 395284,
+          "duration_seconds": 16.470167
+        },
+        "metrics": {
+          "duration_seconds": 16.470167,
+          "true_peak_4x_dbtp": -8.97,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.371359,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 31.65,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 15,
+          "quiet_runs_exceeding_allowance_count": 4,
+          "sustained_silence_excess_seconds": 1.1,
+          "sustained_silence_excess_ratio": 0.066787
+        }
+      },
+      "quality_gates": {
+        "duration_10_to_20_seconds": true,
+        "true_peak_at_or_below_minus_1_dbtp": true,
+        "no_clipped_samples": true,
+        "sustained_silence_excess_at_or_below_20_percent": true,
+        "snr_at_or_above_25_db": true
+      },
+      "all_quality_gates_passed": true
+    },
+    {
+      "slot": "B",
+      "parent_candidate_count": 1,
+      "internal_silence_compaction_cut_count": 4,
+      "candidate_ordinal": 33,
+      "revision_id": "voice-recording-boundary-revision-879a785bc073f190aa37",
+      "original_candidate_id": "voice-recording-alignment-candidate-891659118e15551c4baa",
+      "source_id": "voice-recording-source-df1f78ab14819ac93051",
+      "source_kind": "mail",
+      "role_name": "奈莉德",
+      "batch_name": "自投罗网的猎人",
+      "runtime_character_id": "41b7444e39cc",
+      "runtime_character_name": "奈莉德",
+      "source_persona_id": "41b7444e39cc",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "authoritative_locator": {
+        "block_index": 0,
+        "start_char": 183,
+        "end_char_exclusive": 229
+      },
+      "authoritative_transcript_utf8_sha256": "999c7766c3b48cdeb08c7db8d69a53dfc8cb19871d98ca4d0d03d6722113fe5a",
+      "displayed_text": {
+        "relative_path": "B/displayed_text.txt",
+        "utf8_sha256": "999c7766c3b48cdeb08c7db8d69a53dfc8cb19871d98ca4d0d03d6722113fe5a",
+        "byte_count": 138
+      },
+      "input_candidate_audio": {
+        "wav_sha256": "b602f8171228f659607319d5099ef3ea74b66977e0500faa3156192541a67656",
+        "pcm_sha256": "ebe3dd38f2e0e0da516d8476b10a8bbae8557f65d04c83b79d4cfb68090f718d",
+        "byte_count": 903404,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 451680,
+          "duration_seconds": 18.82
+        },
+        "source_frame_range": {
+          "start_frame": 1489560,
+          "end_frame_exclusive": 1941240,
+          "start_seconds": 62.065,
+          "end_seconds": 80.885,
+          "duration_seconds": 18.82
+        }
+      },
+      "adaptive_cut_threshold_dbfs": -55.0,
+      "detected_active_island_count": 19,
+      "outer_trim": {
+        "candidate_local_retained_range": {
+          "start_frame": 27840,
+          "end_frame_exclusive": 443984
+        },
+        "source_retained_range": {
+          "start_frame": 1517400,
+          "end_frame_exclusive": 1933544,
+          "start_seconds": 63.225,
+          "end_seconds": 80.564333
+        },
+        "left_removed_frames": 27840,
+        "right_removed_frames": 7696,
+        "left_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -100.132,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 0
+        },
+        "right_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -58.448,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 16
+        }
+      },
+      "internal_silence_compaction_cuts": [
+        {
+          "after_active_island_index": 1,
+          "candidate_local_removed_range": {
+            "start_frame": 77280,
+            "end_frame_exclusive": 95520
+          },
+          "source_removed_range": {
+            "start_frame": 1566840,
+            "end_frame_exclusive": 1585080,
+            "start_seconds": 65.285,
+            "end_seconds": 66.045
+          },
+          "source_gap_duration_ms": 1000.0,
+          "removed_source_duration_ms": 760.0,
+          "inserted_silence_ms": 240,
+          "net_duration_reduction_ms": 520.0,
+          "left_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -99.34,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 0
+          },
+          "right_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -99.563,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 0
+          },
+          "compacted_join_output_range": {
+            "start_frame": 49440,
+            "end_frame_exclusive": 55200
+          }
+        },
+        {
+          "after_active_island_index": 5,
+          "candidate_local_removed_range": {
+            "start_frame": 194595,
+            "end_frame_exclusive": 240456
+          },
+          "source_removed_range": {
+            "start_frame": 1684155,
+            "end_frame_exclusive": 1730016,
+            "start_seconds": 70.173125,
+            "end_seconds": 72.084
+          },
+          "source_gap_duration_ms": 2160.0,
+          "removed_source_duration_ms": 1910.875,
+          "inserted_silence_ms": 240,
+          "net_duration_reduction_ms": 1670.875,
+          "left_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -70.263,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 195
+          },
+          "right_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -58.684,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 24
+          },
+          "compacted_join_output_range": {
+            "start_frame": 154275,
+            "end_frame_exclusive": 160035
+          }
+        },
+        {
+          "after_active_island_index": 12,
+          "candidate_local_removed_range": {
+            "start_frame": 317760,
+            "end_frame_exclusive": 350880
+          },
+          "source_removed_range": {
+            "start_frame": 1807320,
+            "end_frame_exclusive": 1840440,
+            "start_seconds": 75.305,
+            "end_seconds": 76.685
+          },
+          "source_gap_duration_ms": 1620.0,
+          "removed_source_duration_ms": 1380.0,
+          "inserted_silence_ms": 240,
+          "net_duration_reduction_ms": 1140.0,
+          "left_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -98.313,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 0
+          },
+          "right_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -99.34,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 0
+          },
+          "compacted_join_output_range": {
+            "start_frame": 237339,
+            "end_frame_exclusive": 243099
+          }
+        },
+        {
+          "after_active_island_index": 14,
+          "candidate_local_removed_range": {
+            "start_frame": 371364,
+            "end_frame_exclusive": 391200
+          },
+          "source_removed_range": {
+            "start_frame": 1860924,
+            "end_frame_exclusive": 1880760,
+            "start_seconds": 77.5385,
+            "end_seconds": 78.365
+          },
+          "source_gap_duration_ms": 1060.0,
+          "removed_source_duration_ms": 826.5,
+          "inserted_silence_ms": 240,
+          "net_duration_reduction_ms": 586.5,
+          "left_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -62.723,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 156
+          },
+          "right_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -99.128,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 0
+          },
+          "compacted_join_output_range": {
+            "start_frame": 263583,
+            "end_frame_exclusive": 269343
+          }
+        }
+      ],
+      "retained_long_gaps": [],
+      "compacted_source_spans": [
+        {
+          "candidate_local_range": {
+            "start_frame": 27840,
+            "end_frame_exclusive": 77280
+          },
+          "source_range": {
+            "start_frame": 1517400,
+            "end_frame_exclusive": 1566840,
+            "start_seconds": 63.225,
+            "end_seconds": 65.285
+          },
+          "compacted_output_range": {
+            "start_frame": 0,
+            "end_frame_exclusive": 49440
+          }
+        },
+        {
+          "candidate_local_range": {
+            "start_frame": 95520,
+            "end_frame_exclusive": 194595
+          },
+          "source_range": {
+            "start_frame": 1585080,
+            "end_frame_exclusive": 1684155,
+            "start_seconds": 66.045,
+            "end_seconds": 70.173125
+          },
+          "compacted_output_range": {
+            "start_frame": 55200,
+            "end_frame_exclusive": 154275
+          }
+        },
+        {
+          "candidate_local_range": {
+            "start_frame": 240456,
+            "end_frame_exclusive": 317760
+          },
+          "source_range": {
+            "start_frame": 1730016,
+            "end_frame_exclusive": 1807320,
+            "start_seconds": 72.084,
+            "end_seconds": 75.305
+          },
+          "compacted_output_range": {
+            "start_frame": 160035,
+            "end_frame_exclusive": 237339
+          }
+        },
+        {
+          "candidate_local_range": {
+            "start_frame": 350880,
+            "end_frame_exclusive": 371364
+          },
+          "source_range": {
+            "start_frame": 1840440,
+            "end_frame_exclusive": 1860924,
+            "start_seconds": 76.685,
+            "end_seconds": 77.5385
+          },
+          "compacted_output_range": {
+            "start_frame": 243099,
+            "end_frame_exclusive": 263583
+          }
+        },
+        {
+          "candidate_local_range": {
+            "start_frame": 391200,
+            "end_frame_exclusive": 443984
+          },
+          "source_range": {
+            "start_frame": 1880760,
+            "end_frame_exclusive": 1933544,
+            "start_seconds": 78.365,
+            "end_seconds": 80.564333
+          },
+          "compacted_output_range": {
+            "start_frame": 269343,
+            "end_frame_exclusive": 322127
+          }
+        }
+      ],
+      "natural_audio": {
+        "relative_path": "B/natural.wav",
+        "wav_sha256": "f64eb63d79f7e31e370063cdd90e78b786f0783515a8e4db9fb40f7bc128bd37",
+        "pcm_sha256": "52ef3998f372cf62547c0c96b217b1c1c4a7f3fd3e7ea3c0ac49695577412f88",
+        "byte_count": 832332,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 416144,
+          "duration_seconds": 17.339333
+        },
+        "metrics": {
+          "duration_seconds": 17.339333,
+          "true_peak_4x_dbtp": -9.278,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.523645,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 32.76,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 18,
+          "quiet_runs_exceeding_allowance_count": 5,
+          "sustained_silence_excess_seconds": 4.05,
+          "sustained_silence_excess_ratio": 0.233573
+        }
+      },
+      "compacted_audio": {
+        "relative_path": "B/compacted.wav",
+        "wav_sha256": "ce3f6b1f6b8e2af4823ea232252bad3ebfb69b55572bd538cd9f9da414d46c2b",
+        "pcm_sha256": "f1d73c4bc442d6ae875a9dfa38f67e32a5f48b63c740b8f8bffbcf29e8e34ef4",
+        "byte_count": 644298,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 322127,
+          "duration_seconds": 13.421958
+        },
+        "metrics": {
+          "duration_seconds": 13.421958,
+          "true_peak_4x_dbtp": -9.278,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.388393,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 29.546,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 18,
+          "quiet_runs_exceeding_allowance_count": 2,
+          "sustained_silence_excess_seconds": 0.22,
+          "sustained_silence_excess_ratio": 0.016391
+        }
+      },
+      "quality_gates": {
+        "duration_10_to_20_seconds": true,
+        "true_peak_at_or_below_minus_1_dbtp": true,
+        "no_clipped_samples": true,
+        "sustained_silence_excess_at_or_below_20_percent": true,
+        "snr_at_or_above_25_db": true
+      },
+      "all_quality_gates_passed": true
+    }
+  ],
+  "sample_set_sha256": "c9e7060c54dfb68464fee09e2d2a1dd3e92fb5e4c93a2568bfff39e5791fd0c9",
+  "quality_summary": {
+    "all_compacted_samples_passed_signal_qc": true,
+    "sample_count": 2
+  },
+  "review_page": {
+    "relative_path": "review.html",
+    "sha256": "88094edd9386fda504cfd2daa21f3ec7350a80379e9ff8e0401b4e363c84787d",
+    "byte_count": 2603
+  },
+  "review_status": "awaiting_human_natural_vs_compacted_comparison",
+  "scope_limits": {
+    "human_listening_approved": false,
+    "natural_vs_compacted_comparison_approved": false,
+    "training_use_approved": false,
+    "voice_cloning_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false,
+    "public_rollout_allowed": false
+  },
+  "executed": true,
+  "manifest_sha256": "c70fb498b59fb1eaf5425a1408988c7828ace013707adb83fb656524d5709c68"
+}

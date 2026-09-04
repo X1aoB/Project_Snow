@@ -1,0 +1,69 @@
+{
+  "schema_version": "project-snow-local-voice-preference-decision-receipt-1",
+  "round_id": "voice-preference-round-9fcc6ed7447cbfa10728",
+  "round_index": 3,
+  "source_round_manifest_sha256": "3b01a1e49e1b8d8dc7358d0d09fbc604e56c7180feaeef440ebbe4c52b90ca78",
+  "source_round_manifest_byte_sha256": "ac92d930cb9e2589d04790297fb04ecff1c10ff2d8408f886df467634b5da5e8",
+  "submission_schema_version": "project-snow-local-voice-preference-decision-1",
+  "submission_manifest_binding_sha256": "3b01a1e49e1b8d8dc7358d0d09fbc604e56c7180feaeef440ebbe4c52b90ca78",
+  "submission_saved_at": "2026-09-04T14:13:17.799Z",
+  "submission_byte_sha256": "b5907c5ff0aeb350642abd79045390a7da8b518e6df329810c4a157e7c9a8bba",
+  "decision_set_sha256": "6fe83cbc9a1197d0708d697fcb76ee9a5a31de4a33777ef816e7588c64a3fb77",
+  "decisions": {
+    "vidya-neutral-short": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-us46",
+      "winning_sample_usable": "usable",
+      "rejection_reasons": []
+    },
+    "vidya-breathy-lexical": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-et7u",
+      "winning_sample_usable": "not_usable",
+      "rejection_reasons": [
+        "wrong_expression_or_character_fit"
+      ]
+    },
+    "vidya-heightened": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-bw9r",
+      "winning_sample_usable": "usable",
+      "rejection_reasons": []
+    },
+    "chenxing-neutral-short": {
+      "relative_choice": "first_sample",
+      "selected_opaque_label_id": "sample-7mxk",
+      "winning_sample_usable": "usable",
+      "rejection_reasons": []
+    },
+    "chenxing-breathy-lexical": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-mwma",
+      "winning_sample_usable": "usable",
+      "rejection_reasons": []
+    },
+    "chenxing-heightened": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-mgr5",
+      "winning_sample_usable": "usable",
+      "rejection_reasons": []
+    }
+  },
+  "summary": {
+    "case_count": 6,
+    "relative_choice_counts": {
+      "first_sample": 1,
+      "second_sample": 5,
+      "reject_both": 0
+    },
+    "usable_case_count": 5,
+    "not_usable_case_count": 1,
+    "rejection_reason_counts": {
+      "wrong_voice_identity": 0,
+      "wrong_expression_or_character_fit": 1,
+      "pronunciation_or_segmentation_error": 0,
+      "synthesis_artifact": 0
+    }
+  },
+  "receipt_sha256": "08b308dc876a274b7c1fef2b282d944dd466c5a7898b34528d75b23d42c06971"
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-4180f7e8addc7ce3c223",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 30,
+  "trigger": "获得物资1",
+  "transcript": "大吉。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/c/cf/gub2imzaqlfao4j0holqz3para5ggzc.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 47064,
+  "content_sha256": "b696d9bb6d44ac04f23ce3a4afd2ecc3eb24aee48e4ac2ff1e21f57677d4cd49",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

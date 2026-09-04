@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-b2648cb3177e1442b1ed",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 50,
+  "trigger": "战斗胜利1",
+  "transcript": "胜局已定，一切按计划进行。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/2/26/tglpiveib1s9v97xjozn3h6n93kglhk.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 167227,
+  "content_sha256": "9d6203f1607d48654b4b1a559443b0911b42b339ff29e65b71402022e4b714fa",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

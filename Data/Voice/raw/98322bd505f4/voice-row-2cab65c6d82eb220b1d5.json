@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-2cab65c6d82eb220b1d5",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 38,
+  "trigger": "登录",
+  "transcript": "我无法放弃或遗忘，无论是好是坏，这些记忆都是我的一部分。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/ba/6htm95xxmfb1o8eu0sa563y681cvkq2.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 335456,
+  "content_sha256": "599540ba0872ae38e3a39fa5ff69d8d8f3c9d76f31032e522e0a6cad3c2cf6e6",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

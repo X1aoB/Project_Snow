@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-3b4286b3641525707326",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 23,
+  "trigger": "重伤退场",
+  "transcript": "又要违背约定了吗？",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/f/f1/64cvhd4fe0asitc40sywy0nt2w923nh.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 165138,
+  "content_sha256": "7b5d3f2595fdbe279b0ca291e4239d541fa444a5d6b34193eb4f7d1451cb9b6e",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

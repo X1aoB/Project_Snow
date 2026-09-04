@@ -1,0 +1,677 @@
+{
+  "schema_version": "project-snow-private-local-voice-normalized-batch-1",
+  "normalized_id": "voice-recording-normalized-3f0e4edb8ec8e9668c5a",
+  "source_intake_id": "voice-recording-intake-348c1b3777e3fcd7b7f3",
+  "source_intake_manifest_sha256": "14599864469b20b1c2217642ee2cb5e4927571b77c1422d04d7d4fd15dccea43",
+  "normalization_config": {
+    "ffmpeg_version": "ffmpeg version 9.0-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+    "audio_stream": "0:a:0",
+    "encoding": "pcm_s16le",
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "bitexact": true,
+    "metadata_removed": true,
+    "amplitude_transform": "none_except_deterministic_stereo_downmix",
+    "purpose": "whole_recording_audio_only_asr_and_segmentation"
+  },
+  "entry_count": 23,
+  "entries": [
+    {
+      "ordinal": 1,
+      "source_id": "voice-recording-source-08af3318405e7ba22e11",
+      "role_name": "伊切尔",
+      "character_id": "78aa7ab99154",
+      "runtime_character_name": "伊切尔",
+      "source_persona_id": "78aa7ab99154",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-48601ae020ae0f855f28",
+      "selectable_character": true,
+      "source_audio_sha256": "481d4998ebca7950293286da1ac2d8b42e1d3334501d2be21cc16380010a9975",
+      "output_relative_path": "audio/voice-recording-source-08af3318405e7ba22e11.wav",
+      "output_wav_sha256": "fcd70189614d09545932e9d5efb6f1abee89699bfa09fa8ffa27fb2865292d84",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2509056,
+        "duration_seconds": 104.544
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 2,
+      "source_id": "voice-recording-source-ce300a792878f7154d22",
+      "role_name": "克罗瑞娜",
+      "character_id": "d5ecfceba959",
+      "runtime_character_name": "克罗瑞娜",
+      "source_persona_id": "d5ecfceba959",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-69a058d3ec2373b8738e",
+      "selectable_character": true,
+      "source_audio_sha256": "3952a894d37e25613b9d10b9ad4b594b3054b0a650f59471ce80ad9dc248d770",
+      "output_relative_path": "audio/voice-recording-source-ce300a792878f7154d22.wav",
+      "output_wav_sha256": "1c351243120794f5b6bcb97c5f486738f11cef0810e8ef193d2ccbc052960e5f",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2251008,
+        "duration_seconds": 93.792
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 3,
+      "source_id": "voice-recording-source-572ec99bd84eac726bc6",
+      "role_name": "凯茜娅",
+      "character_id": "25b23cb64398",
+      "runtime_character_name": "凯茜娅",
+      "source_persona_id": "25b23cb64398",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-5c20515783b7adbfe3ea",
+      "selectable_character": true,
+      "source_audio_sha256": "cd7476eaa5815ca998b68a3e0af19e4a87ac5654fde103fa3da4bafa592c6a8c",
+      "output_relative_path": "audio/voice-recording-source-572ec99bd84eac726bc6.wav",
+      "output_wav_sha256": "c82d879a2e27a5283fa75dff9c5c365a6f0b935c2d9561e59cf9cc5035d2b42c",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2638080,
+        "duration_seconds": 109.92
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 4,
+      "source_id": "voice-recording-source-e0bea24eff0bd132371f",
+      "role_name": "卜卜",
+      "character_id": "6455a5dcff6a",
+      "runtime_character_name": "卜卜",
+      "source_persona_id": "6455a5dcff6a",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-d539d435b8555ea33b90",
+      "selectable_character": true,
+      "source_audio_sha256": "c37d9263cee60527279a50d1649789db1e07b418bdaeb4af5b8ad02c2e230ead",
+      "output_relative_path": "audio/voice-recording-source-e0bea24eff0bd132371f.wav",
+      "output_wav_sha256": "fc8c903aa90683e18a94d4c736f78c56b3e8b5bd2d45944a60f6d43e1263ad78",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2670336,
+        "duration_seconds": 111.264
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 5,
+      "source_id": "voice-recording-source-df1f78ab14819ac93051",
+      "role_name": "奈莉德",
+      "character_id": "41b7444e39cc",
+      "runtime_character_name": "奈莉德",
+      "source_persona_id": "41b7444e39cc",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-c27a36d498a7464bbe69",
+      "selectable_character": true,
+      "source_audio_sha256": "4949a8895c4ef6e282cd5e6abf16e6ee880e3d4b7f9dbb7b56dc68bbfd7ab1a9",
+      "output_relative_path": "audio/voice-recording-source-df1f78ab14819ac93051.wav",
+      "output_wav_sha256": "d6a36cc3eb0e9778083c3f8d65c9b865c6ad0a1b3c8886f3600b99b8dc35a014",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 3594240,
+        "duration_seconds": 149.76
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 6,
+      "source_id": "voice-recording-source-bb76be70c3c6ccce392b",
+      "role_name": "妮塔",
+      "character_id": "4370a74d6fda",
+      "runtime_character_name": "妮塔",
+      "source_persona_id": "4370a74d6fda",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-dbf84dc45eecfb251568",
+      "selectable_character": true,
+      "source_audio_sha256": "4e97be79525a7bd7efdae68827d1b34dcb5fce643e92fb78048da78a3fcdcf9c",
+      "output_relative_path": "audio/voice-recording-source-bb76be70c3c6ccce392b.wav",
+      "output_wav_sha256": "2264699287a0bd853a2c553584b78f0f1ba9824cf3feeefccf3dbb4a2c0aec8f",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2744064,
+        "duration_seconds": 114.336
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 7,
+      "source_id": "voice-recording-source-4892df2da2851cdde8b8",
+      "role_name": "安卡希雅",
+      "character_id": "9f5804761c56",
+      "runtime_character_name": "安卡希雅",
+      "source_persona_id": "9f5804761c56",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-353c80c93d70c94db4d6",
+      "selectable_character": true,
+      "source_audio_sha256": "7721e4b292d62ed9a2ab744c8507e4b16408a0285f2ae13f3a346bb0cb09f566",
+      "output_relative_path": "audio/voice-recording-source-4892df2da2851cdde8b8.wav",
+      "output_wav_sha256": "664ddbcbc2212617e2ab27b404dcb33485483a1ac7d6f2b63a29e4477116718f",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2078208,
+        "duration_seconds": 86.592
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 8,
+      "source_id": "voice-recording-source-375a93e7d8c664f27107",
+      "role_name": "恩雅",
+      "character_id": "43f05917bfa1",
+      "runtime_character_name": "恩雅",
+      "source_persona_id": "43f05917bfa1",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-652cd80abd0b9a6b6251",
+      "selectable_character": true,
+      "source_audio_sha256": "c1f02b6b1bdc99939f476d7539c67e43b9d5a2f5fae1ecd6e7c517e874a905c6",
+      "output_relative_path": "audio/voice-recording-source-375a93e7d8c664f27107.wav",
+      "output_wav_sha256": "007a233f7a2f2eb3c2d32697d4d8e6cf4a561042eac00120f44f57dcbc7ff7d3",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2983680,
+        "duration_seconds": 124.32
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 9,
+      "source_id": "voice-recording-source-85ec0cb9cd4d738a7e3d",
+      "role_name": "晴",
+      "character_id": "921f9ef0cc4e",
+      "runtime_character_name": "晴",
+      "source_persona_id": "921f9ef0cc4e",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-9302a2c8a3a494fcc9e4",
+      "selectable_character": true,
+      "source_audio_sha256": "cf94a1db23c36cf3a66b00bb9235b84e4e9e67875493871fde53515aa8e3219a",
+      "output_relative_path": "audio/voice-recording-source-85ec0cb9cd4d738a7e3d.wav",
+      "output_wav_sha256": "5788379790a5cf05b303c1d02cbdbc31396f12c3f0212241ae0c4088d2d6a713",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 3133440,
+        "duration_seconds": 130.56
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 10,
+      "source_id": "voice-recording-source-e985a4ccd7d9b46ad0e4",
+      "role_name": "猫汐尔",
+      "character_id": "6862c43d2ac9",
+      "runtime_character_name": "猫汐尔",
+      "source_persona_id": "6862c43d2ac9",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-6533d4dc6478544355d5",
+      "selectable_character": true,
+      "source_audio_sha256": "1e1ea943813b3b4650bc33263749c13817d24f1ac7bbaa359c18472c823e7474",
+      "output_relative_path": "audio/voice-recording-source-e985a4ccd7d9b46ad0e4.wav",
+      "output_wav_sha256": "d48543d2a9321f8c3e4f03c40687096c62076ae14ade6354e9f7546d027bdf55",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2601216,
+        "duration_seconds": 108.384
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 11,
+      "source_id": "voice-recording-source-bf99bb530ea940a3ad2d",
+      "role_name": "琴诺",
+      "character_id": "8d5b5c3912bb",
+      "runtime_character_name": "琴诺",
+      "source_persona_id": "8d5b5c3912bb",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-768a991502beb04c72db",
+      "selectable_character": true,
+      "source_audio_sha256": "9895b0544c982640ea6cce162b8b85a6e8b9a3df0fb47b391f162ebf361d7fcc",
+      "output_relative_path": "audio/voice-recording-source-bf99bb530ea940a3ad2d.wav",
+      "output_wav_sha256": "1b59c45343e8fccdb69422e7eba78969977646d72d4e4151669c29f516521f52",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 1692480,
+        "duration_seconds": 70.52
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 12,
+      "source_id": "voice-recording-source-9c2fd097df08ab5f1ff7",
+      "role_name": "瑟瑞斯",
+      "character_id": "85b205f6f623",
+      "runtime_character_name": "瑟瑞斯",
+      "source_persona_id": "85b205f6f623",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-e46810eadca7167cb9bc",
+      "selectable_character": true,
+      "source_audio_sha256": "50c1a35cd54cc2a43eceb8ea108f9dd95b2a43d7be45920cb678de6eabbe0f14",
+      "output_relative_path": "audio/voice-recording-source-9c2fd097df08ab5f1ff7.wav",
+      "output_wav_sha256": "a3b1739597520c84b69fd439ca11f2a9c6b1cfdb935d1d86e36f0129d6d446da",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2889216,
+        "duration_seconds": 120.384
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 13,
+      "source_id": "voice-recording-source-cbb330b122724752ca86",
+      "role_name": "米娅",
+      "character_id": "702f4375675b",
+      "runtime_character_name": "米娅",
+      "source_persona_id": "702f4375675b",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-27ce475a48c761096ee8",
+      "selectable_character": true,
+      "source_audio_sha256": "4cf271af515c5fd85a6ae84cceb88e68fc1bd14313b7c3859458d1b62a3e7958",
+      "output_relative_path": "audio/voice-recording-source-cbb330b122724752ca86.wav",
+      "output_wav_sha256": "3f3736c03d0d6b1cb2e26d04f3102773bdb0ced4dc2894b5af99aeb13e52f3f2",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 1965312,
+        "duration_seconds": 81.888
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 14,
+      "source_id": "voice-recording-source-32143dad4c7202d1e376",
+      "role_name": "肴",
+      "character_id": "cf0569ac6de9",
+      "runtime_character_name": "肴",
+      "source_persona_id": "cf0569ac6de9",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-2e83087f6d6d1eede23f",
+      "selectable_character": true,
+      "source_audio_sha256": "bb97d9756688f94c9d809952f10c4b9ab047f28a74fcf5c6bb7e86985260ccc0",
+      "output_relative_path": "audio/voice-recording-source-32143dad4c7202d1e376.wav",
+      "output_wav_sha256": "cbf2692e81df9d64ca797b97345913e8fb91c3c339671a0f7a1806024d71dc25",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2813184,
+        "duration_seconds": 117.216
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 15,
+      "source_id": "voice-recording-source-455fc74fbb015f219dfc",
+      "role_name": "胧嫣",
+      "character_id": "447ed3c401c9",
+      "runtime_character_name": "胧嫣",
+      "source_persona_id": "447ed3c401c9",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-d3b074c492ce71560175",
+      "selectable_character": true,
+      "source_audio_sha256": "b8b059615178a3c7eedf0127cf4e02ed34694b9f5bd5919a043ed7d3dd4dea08",
+      "output_relative_path": "audio/voice-recording-source-455fc74fbb015f219dfc.wav",
+      "output_wav_sha256": "1cc6b6d289f35f008913893095d07adfdeb0c1c42ab66cb7aee31670e6f7751a",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 1426176,
+        "duration_seconds": 59.424
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 16,
+      "source_id": "voice-recording-source-718afccdd31b91385d80",
+      "role_name": "芙提雅",
+      "character_id": "a2ffc5b44d7f",
+      "runtime_character_name": "芙提雅",
+      "source_persona_id": "a2ffc5b44d7f",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-c547b7b94e28f0a564e5",
+      "selectable_character": true,
+      "source_audio_sha256": "276709bb587f29ba129b5eb357f4263e1af8e82e4401f8cfda3e465956d1686d",
+      "output_relative_path": "audio/voice-recording-source-718afccdd31b91385d80.wav",
+      "output_wav_sha256": "c21aa88ceba5075d6185d747d521254a41b7b5932fe8a759144613aca7f8705f",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2479104,
+        "duration_seconds": 103.296
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 17,
+      "source_id": "voice-recording-source-3a47aa37b5426c8347f7",
+      "role_name": "芬妮",
+      "character_id": "1b0a6b35719a",
+      "runtime_character_name": "芬妮",
+      "source_persona_id": "1b0a6b35719a",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-60864f8f30ef12d65f42",
+      "selectable_character": true,
+      "source_audio_sha256": "3cff31fe749e58673c3544243a7ba87921c3de7b4f0c338a6f58e0fccbc5e565",
+      "output_relative_path": "audio/voice-recording-source-3a47aa37b5426c8347f7.wav",
+      "output_wav_sha256": "529279b1b488431adaaece8484f821f9f43d462fb58bb2a4e94971fb0b22ac1a",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2944512,
+        "duration_seconds": 122.688
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 18,
+      "source_id": "voice-recording-source-d40ea8e4c02259febef6",
+      "role_name": "苔丝",
+      "character_id": "673ba6851b05",
+      "runtime_character_name": "苔丝",
+      "source_persona_id": "673ba6851b05",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-0160dff3e9b04b1d63de",
+      "selectable_character": true,
+      "source_audio_sha256": "3818982dafca0b67fc959ae023cab9d9e40468d1817197ea3f5134c9c541c142",
+      "output_relative_path": "audio/voice-recording-source-d40ea8e4c02259febef6.wav",
+      "output_wav_sha256": "2af3bf12a3414f332b7d617aa9aac063350f82cbe8d0a34e54340a14bd6d0b23",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2366208,
+        "duration_seconds": 98.592
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 19,
+      "source_id": "voice-recording-source-8425ed4b763b2b179a85",
+      "role_name": "茉莉安",
+      "character_id": "daab0f4cceb4",
+      "runtime_character_name": "茉莉安",
+      "source_persona_id": "daab0f4cceb4",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-19fe3f0508a29a7f9b7f",
+      "selectable_character": true,
+      "source_audio_sha256": "067420608f062403741e277731f4555b643e7a7510058424a45506471990c26d",
+      "output_relative_path": "audio/voice-recording-source-8425ed4b763b2b179a85.wav",
+      "output_wav_sha256": "fa87950e8639d60f5c1b6202bc460c22c7e354340dd12f5a3933f983f95a0c05",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2912256,
+        "duration_seconds": 121.344
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 20,
+      "source_id": "voice-recording-source-63d4890c068d5db56f0e",
+      "role_name": "莫尔索",
+      "character_id": "8d5b5c3912bb",
+      "runtime_character_name": "琴诺",
+      "source_persona_id": "1ebefe906ab6",
+      "speaker_variant": "morso",
+      "speaker_identity_id": "voice-speaker-0296b6040d156da9b716",
+      "selectable_character": false,
+      "source_audio_sha256": "2b2a01aecec93f3ea3662bba4b73df3e09866736befde53d95b2b1504f8f82e8",
+      "output_relative_path": "audio/voice-recording-source-63d4890c068d5db56f0e.wav",
+      "output_wav_sha256": "802228bd7d30aaf6af2a753d0d479999bf5fdc82261f429feb4acddc33b155a3",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 765600,
+        "duration_seconds": 31.9
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 21,
+      "source_id": "voice-recording-source-27a158ca9053dbbad4c3",
+      "role_name": "薇蒂雅",
+      "character_id": "5157b8972632",
+      "runtime_character_name": "薇蒂雅",
+      "source_persona_id": "5157b8972632",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-1f9ad8d5dddca825f36f",
+      "selectable_character": true,
+      "source_audio_sha256": "248b781e0e12d2300a3041b2351ff5011eaa0226a0638349d000c79541db2ca8",
+      "output_relative_path": "audio/voice-recording-source-27a158ca9053dbbad4c3.wav",
+      "output_wav_sha256": "24aed88c160a83be58a7b4d8c1e7824624063663cd808a34279afc68cf6edf19",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 3013632,
+        "duration_seconds": 125.568
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 22,
+      "source_id": "voice-recording-source-b7e64791c3b3200be72c",
+      "role_name": "辰星",
+      "character_id": "98322bd505f4",
+      "runtime_character_name": "辰星",
+      "source_persona_id": "98322bd505f4",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-6c71fe7e3fddf619b6fb",
+      "selectable_character": true,
+      "source_audio_sha256": "a694f0783f564629b68d71d2f1671cb077fbedc315bb999ccf8cd8d4b4ba16c8",
+      "output_relative_path": "audio/voice-recording-source-b7e64791c3b3200be72c.wav",
+      "output_wav_sha256": "06a33e5d03f41052c706f4f8eb10a85808f9e817b30139620cf303ff9eab1c86",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 3428352,
+        "duration_seconds": 142.848
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    },
+    {
+      "ordinal": 23,
+      "source_id": "voice-recording-source-03eee67833d8c4294e4d",
+      "role_name": "里芙",
+      "character_id": "ca0144ccd81b",
+      "runtime_character_name": "里芙",
+      "source_persona_id": "ca0144ccd81b",
+      "speaker_variant": null,
+      "speaker_identity_id": "voice-speaker-3538d8203662f8494276",
+      "selectable_character": true,
+      "source_audio_sha256": "417dffe082e4c7cff5a8bb3d956d622568cc915e2c708c2db3e48940d688bae8",
+      "output_relative_path": "audio/voice-recording-source-03eee67833d8c4294e4d.wav",
+      "output_wav_sha256": "52498249b0516221e94c72756bd73154a1bdd49d499654085c8e3bdefa5e9939",
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 2663424,
+        "duration_seconds": 110.976
+      },
+      "processing_state": {
+        "whole_recording_only": true,
+        "segmentation_required": true,
+        "whole_track_enrollment_eligible": false,
+        "transcript_truth_claimed": false
+      }
+    }
+  ],
+  "audio_set_sha256": "b1977b3e03dad7edc98dc8eab15f49a67d4f3fd325713c3965be173231713688",
+  "scope_limits": {
+    "purpose": "whole_recording_audio_only_asr_and_segmentation",
+    "new_runtime_character_created": false,
+    "human_transcript_review_completed": false,
+    "segmentation_approved": false,
+    "training_use_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false
+  },
+  "executed": true,
+  "manifest_sha256": "0443d18b6f45548417891853bc0f8840e538d052de1c3286cd1ee8c29d8b30b4"
+}

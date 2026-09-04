@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-2f90060394f9434c3905",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 1,
+  "trigger": "换弹",
+  "transcript": "中……中场休息。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/2/23/ejax5hqrrdf446xb7i03kfopdylxi1i.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 119162,
+  "content_sha256": "4c4811e3bed6ec996ff3a568af4ebb52583fb8f62aaed504fb3a09503b0ba569",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

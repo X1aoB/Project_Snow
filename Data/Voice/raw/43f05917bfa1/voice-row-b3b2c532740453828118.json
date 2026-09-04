@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-b3b2c532740453828118",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 44,
+  "trigger": "放弃购买",
+  "transcript": "那就关掉啦。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/a/a1/55q4mu7ze3jtsz9lecltwrb49sdg434.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 62738,
+  "content_sha256": "84c25b8c4cff258acfa12276f929f7c11fe871926d4620785943823f585aae59",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

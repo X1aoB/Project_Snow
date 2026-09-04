@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-6ac036055d0e05f7bb41",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 6,
+  "trigger": "歼敌2",
+  "transcript": "在这件事上不会出现变数。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/b8/65wy12vi7ikzwuzpm0wgrode5ol41ar.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 143195,
+  "content_sha256": "eaa91e74f5844bd4a95ed1260f698f9cd2dc20874eb2d3acd852574c5ebe70fa",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

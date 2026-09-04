@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Project Snow 长对话样本对照</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 20px;color:#20242b;background:#f5f7fa}section{background:#fff;border:1px solid #d9dee8;border-radius:12px;padding:20px;margin:20px 0}.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}article{background:#f7f9fc;padding:12px;border-radius:8px}audio{width:100%}.text{white-space:normal}.metrics{color:#4a5568}.warning{padding:12px;background:#fff4d6;border-left:4px solid #d49b00}</style></head>
+<body><h1>Project Snow 长对话样本对照</h1>
+<p class="warning">仅用于本地自然节奏/安全静音压缩试听。未批准训练、声音克隆、Provider 注册、权利接受或公网发布。</p>
+<p>审核重点：压缩版是否出现吞字、切气口、节奏突兀或语义停顿被破坏。屏幕文本是逐字稿真值，ASR 不参与改写。</p>
+
+<section>
+  <h2>A · 瑟瑞斯 · candidate 79</h2>
+  <p class="text">怎么会这样……今天整理衣柜，发现有好多蝴蝶结与水手服之类的元素！说起来，在公司被同事叫“前辈”，在商场结账时被问有没有学生卡，</p>
+  <p><a href="A/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="A/natural.wav"></audio><p>15.128917 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="A/compacted.wav"></audio><p>14.466042 秒；压缩切点 1 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 0.90%；原始逐帧静音比 30.52%（仅观察）；SNR 32.411 dB；true peak -9.627 dBTP。</p>
+</section>
+<section>
+  <h2>B · 瑟瑞斯 · candidate 83</h2>
+  <p class="text">披上不属于我的正装，对着镜子练习了半个小时的动作与表情，稍微有点头绪的时候你却突然回来了，那句“空调太冷”的傻气借口，真是糗大了！</p>
+  <p><a href="B/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="B/natural.wav"></audio><p>15.578708 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="B/compacted.wav"></audio><p>15.578708 秒；压缩切点 0 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 0.06%；原始逐帧静音比 29.27%（仅观察）；SNR 32.304 dB；true peak -8.925 dBTP。</p>
+</section></body></html>

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-22311b0b26252737cd67",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 8,
+  "trigger": "接敌1",
+  "transcript": "很快就能结束。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/d/d9/1kry4h2rxl52ev4z9ve9gjw1vc7a8zb.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 74231,
+  "content_sha256": "74ead0e414926c939c5ffa7caab09f91db3a5774d49650d814cc6f4c97f7c90f",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

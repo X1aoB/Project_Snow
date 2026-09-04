@@ -218,10 +218,27 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Project Snow local-only corpus and generated application state.
-# The source Wiki corpus can be large and may contain licensed material; it is
-# deliberately kept outside version control.  Rebuildable indexes, feedback,
-# benchmarks and local chat history all live below App/runtime.
-/Data/
+# The source Wiki corpus remains outside version control. The Voice corpus is
+# an explicit research-archive exception; see Data/Voice/README.md for its
+# provenance, redistribution warning, and private-artifact exclusions.
+/Data/*
+!/Data/Voice/
+!/Data/Voice/**
+/Data/Voice/.runtime/
+/Data/Voice/**/*.bin
+/Data/Voice/**/*.safetensors
+
+# Provider-private voice state is not part of the shareable corpus.
+/Data/Voice/tts_runtime_profiles/
+/Data/Voice/tts_provider_enrollment_audits/
+/Data/Voice/tts_provider_enrollment_runs/
+/Data/Voice/tts_provider_preflights/
+/Data/Voice/tts_provider_blind_tests/*/audits/
+/Data/Voice/tts_provider_blind_tests/*/manifest.json
+/Data/Voice/tts_preference_challenger_runs/*/audits/
+/Data/Voice/tts_preference_challenger_runs/*/manifest.json
+/Data/Voice/tts_preference_tournaments/*/operator/candidate-map.json
+/Data/Voice/tts_runtime_smoke_tests/*/audits/
 /App/runtime/
 /App/runtime_preview_*/
 

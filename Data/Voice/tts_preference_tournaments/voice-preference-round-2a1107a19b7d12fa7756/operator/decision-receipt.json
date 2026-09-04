@@ -1,0 +1,69 @@
+{
+  "schema_version": "project-snow-local-voice-preference-decision-receipt-1",
+  "round_id": "voice-preference-round-2a1107a19b7d12fa7756",
+  "round_index": 2,
+  "source_round_manifest_sha256": "e944bafb2d457d5a33895cd7f1005ea4e563db887847939060ec752df3dc0332",
+  "source_round_manifest_byte_sha256": "172a79bb6e9a335764e5e997095e9aef0a3989614b3c50701ab22e6f881f472b",
+  "submission_schema_version": "project-snow-local-voice-preference-decision-1",
+  "submission_manifest_binding_sha256": "e944bafb2d457d5a33895cd7f1005ea4e563db887847939060ec752df3dc0332",
+  "submission_saved_at": "2026-09-04T13:45:23.105Z",
+  "submission_byte_sha256": "da6d8af334e880287c8a0fb70fb89db2d5723d355658ba0053843457e5486e75",
+  "decision_set_sha256": "128a024041b99c4f72863fafa4162479e7bee3f2e574503725ea3ed2a9ce2d35",
+  "decisions": {
+    "vidya-neutral-short": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-6g6p",
+      "winning_sample_usable": "usable",
+      "rejection_reasons": []
+    },
+    "vidya-breathy-lexical": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-v5ju",
+      "winning_sample_usable": "usable",
+      "rejection_reasons": []
+    },
+    "vidya-heightened": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-jmnt",
+      "winning_sample_usable": "usable",
+      "rejection_reasons": []
+    },
+    "chenxing-neutral-short": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-su4s",
+      "winning_sample_usable": "usable",
+      "rejection_reasons": []
+    },
+    "chenxing-breathy-lexical": {
+      "relative_choice": "second_sample",
+      "selected_opaque_label_id": "sample-uhzn",
+      "winning_sample_usable": "usable",
+      "rejection_reasons": []
+    },
+    "chenxing-heightened": {
+      "relative_choice": "reject_both",
+      "selected_opaque_label_id": null,
+      "winning_sample_usable": "not_usable",
+      "rejection_reasons": [
+        "wrong_voice_identity"
+      ]
+    }
+  },
+  "summary": {
+    "case_count": 6,
+    "relative_choice_counts": {
+      "first_sample": 0,
+      "second_sample": 5,
+      "reject_both": 1
+    },
+    "usable_case_count": 5,
+    "not_usable_case_count": 1,
+    "rejection_reason_counts": {
+      "wrong_voice_identity": 1,
+      "wrong_expression_or_character_fit": 0,
+      "pronunciation_or_segmentation_error": 0,
+      "synthesis_artifact": 0
+    }
+  },
+  "receipt_sha256": "a98321fd47048199faffcb6ffbfe90f0f1d443fc2a9837053883c2c506f203c6"
+}

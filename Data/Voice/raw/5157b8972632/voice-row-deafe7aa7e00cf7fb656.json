@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-deafe7aa7e00cf7fb656",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 18,
+  "trigger": "轻伤",
+  "transcript": "一点小伤没关系的。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/4/42/blvblr3c6x2q3m9vnsazveoqbg0qcjf.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 119162,
+  "content_sha256": "161d5285271dbc10465b03e0cbdf870e16756687090a7e3f54153b339ae7f306",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

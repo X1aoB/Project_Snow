@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-ac44037b1d86402c0b22",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 30,
+  "trigger": "获得物资1",
+  "transcript": "给大家买点心。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/0/06/5z2ac0dirfjn9y8didzdh2gt0qtv8dp.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 69007,
+  "content_sha256": "8037b2bffcb98c53f0fb9492752d2303570be2c37682a4fe67a3f8db6a145078",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

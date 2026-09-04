@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-90783a54253dc52eb0f6",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 5,
+  "trigger": "歼敌1",
+  "transcript": "转瞬即逝的可不只是子弹。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/bd/ayvgcsvg055eyq0jhmpe7zav6mpdy6z.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 181856,
+  "content_sha256": "6cac34b06117a2abc4ae7d8a89c0515cdee75ba69d5704ca6a1e8e39b8b9baf1",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

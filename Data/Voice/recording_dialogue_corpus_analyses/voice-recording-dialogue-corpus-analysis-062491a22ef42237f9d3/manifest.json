@@ -1,0 +1,3092 @@
+{
+  "schema_version": "project-snow-private-local-voice-dialogue-corpus-analysis-1",
+  "analysis_id": "voice-recording-dialogue-corpus-analysis-062491a22ef42237f9d3",
+  "created_at": "2026-08-31T13:41:29.248756+00:00",
+  "artifact_purpose": "fixed_policy_local_dialogue_signal_analysis_only",
+  "source_boundary_adjudication": {
+    "receipt_id": "voice-recording-boundary-adjudication-3c4102db6ee3378a7862",
+    "manifest_sha256": "771450af8423090ca972ba481fab9ff8b0a9c0bb950b275eedf38311b4d52c33",
+    "decision_set_sha256": "8016e4b63b84f593230f847cb0b2f01135a00110230913327876a4f009288db0",
+    "candidate_count": 161,
+    "accepted_candidate_count": 129,
+    "excluded_candidate_count": 32
+  },
+  "source_policy_review": {
+    "review_id": "voice-recording-dialogue-review-896557593d1f495cc286",
+    "manifest_sha256": "8629032fc7e7688a91fc4354fc16c16378ad1572763be9d6a11235173496916c",
+    "approved_policy_sha256": "719a1268f56035ca905ee78cd375812b55ca38fc475ea76067dd734610b6d358",
+    "reviewer_id": "xiaob",
+    "reviewed_at": "2026-08-31T13:37:48.763268+00:00"
+  },
+  "quality_policy": {
+    "audio_format": {
+      "encoding": "pcm_s16le",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "sample_width_bytes": 2
+    },
+    "energy_frame_ms": 20,
+    "adaptive_cut_threshold": {
+      "noise_percentile": 0.2,
+      "margin_db": 8.0,
+      "minimum_dbfs": -55.0,
+      "maximum_dbfs": -45.0
+    },
+    "outer_padding_ms": 120,
+    "minimum_compactable_internal_gap_ms": 1000,
+    "normal_pause_allowance_per_quiet_run_ms": 750,
+    "synthetic_join_silence_ms": 240,
+    "target_retained_pause_ms": 480,
+    "cut_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+    "legacy_raw_silence_measurement": {
+      "method": "20ms_frame_rms",
+      "threshold_dbfs": -45.0,
+      "gate": false
+    },
+    "sustained_silence_measurement": {
+      "method": "quiet_run_duration_exceeding_750ms_v1",
+      "threshold_dbfs": -45.0,
+      "maximum_excess_ratio": 0.2,
+      "gate": true
+    },
+    "duration_seconds": {
+      "minimum": 10.0,
+      "maximum": 20.0,
+      "applies_to": "compacted_audio"
+    },
+    "true_peak": {
+      "oversample_factor": 4,
+      "interpolator": "catmull_rom_cubic",
+      "maximum_dbtp": -1.0
+    },
+    "maximum_clipped_sample_count": 0,
+    "snr": {
+      "method": "energy_vad_rms_v1_source_only",
+      "minimum_db": 25.0,
+      "synthetic_join_silence_excluded": true
+    }
+  },
+  "profile_count": 23,
+  "runtime_character_count": 22,
+  "profiles": [
+    {
+      "profile_id": "voice-dialogue-profile-18f3f6e64608edf3077f",
+      "runtime_character_id": "1b0a6b35719a",
+      "runtime_character_name": "芬妮",
+      "source_persona_id": "1b0a6b35719a",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "芬妮"
+      ],
+      "batch_names": [
+        "幸福眩晕"
+      ],
+      "accepted_candidate_count": 8,
+      "passing_candidate_count": 4,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 119,
+          "natural_duration_seconds": 18.685958,
+          "compacted_duration_seconds": 16.070792,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.43408,
+          "sustained_silence_excess_ratio": 0.079648,
+          "snr_db": 35.627,
+          "true_peak_4x_dbtp": -8.979,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "6899be102f7a05e34a7c05359a7759687a32ebeee6df2ea55409cdfe50400651",
+          "input_wav_sha256": "232a2b9c67a6c47f4a7c13362fe4ea01caa8f56f0edde978daae41183434af76",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 117,
+          "natural_duration_seconds": 14.455333,
+          "compacted_duration_seconds": 13.175833,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.391502,
+          "sustained_silence_excess_ratio": 0.021251,
+          "snr_db": 30.527,
+          "true_peak_4x_dbtp": -9.021,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "037ba3003d9c1e0567b922f2be0f6bc5a5d5d87750b04ab57d0eabad5b5cff0c",
+          "input_wav_sha256": "3c5f5ef63af28c8dab9bad36731259aae22864a30047b5370e215b45a0621b3a",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 112,
+          "natural_duration_seconds": 11.416208,
+          "compacted_duration_seconds": 9.807042,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.401222,
+          "sustained_silence_excess_ratio": 0.019374,
+          "snr_db": 32.084,
+          "true_peak_4x_dbtp": -10.675,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "a57d052475a96a6ac0885ce4c413e9d3dd917e1da567e1adf64ebd763c91588b",
+          "input_wav_sha256": "f23a09d6c1e8c1f536c1a37dc850e90492b7a5001900f9016f081848e6840ea3"
+        },
+        {
+          "candidate_ordinal": 113,
+          "natural_duration_seconds": 10.91875,
+          "compacted_duration_seconds": 9.122167,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.448578,
+          "sustained_silence_excess_ratio": 0.043849,
+          "snr_db": 31.222,
+          "true_peak_4x_dbtp": -11.295,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "17dd8d7da799e06d804b30c8ab443382f341d1b9f44cea7704f38d675529a68a",
+          "input_wav_sha256": "53d1176846a711476e44188eb8681103c0e5bad5e6f878208bd5e2a00afcb890"
+        },
+        {
+          "candidate_ordinal": 114,
+          "natural_duration_seconds": 7.705792,
+          "compacted_duration_seconds": 5.942542,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.275168,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 31.798,
+          "true_peak_4x_dbtp": -9.032,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "6db9a5a0104c1343d4ce7b7f1d46f0f1f7d1408d26f2371d26e7e907a313e793",
+          "input_wav_sha256": "fa9f38c2ee1539ce920a62b6f0d21111e0c15c0b1b727dd7ff4e47777c7e6efa"
+        },
+        {
+          "candidate_ordinal": 115,
+          "natural_duration_seconds": 11.855,
+          "compacted_duration_seconds": 8.562917,
+          "internal_silence_compaction_cut_count": 4,
+          "raw_frame_silence_ratio": 0.333333,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 31.875,
+          "true_peak_4x_dbtp": -9.389,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "42fc248ea03e088defb8c93a1799866c7981657ee17b212d19cc392e7dac8782",
+          "input_wav_sha256": "17ff59c577cbf03050ab8f00e47b16f742e5352d0073ff81c920417f9cedfc4f"
+        },
+        {
+          "candidate_ordinal": 116,
+          "natural_duration_seconds": 13.909917,
+          "compacted_duration_seconds": 12.844583,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.265941,
+          "sustained_silence_excess_ratio": 0.02647,
+          "snr_db": 31.649,
+          "true_peak_4x_dbtp": -9.395,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "771911db41cc75c17d67a4f3e3225cb742f56903a853271bd648ba4f98598d24",
+          "input_wav_sha256": "68b0d4b12371361710765834ae5ddfec39e3ec2508e1904beb7d9444f3fe1604"
+        },
+        {
+          "candidate_ordinal": 117,
+          "natural_duration_seconds": 14.455333,
+          "compacted_duration_seconds": 13.175833,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.391502,
+          "sustained_silence_excess_ratio": 0.021251,
+          "snr_db": 30.527,
+          "true_peak_4x_dbtp": -9.021,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "037ba3003d9c1e0567b922f2be0f6bc5a5d5d87750b04ab57d0eabad5b5cff0c",
+          "input_wav_sha256": "3c5f5ef63af28c8dab9bad36731259aae22864a30047b5370e215b45a0621b3a"
+        },
+        {
+          "candidate_ordinal": 118,
+          "natural_duration_seconds": 16.177583,
+          "compacted_duration_seconds": 11.920083,
+          "internal_silence_compaction_cut_count": 4,
+          "raw_frame_silence_ratio": 0.490787,
+          "sustained_silence_excess_ratio": 0.073825,
+          "snr_db": 30.432,
+          "true_peak_4x_dbtp": -10.141,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "db87402e10c3d9f38a9bcde6da911f461e9826ed3dcf162dd51c5f02399b112b",
+          "input_wav_sha256": "cfc5e59f4ca59e54ff505081527a22f30d1b4c6252e9079bfea469623ac41552"
+        },
+        {
+          "candidate_ordinal": 119,
+          "natural_duration_seconds": 18.685958,
+          "compacted_duration_seconds": 16.070792,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.43408,
+          "sustained_silence_excess_ratio": 0.079648,
+          "snr_db": 35.627,
+          "true_peak_4x_dbtp": -8.979,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "6899be102f7a05e34a7c05359a7759687a32ebeee6df2ea55409cdfe50400651",
+          "input_wav_sha256": "232a2b9c67a6c47f4a7c13362fe4ea01caa8f56f0edde978daae41183434af76"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-f49bd9dae80a8e77245b",
+      "runtime_character_id": "25b23cb64398",
+      "runtime_character_name": "凯茜娅",
+      "source_persona_id": "25b23cb64398",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "凯茜娅"
+      ],
+      "batch_names": [
+        "一生一世"
+      ],
+      "accepted_candidate_count": 5,
+      "passing_candidate_count": 4,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 19,
+          "natural_duration_seconds": 17.839917,
+          "compacted_duration_seconds": 16.21475,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.369914,
+          "sustained_silence_excess_ratio": 0.076474,
+          "snr_db": 29.283,
+          "true_peak_4x_dbtp": -9.208,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "4d9d94ad2d4d11b5a2d27ea5dff2e4c2440c475b542861e3cd96e35154209f08",
+          "input_wav_sha256": "f0ddfec3df47f4d31f2c87e0857a65a9a65cbc130b66dc6156c061f8e5f7d1b3",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 15,
+          "natural_duration_seconds": 14.9,
+          "compacted_duration_seconds": 12.313083,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.279221,
+          "sustained_silence_excess_ratio": 0.012994,
+          "snr_db": 31.347,
+          "true_peak_4x_dbtp": -9.048,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "8911d8f20f255c0c6400432e7580aa56a8dfedddf5cd76e1aeeaadbd311c746d",
+          "input_wav_sha256": "69456d8d82c118553cc3066e00283dc1b84c96bd36657b41e003eed7c0690924",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 15,
+          "natural_duration_seconds": 14.9,
+          "compacted_duration_seconds": 12.313083,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.279221,
+          "sustained_silence_excess_ratio": 0.012994,
+          "snr_db": 31.347,
+          "true_peak_4x_dbtp": -9.048,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "8911d8f20f255c0c6400432e7580aa56a8dfedddf5cd76e1aeeaadbd311c746d",
+          "input_wav_sha256": "69456d8d82c118553cc3066e00283dc1b84c96bd36657b41e003eed7c0690924"
+        },
+        {
+          "candidate_ordinal": 17,
+          "natural_duration_seconds": 9.69525,
+          "compacted_duration_seconds": 8.907292,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.383408,
+          "sustained_silence_excess_ratio": 0.127985,
+          "snr_db": 31.946,
+          "true_peak_4x_dbtp": -9.096,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "8605ff9ae33f5ac16b2349872136ef261e75522ac2b637ac8469a88a17a06d64",
+          "input_wav_sha256": "355e673a2e6d06017d8c5593e6c78054825e34d9d67809a4c0c8caa9bc18f87b"
+        },
+        {
+          "candidate_ordinal": 18,
+          "natural_duration_seconds": 12.048417,
+          "compacted_duration_seconds": 12.048417,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.437811,
+          "sustained_silence_excess_ratio": 0.089638,
+          "snr_db": 32.56,
+          "true_peak_4x_dbtp": -9.017,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "ba92fab26425944db238047a30e6b2564a6db24158e35204511c0f3c6171dd9d",
+          "input_wav_sha256": "c27cc6373347a20869fb0fad248890ce309c4a6e0d2e5114e322a770232de9db"
+        },
+        {
+          "candidate_ordinal": 19,
+          "natural_duration_seconds": 17.839917,
+          "compacted_duration_seconds": 16.21475,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.369914,
+          "sustained_silence_excess_ratio": 0.076474,
+          "snr_db": 29.283,
+          "true_peak_4x_dbtp": -9.208,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "4d9d94ad2d4d11b5a2d27ea5dff2e4c2440c475b542861e3cd96e35154209f08",
+          "input_wav_sha256": "f0ddfec3df47f4d31f2c87e0857a65a9a65cbc130b66dc6156c061f8e5f7d1b3"
+        },
+        {
+          "candidate_ordinal": 20,
+          "natural_duration_seconds": 11.938792,
+          "compacted_duration_seconds": 10.394875,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.380769,
+          "sustained_silence_excess_ratio": 0.008658,
+          "snr_db": 29.249,
+          "true_peak_4x_dbtp": -8.982,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "5b610d49eaf63bca8f4b0b9dfc2b3cfeae589e9c1fb479864a648ca52905c513",
+          "input_wav_sha256": "ef8866d8311d4c2cd3a397e90ec3e063410f18e0051415e7025efee5279e5bff"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-fda65bc8e2e62cfd776d",
+      "runtime_character_id": "41b7444e39cc",
+      "runtime_character_name": "奈莉德",
+      "source_persona_id": "41b7444e39cc",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "奈莉德"
+      ],
+      "batch_names": [
+        "自投罗网的猎人"
+      ],
+      "accepted_candidate_count": 8,
+      "passing_candidate_count": 7,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 31,
+          "natural_duration_seconds": 17.2155,
+          "compacted_duration_seconds": 16.470167,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.371359,
+          "sustained_silence_excess_ratio": 0.066787,
+          "snr_db": 31.65,
+          "true_peak_4x_dbtp": -8.97,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "371923bc44071f0a64cc46a8802aed7104b24cbfb57d9c5af07d9736f216d96d",
+          "input_wav_sha256": "f29a7da6beefe6c6d993ede73ad83e4862647c90744f8bb61bd55682e4cfbaac",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 33,
+          "natural_duration_seconds": 17.339333,
+          "compacted_duration_seconds": 13.421958,
+          "internal_silence_compaction_cut_count": 4,
+          "raw_frame_silence_ratio": 0.388393,
+          "sustained_silence_excess_ratio": 0.016391,
+          "snr_db": 29.546,
+          "true_peak_4x_dbtp": -9.278,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "999c7766c3b48cdeb08c7db8d69a53dfc8cb19871d98ca4d0d03d6722113fe5a",
+          "input_wav_sha256": "b602f8171228f659607319d5099ef3ea74b66977e0500faa3156192541a67656",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 29,
+          "natural_duration_seconds": 13.638708,
+          "compacted_duration_seconds": 12.134042,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.449753,
+          "sustained_silence_excess_ratio": 0.097247,
+          "snr_db": 27.326,
+          "true_peak_4x_dbtp": -9.019,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "b817377573417e56a19df712754f38449ee31808137dd75a984b03569ebd08bb",
+          "input_wav_sha256": "d37cf2b9fb8e9dad9aa066567ec21eeebdb42dcb6393381e16fe1aa2efd2120c"
+        },
+        {
+          "candidate_ordinal": 30,
+          "natural_duration_seconds": 10.989958,
+          "compacted_duration_seconds": 10.989958,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.421818,
+          "sustained_silence_excess_ratio": 0.101001,
+          "snr_db": 28.861,
+          "true_peak_4x_dbtp": -8.987,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "83a759d5c556d70eb1c87b718dd81ed12291574c1b747285775c301b34e2aa4d",
+          "input_wav_sha256": "d29e377c551604da9b56b3ca8f7e6b6f8b2587226bbac95870e9a3d4e1e43289"
+        },
+        {
+          "candidate_ordinal": 31,
+          "natural_duration_seconds": 17.2155,
+          "compacted_duration_seconds": 16.470167,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.371359,
+          "sustained_silence_excess_ratio": 0.066787,
+          "snr_db": 31.65,
+          "true_peak_4x_dbtp": -8.97,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "371923bc44071f0a64cc46a8802aed7104b24cbfb57d9c5af07d9736f216d96d",
+          "input_wav_sha256": "f29a7da6beefe6c6d993ede73ad83e4862647c90744f8bb61bd55682e4cfbaac"
+        },
+        {
+          "candidate_ordinal": 32,
+          "natural_duration_seconds": 13.900458,
+          "compacted_duration_seconds": 13.260458,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.435241,
+          "sustained_silence_excess_ratio": 0.07315,
+          "snr_db": 32.067,
+          "true_peak_4x_dbtp": -8.981,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "33b97d569f597dab1648407675c36f5a35c1b967b9f1daa2a276a2f2d778e431",
+          "input_wav_sha256": "9467fa91f2be1f58d77d59cc357774e2186fcff3a66e3e08560845921848dbb6"
+        },
+        {
+          "candidate_ordinal": 33,
+          "natural_duration_seconds": 17.339333,
+          "compacted_duration_seconds": 13.421958,
+          "internal_silence_compaction_cut_count": 4,
+          "raw_frame_silence_ratio": 0.388393,
+          "sustained_silence_excess_ratio": 0.016391,
+          "snr_db": 29.546,
+          "true_peak_4x_dbtp": -9.278,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "999c7766c3b48cdeb08c7db8d69a53dfc8cb19871d98ca4d0d03d6722113fe5a",
+          "input_wav_sha256": "b602f8171228f659607319d5099ef3ea74b66977e0500faa3156192541a67656"
+        },
+        {
+          "candidate_ordinal": 34,
+          "natural_duration_seconds": 13.399333,
+          "compacted_duration_seconds": 10.934542,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.486289,
+          "sustained_silence_excess_ratio": 0.193881,
+          "snr_db": 27.22,
+          "true_peak_4x_dbtp": -8.997,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "4352ecd71339df0482e2b57a7a00c8537a61ca675da9e5b9db89c54ade6785ff",
+          "input_wav_sha256": "355e26fd69e84579c8b3c3e4537a266ad343a53e6ce28e62e117465cd112c8e7"
+        },
+        {
+          "candidate_ordinal": 35,
+          "natural_duration_seconds": 13.897625,
+          "compacted_duration_seconds": 12.197625,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.357377,
+          "sustained_silence_excess_ratio": 0.086082,
+          "snr_db": 28.279,
+          "true_peak_4x_dbtp": -9.568,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "70c83d13c3c858e23dd861c7cb817209454db65dd0e7ee4131c98ca280db0a9f",
+          "input_wav_sha256": "b0d668cc654b3c2aae9a87ff84680cb75d10d19f690f297c8068db0661fefe40"
+        },
+        {
+          "candidate_ordinal": 36,
+          "natural_duration_seconds": 11.563042,
+          "compacted_duration_seconds": 9.405083,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.397028,
+          "sustained_silence_excess_ratio": 0.009569,
+          "snr_db": 28.739,
+          "true_peak_4x_dbtp": -9.044,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "b39632432dcbf4807932e05cb18c02c26f9aba600832d24dc6052ade3816cd2c",
+          "input_wav_sha256": "1f6cf87856bb20d562650a0e0f9dd9ac9ce3a11e8647e00f556c3f6cc341d1bb"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-37653f8dc681896db2d5",
+      "runtime_character_id": "4370a74d6fda",
+      "runtime_character_name": "妮塔",
+      "source_persona_id": "4370a74d6fda",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "妮塔"
+      ],
+      "batch_names": [
+        "从入门到放弃"
+      ],
+      "accepted_candidate_count": 4,
+      "passing_candidate_count": 3,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 42,
+          "natural_duration_seconds": 15.057792,
+          "compacted_duration_seconds": 14.518292,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.395317,
+          "sustained_silence_excess_ratio": 0.049593,
+          "snr_db": 31.801,
+          "true_peak_4x_dbtp": -8.984,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "07e91f250af7819d9c4f99c1e07abcb41c790cc671fc459fe48f9d159e008355",
+          "input_wav_sha256": "6562fe30586318bff20bbbb2098bd2386defe8a01b151691753cb78994dc5903",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 38,
+          "natural_duration_seconds": 17.861667,
+          "compacted_duration_seconds": 16.707167,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.34689,
+          "sustained_silence_excess_ratio": 0.018555,
+          "snr_db": 28.775,
+          "true_peak_4x_dbtp": -8.945,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "8b1ba267e22166383d5aefac3c50f3f108cf575cdc6a888b53d7087a4b9b5c2f",
+          "input_wav_sha256": "8e02b9e7a2bd34af5e6b8646f25b6d6c80943f06ac9eca6dec234168cf7b702e",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 38,
+          "natural_duration_seconds": 17.861667,
+          "compacted_duration_seconds": 16.707167,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.34689,
+          "sustained_silence_excess_ratio": 0.018555,
+          "snr_db": 28.775,
+          "true_peak_4x_dbtp": -8.945,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "8b1ba267e22166383d5aefac3c50f3f108cf575cdc6a888b53d7087a4b9b5c2f",
+          "input_wav_sha256": "8e02b9e7a2bd34af5e6b8646f25b6d6c80943f06ac9eca6dec234168cf7b702e"
+        },
+        {
+          "candidate_ordinal": 39,
+          "natural_duration_seconds": 8.455417,
+          "compacted_duration_seconds": 7.935417,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.299748,
+          "sustained_silence_excess_ratio": 0.089472,
+          "snr_db": 32.063,
+          "true_peak_4x_dbtp": -8.981,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "03e06a2f6aa4f0a8a0ec1ff285f3f58a080f217b1da765801a8ebc29f4b66ee2",
+          "input_wav_sha256": "c23949db9584aafd40a64a0aeb53b93e32efaccff8dae46df62c0cf31b0e7f4d"
+        },
+        {
+          "candidate_ordinal": 40,
+          "natural_duration_seconds": 14.076333,
+          "compacted_duration_seconds": 12.676375,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.345426,
+          "sustained_silence_excess_ratio": 0.003944,
+          "snr_db": 28.91,
+          "true_peak_4x_dbtp": -8.936,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "2da00adedfee917fbfa7655c5b8242c13abc8b7541d59e843a2d341970da95d6",
+          "input_wav_sha256": "b38e710d1755365a01f45e2fc947fc85635762af77a3699a3079f145a44ca5b7"
+        },
+        {
+          "candidate_ordinal": 42,
+          "natural_duration_seconds": 15.057792,
+          "compacted_duration_seconds": 14.518292,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.395317,
+          "sustained_silence_excess_ratio": 0.049593,
+          "snr_db": 31.801,
+          "true_peak_4x_dbtp": -8.984,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "07e91f250af7819d9c4f99c1e07abcb41c790cc671fc459fe48f9d159e008355",
+          "input_wav_sha256": "6562fe30586318bff20bbbb2098bd2386defe8a01b151691753cb78994dc5903"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-c8f17a89268ccfd67c70",
+      "runtime_character_id": "43f05917bfa1",
+      "runtime_character_name": "恩雅",
+      "source_persona_id": "43f05917bfa1",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "恩雅"
+      ],
+      "batch_names": [
+        "心底的潮意"
+      ],
+      "accepted_candidate_count": 7,
+      "passing_candidate_count": 6,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 53,
+          "natural_duration_seconds": 16.899708,
+          "compacted_duration_seconds": 14.411708,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.47018,
+          "sustained_silence_excess_ratio": 0.079102,
+          "snr_db": 31.9,
+          "true_peak_4x_dbtp": -9.592,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "b9b7b63f5c3038c00a370ece99dbcbc6b2cfa5f16de87bfb14cedd2d50f75d42",
+          "input_wav_sha256": "77e8747ce7de855b2038359e3c0a317840534a03f494ba90ac8e3079c22f5e27",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 55,
+          "natural_duration_seconds": 15.575417,
+          "compacted_duration_seconds": 13.717208,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.405248,
+          "sustained_silence_excess_ratio": 0.081649,
+          "snr_db": 29.958,
+          "true_peak_4x_dbtp": -11.313,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "7225ac906b832228b1defd18c4091efecb8af65fc9f7dcf46de453be6e3732d4",
+          "input_wav_sha256": "9ba7003a6b102532672b2044f00d0dd0a99b623cb08f1e03c751005916fb7272",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 50,
+          "natural_duration_seconds": 12.69225,
+          "compacted_duration_seconds": 10.870875,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.352941,
+          "sustained_silence_excess_ratio": 0.049674,
+          "snr_db": 32.209,
+          "true_peak_4x_dbtp": -10.125,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "1bdbd6cb675c7b7dcf9483f22d23e2ebc91a36232a6f8b7a28c191a0870f36fd",
+          "input_wav_sha256": "b68555700e804425f93a9ca11eddc3a5fd8e19ad9a76a9d973038b8caba2bcc9"
+        },
+        {
+          "candidate_ordinal": 51,
+          "natural_duration_seconds": 15.49125,
+          "compacted_duration_seconds": 10.482625,
+          "internal_silence_compaction_cut_count": 4,
+          "raw_frame_silence_ratio": 0.375238,
+          "sustained_silence_excess_ratio": 0.042928,
+          "snr_db": 30.698,
+          "true_peak_4x_dbtp": -10.721,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "da92986c872121d8443f1bcf556d61f24606e02b93b42e23ad7e13817a17a260",
+          "input_wav_sha256": "d93635a9d47168cb2f7b8a068b3f33429afa3d5b501fdb586f83fc27f12af9b2"
+        },
+        {
+          "candidate_ordinal": 53,
+          "natural_duration_seconds": 16.899708,
+          "compacted_duration_seconds": 14.411708,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.47018,
+          "sustained_silence_excess_ratio": 0.079102,
+          "snr_db": 31.9,
+          "true_peak_4x_dbtp": -9.592,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "b9b7b63f5c3038c00a370ece99dbcbc6b2cfa5f16de87bfb14cedd2d50f75d42",
+          "input_wav_sha256": "77e8747ce7de855b2038359e3c0a317840534a03f494ba90ac8e3079c22f5e27"
+        },
+        {
+          "candidate_ordinal": 54,
+          "natural_duration_seconds": 12.679708,
+          "compacted_duration_seconds": 10.152417,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.383858,
+          "sustained_silence_excess_ratio": 0.069934,
+          "snr_db": 31.289,
+          "true_peak_4x_dbtp": -9.972,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "021ff934172b9804a9e644a7f60a63c71e26babde58cff718bd3c331f12eb66c",
+          "input_wav_sha256": "4e6b38aca53aac24de8dc4f6e6fa6cbf6b7446b7ae3852ffdb5ead225d40b65f"
+        },
+        {
+          "candidate_ordinal": 55,
+          "natural_duration_seconds": 15.575417,
+          "compacted_duration_seconds": 13.717208,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.405248,
+          "sustained_silence_excess_ratio": 0.081649,
+          "snr_db": 29.958,
+          "true_peak_4x_dbtp": -11.313,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "7225ac906b832228b1defd18c4091efecb8af65fc9f7dcf46de453be6e3732d4",
+          "input_wav_sha256": "9ba7003a6b102532672b2044f00d0dd0a99b623cb08f1e03c751005916fb7272"
+        },
+        {
+          "candidate_ordinal": 56,
+          "natural_duration_seconds": 9.848208,
+          "compacted_duration_seconds": 9.848208,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.409736,
+          "sustained_silence_excess_ratio": 0.015231,
+          "snr_db": 33.599,
+          "true_peak_4x_dbtp": -9.06,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "98b0b8585342f57d12dfe20408c44468fcd12d5d59b420d3ff9bc7fa11b69fc4",
+          "input_wav_sha256": "80ec4747da638a68679006e8b41aeab6bab739ff62a047d6ded464cbbc557e68"
+        },
+        {
+          "candidate_ordinal": 57,
+          "natural_duration_seconds": 12.826375,
+          "compacted_duration_seconds": 11.073625,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.469314,
+          "sustained_silence_excess_ratio": 0.139069,
+          "snr_db": 30.8,
+          "true_peak_4x_dbtp": -9.06,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "2288aa31151a0fc5ae123c0ba5037227c60f54a88484ebbe7921a7c66303c3cd",
+          "input_wav_sha256": "937602ee545ed47cc5425e5c14e4481069274355cfb5b0565841b8363f0db584"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-de53943a77b0e2107f43",
+      "runtime_character_id": "447ed3c401c9",
+      "runtime_character_name": "胧嫣",
+      "source_persona_id": "447ed3c401c9",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "胧嫣"
+      ],
+      "batch_names": [
+        "瑞狐·大厅语音"
+      ],
+      "accepted_candidate_count": 3,
+      "passing_candidate_count": 1,
+      "parent_disjoint_ab_found": false,
+      "best_ab": [],
+      "candidates": [
+        {
+          "candidate_ordinal": 101,
+          "natural_duration_seconds": 9.84,
+          "compacted_duration_seconds": 9.84,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.300813,
+          "sustained_silence_excess_ratio": 0.046748,
+          "snr_db": 35.642,
+          "true_peak_4x_dbtp": -2.114,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "1e7ad979c24d4f32bf74cb8dee6c1616e1476463b8b40b7c6a64b1d9d32b4787",
+          "input_wav_sha256": "5524b6a4f12e97b72d81f5b1956a7ddb3f3102d35d712e445d03e0df44d99a09"
+        },
+        {
+          "candidate_ordinal": 102,
+          "natural_duration_seconds": 8.94,
+          "compacted_duration_seconds": 8.24,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.385922,
+          "sustained_silence_excess_ratio": 0.029126,
+          "snr_db": 33.634,
+          "true_peak_4x_dbtp": -3.208,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "86cd454536f6514ed4c89041682f89cd04334644f24ca3bc18fdd5efbc99f7a7",
+          "input_wav_sha256": "1e16f3cb15652815fd3141a26afcbd287c97dac19f4cd661a828e15fbc4ed44b"
+        },
+        {
+          "candidate_ordinal": 103,
+          "natural_duration_seconds": 14.06,
+          "compacted_duration_seconds": 14.06,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.26458,
+          "sustained_silence_excess_ratio": 0.032006,
+          "snr_db": 32.719,
+          "true_peak_4x_dbtp": -2.939,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "2fe68d7ac2e6aad10d354e01336791819e6b915c2714afa174ccc55a244d0c17",
+          "input_wav_sha256": "d6cf95df883b5b06f607632048ccdf2a2751b564d705d21d06b13ac870f8be0f"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-148e0e8de98a86740285",
+      "runtime_character_id": "5157b8972632",
+      "runtime_character_name": "薇蒂雅",
+      "source_persona_id": "5157b8972632",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "薇蒂雅"
+      ],
+      "batch_names": [
+        "呈堂证供"
+      ],
+      "accepted_candidate_count": 7,
+      "passing_candidate_count": 6,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 143,
+          "natural_duration_seconds": 16.397333,
+          "compacted_duration_seconds": 14.959042,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.40107,
+          "sustained_silence_excess_ratio": 0.023397,
+          "snr_db": 30.61,
+          "true_peak_4x_dbtp": -9.042,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "58974dc9ccaeb3d9737cf4f08a7d509613285084e6166c307b9d6d15eefdbdd3",
+          "input_wav_sha256": "93649d13d505b1dfe46e987be0b5ae2da1bf88900559032fc961f465bdbf347f",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 137,
+          "natural_duration_seconds": 15.721292,
+          "compacted_duration_seconds": 15.721292,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.3723,
+          "sustained_silence_excess_ratio": 0.09414,
+          "snr_db": 32.271,
+          "true_peak_4x_dbtp": -9.063,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "9ab3519b0c3d8e90a46928ff29b26eabea6ad5ccc2a4b292d68be6a9e8001606",
+          "input_wav_sha256": "33426dd3253cc5f6d1c3ca6228aaf52cfa2f586f55464cd0104430e01b1d2191",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 137,
+          "natural_duration_seconds": 15.721292,
+          "compacted_duration_seconds": 15.721292,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.3723,
+          "sustained_silence_excess_ratio": 0.09414,
+          "snr_db": 32.271,
+          "true_peak_4x_dbtp": -9.063,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "9ab3519b0c3d8e90a46928ff29b26eabea6ad5ccc2a4b292d68be6a9e8001606",
+          "input_wav_sha256": "33426dd3253cc5f6d1c3ca6228aaf52cfa2f586f55464cd0104430e01b1d2191"
+        },
+        {
+          "candidate_ordinal": 138,
+          "natural_duration_seconds": 14.278208,
+          "compacted_duration_seconds": 14.278208,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.359944,
+          "sustained_silence_excess_ratio": 0.056029,
+          "snr_db": 30.765,
+          "true_peak_4x_dbtp": -9.017,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "80865cb10f35102e056d36b0f06edfb5637836e5af1449c9a23ccf7208a2582f",
+          "input_wav_sha256": "b684b5c0d1769803668167fef385d525b250568bc67f64e35259cad77474c830"
+        },
+        {
+          "candidate_ordinal": 139,
+          "natural_duration_seconds": 6.689083,
+          "compacted_duration_seconds": 6.689083,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.379104,
+          "sustained_silence_excess_ratio": 0.049334,
+          "snr_db": 34.086,
+          "true_peak_4x_dbtp": -8.888,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "21383f33f65397b01e8dec01fbc842418a91e1eb19a16806a7dceb572f4b6362",
+          "input_wav_sha256": "54f3b8e7ddaa646107a9a0702d990e1d7dd4938f6f2ebcb63ca95ebc53aecb70"
+        },
+        {
+          "candidate_ordinal": 141,
+          "natural_duration_seconds": 16.871208,
+          "compacted_duration_seconds": 16.211042,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.251541,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 27.613,
+          "true_peak_4x_dbtp": -8.975,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "a52063c6f886a9d463e2eef47597798e36f17d6de3bda6563ef503248a8dcaf2",
+          "input_wav_sha256": "5916d161ee865fb91429ef4cdb6db9357265837431717595287aa1610e2e3de3"
+        },
+        {
+          "candidate_ordinal": 142,
+          "natural_duration_seconds": 13.792792,
+          "compacted_duration_seconds": 13.792792,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.4,
+          "sustained_silence_excess_ratio": 0.023201,
+          "snr_db": 31.66,
+          "true_peak_4x_dbtp": -8.847,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "be4853a98b06af52430ea18c55ce24ca795ce8d31a8b53057087b5d5f7e81195",
+          "input_wav_sha256": "154689321e1a55fdc899c0819edae7aa67635e9d7a65c749733d89393362eb6d"
+        },
+        {
+          "candidate_ordinal": 143,
+          "natural_duration_seconds": 16.397333,
+          "compacted_duration_seconds": 14.959042,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.40107,
+          "sustained_silence_excess_ratio": 0.023397,
+          "snr_db": 30.61,
+          "true_peak_4x_dbtp": -9.042,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "58974dc9ccaeb3d9737cf4f08a7d509613285084e6166c307b9d6d15eefdbdd3",
+          "input_wav_sha256": "93649d13d505b1dfe46e987be0b5ae2da1bf88900559032fc961f465bdbf347f"
+        },
+        {
+          "candidate_ordinal": 144,
+          "natural_duration_seconds": 10.2585,
+          "compacted_duration_seconds": 10.2585,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.481481,
+          "sustained_silence_excess_ratio": 0.130623,
+          "snr_db": 29.731,
+          "true_peak_4x_dbtp": -10.385,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "05a2e00b3db1210a4c9afd503a364049732cb5408d15281be00b232fb446fd91",
+          "input_wav_sha256": "b0dc962078d475a516976efafa2626c0385620683784d780b96f37a462295bda"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-f0cba895304ea3ea2583",
+      "runtime_character_id": "6455a5dcff6a",
+      "runtime_character_name": "卜卜",
+      "source_persona_id": "6455a5dcff6a",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "卜卜"
+      ],
+      "batch_names": [
+        "恋恋账簿"
+      ],
+      "accepted_candidate_count": 3,
+      "passing_candidate_count": 3,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 22,
+          "natural_duration_seconds": 15.145708,
+          "compacted_duration_seconds": 15.145708,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.369393,
+          "sustained_silence_excess_ratio": 0.029051,
+          "snr_db": 25.185,
+          "true_peak_4x_dbtp": -9.034,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "283a0658da86d0de432e3d0880ee4fca3f5090e37d576b96ab7fbf89c16f1c86",
+          "input_wav_sha256": "a60a11cc27f9de9bae377c2f5791d25127f3c666e587edb6d6a927f232daa94b",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 26,
+          "natural_duration_seconds": 16.162042,
+          "compacted_duration_seconds": 15.529417,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.341055,
+          "sustained_silence_excess_ratio": 0.02125,
+          "snr_db": 30.215,
+          "true_peak_4x_dbtp": -9.849,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "7a4e324e2e9cd9e7a00c933b489ccffe8fe39ac528bc3a79a2e56d5f1d7d2f70",
+          "input_wav_sha256": "0a848bffc10301f3d6d7f46144cd939577bbaf455cade807b859b8ac86c8d435",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 22,
+          "natural_duration_seconds": 15.145708,
+          "compacted_duration_seconds": 15.145708,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.369393,
+          "sustained_silence_excess_ratio": 0.029051,
+          "snr_db": 25.185,
+          "true_peak_4x_dbtp": -9.034,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "283a0658da86d0de432e3d0880ee4fca3f5090e37d576b96ab7fbf89c16f1c86",
+          "input_wav_sha256": "a60a11cc27f9de9bae377c2f5791d25127f3c666e587edb6d6a927f232daa94b"
+        },
+        {
+          "candidate_ordinal": 25,
+          "natural_duration_seconds": 10.939958,
+          "compacted_duration_seconds": 10.330583,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.348162,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 31.685,
+          "true_peak_4x_dbtp": -9.898,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "f7e121c27813d08ad47de2d902276dfcd3c46963b2b5a8161972e38cbdd9ab68",
+          "input_wav_sha256": "4db318dae64419b9683f2ebde8971d108dbfc1855ba5c3e00323cb2e9eee5c5c"
+        },
+        {
+          "candidate_ordinal": 26,
+          "natural_duration_seconds": 16.162042,
+          "compacted_duration_seconds": 15.529417,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.341055,
+          "sustained_silence_excess_ratio": 0.02125,
+          "snr_db": 30.215,
+          "true_peak_4x_dbtp": -9.849,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "7a4e324e2e9cd9e7a00c933b489ccffe8fe39ac528bc3a79a2e56d5f1d7d2f70",
+          "input_wav_sha256": "0a848bffc10301f3d6d7f46144cd939577bbaf455cade807b859b8ac86c8d435"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-56114d8b073fa4ccaf09",
+      "runtime_character_id": "673ba6851b05",
+      "runtime_character_name": "苔丝",
+      "source_persona_id": "673ba6851b05",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "苔丝"
+      ],
+      "batch_names": [
+        "完美闭环"
+      ],
+      "accepted_candidate_count": 5,
+      "passing_candidate_count": 5,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 121,
+          "natural_duration_seconds": 16.836125,
+          "compacted_duration_seconds": 15.812042,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.390645,
+          "sustained_silence_excess_ratio": 0.013281,
+          "snr_db": 31.289,
+          "true_peak_4x_dbtp": -9.917,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "7587e7ceb6ab647ed3b56bb36515fb1cfabbe4335be4f6a1958f04c1668a37ff",
+          "input_wav_sha256": "62a4d1a75c2be75d0cfe9dbdb00bae0283292993d8efac710b64f57507c064ba",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 125,
+          "natural_duration_seconds": 14.898667,
+          "compacted_duration_seconds": 13.775458,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.358491,
+          "sustained_silence_excess_ratio": 0.060978,
+          "snr_db": 32.721,
+          "true_peak_4x_dbtp": -8.967,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "212b8a60b36723efa918d40ba1c1b5318e778bcc35b58c78eeb86895bd5a579e",
+          "input_wav_sha256": "8eba0f1274fe8c8e75f52b90ac1f16436374a9a9888eea1559c70e4de364b17d",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 121,
+          "natural_duration_seconds": 16.836125,
+          "compacted_duration_seconds": 15.812042,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.390645,
+          "sustained_silence_excess_ratio": 0.013281,
+          "snr_db": 31.289,
+          "true_peak_4x_dbtp": -9.917,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "7587e7ceb6ab647ed3b56bb36515fb1cfabbe4335be4f6a1958f04c1668a37ff",
+          "input_wav_sha256": "62a4d1a75c2be75d0cfe9dbdb00bae0283292993d8efac710b64f57507c064ba"
+        },
+        {
+          "candidate_ordinal": 122,
+          "natural_duration_seconds": 12.608042,
+          "compacted_duration_seconds": 12.082875,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.322314,
+          "sustained_silence_excess_ratio": 0.000828,
+          "snr_db": 30.83,
+          "true_peak_4x_dbtp": -8.971,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "89fa5aacf8fcb6945ded979277584266e43ba366e2f01cc3d89930ff303a4d34",
+          "input_wav_sha256": "238c2e30338919588d7f337f60095cb219070f96f29756edfc16086d1790bcd3"
+        },
+        {
+          "candidate_ordinal": 123,
+          "natural_duration_seconds": 12.083917,
+          "compacted_duration_seconds": 12.083917,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.375207,
+          "sustained_silence_excess_ratio": 0.033929,
+          "snr_db": 32.367,
+          "true_peak_4x_dbtp": -9.502,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "7a72f5d168d6b6432f7daa33c0f9f95022b69cf59bf9c9165217c8e0a8e89c8b",
+          "input_wav_sha256": "7b7c5b88c8d43f902066fc4af7c86c45d768c3144cca6419a2f29d022156dfbe"
+        },
+        {
+          "candidate_ordinal": 124,
+          "natural_duration_seconds": 12.1835,
+          "compacted_duration_seconds": 11.5495,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.378893,
+          "sustained_silence_excess_ratio": 0.030304,
+          "snr_db": 33.208,
+          "true_peak_4x_dbtp": -9.073,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "bb478369e56ba20a2350c2a40f6f97b19d725e592f028685e59a327b0d89d730",
+          "input_wav_sha256": "6e6ee63d4855c171338edc3850576994a2d08cf2b6179120e5abcc96b744fd05"
+        },
+        {
+          "candidate_ordinal": 125,
+          "natural_duration_seconds": 14.898667,
+          "compacted_duration_seconds": 13.775458,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.358491,
+          "sustained_silence_excess_ratio": 0.060978,
+          "snr_db": 32.721,
+          "true_peak_4x_dbtp": -8.967,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "212b8a60b36723efa918d40ba1c1b5318e778bcc35b58c78eeb86895bd5a579e",
+          "input_wav_sha256": "8eba0f1274fe8c8e75f52b90ac1f16436374a9a9888eea1559c70e4de364b17d"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-0e90d2e1f56229eb89e1",
+      "runtime_character_id": "6862c43d2ac9",
+      "runtime_character_name": "猫汐尔",
+      "source_persona_id": "6862c43d2ac9",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "猫汐尔"
+      ],
+      "batch_names": [
+        "护理预约"
+      ],
+      "accepted_candidate_count": 6,
+      "passing_candidate_count": 5,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 67,
+          "natural_duration_seconds": 14.255417,
+          "compacted_duration_seconds": 14.255417,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.352034,
+          "sustained_silence_excess_ratio": 0.010522,
+          "snr_db": 28.33,
+          "true_peak_4x_dbtp": -9.008,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "cb128bd33958b543c01ba9814052e9809209e190189f4c73e32f09c18ea4bcc9",
+          "input_wav_sha256": "16c6ee7d6e92873c63ff2b58484fae6354d7f11024da3fa6461ad9519fc3f0d7",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 68,
+          "natural_duration_seconds": 16.517917,
+          "compacted_duration_seconds": 15.947333,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.327068,
+          "sustained_silence_excess_ratio": 0.028845,
+          "snr_db": 25.839,
+          "true_peak_4x_dbtp": -10.585,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "47751dd83436766aacb2c5f5d97042c2a4200f068c77e16e47cd3fcc8f42aadc",
+          "input_wav_sha256": "cd9315eba4e4225fa443e5c6417ae258658900050c1e334b9e174b61205bd00d",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 66,
+          "natural_duration_seconds": 11.896292,
+          "compacted_duration_seconds": 11.068833,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.259928,
+          "sustained_silence_excess_ratio": 0.009938,
+          "snr_db": 28.454,
+          "true_peak_4x_dbtp": -8.985,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "1a361a0602f222584d182788b83ea1ba0b0ab5fa7fcc26ff2615f6f6c1815b7d",
+          "input_wav_sha256": "e7de86ac309ca20a254952bc525da85b0743f5f3da9ef662119dd6e25431cb40"
+        },
+        {
+          "candidate_ordinal": 67,
+          "natural_duration_seconds": 14.255417,
+          "compacted_duration_seconds": 14.255417,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.352034,
+          "sustained_silence_excess_ratio": 0.010522,
+          "snr_db": 28.33,
+          "true_peak_4x_dbtp": -9.008,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "cb128bd33958b543c01ba9814052e9809209e190189f4c73e32f09c18ea4bcc9",
+          "input_wav_sha256": "16c6ee7d6e92873c63ff2b58484fae6354d7f11024da3fa6461ad9519fc3f0d7"
+        },
+        {
+          "candidate_ordinal": 68,
+          "natural_duration_seconds": 16.517917,
+          "compacted_duration_seconds": 15.947333,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.327068,
+          "sustained_silence_excess_ratio": 0.028845,
+          "snr_db": 25.839,
+          "true_peak_4x_dbtp": -10.585,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "47751dd83436766aacb2c5f5d97042c2a4200f068c77e16e47cd3fcc8f42aadc",
+          "input_wav_sha256": "cd9315eba4e4225fa443e5c6417ae258658900050c1e334b9e174b61205bd00d"
+        },
+        {
+          "candidate_ordinal": 69,
+          "natural_duration_seconds": 16.238417,
+          "compacted_duration_seconds": 16.238417,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.397783,
+          "sustained_silence_excess_ratio": 0.035102,
+          "snr_db": 33.239,
+          "true_peak_4x_dbtp": -8.988,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "57e93ffb6a2f186e5929f274cbc355d44ba8f7a38fb842eb696741b111bb4ae7",
+          "input_wav_sha256": "7bc4dd05fcca50aec47654009c6bf29d8c2a101e7edeb6cddfe455e97c0bb7ff"
+        },
+        {
+          "candidate_ordinal": 71,
+          "natural_duration_seconds": 14.361083,
+          "compacted_duration_seconds": 13.744167,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.281977,
+          "sustained_silence_excess_ratio": 0.010914,
+          "snr_db": 32.722,
+          "true_peak_4x_dbtp": -10.469,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "cbee8b8bd423f96e280245f3f54965885e3c76a5279bb382a536b1ea1583918c",
+          "input_wav_sha256": "1e4be5ffafbbf7fad4b348e9350020f8db3d74f4c62136c73966201a18912fd2"
+        },
+        {
+          "candidate_ordinal": 72,
+          "natural_duration_seconds": 9.318292,
+          "compacted_duration_seconds": 8.643,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.362587,
+          "sustained_silence_excess_ratio": 0.041652,
+          "snr_db": 29.314,
+          "true_peak_4x_dbtp": -11.843,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "d03ac0181f9f59cd7b709c5cb2f7e58a5b0f781deae285c905bebe1900eae3c7",
+          "input_wav_sha256": "de776f5f7e61bc7501d45a2ea18d76524d7d8a78580229dc97e58faf6934c7d8"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-af7e6682b42117bb3c26",
+      "runtime_character_id": "702f4375675b",
+      "runtime_character_name": "米娅",
+      "source_persona_id": "702f4375675b",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "米娅"
+      ],
+      "batch_names": [
+        "星彩·大厅语音"
+      ],
+      "accepted_candidate_count": 5,
+      "passing_candidate_count": 2,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 90,
+          "natural_duration_seconds": 17.899083,
+          "compacted_duration_seconds": 17.37875,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.50748,
+          "sustained_silence_excess_ratio": 0.04143,
+          "snr_db": 34.063,
+          "true_peak_4x_dbtp": -3.198,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "d0c4c00e641761bd5160a8e0867412723eb8b0a4200d921a560693265b887425",
+          "input_wav_sha256": "7228ef467409a7668eeaa37d980a3a36885b50818b6aea13eb54d6065ed6ca72",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 87,
+          "natural_duration_seconds": 11.802042,
+          "compacted_duration_seconds": 11.802042,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.314721,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 34.465,
+          "true_peak_4x_dbtp": -1.433,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "1d28f3e3a7f3317c8f912d2b63a52114a3454df17ab7959981a6546524a2d45f",
+          "input_wav_sha256": "db980624b1ccb33f64456a8c211251ac6ef5da4312bf14f5c6e4c23b6eedd3fe",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 87,
+          "natural_duration_seconds": 11.802042,
+          "compacted_duration_seconds": 11.802042,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.314721,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 34.465,
+          "true_peak_4x_dbtp": -1.433,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "1d28f3e3a7f3317c8f912d2b63a52114a3454df17ab7959981a6546524a2d45f",
+          "input_wav_sha256": "db980624b1ccb33f64456a8c211251ac6ef5da4312bf14f5c6e4c23b6eedd3fe"
+        },
+        {
+          "candidate_ordinal": 88,
+          "natural_duration_seconds": 9.413583,
+          "compacted_duration_seconds": 7.932375,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.526448,
+          "sustained_silence_excess_ratio": 0.032777,
+          "snr_db": 35.41,
+          "true_peak_4x_dbtp": -4.641,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "5c8cef2da06cd12ea7dce5cbcb51147186292c60f9b87b1120496db5943356a3",
+          "input_wav_sha256": "7fb6785f5e33284e2bf31ff176c759f5670513bf791a5c53f70aa542b982e5f7"
+        },
+        {
+          "candidate_ordinal": 89,
+          "natural_duration_seconds": 10.331625,
+          "compacted_duration_seconds": 9.731625,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.291581,
+          "sustained_silence_excess_ratio": 0.023634,
+          "snr_db": 35.56,
+          "true_peak_4x_dbtp": -4.695,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "d41007f8003aa6ab8e3c706f11f3620501cf4999bd6af1c74a182564bca59d60",
+          "input_wav_sha256": "489699cd3ac1c091d342b2092292fa72691cee20809cf03bb2bbc6f9bfef7e7e"
+        },
+        {
+          "candidate_ordinal": 90,
+          "natural_duration_seconds": 17.899083,
+          "compacted_duration_seconds": 17.37875,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.50748,
+          "sustained_silence_excess_ratio": 0.04143,
+          "snr_db": 34.063,
+          "true_peak_4x_dbtp": -3.198,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "d0c4c00e641761bd5160a8e0867412723eb8b0a4200d921a560693265b887425",
+          "input_wav_sha256": "7228ef467409a7668eeaa37d980a3a36885b50818b6aea13eb54d6065ed6ca72"
+        },
+        {
+          "candidate_ordinal": 91,
+          "natural_duration_seconds": 7.938,
+          "compacted_duration_seconds": 7.938,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.186398,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 34.591,
+          "true_peak_4x_dbtp": -4.374,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "7800a7f1a0545ec9b85231e33b3cc9c2d4b376bff639d56450b7cadb515c2838",
+          "input_wav_sha256": "b0e573f14ff9899fb5ccda99d7f9d998b67961c5c742ac689fbddb0b24832504"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-45d5fdb8985e0245e9ec",
+      "runtime_character_id": "78aa7ab99154",
+      "runtime_character_name": "伊切尔",
+      "source_persona_id": "78aa7ab99154",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "伊切尔"
+      ],
+      "batch_names": [
+        "观后感"
+      ],
+      "accepted_candidate_count": 6,
+      "passing_candidate_count": 6,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 5,
+          "natural_duration_seconds": 14.824625,
+          "compacted_duration_seconds": 14.824625,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.297844,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 29.393,
+          "true_peak_4x_dbtp": -8.981,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "71ff16c0226268398854380c4ec3abfe5f4a13accc596734f7d9b17538f04bbf",
+          "input_wav_sha256": "65ea6a26936030005cc979667391ec95e72596b73de7f759786c206dc5635f50",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 6,
+          "natural_duration_seconds": 14.500083,
+          "compacted_duration_seconds": 14.500083,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.297521,
+          "sustained_silence_excess_ratio": 0.008965,
+          "snr_db": 29.76,
+          "true_peak_4x_dbtp": -9.023,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "8f40133ebd8d92aceae2d16a238a3482e3be4f364cdf5e6f3443374bb21a5ee4",
+          "input_wav_sha256": "bef15193fa84946ede3a9fc08295e174069ffde49662432fffd5350c91163880",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 2,
+          "natural_duration_seconds": 14.219958,
+          "compacted_duration_seconds": 14.219958,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.261603,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 28.292,
+          "true_peak_4x_dbtp": -8.991,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "3a49258fbd894cbcb6687dbe9979627d9a895e7a07b1580ae20dece4553b856c",
+          "input_wav_sha256": "79757dc522b57bd9adf7cd9a191c50acdb97e0298b50470055c79432c8ad12dd"
+        },
+        {
+          "candidate_ordinal": 3,
+          "natural_duration_seconds": 12.072167,
+          "compacted_duration_seconds": 12.072167,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.347682,
+          "sustained_silence_excess_ratio": 0.024022,
+          "snr_db": 31.138,
+          "true_peak_4x_dbtp": -8.967,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "f8668839901c20dfc2cf9c9cf749c1100f9e50d27df582e66db10ace3161c2d1",
+          "input_wav_sha256": "16e7a51fc1fd53635bb96342bc48877f631fc4728e4b4d70410c78c03015bf27"
+        },
+        {
+          "candidate_ordinal": 4,
+          "natural_duration_seconds": 14.406375,
+          "compacted_duration_seconds": 14.406375,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.31068,
+          "sustained_silence_excess_ratio": 0.046507,
+          "snr_db": 31.706,
+          "true_peak_4x_dbtp": -9.078,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "d1672a79cbfffbaa0d1c06cdca39fbedde35f065514bdbe6f4fa23f341225f72",
+          "input_wav_sha256": "c55da29c900ea6590b4461e95d4c07fcd94086a24dde31c9471972f570b46335"
+        },
+        {
+          "candidate_ordinal": 5,
+          "natural_duration_seconds": 14.824625,
+          "compacted_duration_seconds": 14.824625,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.297844,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 29.393,
+          "true_peak_4x_dbtp": -8.981,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "71ff16c0226268398854380c4ec3abfe5f4a13accc596734f7d9b17538f04bbf",
+          "input_wav_sha256": "65ea6a26936030005cc979667391ec95e72596b73de7f759786c206dc5635f50"
+        },
+        {
+          "candidate_ordinal": 6,
+          "natural_duration_seconds": 14.500083,
+          "compacted_duration_seconds": 14.500083,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.297521,
+          "sustained_silence_excess_ratio": 0.008965,
+          "snr_db": 29.76,
+          "true_peak_4x_dbtp": -9.023,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "8f40133ebd8d92aceae2d16a238a3482e3be4f364cdf5e6f3443374bb21a5ee4",
+          "input_wav_sha256": "bef15193fa84946ede3a9fc08295e174069ffde49662432fffd5350c91163880"
+        },
+        {
+          "candidate_ordinal": 7,
+          "natural_duration_seconds": 12.57,
+          "compacted_duration_seconds": 12.57,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.332273,
+          "sustained_silence_excess_ratio": 0.047733,
+          "snr_db": 31.208,
+          "true_peak_4x_dbtp": -9.014,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "c3471fde830d2ca65b224631561d18493e5ede348b290fe0d803c72b6f71354b",
+          "input_wav_sha256": "96cb22eedd483925c6b44d4d314a5a55d573d281aa5a5605af3d9053df3ed0b6"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-2ec81667cb61b11a39cd",
+      "runtime_character_id": "85b205f6f623",
+      "runtime_character_name": "瑟瑞斯",
+      "source_persona_id": "85b205f6f623",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "瑟瑞斯"
+      ],
+      "batch_names": [
+        "换种风格怎么样"
+      ],
+      "accepted_candidate_count": 5,
+      "passing_candidate_count": 5,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 79,
+          "natural_duration_seconds": 15.128917,
+          "compacted_duration_seconds": 14.466042,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.305249,
+          "sustained_silence_excess_ratio": 0.008987,
+          "snr_db": 32.411,
+          "true_peak_4x_dbtp": -9.627,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "3c01d1682d51a9ff0ffe86d7c2e3cb627d354c099af485dbfea90a526c3bcba4",
+          "input_wav_sha256": "94f3b7018331ecf4d6f8eba6cde49df294517142ccbbe8a6a77adeda286240d8",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 83,
+          "natural_duration_seconds": 15.578708,
+          "compacted_duration_seconds": 15.578708,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.292683,
+          "sustained_silence_excess_ratio": 0.000642,
+          "snr_db": 32.304,
+          "true_peak_4x_dbtp": -8.925,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "eb7f6fb56eed500753f98a78836314f602c8fa33c8704cf3aafd394f3ca9a1c0",
+          "input_wav_sha256": "32be641ecca64dfbedb2781a9b9979091a913b3c8f5aff33357fe78ad9b5a512",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 79,
+          "natural_duration_seconds": 15.128917,
+          "compacted_duration_seconds": 14.466042,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.305249,
+          "sustained_silence_excess_ratio": 0.008987,
+          "snr_db": 32.411,
+          "true_peak_4x_dbtp": -9.627,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "3c01d1682d51a9ff0ffe86d7c2e3cb627d354c099af485dbfea90a526c3bcba4",
+          "input_wav_sha256": "94f3b7018331ecf4d6f8eba6cde49df294517142ccbbe8a6a77adeda286240d8"
+        },
+        {
+          "candidate_ordinal": 82,
+          "natural_duration_seconds": 14.232625,
+          "compacted_duration_seconds": 14.232625,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.356742,
+          "sustained_silence_excess_ratio": 0.028104,
+          "snr_db": 30.607,
+          "true_peak_4x_dbtp": -11.105,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "4cba7d6b8d61b3143e7e09860ed3e1e300cfb5e3940a07d02cc28585701be1b9",
+          "input_wav_sha256": "a2b385c687d67180e4bb250b3682762d719499295c6c6ba26aec76c367af8e4b"
+        },
+        {
+          "candidate_ordinal": 83,
+          "natural_duration_seconds": 15.578708,
+          "compacted_duration_seconds": 15.578708,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.292683,
+          "sustained_silence_excess_ratio": 0.000642,
+          "snr_db": 32.304,
+          "true_peak_4x_dbtp": -8.925,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "eb7f6fb56eed500753f98a78836314f602c8fa33c8704cf3aafd394f3ca9a1c0",
+          "input_wav_sha256": "32be641ecca64dfbedb2781a9b9979091a913b3c8f5aff33357fe78ad9b5a512"
+        },
+        {
+          "candidate_ordinal": 84,
+          "natural_duration_seconds": 12.874125,
+          "compacted_duration_seconds": 11.790375,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.367797,
+          "sustained_silence_excess_ratio": 0.004241,
+          "snr_db": 33.634,
+          "true_peak_4x_dbtp": -8.472,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "c262539c7937c85a21d5190ec3369d5e5a3c5018fe2767c86cd487cbcf513531",
+          "input_wav_sha256": "37d2897063a259e67278f6ddc60c1e7da64928c5b1137c6f7cc373b9ae009c10"
+        },
+        {
+          "candidate_ordinal": 85,
+          "natural_duration_seconds": 11.699917,
+          "compacted_duration_seconds": 10.913,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.311355,
+          "sustained_silence_excess_ratio": 0.014661,
+          "snr_db": 33.635,
+          "true_peak_4x_dbtp": -8.799,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "b1153b12e970bf92ee88c2f798916f94054586e3c14ce6760324cef16f61a63f",
+          "input_wav_sha256": "1fbd4df10702fab87c99affdedc3e50cbcdc21c0cf59b3fcc210eb09d8e097e3"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-388bd9d9bad8a68af0e0",
+      "runtime_character_id": "8d5b5c3912bb",
+      "runtime_character_name": "琴诺",
+      "source_persona_id": "1ebefe906ab6",
+      "speaker_variant": "morso",
+      "selectable_character": false,
+      "role_names": [
+        "莫尔索"
+      ],
+      "batch_names": [
+        "战术讨论"
+      ],
+      "accepted_candidate_count": 4,
+      "passing_candidate_count": 2,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 134,
+          "natural_duration_seconds": 12.992792,
+          "compacted_duration_seconds": 12.272792,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.333876,
+          "sustained_silence_excess_ratio": 0.039111,
+          "snr_db": 28.053,
+          "true_peak_4x_dbtp": -7.385,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "f3588b2409ff81f12c1aa1c25b1bd3c6e90f4777619ac748d433f484cac8933a",
+          "input_wav_sha256": "569f406165cfd0fbcc0e8e2eb4346cc8031099c17d148a26485b6e441d235930",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 133,
+          "natural_duration_seconds": 11.839958,
+          "compacted_duration_seconds": 11.246,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.312611,
+          "sustained_silence_excess_ratio": 0.024898,
+          "snr_db": 28.988,
+          "true_peak_4x_dbtp": -7.492,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "cd8ec916b783ccbc5158554ebfa0f74dc548807f1173a5bca7a7570f8451f9c4",
+          "input_wav_sha256": "5eb1b5035bf792e316ff19d17bc9b6e78816f099075c5bb4ff128a474243af03",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 133,
+          "natural_duration_seconds": 11.839958,
+          "compacted_duration_seconds": 11.246,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.312611,
+          "sustained_silence_excess_ratio": 0.024898,
+          "snr_db": 28.988,
+          "true_peak_4x_dbtp": -7.492,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "cd8ec916b783ccbc5158554ebfa0f74dc548807f1173a5bca7a7570f8451f9c4",
+          "input_wav_sha256": "5eb1b5035bf792e316ff19d17bc9b6e78816f099075c5bb4ff128a474243af03"
+        },
+        {
+          "candidate_ordinal": 134,
+          "natural_duration_seconds": 12.992792,
+          "compacted_duration_seconds": 12.272792,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.333876,
+          "sustained_silence_excess_ratio": 0.039111,
+          "snr_db": 28.053,
+          "true_peak_4x_dbtp": -7.385,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "f3588b2409ff81f12c1aa1c25b1bd3c6e90f4777619ac748d433f484cac8933a",
+          "input_wav_sha256": "569f406165cfd0fbcc0e8e2eb4346cc8031099c17d148a26485b6e441d235930"
+        },
+        {
+          "candidate_ordinal": 135,
+          "natural_duration_seconds": 4.624125,
+          "compacted_duration_seconds": 4.624125,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.426724,
+          "sustained_silence_excess_ratio": 0.06704,
+          "snr_db": 33.046,
+          "true_peak_4x_dbtp": -7.476,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "b0ea9e62541a91219ba0f1f1b1276c86419db4ac603f7832dae21f416b723381",
+          "input_wav_sha256": "7c6be8186a857b9d00c7d9387415282ea4665bde33d1527b46a26c795c6bcb6a"
+        },
+        {
+          "candidate_ordinal": 136,
+          "natural_duration_seconds": 0.599583,
+          "compacted_duration_seconds": 0.599583,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.033333,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 18.168,
+          "true_peak_4x_dbtp": -18.244,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds",
+            "snr_at_or_above_25_db"
+          ],
+          "authoritative_transcript_utf8_sha256": "f3d367d3844a28e2f42fce643e2f0189fde15d157c88b144cec79b0a76371aa3",
+          "input_wav_sha256": "f667fa34fab4b442200378accd9b6bf59bdaa705272a59a1738af2a566977eb8"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-9e21ecc30cbe8be3174c",
+      "runtime_character_id": "8d5b5c3912bb",
+      "runtime_character_name": "琴诺",
+      "source_persona_id": "8d5b5c3912bb",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "琴诺"
+      ],
+      "batch_names": [
+        "战术讨论"
+      ],
+      "accepted_candidate_count": 3,
+      "passing_candidate_count": 2,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 73,
+          "natural_duration_seconds": 13.940167,
+          "compacted_duration_seconds": 13.940167,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.286533,
+          "sustained_silence_excess_ratio": 0.009326,
+          "snr_db": 27.767,
+          "true_peak_4x_dbtp": -8.946,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "f03a47a1062fb3a4e2e9026df35db71229d63c5d655023965b7b2930c8ff0e7a",
+          "input_wav_sha256": "c7ecf1ea7931ebf2fea18c03e71b4b6f30d424ba485233238d5eb832c2e28cc7",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 76,
+          "natural_duration_seconds": 14.340042,
+          "compacted_duration_seconds": 13.1995,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.290909,
+          "sustained_silence_excess_ratio": 0.015152,
+          "snr_db": 29.17,
+          "true_peak_4x_dbtp": -7.722,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "22daf1745e9fbf71c7642d4592cd527e6cb219265bd0282fbbc6612f310b334a",
+          "input_wav_sha256": "4129e454a87e33cf61c16ef55a979b250ffcb09eb0701adcad7354b347d456cb",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 73,
+          "natural_duration_seconds": 13.940167,
+          "compacted_duration_seconds": 13.940167,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.286533,
+          "sustained_silence_excess_ratio": 0.009326,
+          "snr_db": 27.767,
+          "true_peak_4x_dbtp": -8.946,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "f03a47a1062fb3a4e2e9026df35db71229d63c5d655023965b7b2930c8ff0e7a",
+          "input_wav_sha256": "c7ecf1ea7931ebf2fea18c03e71b4b6f30d424ba485233238d5eb832c2e28cc7"
+        },
+        {
+          "candidate_ordinal": 74,
+          "natural_duration_seconds": 10.374917,
+          "compacted_duration_seconds": 9.56025,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.208768,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 29.187,
+          "true_peak_4x_dbtp": -8.998,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "ae0a052aa97b3e18b47cf2aaf99557fca585856a420f8ceba952f5c4ba5c41cd",
+          "input_wav_sha256": "7818b752ea05c61865ccf79619b997e1c610a2a994dafe33d5b6af6afa9f22a8"
+        },
+        {
+          "candidate_ordinal": 76,
+          "natural_duration_seconds": 14.340042,
+          "compacted_duration_seconds": 13.1995,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.290909,
+          "sustained_silence_excess_ratio": 0.015152,
+          "snr_db": 29.17,
+          "true_peak_4x_dbtp": -7.722,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "22daf1745e9fbf71c7642d4592cd527e6cb219265bd0282fbbc6612f310b334a",
+          "input_wav_sha256": "4129e454a87e33cf61c16ef55a979b250ffcb09eb0701adcad7354b347d456cb"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-e0345197c48412dd8bea",
+      "runtime_character_id": "921f9ef0cc4e",
+      "runtime_character_name": "晴",
+      "source_persona_id": "921f9ef0cc4e",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "晴"
+      ],
+      "batch_names": [
+        "今日晴好"
+      ],
+      "accepted_candidate_count": 8,
+      "passing_candidate_count": 6,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 60,
+          "natural_duration_seconds": 19.0175,
+          "compacted_duration_seconds": 14.914,
+          "internal_silence_compaction_cut_count": 4,
+          "raw_frame_silence_ratio": 0.536193,
+          "sustained_silence_excess_ratio": 0.193107,
+          "snr_db": 31.708,
+          "true_peak_4x_dbtp": -8.996,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "0e2af41f84eedbc0dbd9b628b6c72585eb01f807cd393703b594e8ef74016333",
+          "input_wav_sha256": "cd69270958e0ecd233ed17f8c4e18e8943508e7af3541d54829006f8bcee05b7",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 59,
+          "natural_duration_seconds": 18.255042,
+          "compacted_duration_seconds": 15.352333,
+          "internal_silence_compaction_cut_count": 4,
+          "raw_frame_silence_ratio": 0.503906,
+          "sustained_silence_excess_ratio": 0.116595,
+          "snr_db": 31.038,
+          "true_peak_4x_dbtp": -8.902,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "fef07d8aa57f53599b041a8db1126cdfd46e29a1085bf0c7ef2e6c6ba9232882",
+          "input_wav_sha256": "cbdaaa4bec6b50c84b6df6b7f2969c93c8a766c9330592233c9c1a1610090bb7",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 58,
+          "natural_duration_seconds": 11.158833,
+          "compacted_duration_seconds": 9.593208,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.370833,
+          "sustained_silence_excess_ratio": 0.025018,
+          "snr_db": 34.52,
+          "true_peak_4x_dbtp": -8.874,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "b17ee4f1ba9bac77a9a02be44b64475d870c75c8e67e6e2637260959ee057afd",
+          "input_wav_sha256": "934155c09f981418407c0d00ee71bf4a80a9ad2a9ef9f6158a65c945f11c6dd0"
+        },
+        {
+          "candidate_ordinal": 59,
+          "natural_duration_seconds": 18.255042,
+          "compacted_duration_seconds": 15.352333,
+          "internal_silence_compaction_cut_count": 4,
+          "raw_frame_silence_ratio": 0.503906,
+          "sustained_silence_excess_ratio": 0.116595,
+          "snr_db": 31.038,
+          "true_peak_4x_dbtp": -8.902,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "fef07d8aa57f53599b041a8db1126cdfd46e29a1085bf0c7ef2e6c6ba9232882",
+          "input_wav_sha256": "cbdaaa4bec6b50c84b6df6b7f2969c93c8a766c9330592233c9c1a1610090bb7"
+        },
+        {
+          "candidate_ordinal": 60,
+          "natural_duration_seconds": 19.0175,
+          "compacted_duration_seconds": 14.914,
+          "internal_silence_compaction_cut_count": 4,
+          "raw_frame_silence_ratio": 0.536193,
+          "sustained_silence_excess_ratio": 0.193107,
+          "snr_db": 31.708,
+          "true_peak_4x_dbtp": -8.996,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "0e2af41f84eedbc0dbd9b628b6c72585eb01f807cd393703b594e8ef74016333",
+          "input_wav_sha256": "cd69270958e0ecd233ed17f8c4e18e8943508e7af3541d54829006f8bcee05b7"
+        },
+        {
+          "candidate_ordinal": 61,
+          "natural_duration_seconds": 11.910667,
+          "compacted_duration_seconds": 11.910667,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.409396,
+          "sustained_silence_excess_ratio": 0.073883,
+          "snr_db": 33.015,
+          "true_peak_4x_dbtp": -9.046,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "941284a89028b9c15036f2a059cb1bfecef384edff1361616b5ef5cb5335506c",
+          "input_wav_sha256": "d2eff653de4ba3339f8cf179f13f65ba5e549a26b55c2e3163871c54c7728245"
+        },
+        {
+          "candidate_ordinal": 62,
+          "natural_duration_seconds": 13.859458,
+          "compacted_duration_seconds": 12.01125,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.420965,
+          "sustained_silence_excess_ratio": 0.150692,
+          "snr_db": 30.108,
+          "true_peak_4x_dbtp": -9.837,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "e51932081c5f80894e3c20dc799461a0ac33fe2e0046e95dfdc625b4c6ac3fd6",
+          "input_wav_sha256": "cd87c9eca5de5e24983c1c54efff8ce2026d9f9e211eb6683721978e57619429"
+        },
+        {
+          "candidate_ordinal": 63,
+          "natural_duration_seconds": 15.729208,
+          "compacted_duration_seconds": 11.338792,
+          "internal_silence_compaction_cut_count": 4,
+          "raw_frame_silence_ratio": 0.372134,
+          "sustained_silence_excess_ratio": 0.013229,
+          "snr_db": 29.743,
+          "true_peak_4x_dbtp": -9.104,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "46acaacade645c464322e4421df3fb3d15b7becb1ab7d2cfbebab035b5a885f2",
+          "input_wav_sha256": "4167e69036b785d20db8d889e81cead4a0f46f3f9874448da3815afa1d25611b"
+        },
+        {
+          "candidate_ordinal": 64,
+          "natural_duration_seconds": 11.911083,
+          "compacted_duration_seconds": 9.853208,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.462475,
+          "sustained_silence_excess_ratio": 0.010149,
+          "snr_db": 33.199,
+          "true_peak_4x_dbtp": -8.995,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "01e877a255698cb6297bfee03d55aa797182324e8e2a68c8d4278052536c07a0",
+          "input_wav_sha256": "c220b6163ff24ef0c2c67b3145e0e5950a2f2ed0b788d8bd83c3ae21f78d47b7"
+        },
+        {
+          "candidate_ordinal": 65,
+          "natural_duration_seconds": 13.129333,
+          "compacted_duration_seconds": 10.413042,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.391555,
+          "sustained_silence_excess_ratio": 0.084509,
+          "snr_db": 32.545,
+          "true_peak_4x_dbtp": -9.043,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "4b632159a3418648d250cd26c9dd0d7b39abf1bf15a1a5b77ca0f35288bfab10",
+          "input_wav_sha256": "7a68f5291273f772c0af602f40ebbf89667b8821b415e4c1572892cc0b5b88d3"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-4ecf3f2b4fdac1080bcf",
+      "runtime_character_id": "98322bd505f4",
+      "runtime_character_name": "辰星",
+      "source_persona_id": "98322bd505f4",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "辰星"
+      ],
+      "batch_names": [
+        "再来一次？"
+      ],
+      "accepted_candidate_count": 9,
+      "passing_candidate_count": 4,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 149,
+          "natural_duration_seconds": 18.672,
+          "compacted_duration_seconds": 15.817208,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.452592,
+          "sustained_silence_excess_ratio": 0.044888,
+          "snr_db": 32.986,
+          "true_peak_4x_dbtp": -10.645,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "084b087a9e05cb4f7c45ecb453776302f7ff814be2efc973f5681c6f80b29fb3",
+          "input_wav_sha256": "9e7841b2cc94b5f775ecc6754a751c94ee30050aecc78950e425ad1fb3385664",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 148,
+          "natural_duration_seconds": 16.688,
+          "compacted_duration_seconds": 14.036083,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.331909,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 30.514,
+          "true_peak_4x_dbtp": -8.757,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "850e3977f5804967bfbee95f2e242634d5bab6f5a65494b6263c60833fce0cff",
+          "input_wav_sha256": "3191d371e7189d6734700572fd852e41e6a270b846c0709d662f3117aa264102",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 146,
+          "natural_duration_seconds": 10.1,
+          "compacted_duration_seconds": 9.23875,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.329004,
+          "sustained_silence_excess_ratio": 0.014071,
+          "snr_db": 36.292,
+          "true_peak_4x_dbtp": -9.035,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "5a16d917d6147d03f2f4bff8f31081569dfb5256ecbbb0c4ea069862b29082b8",
+          "input_wav_sha256": "0c282fec1d59d9af657cd09e7dbb7a11c858c346c969110b421dcdcbc9942483"
+        },
+        {
+          "candidate_ordinal": 147,
+          "natural_duration_seconds": 7.728458,
+          "compacted_duration_seconds": 6.479833,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.234568,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 29.442,
+          "true_peak_4x_dbtp": -8.699,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "c065a28ec7d7eaddae4a7c2fe9f5638f1a059ec3281f993407d8dc8718e82572",
+          "input_wav_sha256": "3d26f23c7aa754997a7e29b211104c8a7eee5ba3ef623a43dc972ddb5f692681"
+        },
+        {
+          "candidate_ordinal": 148,
+          "natural_duration_seconds": 16.688,
+          "compacted_duration_seconds": 14.036083,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.331909,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 30.514,
+          "true_peak_4x_dbtp": -8.757,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "850e3977f5804967bfbee95f2e242634d5bab6f5a65494b6263c60833fce0cff",
+          "input_wav_sha256": "3191d371e7189d6734700572fd852e41e6a270b846c0709d662f3117aa264102"
+        },
+        {
+          "candidate_ordinal": 149,
+          "natural_duration_seconds": 18.672,
+          "compacted_duration_seconds": 15.817208,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.452592,
+          "sustained_silence_excess_ratio": 0.044888,
+          "snr_db": 32.986,
+          "true_peak_4x_dbtp": -10.645,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "084b087a9e05cb4f7c45ecb453776302f7ff814be2efc973f5681c6f80b29fb3",
+          "input_wav_sha256": "9e7841b2cc94b5f775ecc6754a751c94ee30050aecc78950e425ad1fb3385664"
+        },
+        {
+          "candidate_ordinal": 150,
+          "natural_duration_seconds": 13.22775,
+          "compacted_duration_seconds": 10.089458,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.481188,
+          "sustained_silence_excess_ratio": 0.103078,
+          "snr_db": 33.766,
+          "true_peak_4x_dbtp": -9.278,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "053cbf13d4e935006e0bf46e99c18000eacfd2b7c71cbeb68bf8187fdcb4a534",
+          "input_wav_sha256": "9ec3a777d1cc303e6c817c3e89ed9e7d4bef4a739bdd26118006e7f8c9270266"
+        },
+        {
+          "candidate_ordinal": 151,
+          "natural_duration_seconds": 10.273542,
+          "compacted_duration_seconds": 6.65075,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.468468,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 27.434,
+          "true_peak_4x_dbtp": -10.083,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "ab251fb2193ed618f7ce3e4690b234f3b5fe46a770f6ba66ec5f354e9e8aff6a",
+          "input_wav_sha256": "59d7a3eb568195af831531e07947564050de6fbc52e4c5ec2801c843aa693fa3"
+        },
+        {
+          "candidate_ordinal": 152,
+          "natural_duration_seconds": 11.048125,
+          "compacted_duration_seconds": 8.265208,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.468599,
+          "sustained_silence_excess_ratio": 0.056865,
+          "snr_db": 34.199,
+          "true_peak_4x_dbtp": -8.146,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "2eb76ce7c3ca1fe2ea01f99ddae12842f9d94f64bc70455c2ecb5fefca52d334",
+          "input_wav_sha256": "c142c0ac400975de8a5753214e8aa6c9b7fb838a66745f10baf96091cb3d07e8"
+        },
+        {
+          "candidate_ordinal": 153,
+          "natural_duration_seconds": 12.324333,
+          "compacted_duration_seconds": 9.5125,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.365546,
+          "sustained_silence_excess_ratio": 0.027332,
+          "snr_db": 35.035,
+          "true_peak_4x_dbtp": -8.527,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "6bed378384434483a6bb2063e35d60c60f3595dd634f30d254ea4f24bfd20c72",
+          "input_wav_sha256": "ce4df596ea2eeebcb59de2a7e56a87465aef23a8eb14eebf0ac525b0992d1bd0"
+        },
+        {
+          "candidate_ordinal": 154,
+          "natural_duration_seconds": 11.865833,
+          "compacted_duration_seconds": 10.149667,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.354331,
+          "sustained_silence_excess_ratio": 0.009853,
+          "snr_db": 33.813,
+          "true_peak_4x_dbtp": -8.682,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "2a0612c823c586b695ab9c4daf058ef971d5df7c566144d888998fc476ec8039",
+          "input_wav_sha256": "12a5406fc518746a756ce449dd0a61148828c0e43d78fc1cba249139db7e8550"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-855af7693e0574bd4089",
+      "runtime_character_id": "9f5804761c56",
+      "runtime_character_name": "安卡希雅",
+      "source_persona_id": "9f5804761c56",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "安卡希雅"
+      ],
+      "batch_names": [
+        "恋爱补丁"
+      ],
+      "accepted_candidate_count": 2,
+      "passing_candidate_count": 2,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 46,
+          "natural_duration_seconds": 14.36,
+          "compacted_duration_seconds": 14.36,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.267409,
+          "sustained_silence_excess_ratio": 0.012535,
+          "snr_db": 28.9,
+          "true_peak_4x_dbtp": -8.913,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "b89301794ee66f0498b3ce696f260adb21614058ad10cb0a411081fcc9b2d416",
+          "input_wav_sha256": "6fe22aefc49114df2442fe376fcd1ec0093a772e52286f5d83d3b711f04a3b99",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 45,
+          "natural_duration_seconds": 13.310625,
+          "compacted_duration_seconds": 13.310625,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.151652,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 31.804,
+          "true_peak_4x_dbtp": -8.855,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "7023806038138d250a2010da5f845176e45ae7b76b1056288ab9c66a83023788",
+          "input_wav_sha256": "ae50b0199919d62d65ebe322461c7388e687696715eb48ac6781844336bb2500",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 45,
+          "natural_duration_seconds": 13.310625,
+          "compacted_duration_seconds": 13.310625,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.151652,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 31.804,
+          "true_peak_4x_dbtp": -8.855,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "7023806038138d250a2010da5f845176e45ae7b76b1056288ab9c66a83023788",
+          "input_wav_sha256": "ae50b0199919d62d65ebe322461c7388e687696715eb48ac6781844336bb2500"
+        },
+        {
+          "candidate_ordinal": 46,
+          "natural_duration_seconds": 14.36,
+          "compacted_duration_seconds": 14.36,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.267409,
+          "sustained_silence_excess_ratio": 0.012535,
+          "snr_db": 28.9,
+          "true_peak_4x_dbtp": -8.913,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "b89301794ee66f0498b3ce696f260adb21614058ad10cb0a411081fcc9b2d416",
+          "input_wav_sha256": "6fe22aefc49114df2442fe376fcd1ec0093a772e52286f5d83d3b711f04a3b99"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-af32ed55084c5d592920",
+      "runtime_character_id": "a2ffc5b44d7f",
+      "runtime_character_name": "芙提雅",
+      "source_persona_id": "a2ffc5b44d7f",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "芙提雅"
+      ],
+      "batch_names": [
+        "灵感大爆发"
+      ],
+      "accepted_candidate_count": 6,
+      "passing_candidate_count": 5,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 109,
+          "natural_duration_seconds": 16.081333,
+          "compacted_duration_seconds": 15.51,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.270619,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 30.497,
+          "true_peak_4x_dbtp": -9.032,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "16d822b1d1afd9ce178090a00ea426c99d332c936972d9e81e99e8f15fd443b8",
+          "input_wav_sha256": "d2727d25f79ed296ae5c635f25e22f8008e06239868ab4367b340c982bd60059",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 108,
+          "natural_duration_seconds": 13.890542,
+          "compacted_duration_seconds": 13.890542,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.267626,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 31.248,
+          "true_peak_4x_dbtp": -8.983,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "84ad5533a6cf4f285409039c84f80c5c6118f2946db4e957d3bd96c5abcd173f",
+          "input_wav_sha256": "b417227abecf781edf5bd7c7feaf3f71aecad4d8b8c379bd3d07f59f5504fd3f",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 105,
+          "natural_duration_seconds": 11.155292,
+          "compacted_duration_seconds": 11.155292,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.293907,
+          "sustained_silence_excess_ratio": 0.013447,
+          "snr_db": 28.409,
+          "true_peak_4x_dbtp": -9.072,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "74810bbf8661f903fdcb090befb232b10352ad3e8ae7ac030be5321dfcffe713",
+          "input_wav_sha256": "fa97fff0db0e8af03aabac1a2d165dd24b8c02802ce41d354b8839d91439e7ae"
+        },
+        {
+          "candidate_ordinal": 106,
+          "natural_duration_seconds": 11.890833,
+          "compacted_duration_seconds": 11.890833,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.284034,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 28.534,
+          "true_peak_4x_dbtp": -9.079,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "bcc53b4006d93631aec957d629ae93239521ea6dca6b14c647f746cecb886e35",
+          "input_wav_sha256": "885b77f9c747f54e5a0fa885e8ee4a1ebf3b6f1e0d0b655cd6bdf70c73220b28"
+        },
+        {
+          "candidate_ordinal": 107,
+          "natural_duration_seconds": 15.469958,
+          "compacted_duration_seconds": 13.464333,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.283383,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 28.472,
+          "true_peak_4x_dbtp": -9.152,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "71f85916c8b1595bb3ad2c29bd7e8dd4b0e94f65cc163e3eb22adcf5cfaf27bd",
+          "input_wav_sha256": "1430fb4c05be6eabef58647a62ec575a312c90e41639214d8c24cf25f3d0c9cd"
+        },
+        {
+          "candidate_ordinal": 108,
+          "natural_duration_seconds": 13.890542,
+          "compacted_duration_seconds": 13.890542,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.267626,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 31.248,
+          "true_peak_4x_dbtp": -8.983,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "84ad5533a6cf4f285409039c84f80c5c6118f2946db4e957d3bd96c5abcd173f",
+          "input_wav_sha256": "b417227abecf781edf5bd7c7feaf3f71aecad4d8b8c379bd3d07f59f5504fd3f"
+        },
+        {
+          "candidate_ordinal": 109,
+          "natural_duration_seconds": 16.081333,
+          "compacted_duration_seconds": 15.51,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.270619,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 30.497,
+          "true_peak_4x_dbtp": -9.032,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "16d822b1d1afd9ce178090a00ea426c99d332c936972d9e81e99e8f15fd443b8",
+          "input_wav_sha256": "d2727d25f79ed296ae5c635f25e22f8008e06239868ab4367b340c982bd60059"
+        },
+        {
+          "candidate_ordinal": 110,
+          "natural_duration_seconds": 9.428333,
+          "compacted_duration_seconds": 9.428333,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.233051,
+          "sustained_silence_excess_ratio": 0.005303,
+          "snr_db": 27.954,
+          "true_peak_4x_dbtp": -9.02,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "773c159c86e954b67a57bc792b8b28d04d60800641d4107797051de1cd145fe2",
+          "input_wav_sha256": "d3ef4d9e3b0cb6f6abbf94d710b5b7e94179eaf61b0b9ce79a69046bd1448552"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-d3afe65950a669d0a737",
+      "runtime_character_id": "ca0144ccd81b",
+      "runtime_character_name": "里芙",
+      "source_persona_id": "ca0144ccd81b",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "里芙"
+      ],
+      "batch_names": [
+        "海姆达尔最广阔的天地"
+      ],
+      "accepted_candidate_count": 7,
+      "passing_candidate_count": 5,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 155,
+          "natural_duration_seconds": 15.602875,
+          "compacted_duration_seconds": 15.026417,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.328457,
+          "sustained_silence_excess_ratio": 0.037268,
+          "snr_db": 32.065,
+          "true_peak_4x_dbtp": -9.081,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "f3e2f7c9c2062fefc29defd3ec40844613b32cfbaee31539fdeb41caca101ad9",
+          "input_wav_sha256": "72f7b8b62d1ed08b9b6e8f346687555ff0afe336a12b9d191513f26f167527e1",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 156,
+          "natural_duration_seconds": 15.801083,
+          "compacted_duration_seconds": 14.362833,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.340751,
+          "sustained_silence_excess_ratio": 0.025761,
+          "snr_db": 32.705,
+          "true_peak_4x_dbtp": -8.989,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "c3ce69dcf3b107a465b222ca2fa2f7f53c1c371466c3da7ad96f0bdadfb930da",
+          "input_wav_sha256": "64fcc1a714c3384080918039ff36e8a88036480f2e0b21432b3097fd43e01203",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 155,
+          "natural_duration_seconds": 15.602875,
+          "compacted_duration_seconds": 15.026417,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.328457,
+          "sustained_silence_excess_ratio": 0.037268,
+          "snr_db": 32.065,
+          "true_peak_4x_dbtp": -9.081,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "f3e2f7c9c2062fefc29defd3ec40844613b32cfbaee31539fdeb41caca101ad9",
+          "input_wav_sha256": "72f7b8b62d1ed08b9b6e8f346687555ff0afe336a12b9d191513f26f167527e1"
+        },
+        {
+          "candidate_ordinal": 156,
+          "natural_duration_seconds": 15.801083,
+          "compacted_duration_seconds": 14.362833,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.340751,
+          "sustained_silence_excess_ratio": 0.025761,
+          "snr_db": 32.705,
+          "true_peak_4x_dbtp": -8.989,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "c3ce69dcf3b107a465b222ca2fa2f7f53c1c371466c3da7ad96f0bdadfb930da",
+          "input_wav_sha256": "64fcc1a714c3384080918039ff36e8a88036480f2e0b21432b3097fd43e01203"
+        },
+        {
+          "candidate_ordinal": 157,
+          "natural_duration_seconds": 9.342292,
+          "compacted_duration_seconds": 8.512958,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.488263,
+          "sustained_silence_excess_ratio": 0.104547,
+          "snr_db": 33.82,
+          "true_peak_4x_dbtp": -9.009,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "abed9214b41f1e8b0da9f0731a208b384689bfcfc1895d16374c7b075cc88703",
+          "input_wav_sha256": "bfa57500da9be09b785bbb9e4ad90e8e60f7b847128a0700079c4cf20440d857"
+        },
+        {
+          "candidate_ordinal": 158,
+          "natural_duration_seconds": 13.69525,
+          "compacted_duration_seconds": 12.115583,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.391089,
+          "sustained_silence_excess_ratio": 0.025587,
+          "snr_db": 29.93,
+          "true_peak_4x_dbtp": -10.687,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "b2ca3e85470d46552227afab35640f52cd7853f861f2215f8c1dd354b4aad7d2",
+          "input_wav_sha256": "3d88a2dc09007ab5878b3a0f69241ac0247c9fa3f5aeb68c99460bc46a210ab6"
+        },
+        {
+          "candidate_ordinal": 159,
+          "natural_duration_seconds": 15.9555,
+          "compacted_duration_seconds": 13.906583,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.387931,
+          "sustained_silence_excess_ratio": 0.089166,
+          "snr_db": 32.2,
+          "true_peak_4x_dbtp": -10.013,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "dfffe2ce0219743287b19af9c2db4cbde905ee7554caa8f22c4e305cee97ec75",
+          "input_wav_sha256": "655c6beb1a6634445886aa2ace2a0a75a5f7744cbca581d63c8d564d4aae3899"
+        },
+        {
+          "candidate_ordinal": 160,
+          "natural_duration_seconds": 17.931625,
+          "compacted_duration_seconds": 16.983083,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.376471,
+          "sustained_silence_excess_ratio": 0.012954,
+          "snr_db": 31.277,
+          "true_peak_4x_dbtp": -10.002,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "08deb72e0f5e2518328840bedff482544ee6ac6452b9b2db6f04abce3119de83",
+          "input_wav_sha256": "ea6700870ca28500693a30381c8e6ecd69cf5bf0dc7bb031ccc3a51612c8bfe6"
+        },
+        {
+          "candidate_ordinal": 161,
+          "natural_duration_seconds": 11.144958,
+          "compacted_duration_seconds": 7.997042,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.3275,
+          "sustained_silence_excess_ratio": 0.013755,
+          "snr_db": 28.546,
+          "true_peak_4x_dbtp": -10.485,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "94700318eab15ce272bb1e360d0677a2e1064148552a7365744e00d8d48572fc",
+          "input_wav_sha256": "4480aa0458ecab524af835927bd700184ddaaf9e17b10e93c19e5ec746e29e88"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-6a123b077c8ddb49a169",
+      "runtime_character_id": "cf0569ac6de9",
+      "runtime_character_name": "肴",
+      "source_persona_id": "cf0569ac6de9",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "肴"
+      ],
+      "batch_names": [
+        "一起醒来，一起下班"
+      ],
+      "accepted_candidate_count": 8,
+      "passing_candidate_count": 6,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 99,
+          "natural_duration_seconds": 14.753917,
+          "compacted_duration_seconds": 14.753917,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.379404,
+          "sustained_silence_excess_ratio": 0.007456,
+          "snr_db": 31.235,
+          "true_peak_4x_dbtp": -9.006,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "c5d66295a095141b9f84e94d728e5b81063f4324ccb4c476571d167c47679cb8",
+          "input_wav_sha256": "b149695b864716bce42449dd0589c76768dd93c0dad53aefbda031255699c112",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 93,
+          "natural_duration_seconds": 13.96,
+          "compacted_duration_seconds": 13.96,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.369628,
+          "sustained_silence_excess_ratio": 0.02149,
+          "snr_db": 33.834,
+          "true_peak_4x_dbtp": -9.008,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "0dda4ade3e1355277ee494b6bdd5abc59bb431aef99dfb57b186f553f94cc47c",
+          "input_wav_sha256": "28194a5bf95703c2c9147486f8344da9701b1da1ba77a15957c209a8c096cd4b",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 93,
+          "natural_duration_seconds": 13.96,
+          "compacted_duration_seconds": 13.96,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.369628,
+          "sustained_silence_excess_ratio": 0.02149,
+          "snr_db": 33.834,
+          "true_peak_4x_dbtp": -9.008,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "0dda4ade3e1355277ee494b6bdd5abc59bb431aef99dfb57b186f553f94cc47c",
+          "input_wav_sha256": "28194a5bf95703c2c9147486f8344da9701b1da1ba77a15957c209a8c096cd4b"
+        },
+        {
+          "candidate_ordinal": 94,
+          "natural_duration_seconds": 11.997583,
+          "compacted_duration_seconds": 11.997583,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.321667,
+          "sustained_silence_excess_ratio": 0.008335,
+          "snr_db": 29.305,
+          "true_peak_4x_dbtp": -10.242,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "ec3f8dca5141c5c510deba172d799c8cf1edb2814d34e0aeef474be1e13278ed",
+          "input_wav_sha256": "928780fbfdf5574d02513e824ebb48c3d998201c81896f9499ce1011908a20ab"
+        },
+        {
+          "candidate_ordinal": 95,
+          "natural_duration_seconds": 21.498708,
+          "compacted_duration_seconds": 21.498708,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.36093,
+          "sustained_silence_excess_ratio": 0.057213,
+          "snr_db": 32.409,
+          "true_peak_4x_dbtp": -8.865,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "67e28989b1008beedf05dad078300a59835c26bd5eb4409bfdd347f756a68939",
+          "input_wav_sha256": "2666f5c74e1e1ee67421dc395d951e8d38d3c524b3de89cfa5441414a120e745"
+        },
+        {
+          "candidate_ordinal": 96,
+          "natural_duration_seconds": 9.379708,
+          "compacted_duration_seconds": 9.379708,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.189765,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 31.879,
+          "true_peak_4x_dbtp": -8.943,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "ba0ea4039195fd7b9f44d483626ff35fba820355d5130d77d31f00c893b43cba",
+          "input_wav_sha256": "e86ceacb1c89e66b78d0007bff76891252c02ed8b475b4d0ef1b1370a5452b97"
+        },
+        {
+          "candidate_ordinal": 97,
+          "natural_duration_seconds": 11.523958,
+          "compacted_duration_seconds": 11.523958,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.292894,
+          "sustained_silence_excess_ratio": 0.00781,
+          "snr_db": 30.253,
+          "true_peak_4x_dbtp": -9.608,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "56473fc59e34d49658b4cf3bbfb9f829c50477170506817b2d3b2ca33f6eb8d3",
+          "input_wav_sha256": "477a9d0c216f8b75a83dd7765450ac968e49260f4d7d61e0e84e50026c28ef4f"
+        },
+        {
+          "candidate_ordinal": 98,
+          "natural_duration_seconds": 11.721833,
+          "compacted_duration_seconds": 11.721833,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.337308,
+          "sustained_silence_excess_ratio": 0.041802,
+          "snr_db": 31.764,
+          "true_peak_4x_dbtp": -9.004,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "61bdeb895b0e669b8949f995391c817376c5a4e9ddd1ae51c3e35ace1c37a2a0",
+          "input_wav_sha256": "5251163a3e6a6afc17dac18e04a550e4166734ec8ef07c40fbcc677a998e83c7"
+        },
+        {
+          "candidate_ordinal": 99,
+          "natural_duration_seconds": 14.753917,
+          "compacted_duration_seconds": 14.753917,
+          "internal_silence_compaction_cut_count": 0,
+          "raw_frame_silence_ratio": 0.379404,
+          "sustained_silence_excess_ratio": 0.007456,
+          "snr_db": 31.235,
+          "true_peak_4x_dbtp": -9.006,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "c5d66295a095141b9f84e94d728e5b81063f4324ccb4c476571d167c47679cb8",
+          "input_wav_sha256": "b149695b864716bce42449dd0589c76768dd93c0dad53aefbda031255699c112"
+        },
+        {
+          "candidate_ordinal": 100,
+          "natural_duration_seconds": 14.29125,
+          "compacted_duration_seconds": 13.77125,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.38897,
+          "sustained_silence_excess_ratio": 0.06027,
+          "snr_db": 32.375,
+          "true_peak_4x_dbtp": -8.986,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "6810751e6d60f45ab338e75f69230ff77986498a5928c8d588a4f20aa771447f",
+          "input_wav_sha256": "42101ff32f5dce717f589f08bb2c8bfe0b8a171aa9a64e34be24c10f7bbc6fcf"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-9326b8fe79cc6353ce0d",
+      "runtime_character_id": "d5ecfceba959",
+      "runtime_character_name": "克罗瑞娜",
+      "source_persona_id": "d5ecfceba959",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "克罗瑞娜"
+      ],
+      "batch_names": [
+        "绯月·大厅语音"
+      ],
+      "accepted_candidate_count": 4,
+      "passing_candidate_count": 1,
+      "parent_disjoint_ab_found": false,
+      "best_ab": [],
+      "candidates": [
+        {
+          "candidate_ordinal": 9,
+          "natural_duration_seconds": 9.04,
+          "compacted_duration_seconds": 7.88,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.467005,
+          "sustained_silence_excess_ratio": 0.034264,
+          "snr_db": 37.108,
+          "true_peak_4x_dbtp": -4.368,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "200f63513981544e1304f205e0310e3d9d63fdc8563b5b45b1823e3d3c2c9768",
+          "input_wav_sha256": "36ba49ec4bf7c690a5dcbe86d4b27fa03f5691a50bba6c784ba818302b8df37a"
+        },
+        {
+          "candidate_ordinal": 10,
+          "natural_duration_seconds": 9.04,
+          "compacted_duration_seconds": 8.5,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.381176,
+          "sustained_silence_excess_ratio": 0.0,
+          "snr_db": 36.331,
+          "true_peak_4x_dbtp": -2.358,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "duration_10_to_20_seconds"
+          ],
+          "authoritative_transcript_utf8_sha256": "f924c809b10d1d2bde90ddacba6a20a49f3426803d7e7b72736cae3e47293bcc",
+          "input_wav_sha256": "1468f57d1d65e69cf0364852ef340e2c98ba4a8a0c698db6f2117a85cf190ea5"
+        },
+        {
+          "candidate_ordinal": 12,
+          "natural_duration_seconds": 12.58,
+          "compacted_duration_seconds": 11.22,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.345811,
+          "sustained_silence_excess_ratio": 0.024064,
+          "snr_db": 36.858,
+          "true_peak_4x_dbtp": -0.341,
+          "all_quality_gates_passed": false,
+          "failed_quality_gates": [
+            "true_peak_at_or_below_minus_1_dbtp"
+          ],
+          "authoritative_transcript_utf8_sha256": "a08944684d3ea7f652bab5525bbc0fb93475e687efbf865a4443f6f0c11cbc04",
+          "input_wav_sha256": "469b7b2e859f2bbe454258451e26cc6741d95ad754524f49fba3f9188d420de5"
+        },
+        {
+          "candidate_ordinal": 13,
+          "natural_duration_seconds": 13.779958,
+          "compacted_duration_seconds": 13.099958,
+          "internal_silence_compaction_cut_count": 1,
+          "raw_frame_silence_ratio": 0.245802,
+          "sustained_silence_excess_ratio": 0.008397,
+          "snr_db": 36.496,
+          "true_peak_4x_dbtp": -2.187,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "3d2629a00eac3ececac855b7f97161376c154af26353f4368add8d1ee0bc42fb",
+          "input_wav_sha256": "d208603101071d3411e612dc5b34d1ea6fee64de041d13d02ba7fb1b985c2839"
+        }
+      ]
+    },
+    {
+      "profile_id": "voice-dialogue-profile-7667c84446fa560c4d37",
+      "runtime_character_id": "daab0f4cceb4",
+      "runtime_character_name": "茉莉安",
+      "source_persona_id": "daab0f4cceb4",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "role_names": [
+        "茉莉安"
+      ],
+      "batch_names": [
+        "共探终极"
+      ],
+      "accepted_candidate_count": 6,
+      "passing_candidate_count": 6,
+      "parent_disjoint_ab_found": true,
+      "best_ab": [
+        {
+          "candidate_ordinal": 129,
+          "natural_duration_seconds": 16.545375,
+          "compacted_duration_seconds": 14.985917,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.412,
+          "sustained_silence_excess_ratio": 0.107434,
+          "snr_db": 31.305,
+          "true_peak_4x_dbtp": -9.432,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "ddfc29200eee073d19babb906b48a2e430f297331fecca021de8ec5f8b6623e0",
+          "input_wav_sha256": "c3d71db75e12788337924d1a1f9d92065ef5df2f6ddb5298e880a5f8f624629e",
+          "slot": "A"
+        },
+        {
+          "candidate_ordinal": 131,
+          "natural_duration_seconds": 16.21,
+          "compacted_duration_seconds": 13.2535,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.280543,
+          "sustained_silence_excess_ratio": 0.047535,
+          "snr_db": 29.598,
+          "true_peak_4x_dbtp": -9.712,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "6ebd514f872306d611e4a3c1a4ebb25999a57d375930fdc33fbfe51a2ff7207f",
+          "input_wav_sha256": "cf74a58ab429c4553eecd4d625b571fbbd79e4781a007c77aee212dc0c78dbc1",
+          "slot": "B"
+        }
+      ],
+      "candidates": [
+        {
+          "candidate_ordinal": 126,
+          "natural_duration_seconds": 15.12,
+          "compacted_duration_seconds": 12.23625,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.369281,
+          "sustained_silence_excess_ratio": 0.049852,
+          "snr_db": 27.321,
+          "true_peak_4x_dbtp": -10.084,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "4af5c3d23952bdb0eccc95e29af01f459e18e90bc7521b8868f6ad549375251c",
+          "input_wav_sha256": "25ec63984a034d4a513ce6084ba17b616b01dafd44b04ce4b595a5834e0393ce"
+        },
+        {
+          "candidate_ordinal": 127,
+          "natural_duration_seconds": 13.997958,
+          "compacted_duration_seconds": 12.420792,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.344051,
+          "sustained_silence_excess_ratio": 0.057967,
+          "snr_db": 32.344,
+          "true_peak_4x_dbtp": -9.129,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "c43f53b92ede26388abaf2b6c697732a7d02eb8b5e0de3379d4336edc8917761",
+          "input_wav_sha256": "b3eb31dc1ecec1322b9368a70269b1a6f3218c3dbbd2a507c5ef4655db5319f6"
+        },
+        {
+          "candidate_ordinal": 129,
+          "natural_duration_seconds": 16.545375,
+          "compacted_duration_seconds": 14.985917,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.412,
+          "sustained_silence_excess_ratio": 0.107434,
+          "snr_db": 31.305,
+          "true_peak_4x_dbtp": -9.432,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "ddfc29200eee073d19babb906b48a2e430f297331fecca021de8ec5f8b6623e0",
+          "input_wav_sha256": "c3d71db75e12788337924d1a1f9d92065ef5df2f6ddb5298e880a5f8f624629e"
+        },
+        {
+          "candidate_ordinal": 130,
+          "natural_duration_seconds": 13.317542,
+          "compacted_duration_seconds": 11.559875,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.410035,
+          "sustained_silence_excess_ratio": 0.134084,
+          "snr_db": 30.75,
+          "true_peak_4x_dbtp": -8.95,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "4d52b12eeab4bbef86a357f67e9f64c9fde77ab81c067fa1e8df5f678a6a77ac",
+          "input_wav_sha256": "a8c8ad71978d0998e588f3b93314acb7f2a2aff57e100173dc2e554086e4ad4b"
+        },
+        {
+          "candidate_ordinal": 131,
+          "natural_duration_seconds": 16.21,
+          "compacted_duration_seconds": 13.2535,
+          "internal_silence_compaction_cut_count": 3,
+          "raw_frame_silence_ratio": 0.280543,
+          "sustained_silence_excess_ratio": 0.047535,
+          "snr_db": 29.598,
+          "true_peak_4x_dbtp": -9.712,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "6ebd514f872306d611e4a3c1a4ebb25999a57d375930fdc33fbfe51a2ff7207f",
+          "input_wav_sha256": "cf74a58ab429c4553eecd4d625b571fbbd79e4781a007c77aee212dc0c78dbc1"
+        },
+        {
+          "candidate_ordinal": 132,
+          "natural_duration_seconds": 19.945458,
+          "compacted_duration_seconds": 18.643917,
+          "internal_silence_compaction_cut_count": 2,
+          "raw_frame_silence_ratio": 0.436227,
+          "sustained_silence_excess_ratio": 0.008582,
+          "snr_db": 29.541,
+          "true_peak_4x_dbtp": -8.995,
+          "all_quality_gates_passed": true,
+          "failed_quality_gates": [],
+          "authoritative_transcript_utf8_sha256": "c85e4f22af1eb6d4ed6024be05cafbcfae3bbcba58bd0461d23e20d6832666de",
+          "input_wav_sha256": "0dbe5d99d4481c5f9c8f04cd9d6728dc3cf508ea34d92483d914f63bdc666eae"
+        }
+      ]
+    }
+  ],
+  "profile_set_sha256": "afc767ab99e3fff633c4fed36183bfa2dceebffc39f5f899696544fb1d9cd941",
+  "summary": {
+    "accepted_candidate_count": 129,
+    "excluded_candidate_count": 32,
+    "profiles_with_complete_ab_count": 21,
+    "profiles_without_complete_ab_count": 2
+  },
+  "authoritative_assertions": {
+    "screen_text_is_authoritative": true,
+    "authoritative_transcript_modified": false,
+    "asr_used_as_transcript_source": false,
+    "all_detected_voiced_regions_retained": true,
+    "only_low_energy_silence_compacted": true,
+    "normal_pauses_up_to_750ms_tolerated": true,
+    "legacy_raw_silence_ratio_used_as_gate": false,
+    "parent_candidate_count_separate_from_internal_cut_count": true,
+    "excluded_candidates_reintroduced": false,
+    "new_runtime_character_created": false,
+    "all_profiles_share_one_fixed_policy": true,
+    "qinno_morso_runtime_character_split": false
+  },
+  "scope_grants": {
+    "same_policy_local_recording_expansion_approved": true,
+    "automatic_signal_analysis_allowed": true
+  },
+  "scope_limits": {
+    "training_use_approved": false,
+    "voice_cloning_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false,
+    "public_rollout_allowed": false
+  },
+  "executed": true,
+  "manifest_sha256": "5c8eced4da50638c2f2016f002fa9803528e2c718d00303c39a1a1ee50b2ccce"
+}

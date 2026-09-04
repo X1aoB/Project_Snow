@@ -1,3 +1,6 @@
 *.sh text eol=lf
 App/ops/project-snow-release text eol=lf
 App/config/origin-edge/*.pem binary
+Data/Voice/**/*.wav filter=lfs diff=lfs merge=lfs -text
+Data/Voice/**/*.mp3 filter=lfs diff=lfs merge=lfs -text
+Data/Voice/**/*.mkv filter=lfs diff=lfs merge=lfs -text

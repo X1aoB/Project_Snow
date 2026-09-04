@@ -1,0 +1,246 @@
+{
+  "schema_version": "project-snow-local-voice-preference-round-1",
+  "decision_submission_schema_version": "project-snow-local-voice-preference-decision-1",
+  "policy_version": "project-snow-pairwise-rejection-tournament-1",
+  "round_id": "voice-preference-round-2a1107a19b7d12fa7756",
+  "round_index": 2,
+  "prepared_at": "2026-09-04T11:22:07.4813955+08:00",
+  "status": "awaiting_local_pairwise_rejection_decisions",
+  "source": {
+    "previous_round_id": "voice-preference-round-77f40486985a7f7304bb",
+    "previous_round_manifest_sha256": "f67610e8f9cb1ac9dc6cf8d5ad95fceca0420d5b26fe855b78a56edda8fad669",
+    "previous_decision_receipt_sha256": "3bff4d6aabc0646a721db06f0a7b6be4ae3283147aa45cef7bf9f3bf071817b0",
+    "previous_decision_set_sha256": "0e77d7d25c08d481eda66764d5aea6db15702eccb677fe30ed10787c4e0abea3",
+    "blind_test_run_id": "voice-provider-blind-test-run-752a4dd81a874a263de7",
+    "challenger_run_manifest_sha256": "21caadbbf4a86cb008980399ed098f4a4079e70c8a55f6bf044436a240658d8a"
+  },
+  "privacy_contract": {
+    "candidate_mapping_included": false,
+    "provider_voice_ids_included": false,
+    "candidate_a_b_labels_included": false,
+    "workspace_id_included": false,
+    "local_review_only": true,
+    "publication_authorized": false
+  },
+  "generation_contract": {
+    "provider_calls_performed_for_this_round": true,
+    "new_synthesis_outputs_created": 7,
+    "reused_existing_blind_outputs": 5,
+    "provider_usage_characters": 248,
+    "incremental_provider_cost_usd": "0.0035551544",
+    "incremental_provider_cost_ceiling_usd": "0.01",
+    "instruction_control_supported_by_target_model": false,
+    "instructions_sent": false,
+    "steering_scope": "punctuation_only_same_lexical_text",
+    "next_provider_generation_requires_complete_human_submission": true,
+    "provider_learns_from_rejection": false
+  },
+  "decision_contract": {
+    "decision_type": "pairwise_preference_with_absolute_usability_gate",
+    "choices": [
+      "first_sample",
+      "second_sample",
+      "reject_both"
+    ],
+    "usability_values": [
+      "usable",
+      "not_usable"
+    ],
+    "rejection_reasons": [
+      "wrong_voice_identity",
+      "wrong_expression_or_character_fit",
+      "pronunciation_or_segmentation_error",
+      "synthesis_artifact"
+    ],
+    "numeric_scoring_used": false,
+    "relative_winner_may_still_be_not_usable": true,
+    "consecutive_champion_wins_required_before_final_acceptance": 3,
+    "unseen_validation_required_before_final_acceptance": true,
+    "same_voice_identity_rejection_limit_before_reenrollment": 2
+  },
+  "paralinguistic_event_lane": {
+    "ordinals": [
+      2,
+      3
+    ],
+    "included": false,
+    "event_bank_eligibility": "pending_human_event_qa"
+  },
+  "cases": [
+    {
+      "sequence": 1,
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "case_id": "vidya-neutral-short",
+      "source_case_index": 1,
+      "style_anchor": "neutral",
+      "text": "今天的状态很稳定，我们可以按计划继续。",
+      "samples": [
+        {
+          "display_order": 1,
+          "opaque_label_id": "sample-ngz7",
+          "display_label": "样本 NGZ7",
+          "audio_relative_path": "audio/vidya/01-sample-ngz7.wav",
+          "duration_seconds": 4.56,
+          "wav_sha256": "afa73253f0e862ff52be94e0094491d3aa5b6b290b71b72cd290576af5b5870c",
+          "full_scale_sample_count": 0
+        },
+        {
+          "display_order": 2,
+          "opaque_label_id": "sample-6g6p",
+          "display_label": "样本 6G6P",
+          "audio_relative_path": "audio/vidya/01-sample-6g6p.wav",
+          "duration_seconds": 4.16,
+          "wav_sha256": "966e93660612d53005cc5a378f01e134be3410295bd41e0425278f2710c31a42",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "sequence": 2,
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "case_id": "vidya-breathy-lexical",
+      "source_case_index": 4,
+      "style_anchor": "restrained_breathy_lexical",
+      "text": "靠近一点，我只想把这句话轻轻说给你听。",
+      "samples": [
+        {
+          "display_order": 1,
+          "opaque_label_id": "sample-a5kz",
+          "display_label": "样本 A5KZ",
+          "audio_relative_path": "audio/vidya/02-sample-a5kz.wav",
+          "duration_seconds": 5.2,
+          "wav_sha256": "b300d04798a25a2ad0bbb00e6c85aa916146d04bdfa8d31cec1127907755d0ee",
+          "full_scale_sample_count": 0
+        },
+        {
+          "display_order": 2,
+          "opaque_label_id": "sample-v5ju",
+          "display_label": "样本 V5JU",
+          "audio_relative_path": "audio/vidya/02-sample-v5ju.wav",
+          "duration_seconds": 4.88,
+          "wav_sha256": "63e43a7f8aa1ad524d6a12a0eff17ca28965564e3528523f979e3156be2641c2",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "sequence": 3,
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "case_id": "vidya-heightened",
+      "source_case_index": 5,
+      "style_anchor": "heightened",
+      "text": "终于等到你了，别想让我现在移开视线！",
+      "samples": [
+        {
+          "display_order": 1,
+          "opaque_label_id": "sample-bjkv",
+          "display_label": "样本 BJKV",
+          "audio_relative_path": "audio/vidya/03-sample-bjkv.wav",
+          "duration_seconds": 3.52,
+          "wav_sha256": "7cce04b06e213da6844b45ac70c39a91ef574b54687269fa29a389061a86c96f",
+          "full_scale_sample_count": 0
+        },
+        {
+          "display_order": 2,
+          "opaque_label_id": "sample-jmnt",
+          "display_label": "样本 JMNT",
+          "audio_relative_path": "audio/vidya/03-sample-jmnt.wav",
+          "duration_seconds": 3.68,
+          "wav_sha256": "3a08f06ea6cc8ebf0329e72cb0f82c9e74437750945fa7c4ac5f984cb80028cf",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "sequence": 4,
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "case_id": "chenxing-neutral-short",
+      "source_case_index": 1,
+      "style_anchor": "neutral",
+      "text": "设备运行正常，下一项检查可以开始。",
+      "samples": [
+        {
+          "display_order": 1,
+          "opaque_label_id": "sample-n7k7",
+          "display_label": "样本 N7K7",
+          "audio_relative_path": "audio/chenxing/04-sample-n7k7.wav",
+          "duration_seconds": 4.48,
+          "wav_sha256": "99e9e099260f126966b748cc4ccb36ee8115f9499893731cebff6fcb3825492c",
+          "full_scale_sample_count": 0
+        },
+        {
+          "display_order": 2,
+          "opaque_label_id": "sample-su4s",
+          "display_label": "样本 SU4S",
+          "audio_relative_path": "audio/chenxing/04-sample-su4s.wav",
+          "duration_seconds": 3.36,
+          "wav_sha256": "976adcc313ff39dd61922ac14eb8fe585dd5e4d78c5a86c7ba488b2b975f01d9",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "sequence": 5,
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "case_id": "chenxing-breathy-lexical",
+      "source_case_index": 4,
+      "style_anchor": "restrained_breathy_lexical",
+      "text": "声音放轻些，我就在这里，不必惊动其他人。",
+      "samples": [
+        {
+          "display_order": 1,
+          "opaque_label_id": "sample-e2an",
+          "display_label": "样本 E2AN",
+          "audio_relative_path": "audio/chenxing/05-sample-e2an.wav",
+          "duration_seconds": 4.48,
+          "wav_sha256": "73e342a38e561eaf8dd82fa2bbf3a75cd738400bbe755717f275d27a6fe26d75",
+          "full_scale_sample_count": 0
+        },
+        {
+          "display_order": 2,
+          "opaque_label_id": "sample-uhzn",
+          "display_label": "样本 UHZN",
+          "audio_relative_path": "audio/chenxing/05-sample-uhzn.wav",
+          "duration_seconds": 4.96,
+          "wav_sha256": "ce84d1c8c5a699a4a72e4ece66bd61ec7b3fcdbb1caa87fcb219925f798f624e",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "sequence": 6,
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "case_id": "chenxing-heightened",
+      "source_case_index": 5,
+      "style_anchor": "heightened",
+      "text": "看着我，保持清醒，我们一定能一起回去！",
+      "samples": [
+        {
+          "display_order": 1,
+          "opaque_label_id": "sample-egjh",
+          "display_label": "样本 EGJH",
+          "audio_relative_path": "audio/chenxing/06-sample-egjh.wav",
+          "duration_seconds": 4.24,
+          "wav_sha256": "cac7ab38d0a4cdaaed3c09b1cc10d4f2f6aca86e40094e45b6f1e9e80b95025b",
+          "full_scale_sample_count": 0
+        },
+        {
+          "display_order": 2,
+          "opaque_label_id": "sample-t3jb",
+          "display_label": "样本 T3JB",
+          "audio_relative_path": "audio/chenxing/06-sample-t3jb.wav",
+          "duration_seconds": 4.64,
+          "wav_sha256": "e46a1b3634b1959a551aacc98c38a3110e81d24b2d872d9918eec7233eb637ab",
+          "full_scale_sample_count": 0
+        }
+      ]
+    }
+  ],
+  "manifest_sha256": "e944bafb2d457d5a33895cd7f1005ea4e563db887847939060ec752df3dc0332"
+}

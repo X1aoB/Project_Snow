@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Project Snow 长对话样本对照</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 20px;color:#20242b;background:#f5f7fa}section{background:#fff;border:1px solid #d9dee8;border-radius:12px;padding:20px;margin:20px 0}.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}article{background:#f7f9fc;padding:12px;border-radius:8px}audio{width:100%}.text{white-space:normal}.metrics{color:#4a5568}.warning{padding:12px;background:#fff4d6;border-left:4px solid #d49b00}</style></head>
+<body><h1>Project Snow 长对话样本对照</h1>
+<p class="warning">仅用于本地自然节奏/安全静音压缩试听。未批准训练、声音克隆、Provider 注册、权利接受或公网发布。</p>
+<p>审核重点：压缩版是否出现吞字、切气口、节奏突兀或语义停顿被破坏。屏幕文本是逐字稿真值，ASR 不参与改写。</p>
+
+<section>
+  <h2>A · 奈莉德 · candidate 31</h2>
+  <p class="text">想要出入你的房间简直易如反掌，该说可爱的分析员不设防，还是有意为之呢？事实就是，你那双皮质手套也跟着我出了一趟任务。</p>
+  <p><a href="A/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="A/natural.wav"></audio><p>17.2155 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="A/compacted.wav"></audio><p>16.470167 秒；压缩切点 1 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 6.68%；原始逐帧静音比 37.14%（仅观察）；SNR 31.65 dB；true peak -8.97 dBTP。</p>
+</section>
+<section>
+  <h2>B · 奈莉德 · candidate 33</h2>
+  <p class="text">拿起床头柜上的水杯，像鉴赏藏品一样缓慢转动它，最终将目光锁定在杯口，那里有属于分析员的印记。</p>
+  <p><a href="B/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="B/natural.wav"></audio><p>17.339333 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="B/compacted.wav"></audio><p>13.421958 秒；压缩切点 4 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 1.64%；原始逐帧静音比 38.84%（仅观察）；SNR 29.546 dB；true peak -9.278 dBTP。</p>
+</section></body></html>

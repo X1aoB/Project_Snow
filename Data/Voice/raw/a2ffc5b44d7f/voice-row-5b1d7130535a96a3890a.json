@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-5b1d7130535a96a3890a",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 9,
+  "trigger": "接敌2",
+  "transcript": "敌人数量呈几何级增长，我是不是应该先躲一躲？",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/a/a5/oesae437dfm5690qaoy1mt7swfmvwnj.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 199619,
+  "content_sha256": "627a2d3ba76fe761854976aea3e78a0a0bf057e2f438e92dad4fce3a29f9e2c7",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

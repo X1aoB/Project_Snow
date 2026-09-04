@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-c37f5944fd9baaa546b8",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 28,
+  "trigger": "获得补给1",
+  "transcript": "坚持是有意义的。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/c/cb/i6ctkhw3p5pqs39i1butg55ggta5op3.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 99309,
+  "content_sha256": "ebd2ffe78c7214b099ca57f1b27c74b4fa3b0b5435a59aecf126dd73262110d6",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

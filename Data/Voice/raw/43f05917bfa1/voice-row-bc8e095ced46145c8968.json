@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-bc8e095ced46145c8968",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 37,
+  "trigger": "看板娘展示2",
+  "transcript": "我没经历过那样的痛苦，所以没有资格劝别人放下。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/1/1d/hat4wzg6eq2nuadrnv8y79eydad33wu.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 326052,
+  "content_sha256": "816cbe25be875d3a239381c63bd0ec4dfccdaf645fcea9ee2ef0af5a59c4fced",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

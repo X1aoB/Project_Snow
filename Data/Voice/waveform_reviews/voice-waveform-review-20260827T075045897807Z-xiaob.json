@@ -1,0 +1,128 @@
+{
+  "schema_version": "project-snow-private-voice-waveform-review-1",
+  "review_id": "voice-waveform-review-20260827T075045897807Z-xiaob",
+  "recorded_at": "2026-08-27T07:50:45.897807+00:00",
+  "reviewer_id": "xiaob",
+  "composition_approval_id": "voice-composition-approval-20260827T070901664905Z-xiaob",
+  "composition_approval_receipt_sha256": "7e5e5ad35960b36c638244ca1f28dd3376abfaf9bb1402d543b505ad35f1f09f",
+  "reviewed_audio_set_sha256": "b1f940c59f5e93ac231cfb5ead4e01803b2e58439581a57468fddea150c66a2f",
+  "sample_count": 4,
+  "operator_assertions": {
+    "complete_waveforms_listened": true,
+    "decision": "pass"
+  },
+  "pair_source_overlap": [
+    {
+      "character_id": "43f05917bfa1",
+      "shared_source_candidate_ids": [
+        "voice-row-4d5bb54c0750a12e89ae",
+        "voice-row-94b30d26ce30779b60a4",
+        "voice-row-ab9a4ebfb34d068a8803"
+      ],
+      "shared_source_count": 3,
+      "a_source_count": 4,
+      "b_source_count": 4,
+      "shared_fraction_of_a": 0.75,
+      "shared_fraction_of_b": 0.75,
+      "ab_independence_assessment": "needs_new_plan_before_meaningful_ab_comparison"
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "shared_source_candidate_ids": [],
+      "shared_source_count": 0,
+      "a_source_count": 2,
+      "b_source_count": 3,
+      "shared_fraction_of_a": 0.0,
+      "shared_fraction_of_b": 0.0,
+      "ab_independence_assessment": "no_source_candidate_overlap_detected"
+    }
+  ],
+  "scope_limits": {
+    "purpose": "composite_waveform_internal_ab_listening_only",
+    "waveform_listening_passed": true,
+    "source_segment_review_overridden": false,
+    "composite_release_review_completed": false,
+    "ab_independence_approved": false,
+    "ab_winner_selected": false,
+    "automated_qc_overridden": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false
+  },
+  "samples": [
+    {
+      "sample_id": "voice-sample-enya-provisional-a",
+      "character_id": "43f05917bfa1",
+      "ab_slot": "A",
+      "source_candidate_ids": [
+        "voice-row-1862fef4395fce3bee06",
+        "voice-row-4d5bb54c0750a12e89ae",
+        "voice-row-94b30d26ce30779b60a4",
+        "voice-row-ab9a4ebfb34d068a8803"
+      ],
+      "audio_sha256": "20438615fdc80d38ff3b8f8ccf912bb1456549fbe48db691d48b938209a479c7",
+      "transcript_sha256": "7939644fd0cdcbfd179d09c9194888630f8e5b97617b4db336ec606cdc48f25c",
+      "qc_sha256": "77a18262221ae0f794f1ac79733b768a3fba00d263d267c276dc0f42608420a2",
+      "composition_processing_sha256": "b0481b674086c3558e912e636dbae181bbcb711188cd05266810d285da60f8cc",
+      "concatenation_sha256": "a342e9501c1217786a59c31ee669f6a58fd2d0699126b615c172d7d40556e916",
+      "metadata_basis_sha256": "e854c2337983712f9db30c0b0110b27679114406f39b86386b003ee14d917ba2",
+      "operator_decision": "pass",
+      "operator_note": ""
+    },
+    {
+      "sample_id": "voice-sample-enya-provisional-b",
+      "character_id": "43f05917bfa1",
+      "ab_slot": "B",
+      "source_candidate_ids": [
+        "voice-row-4d5bb54c0750a12e89ae",
+        "voice-row-82e471676e10fc4b9bca",
+        "voice-row-94b30d26ce30779b60a4",
+        "voice-row-ab9a4ebfb34d068a8803"
+      ],
+      "audio_sha256": "c0b69ecd09cae4213d887cfef5661c0954ba8ec64b2f1c4cdf3c6069ef7c9ed2",
+      "transcript_sha256": "c04e6fe5b4c53916ea56a2e6f7455a9dec2a496f39472b0f219203e57e63f780",
+      "qc_sha256": "10543ecc13a1e147c95050a42237db26b760775a691bb71537a3cf53b8a9ab87",
+      "composition_processing_sha256": "503618015587fdd1d7a3fcfdcd697ac3029fb8dd4222c8babc7d339844f56bc6",
+      "concatenation_sha256": "92169a1fbbe589d9feb731cee7adf87472f7b4dca3f99d87aa4b80fceae8adad",
+      "metadata_basis_sha256": "007f27b4fe145df55280d3891902e7478e1b9b0375e0b4f3a52b3afe821e4acf",
+      "operator_decision": "pass",
+      "operator_note": "为什么A和B内容是一样的"
+    },
+    {
+      "sample_id": "voice-sample-fritia-provisional-a",
+      "character_id": "a2ffc5b44d7f",
+      "ab_slot": "A",
+      "source_candidate_ids": [
+        "voice-row-250bea99b157a52fbd12",
+        "voice-row-7b0512ddf1ed64a6d8d7"
+      ],
+      "audio_sha256": "ff8daf42a488c257f9c4a56a3944b5915e21d49eee3feeff599e4e7c01805913",
+      "transcript_sha256": "ddda8644ad14c39bd5f4e7a662a89961f71c124508c80653653bffae9fc71c01",
+      "qc_sha256": "48c428d4f4ce39de8252f4e9ea2fe9f0e8f505164208653169838e5376429e8e",
+      "composition_processing_sha256": "544c51bbc0c87c10b7b69be121f152cb42c406fd33a6739b7cb83d4fbf06cfa0",
+      "concatenation_sha256": "a342e9501c1217786a59c31ee669f6a58fd2d0699126b615c172d7d40556e916",
+      "metadata_basis_sha256": "832218e778d095c83b0a0745b1053d840e76e46cb87215f614adab357af18ff1",
+      "operator_decision": "pass",
+      "operator_note": ""
+    },
+    {
+      "sample_id": "voice-sample-fritia-provisional-b",
+      "character_id": "a2ffc5b44d7f",
+      "ab_slot": "B",
+      "source_candidate_ids": [
+        "voice-row-b1c80000139018725991",
+        "voice-row-d2de3c49030408c4017d",
+        "voice-row-dfd89b4379c565dfb015"
+      ],
+      "audio_sha256": "0aaf9f71f55c04c8769b90ae8acdddf5b50da86c453338d43a065a7ce5050319",
+      "transcript_sha256": "d052fa5bdcac9613cb03692642386e254a3475458cd75ae8780ffac2acbd5a18",
+      "qc_sha256": "615d88bf2f521350ff0e2e946e95f7e70826e1240c554767863245b4eef5e9d9",
+      "composition_processing_sha256": "caacc5f7c3fdad26a231262044179f29b8be59cb22b25791f47351eb03eed139",
+      "concatenation_sha256": "92169a1fbbe589d9feb731cee7adf87472f7b4dca3f99d87aa4b80fceae8adad",
+      "metadata_basis_sha256": "c53a2e96f7c61d3dad8f404e2acbab5e37432161eb211f9daa711a0e0f462a12",
+      "operator_decision": "pass",
+      "operator_note": ""
+    }
+  ],
+  "receipt_sha256": "80dec5f7ef07c8fc9a0a6116674a3d05cea45e768ed0e358ee1f2070b18b57c7"
+}

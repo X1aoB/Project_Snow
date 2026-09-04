@@ -1,0 +1,122 @@
+{
+  "schema_version": "project-snow-private-voice-composite-1",
+  "sample_id": "voice-sample-fritia-provisional-b",
+  "character_id": "a2ffc5b44d7f",
+  "source_candidate_ids": [
+    "voice-row-b1c80000139018725991",
+    "voice-row-d2de3c49030408c4017d",
+    "voice-row-dfd89b4379c565dfb015"
+  ],
+  "source_form": {
+    "armor_id": "6e4cda85e2ad",
+    "armor_name": "小太阳",
+    "armor_semantics": "explicit_selected_armor_voice_source"
+  },
+  "source_clean_sha256": [
+    "d85267975628816946038d93006daf5c3a5f2fae7618a5d859ba7ed017fe4828",
+    "3b10f33d903014fbb184a82ba3cc2fde36f590d65bdc0a4758d25b30304b7314",
+    "c460ab4ae600d83bfd97225766999c99c8e0f2d940078a43a89a97e556e71853"
+  ],
+  "composition_processing": {
+    "method": {
+      "join_silence_ms": 150,
+      "internal_boundary_trim": {
+        "method": "reviewed_active_bounds_adaptive_v1",
+        "active_threshold_dbfs": -50.0,
+        "outer_boundaries_preserved": true,
+        "maximum_padding_ms": 300,
+        "minimum_padding_ms": 0,
+        "padding_step_ms": 10,
+        "selection": "largest_padding_that_passes_all_non_true_peak_qc_gates"
+      }
+    },
+    "selected_internal_padding_ms": 260,
+    "segment_boundaries": [
+      {
+        "candidate_id": "voice-row-b1c80000139018725991",
+        "input_frame_count": 90906,
+        "kept_start_frame": 0,
+        "kept_end_frame_exclusive": 90720,
+        "trimmed_leading_frames": 0,
+        "trimmed_trailing_frames": 186
+      },
+      {
+        "candidate_id": "voice-row-d2de3c49030408c4017d",
+        "input_frame_count": 98880,
+        "kept_start_frame": 0,
+        "kept_end_frame_exclusive": 97920,
+        "trimmed_leading_frames": 0,
+        "trimmed_trailing_frames": 960
+      },
+      {
+        "candidate_id": "voice-row-dfd89b4379c565dfb015",
+        "input_frame_count": 90720,
+        "kept_start_frame": 960,
+        "kept_end_frame_exclusive": 90720,
+        "trimmed_leading_frames": 960,
+        "trimmed_trailing_frames": 0
+      }
+    ]
+  },
+  "output_sha256": "0aaf9f71f55c04c8769b90ae8acdddf5b50da86c453338d43a065a7ce5050319",
+  "transcript_sha256": "d052fa5bdcac9613cb03692642386e254a3475458cd75ae8780ffac2acbd5a18",
+  "concatenation": {
+    "approved": true,
+    "purpose": "ab_voice_sample_internal_evaluation_only",
+    "ab_slot": "B",
+    "approval_id": "voice-composition-approval-20260827T070901664905Z-xiaob",
+    "approval_receipt_sha256": "7e5e5ad35960b36c638244ca1f28dd3376abfaf9bb1402d543b505ad35f1f09f",
+    "approved_by": "xiaob",
+    "source_policy": {
+      "decision_id": "single-selected-armor-source-per-character-20260826",
+      "file_sha256": "9bb8018f7e0f0f4360a15ba7f028fe83bccc4687eaea9e439f3c11c2fdaae885"
+    },
+    "silence_between_segments_ms": 150
+  },
+  "qc": {
+    "duration_seconds": 11.9,
+    "sample_rate": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "sample_peak_dbfs": -2.374,
+    "true_peak_dbfs": -2.3,
+    "true_peak_measurement": "ffmpeg_ebur128_4x_oversampled",
+    "clipping_ratio": 0.0,
+    "silence_ratio": 0.198319,
+    "silence_ratio_measurement": {
+      "measurement": "qualifying_contiguous_low_rms_frames_over_total_pcm_frames",
+      "threshold_dbfs": -45.0,
+      "window_ms": 20,
+      "minimum_run_ms": 200,
+      "minimum_run_frames": 4800,
+      "qualifying_run_count": 6,
+      "qualifying_silence_frames": 56640
+    },
+    "estimated_snr_db": 52.255,
+    "automated_checks": {
+      "duration_10_to_20_seconds": true,
+      "estimated_snr_at_least_25_db": true,
+      "silence_ratio_at_most_0_20": true,
+      "true_peak_at_most_minus_1_dbfs": true,
+      "no_clipped_samples": true
+    },
+    "automated_qc_pass": true,
+    "manual_single_speaker_music_sfx_transcript_review_required": true
+  },
+  "manual_review": {
+    "single_speaker": null,
+    "music_or_sfx": null,
+    "transcript_verified": null,
+    "reviewer": null,
+    "decision": "pending"
+  },
+  "waveform_review": {
+    "review_id": "voice-waveform-review-20260827T075045897807Z-xiaob",
+    "review_receipt_sha256": "80dec5f7ef07c8fc9a0a6116674a3d05cea45e768ed0e358ee1f2070b18b57c7",
+    "reviewed_at": "2026-08-27T07:50:45.897807+00:00",
+    "reviewer": "xiaob",
+    "decision": "pass",
+    "scope": "internal_ab_listening_only",
+    "operator_note": ""
+  }
+}

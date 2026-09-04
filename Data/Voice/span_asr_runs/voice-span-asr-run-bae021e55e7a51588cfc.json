@@ -1,0 +1,570 @@
+{
+  "schema_version": "project-snow-private-voice-span-audio-asr-run-1",
+  "run_id": "voice-span-asr-run-bae021e55e7a51588cfc",
+  "created_at": "2026-08-28T12:34:44+00:00",
+  "artifact_purpose": "local_audio_only_asr_hypotheses_for_human_review",
+  "source_package": {
+    "package_id": "voice-span-review-package-6bafdaecd6fa9468a9d7",
+    "manifest_sha256": "8b9b32857dd5a216deb19c5f6ca27bf8c74b8f5c1127fda9c01adf262ed089c1",
+    "span_review_queue_sha256": "160765819cda7794b82f6d51a65ab473bc632a046aaeb192da429deb2b4068f2",
+    "inventory_sha256": "bd9aa282c8bba4e18168f0d4f79cd8783b71f67f0630b6d6bcdccf6b1c22231b",
+    "clip_count": 15
+  },
+  "model": {
+    "engine": "faster-whisper",
+    "engine_version": "1.2.1",
+    "package": "faster-whisper==1.2.1",
+    "model_id": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "snapshot_id": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+    "model_file_sha256": "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da",
+    "snapshot_manifest_sha256": "09949fe7c0365d1b19dbcfd3f48c523a4a951cf4c566f448b1915d66fef37fbd",
+    "snapshot_file_count": "5",
+    "device": "cpu",
+    "compute_type": "int8",
+    "runtime_version": "4.8.1"
+  },
+  "model_sha256": "bd76579114dbad3bc367d587c7ac8a04c5b6ab2770f0aa11ff9e434e4cfa02a0",
+  "decode_config": {
+    "beam_size": 5,
+    "best_of": 5,
+    "condition_on_previous_text": false,
+    "hotwords": null,
+    "initial_prompt": null,
+    "language": "zh",
+    "task": "transcribe",
+    "temperature": 0.0,
+    "vad_filter": false,
+    "word_timestamps": true
+  },
+  "decode_config_sha256": "ece74631af39103fa66f63631579e3165f668163ea8c74d33d54a4732f8dd15e",
+  "input_policy": {
+    "input_kind": "wav_bytes_only",
+    "prompt_used": false,
+    "reference_transcript_used": false,
+    "hotwords_used": false,
+    "character_metadata_used": false,
+    "cross_clip_context_used": false,
+    "external_audio_disclosure": false
+  },
+  "legacy_text_policy": {
+    "disposition": "rejected_as_transcript_truth",
+    "plaintext_copied": false,
+    "used_by_asr": false,
+    "retained_binding": "sha256_only",
+    "human_decision_source": "listen_to_audio_only"
+  },
+  "input_audio_set_sha256": "819dbdf0f3a0ed699afd9cda1e7462ad6bbff61facb0863eb325837fb76d3dd1",
+  "transcript_set_sha256": "d8fdfd1fd0b03bb4461084d5c641ced274c517251601fa91351caa70a057935e",
+  "clip_count": 15,
+  "clips": [
+    {
+      "ordinal": 1,
+      "span_id": "voice-span-80d24e754e3621808ddc",
+      "audio_sha256": "1d23be2ea45ba7e07059963d7db7fc432b2c0cae1de7c13991df0f6d88e9fb60",
+      "audio_byte_count": 232364,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 116160,
+        "duration_seconds": 4.84
+      },
+      "source_audio_sha256": "1ddd2c37b44544af7530fbb3c6ac51d1f1edfffd0b2b5f3d600504cf28c758a7",
+      "source_range": {
+        "start_frame": 5280,
+        "end_frame_exclusive": 121440,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "21720fc3bf2e48166283aab351bbe66855557623cad94af74a2bcfdbce56deef",
+        "transcript_alignment_hint_sha256": "946ed0a92187dcf9846b5c18c4339bdd244ac221dfd5866231ea173044a4bae1"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "昨天成功摸到分析员的腹肌了,那今天我可以……",
+      "text_utf8_sha256": "17751585420fb933f8cb6a555afedebed03d0c274fc930a247a2b4b8ffdb2b50",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 4.84,
+      "segment_count": 1,
+      "average_log_probability": -0.27917375829484725,
+      "max_no_speech_probability": 1.326494192266381e-10
+    },
+    {
+      "ordinal": 2,
+      "span_id": "voice-span-30b1e82c2219f5408c9f",
+      "audio_sha256": "07890d8bb74222da1c44015e87e91c13f662d8b09f0ddf4e12f52a6fa9c12058",
+      "audio_byte_count": 133484,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 66720,
+        "duration_seconds": 2.78
+      },
+      "source_audio_sha256": "1ddd2c37b44544af7530fbb3c6ac51d1f1edfffd0b2b5f3d600504cf28c758a7",
+      "source_range": {
+        "start_frame": 136800,
+        "end_frame_exclusive": 203520,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "21720fc3bf2e48166283aab351bbe66855557623cad94af74a2bcfdbce56deef",
+        "transcript_alignment_hint_sha256": "e48016ea5ca6267d095d2d6c487c243e5c9e19175b42bd7607f85e4f51f29d1b"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "啊啊啊",
+      "text_utf8_sha256": "19bc388febfecd6a6653652c3d5b258cb34dda22c358a37481493de7900600c0",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 2.78,
+      "segment_count": 3,
+      "average_log_probability": -0.8011898875236512,
+      "max_no_speech_probability": 8.512670429672298e-11
+    },
+    {
+      "ordinal": 3,
+      "span_id": "voice-span-f8f9e97cb60ff69edf84",
+      "audio_sha256": "aacfb68f137cb4a99b707bd3cf14af10727831d6392b8ffd3f2755f162809006",
+      "audio_byte_count": 92204,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 46080,
+        "duration_seconds": 1.92
+      },
+      "source_audio_sha256": "1ddd2c37b44544af7530fbb3c6ac51d1f1edfffd0b2b5f3d600504cf28c758a7",
+      "source_range": {
+        "start_frame": 219840,
+        "end_frame_exclusive": 265920,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "21720fc3bf2e48166283aab351bbe66855557623cad94af74a2bcfdbce56deef",
+        "transcript_alignment_hint_sha256": "c1d2badfec1863f38fa2c51eb4b25ce9d31d562413c784c146bc716855c49be7"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "啊",
+      "text_utf8_sha256": "7c2c50fbaf7b274733d5fa623040492ef299c898075f8fc47fd28356c7e08898",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 1.92,
+      "segment_count": 1,
+      "average_log_probability": -0.9234921634197236,
+      "max_no_speech_probability": 7.394321960285666e-11
+    },
+    {
+      "ordinal": 4,
+      "span_id": "voice-span-05a93131340fcfc7474f",
+      "audio_sha256": "393dde17682fa39edc72be1c3c3184ad680042b73cb373414182d0e498a3ff86",
+      "audio_byte_count": 127724,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 63840,
+        "duration_seconds": 2.66
+      },
+      "source_audio_sha256": "1ddd2c37b44544af7530fbb3c6ac51d1f1edfffd0b2b5f3d600504cf28c758a7",
+      "source_range": {
+        "start_frame": 296160,
+        "end_frame_exclusive": 360000,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "21720fc3bf2e48166283aab351bbe66855557623cad94af74a2bcfdbce56deef",
+        "transcript_alignment_hint_sha256": "a27d306fbb365defcbd13d9daf83f2e79af6a3f70c41e4e1b4332696de1ab8a8"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "是分析人",
+      "text_utf8_sha256": "e5ab0e1ccfe4422a9364f1f654a69910134b7c213f1d1af8995237e260321f10",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 2.66,
+      "segment_count": 1,
+      "average_log_probability": -0.4751052707433701,
+      "max_no_speech_probability": 1.0516709898766852e-11
+    },
+    {
+      "ordinal": 5,
+      "span_id": "voice-span-f015499d412ae75a1991",
+      "audio_sha256": "5419b30ed0d59a5cdafda1748dd130bc6919085b251db5a061648c8b527955eb",
+      "audio_byte_count": 151724,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 75840,
+        "duration_seconds": 3.16
+      },
+      "source_audio_sha256": "5e2fd35d4d9e85e68eda1608e4c12cc16e55cccfb977c3a62eee8ccadb9b09eb",
+      "source_range": {
+        "start_frame": 113760,
+        "end_frame_exclusive": 189600,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "c1c9d13ead9131969b5d5cf539704144e40242444e60a6de43694c721b56cbe0",
+        "transcript_alignment_hint_sha256": "d551ec78c9eb40bac92f91a193d06d9bc1fa266ba518a34b06876c12d7a91f74"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "果然没白等,今天我是第一个见到分析员的人。",
+      "text_utf8_sha256": "be80de965b862362a2934d9d11e16cf965f5dd9e01fe615794fe24c71dcec867",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 3.16,
+      "segment_count": 1,
+      "average_log_probability": -0.16749609126286072,
+      "max_no_speech_probability": 9.521017307889679e-11
+    },
+    {
+      "ordinal": 6,
+      "span_id": "voice-span-fc23b647fab9a353c30b",
+      "audio_sha256": "7c1c35de4b41824bd5f908b860d41ade8a4a3b7f5ac0a696948194e2788c97a5",
+      "audio_byte_count": 143084,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 71520,
+        "duration_seconds": 2.98
+      },
+      "source_audio_sha256": "58c60146c95eee0022d74bfb7f0680047616404bfd33f2d2666de67f4bf7bd3e",
+      "source_range": {
+        "start_frame": 6240,
+        "end_frame_exclusive": 77760,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "ee63501c5520a4baf87bc5871776fb266b6d455f7587a6f7621b1566fa1b9bb8",
+        "transcript_alignment_hint_sha256": "fa421b82e999d23672a50776380faba59685bf042c0c34880dc10b2abf518ce8"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "三夕元,我可以再走进去看看你吗?",
+      "text_utf8_sha256": "77c6b5da78cebea708e5eae9dca4c3fd8e6efde201d4261ef2447dd1c422e1b0",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 2.98,
+      "segment_count": 1,
+      "average_log_probability": -0.46474222507741714,
+      "max_no_speech_probability": 8.43481812173863e-11
+    },
+    {
+      "ordinal": 7,
+      "span_id": "voice-span-852e814262944c75c14b",
+      "audio_sha256": "e218d13aadcd22ea38fc3e144fb7614e7eb33557174606cae3f68c3a38e95ebd",
+      "audio_byte_count": 297644,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 148800,
+        "duration_seconds": 6.2
+      },
+      "source_audio_sha256": "58c60146c95eee0022d74bfb7f0680047616404bfd33f2d2666de67f4bf7bd3e",
+      "source_range": {
+        "start_frame": 97920,
+        "end_frame_exclusive": 246720,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "ee63501c5520a4baf87bc5871776fb266b6d455f7587a6f7621b1566fa1b9bb8",
+        "transcript_alignment_hint_sha256": "fe514592ebcdcf732deaa92fadd8138a0aa44c6d506661b3255bd772a0c50d9a"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "那,我能摸摸你吗?我,我这都是为了下一部作品再取材,嗯。",
+      "text_utf8_sha256": "b8f8cf64a2f665b8c3ffaae0fe3a6855410cc146afc5214f6980f3495a00f595",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 6.2,
+      "segment_count": 1,
+      "average_log_probability": -0.22586136823520064,
+      "max_no_speech_probability": 3.2153800455514414e-11
+    },
+    {
+      "ordinal": 8,
+      "span_id": "voice-span-26756217f1f0f8e271b9",
+      "audio_sha256": "1ee7de161ed0e9d863866f4a4a4320541610cd84a20b3c873db7ff02ec4e93cb",
+      "audio_byte_count": 139244,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 69600,
+        "duration_seconds": 2.9
+      },
+      "source_audio_sha256": "7384e3ead395f29f948c802bd9506cb3e2d1997508541169c6ff5d0e7d6d6648",
+      "source_range": {
+        "start_frame": 1440,
+        "end_frame_exclusive": 71040,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "02c231b8b811f1112860f7f613502722a0c452871f07c355ed1b79147e9a221b",
+        "transcript_alignment_hint_sha256": "02c231b8b811f1112860f7f613502722a0c452871f07c355ed1b79147e9a221b"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "如此重要的事情,我希望你不要忘记。",
+      "text_utf8_sha256": "1230a642407e07141dce7dd12676d64f76cd412c7a6529e314f1c79e7099e362",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 2.9,
+      "segment_count": 1,
+      "average_log_probability": -0.08748340805371604,
+      "max_no_speech_probability": 8.106878883473723e-12
+    },
+    {
+      "ordinal": 9,
+      "span_id": "voice-span-428b35929bca0bcc35ad",
+      "audio_sha256": "5a3d33e10d34743baab2b31c2bab8513457d987b04c2b01ec17d84a97335598e",
+      "audio_byte_count": 118124,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 59040,
+        "duration_seconds": 2.46
+      },
+      "source_audio_sha256": "236814904556796f0b205261c4a9faf4660f1ffdc2a1be9e7288b40269e03deb",
+      "source_range": {
+        "start_frame": 1920,
+        "end_frame_exclusive": 60960,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "a590f19db280e9372a20fac754089c4a89f52358226613d008ab3f4bd03fbd3e",
+        "transcript_alignment_hint_sha256": "c620bdc7931d4a0d4002b40181424eba887679ebdf9cd4beb85a96ddc33d05e8"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "风雨会鸣,潮汐鱼音",
+      "text_utf8_sha256": "f8926c1da20700f0753e8c4c75148a5af7f6bd15535ff415734f6f8902900eeb",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 2.46,
+      "segment_count": 1,
+      "average_log_probability": -0.25128620200686985,
+      "max_no_speech_probability": 1.2457554952882699e-11
+    },
+    {
+      "ordinal": 10,
+      "span_id": "voice-span-2204e9713a8251101b9b",
+      "audio_sha256": "99dfd0a4af1a46d87f81ef142e30ee82d8fbce029b901956bcdfbf7a01a2ce3f",
+      "audio_byte_count": 42284,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 21120,
+        "duration_seconds": 0.88
+      },
+      "source_audio_sha256": "236814904556796f0b205261c4a9faf4660f1ffdc2a1be9e7288b40269e03deb",
+      "source_range": {
+        "start_frame": 72960,
+        "end_frame_exclusive": 94080,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "a590f19db280e9372a20fac754089c4a89f52358226613d008ab3f4bd03fbd3e",
+        "transcript_alignment_hint_sha256": "4aea8d257cffdb22e39afd732fe8669e2e703d07ea15e0f20e8a6fcaf11e55f0"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "接招前路",
+      "text_utf8_sha256": "6aa8240a39dcb1cbebbe3ee78d469503cf8309aa870f4ad63f7438f62c4d106e",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 0.88,
+      "segment_count": 1,
+      "average_log_probability": -0.12245058454573154,
+      "max_no_speech_probability": 8.4771174455045e-12
+    },
+    {
+      "ordinal": 11,
+      "span_id": "voice-span-4f7fa278be1234445da0",
+      "audio_sha256": "1078e851e2875fe368cebe5d395034fe8b5267b3f11dac75738b07927de613d1",
+      "audio_byte_count": 158924,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 79440,
+        "duration_seconds": 3.31
+      },
+      "source_audio_sha256": "504d82ce0c28310636405e41c2485f2b8362a413817bfdab9d0c3d4a017357ef",
+      "source_range": {
+        "start_frame": 6240,
+        "end_frame_exclusive": 85680,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "aaf976469cfe75166a8e34dc2f68cb829ef9566985459a508525704a0441c0ea",
+        "transcript_alignment_hint_sha256": "aaf976469cfe75166a8e34dc2f68cb829ef9566985459a508525704a0441c0ea"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "正确的选择,才能导向正确的结果。",
+      "text_utf8_sha256": "0dc610b8cf17ae97bb8442d38d72d7b689c76df914dba824e6121c54d1b0565d",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 3.31,
+      "segment_count": 1,
+      "average_log_probability": -0.07778642450769742,
+      "max_no_speech_probability": 1.1314246414761975e-11
+    },
+    {
+      "ordinal": 12,
+      "span_id": "voice-span-367175425cb532c43662",
+      "audio_sha256": "bcf7ca09a3099d4f5c0d8f07df2eb4c689d141e4d1cb6d7929429ed3f7fbf322",
+      "audio_byte_count": 159884,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 79920,
+        "duration_seconds": 3.33
+      },
+      "source_audio_sha256": "504d82ce0c28310636405e41c2485f2b8362a413817bfdab9d0c3d4a017357ef",
+      "source_range": {
+        "start_frame": 3120,
+        "end_frame_exclusive": 83040,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "aaf976469cfe75166a8e34dc2f68cb829ef9566985459a508525704a0441c0ea",
+        "transcript_alignment_hint_sha256": "aaf976469cfe75166a8e34dc2f68cb829ef9566985459a508525704a0441c0ea"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "正确的选择,才能导向正确的结果。",
+      "text_utf8_sha256": "0dc610b8cf17ae97bb8442d38d72d7b689c76df914dba824e6121c54d1b0565d",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 3.33,
+      "segment_count": 1,
+      "average_log_probability": -0.08610973538209994,
+      "max_no_speech_probability": 2.680030850021886e-11
+    },
+    {
+      "ordinal": 13,
+      "span_id": "voice-span-65e3dbf47ea72878d122",
+      "audio_sha256": "11874cb6caf5df3507cdb6aa0c2635579b1883c322e246404b7ac570690acb9c",
+      "audio_byte_count": 57644,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 28800,
+        "duration_seconds": 1.2
+      },
+      "source_audio_sha256": "26e4519790fabc9c3656e457f6c42648a44808d50d0e20e3e9670cbc50335aa0",
+      "source_range": {
+        "start_frame": 3360,
+        "end_frame_exclusive": 32160,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "5803f72184aa39a7932820b99bbc8e59cb0cb5f399501bd59bc50bc168a2d6e5",
+        "transcript_alignment_hint_sha256": "5803f72184aa39a7932820b99bbc8e59cb0cb5f399501bd59bc50bc168a2d6e5"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "很快就能结束。",
+      "text_utf8_sha256": "5803f72184aa39a7932820b99bbc8e59cb0cb5f399501bd59bc50bc168a2d6e5",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 1.2,
+      "segment_count": 1,
+      "average_log_probability": -0.17041545063257219,
+      "max_no_speech_probability": 2.0463201966247624e-10
+    },
+    {
+      "ordinal": 14,
+      "span_id": "voice-span-6d5f5fed4df4f45d1659",
+      "audio_sha256": "ec3986302688e00bc150030837f520af2efd0cbe127eae00d83da1f7073d4512",
+      "audio_byte_count": 51884,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 25920,
+        "duration_seconds": 1.08
+      },
+      "source_audio_sha256": "e94c9bfab8dd844f344e14654a7277ed12cafa96a74f0af1c39154995ac7fcbb",
+      "source_range": {
+        "start_frame": 4320,
+        "end_frame_exclusive": 30240,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "549bb41fd4e06feecd53c6b7bd210dcde1a83ef08892c6c96d94d211c447a654",
+        "transcript_alignment_hint_sha256": "549bb41fd4e06feecd53c6b7bd210dcde1a83ef08892c6c96d94d211c447a654"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "不要忘记看消息。",
+      "text_utf8_sha256": "549bb41fd4e06feecd53c6b7bd210dcde1a83ef08892c6c96d94d211c447a654",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 1.08,
+      "segment_count": 1,
+      "average_log_probability": -0.1744539722800255,
+      "max_no_speech_probability": 1.2068828575406698e-11
+    },
+    {
+      "ordinal": 15,
+      "span_id": "voice-span-ff0815edc0cc9e31abe0",
+      "audio_sha256": "7f6369b0b4b76c697977c42a30509b310308a223acce9090f170d72c19fb4690",
+      "audio_byte_count": 189164,
+      "audio_format": {
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 94560,
+        "duration_seconds": 3.94
+      },
+      "source_audio_sha256": "bb37a79ff51b011a27d0c762e876e7ed3362e9fee1958936e6a2049febdc5f26",
+      "source_range": {
+        "start_frame": 5280,
+        "end_frame_exclusive": 99840,
+        "sample_rate_hz": 24000
+      },
+      "legacy_text_hashes": {
+        "source_transcript_sha256": "a31bcf0425f41da685e7f45303380e1cb60da99a0906dfef1e1481fd99c0fb8b",
+        "transcript_alignment_hint_sha256": "a31bcf0425f41da685e7f45303380e1cb60da99a0906dfef1e1481fd99c0fb8b"
+      },
+      "hypothesis_status": "pending_human_audio_review",
+      "text": "我不想和别人有太多牵扯,也不想制造更多回忆。",
+      "text_utf8_sha256": "57442aa69ddd1bda7a1b10df2296c76615c087f26a259667baee9a31040a8184",
+      "language": "zh",
+      "language_probability": 1.0,
+      "duration_seconds": 3.94,
+      "segment_count": 1,
+      "average_log_probability": -0.04946033904949824,
+      "max_no_speech_probability": 6.934121332680121e-11
+    }
+  ],
+  "review_status": "pending_human_audio_review",
+  "scope_limits": {
+    "human_transcript_review_completed": false,
+    "transcript_accepted": false,
+    "span_approved": false,
+    "transcript_alignment_verified": false,
+    "concatenation_approved": false,
+    "ab_winner_selected": false,
+    "automated_qc_overridden": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false
+  },
+  "manifest_sha256": "9481d0a6246bb64093f2cf01f016272c60c9ebb0baef0c50b337acaf41cdad9c"
+}

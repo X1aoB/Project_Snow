@@ -1,0 +1,305 @@
+{
+  "schema_version": "project-snow-private-local-voice-target-ab-review-1",
+  "review_id": "voice-target-ab-review-9afda082d22702b0adb7",
+  "reviewed_at": "2026-09-02T05:25:58+00:00",
+  "artifact_purpose": "record_exact_human_natural_vs_compacted_selection_for_local_ab_only",
+  "reviewer_id": "xiaob",
+  "authorization_evidence": {
+    "source": "current_codex_task_user_message",
+    "statement": "四个槽位按推荐方案通过：薇蒂雅 A 压缩版、B 通过；辰星 A/B 压缩版。",
+    "statement_utf8_sha256": "d0ec092c74369bcb1440f319f685b2d8a1704b5790a94f2cb63ad9506e950ad5"
+  },
+  "source_batch": {
+    "id": "voice-recording-dialogue-comparison-batch-2b1a6205488b251038a3",
+    "manifest_sha256": "f397560a7b979da7d8f59db364058a81bba142cb668b427ed246973f5eecf684",
+    "byte_sha256": "00791972cb016993eef95b4b7a81b54a0512375a5d498d1b72e846a36b1c9769",
+    "relative_path": "recording_dialogue_comparison_batches/voice-recording-dialogue-comparison-batch-2b1a6205488b251038a3/manifest.json"
+  },
+  "package_set_sha256": "e24c806b7ca2a92c96f8877d864e55f7ddfa05ee67bc1d855c262893d55ebb35",
+  "decision_set_sha256": "51e9273197405e9a6bfebb9f4dd27528fcd45d781cb6a769fa560a32c551bc11",
+  "packages": [
+    {
+      "package_id": "voice-recording-dialogue-comparison-a62af942ac96e7bc059e",
+      "profile_id": "voice-dialogue-profile-148e0e8de98a86740285",
+      "runtime_character_id": "5157b8972632",
+      "runtime_character_name": "薇蒂雅",
+      "manifest_sha256": "79c921ffa02b59d1ec792b34be48fe5d46be7da7cfecb58caee004232f220aec",
+      "byte_sha256": "d96b962db1596ccbf44d18d682975842eca7dca098685deee8d88f7bd5b30dcc",
+      "relative_path": "recording_dialogue_comparisons/voice-recording-dialogue-comparison-a62af942ac96e7bc059e/manifest.json",
+      "prior_review_status": "awaiting_human_natural_vs_compacted_comparison",
+      "review_page": {
+        "relative_path": "review.html",
+        "sha256": "8a905e99f38810ad5d80eec7dadc73093ea98c1a1df58fdd3f9b2483b2995605",
+        "byte_count": 2584
+      },
+      "decisions": [
+        {
+          "slot": "A",
+          "candidate_ordinal": 143,
+          "original_candidate_id": "voice-recording-alignment-candidate-808831a25931be9710a1",
+          "source_id": "voice-recording-source-27a158ca9053dbbad4c3",
+          "source_frame_range": {
+            "start_frame": 2290440,
+            "end_frame_exclusive": 2685240
+          },
+          "authoritative_transcript_utf8_sha256": "58974dc9ccaeb3d9737cf4f08a7d509613285084e6166c307b9d6d15eefdbdd3",
+          "input_candidate_wav_sha256": "93649d13d505b1dfe46e987be0b5ae2da1bf88900559032fc961f465bdbf347f",
+          "displayed_text": {
+            "relative_path": "A/displayed_text.txt",
+            "sha256": "58974dc9ccaeb3d9737cf4f08a7d509613285084e6166c307b9d6d15eefdbdd3",
+            "byte_count": 123
+          },
+          "natural_audio": {
+            "relative_path": "A/natural.wav",
+            "sha256": "7e3c0e5c8680f991a8ead48cea0b65afb49c57643a38ce1d866eafe33e069e81",
+            "byte_count": 787116,
+            "pcm_sha256": "f6586fed7e8f82a41155838dd0da66bead43fcdd9b2dd50487f7a200666841e2",
+            "audio_format": {
+              "encoding": "pcm_s16le",
+              "sample_rate_hz": 24000,
+              "channels": 1,
+              "sample_width_bytes": 2,
+              "frame_count": 393536,
+              "duration_seconds": 16.397333
+            }
+          },
+          "selected_audio": {
+            "relative_path": "A/compacted.wav",
+            "sha256": "c7199bd8ea080056cf3d5c2af48db333abad0a445d49c6928c3313306ffde556",
+            "byte_count": 718078,
+            "pcm_sha256": "e1e7df253db9a1008ad230b1776d4329211ac0645c8870caa6660ba5df338513",
+            "audio_format": {
+              "encoding": "pcm_s16le",
+              "sample_rate_hz": 24000,
+              "channels": 1,
+              "sample_width_bytes": 2,
+              "frame_count": 359017,
+              "duration_seconds": 14.959042
+            }
+          },
+          "selected_variant": "compacted",
+          "natural_and_compacted_identical": false,
+          "internal_silence_compaction_cut_count": 2,
+          "decision": "compacted_accepted_no_issue",
+          "human_assessment": "no_material_audible_difference_reported",
+          "issue_codes": []
+        },
+        {
+          "slot": "B",
+          "candidate_ordinal": 137,
+          "original_candidate_id": "voice-recording-alignment-candidate-f3b9be3c8e9ea1af0b1e",
+          "source_id": "voice-recording-source-27a158ca9053dbbad4c3",
+          "source_frame_range": {
+            "start_frame": 162719,
+            "end_frame_exclusive": 552120
+          },
+          "authoritative_transcript_utf8_sha256": "9ab3519b0c3d8e90a46928ff29b26eabea6ad5ccc2a4b292d68be6a9e8001606",
+          "input_candidate_wav_sha256": "33426dd3253cc5f6d1c3ca6228aaf52cfa2f586f55464cd0104430e01b1d2191",
+          "displayed_text": {
+            "relative_path": "B/displayed_text.txt",
+            "sha256": "9ab3519b0c3d8e90a46928ff29b26eabea6ad5ccc2a4b292d68be6a9e8001606",
+            "byte_count": 165
+          },
+          "natural_audio": {
+            "relative_path": "B/natural.wav",
+            "sha256": "1693d0e89a6d230c35e12a3d51a87f76a8a866398aa9727756df9a96c9724520",
+            "byte_count": 754666,
+            "pcm_sha256": "c72628bb802043d00920c92248ddb7c863fab01bfbf2a5f12acfe281b8ffd320",
+            "audio_format": {
+              "encoding": "pcm_s16le",
+              "sample_rate_hz": 24000,
+              "channels": 1,
+              "sample_width_bytes": 2,
+              "frame_count": 377311,
+              "duration_seconds": 15.721292
+            }
+          },
+          "selected_audio": {
+            "relative_path": "B/compacted.wav",
+            "sha256": "1693d0e89a6d230c35e12a3d51a87f76a8a866398aa9727756df9a96c9724520",
+            "byte_count": 754666,
+            "pcm_sha256": "c72628bb802043d00920c92248ddb7c863fab01bfbf2a5f12acfe281b8ffd320",
+            "audio_format": {
+              "encoding": "pcm_s16le",
+              "sample_rate_hz": 24000,
+              "channels": 1,
+              "sample_width_bytes": 2,
+              "frame_count": 377311,
+              "duration_seconds": 15.721292
+            }
+          },
+          "selected_variant": "compacted",
+          "natural_and_compacted_identical": true,
+          "internal_silence_compaction_cut_count": 0,
+          "decision": "compacted_accepted_no_issue",
+          "human_assessment": "no_material_audible_difference_reported",
+          "issue_codes": []
+        }
+      ],
+      "ab_isolation": {
+        "candidate_ordinals_unique": true,
+        "original_candidate_ids_unique": true,
+        "transcript_hashes_unique": true,
+        "input_audio_hashes_unique": true,
+        "selected_audio_hashes_unique": true,
+        "source_frame_ranges_non_overlapping": true
+      },
+      "verified_asset_count": 7
+    },
+    {
+      "package_id": "voice-recording-dialogue-comparison-9eaa4601e56ff9917069",
+      "profile_id": "voice-dialogue-profile-4ecf3f2b4fdac1080bcf",
+      "runtime_character_id": "98322bd505f4",
+      "runtime_character_name": "辰星",
+      "manifest_sha256": "725e493488b13d6b5073e889afbc32c2cf251a4c91a05c61578128a31ca3f03c",
+      "byte_sha256": "ae2983cdd236c32eedd89285fae0e16609f5dffaf3ab3a9a180dec0034054305",
+      "relative_path": "recording_dialogue_comparisons/voice-recording-dialogue-comparison-9eaa4601e56ff9917069/manifest.json",
+      "prior_review_status": "awaiting_human_natural_vs_compacted_comparison",
+      "review_page": {
+        "relative_path": "review.html",
+        "sha256": "29598b14c647d0c328fe6177f39d70b677c3234190233b138a08de25c712c9b7",
+        "byte_count": 2562
+      },
+      "decisions": [
+        {
+          "slot": "A",
+          "candidate_ordinal": 149,
+          "original_candidate_id": "voice-recording-alignment-candidate-46a3267712678044d57a",
+          "source_id": "voice-recording-source-b7e64791c3b3200be72c",
+          "source_frame_range": {
+            "start_frame": 1321560,
+            "end_frame_exclusive": 1782361
+          },
+          "authoritative_transcript_utf8_sha256": "084b087a9e05cb4f7c45ecb453776302f7ff814be2efc973f5681c6f80b29fb3",
+          "input_candidate_wav_sha256": "9e7841b2cc94b5f775ecc6754a751c94ee30050aecc78950e425ad1fb3385664",
+          "displayed_text": {
+            "relative_path": "A/displayed_text.txt",
+            "sha256": "084b087a9e05cb4f7c45ecb453776302f7ff814be2efc973f5681c6f80b29fb3",
+            "byte_count": 120
+          },
+          "natural_audio": {
+            "relative_path": "A/natural.wav",
+            "sha256": "51acb2283ec9af386dd4cb5c069009e9933531dad1ecf6e3049ce74c0a222cb0",
+            "byte_count": 896300,
+            "pcm_sha256": "e2c2a2109e7470fbb4c377fe1bcb2e432991c2d7e0efa24f110a7534210ea25c",
+            "audio_format": {
+              "encoding": "pcm_s16le",
+              "sample_rate_hz": 24000,
+              "channels": 1,
+              "sample_width_bytes": 2,
+              "frame_count": 448128,
+              "duration_seconds": 18.672
+            }
+          },
+          "selected_audio": {
+            "relative_path": "A/compacted.wav",
+            "sha256": "be7b8e90a2e4b887bb65f554c12cf233dd14dee1d6e6252ca289150220b70063",
+            "byte_count": 759270,
+            "pcm_sha256": "18173a4f679be2139f4e9031d3eab6afb5bfb18067c79c613bb58e5e67c2636b",
+            "audio_format": {
+              "encoding": "pcm_s16le",
+              "sample_rate_hz": 24000,
+              "channels": 1,
+              "sample_width_bytes": 2,
+              "frame_count": 379613,
+              "duration_seconds": 15.817208
+            }
+          },
+          "selected_variant": "compacted",
+          "natural_and_compacted_identical": false,
+          "internal_silence_compaction_cut_count": 3,
+          "decision": "compacted_accepted_no_issue",
+          "human_assessment": "no_material_audible_difference_reported",
+          "issue_codes": []
+        },
+        {
+          "slot": "B",
+          "candidate_ordinal": 148,
+          "original_candidate_id": "voice-recording-alignment-candidate-e0b271507a3769754934",
+          "source_id": "voice-recording-source-b7e64791c3b3200be72c",
+          "source_frame_range": {
+            "start_frame": 876841,
+            "end_frame_exclusive": 1321560
+          },
+          "authoritative_transcript_utf8_sha256": "850e3977f5804967bfbee95f2e242634d5bab6f5a65494b6263c60833fce0cff",
+          "input_candidate_wav_sha256": "3191d371e7189d6734700572fd852e41e6a270b846c0709d662f3117aa264102",
+          "displayed_text": {
+            "relative_path": "B/displayed_text.txt",
+            "sha256": "850e3977f5804967bfbee95f2e242634d5bab6f5a65494b6263c60833fce0cff",
+            "byte_count": 156
+          },
+          "natural_audio": {
+            "relative_path": "B/natural.wav",
+            "sha256": "30db1a856e96875e5eee63f02911f99902c22f3e7ba1ba44a7dfc0f87c1d7717",
+            "byte_count": 801068,
+            "pcm_sha256": "abbdf3a587a6ccfb76a0e1bf96c7df25e3be73f9aa2bd34194e9d07ff0891803",
+            "audio_format": {
+              "encoding": "pcm_s16le",
+              "sample_rate_hz": 24000,
+              "channels": 1,
+              "sample_width_bytes": 2,
+              "frame_count": 400512,
+              "duration_seconds": 16.688
+            }
+          },
+          "selected_audio": {
+            "relative_path": "B/compacted.wav",
+            "sha256": "654d344a406ac497e5fb92deb41d46af76e96afc4fc0f5b0c02fba6e5a22f261",
+            "byte_count": 673776,
+            "pcm_sha256": "e81280bac1ac1f2aa004de004f075ceb40dedce933201e5cc70a9de28f32e6c2",
+            "audio_format": {
+              "encoding": "pcm_s16le",
+              "sample_rate_hz": 24000,
+              "channels": 1,
+              "sample_width_bytes": 2,
+              "frame_count": 336866,
+              "duration_seconds": 14.036083
+            }
+          },
+          "selected_variant": "compacted",
+          "natural_and_compacted_identical": false,
+          "internal_silence_compaction_cut_count": 3,
+          "decision": "compacted_accepted_no_issue",
+          "human_assessment": "no_material_audible_difference_reported",
+          "issue_codes": []
+        }
+      ],
+      "ab_isolation": {
+        "candidate_ordinals_unique": true,
+        "original_candidate_ids_unique": true,
+        "transcript_hashes_unique": true,
+        "input_audio_hashes_unique": true,
+        "selected_audio_hashes_unique": true,
+        "source_frame_ranges_non_overlapping": true
+      },
+      "verified_asset_count": 7
+    }
+  ],
+  "summary": {
+    "package_count": 2,
+    "character_count": 2,
+    "slot_count": 4,
+    "compacted_accepted_no_issue_count": 4,
+    "natural_and_compacted_identical_count": 1,
+    "verified_asset_count": 14,
+    "all_signal_quality_gates_passed": true,
+    "all_ab_isolation_checks_passed": true
+  },
+  "approval_scope": {
+    "human_listening_completed": true,
+    "compacted_variant_selected_for_local_ab_candidates": true,
+    "no_material_audible_difference_reported": true,
+    "natural_masters_retained": true
+  },
+  "scope_limits": {
+    "training_use_approved": false,
+    "voice_cloning_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false,
+    "public_rollout_allowed": false
+  },
+  "executed": true,
+  "stable_identity": "9afda082d22702b0adb713328a4ca35e7480cf70960a0e8e8cc1d74b5a374f66",
+  "receipt_sha256": "8a319737777c49c134cb6cbbba0c3f4cf04191db2eb22bc75fd1054a2f64a4f5"
+}

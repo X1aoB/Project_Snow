@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-586a253345fcf7b929df",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 41,
+  "trigger": "其他3",
+  "transcript": "我的梦想是，创造每个孩子都能笑着长大的世界。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/f/f7/fzeh9hi8bx98nd3k36skaqnmv7vur78.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 258133,
+  "content_sha256": "f97bb0b2a6438664d147a6ba19cfb7546549c1761a94075792afc850a2d0a522",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

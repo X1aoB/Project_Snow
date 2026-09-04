@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-5469c2bf332954377dc5",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 16,
+  "trigger": "活动提醒",
+  "transcript": "好孩子都知道，抓紧时间。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/b7/fgdmar568lwyb26rlg54j2m5h2uy7ky.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 109758,
+  "content_sha256": "4d0d00817f561387b1525b007c0fec26400d524954e37e4470b46abb1c15be64",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

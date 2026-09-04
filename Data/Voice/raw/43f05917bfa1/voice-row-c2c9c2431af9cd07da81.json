@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-c2c9c2431af9cd07da81",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 51,
+  "trigger": "战斗开始2",
+  "transcript": "一起回去吧，别落东西啊。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/f/fa/6iy3c4o5t80ulrwe7e3wa3x7hr424qs.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 147374,
+  "content_sha256": "f8a708a94b514c39e3475138527475d013f53ed45f497bb6cd4db0ef367d3977",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

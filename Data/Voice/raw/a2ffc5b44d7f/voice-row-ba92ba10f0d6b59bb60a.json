@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-ba92ba10f0d6b59bb60a",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 32,
+  "trigger": "升级1",
+  "transcript": "嗯，总不能一直被看不起嘛。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/f/fd/19i5k7f80huhzqjvgcu2bynjt0d51dg.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 122297,
+  "content_sha256": "ba3409bdc5790f2ad1ac927571c85abaea84d5c4c1ab0c61812d218c51e7d453",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

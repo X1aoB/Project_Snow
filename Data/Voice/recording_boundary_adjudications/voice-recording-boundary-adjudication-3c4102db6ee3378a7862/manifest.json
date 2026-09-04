@@ -1,0 +1,1793 @@
+{
+  "schema_version": "project-snow-private-local-voice-boundary-adjudication-1",
+  "receipt_id": "voice-recording-boundary-adjudication-3c4102db6ee3378a7862",
+  "reviewed_at": "2026-08-29T18:26:58.843712+00:00",
+  "artifact_purpose": "immutable_transcript_free_boundary_adjudication",
+  "reviewer_id": "codex_gpu_boundary_review",
+  "source_boundary_audit": {
+    "audit_id": "voice-recording-boundary-audit-cae5d9304d81f2335d09",
+    "manifest_sha256": "3b5907abc86e2048a47732b1ab284d3009cd5d5ede9b89dd850238104d51a176",
+    "candidate_set_sha256": "e2827cd644caaba28a533de8da474fab72fd1665e37deb91b328e451c3e261d8",
+    "candidate_count": 161
+  },
+  "source_decisions_sha256": "46b2de227388c01a243fd96313d40106076b2d4f8d6cd3660803b6b7a2fa982c",
+  "decision_set_sha256": "8016e4b63b84f593230f847cb0b2f01135a00110230913327876a4f009288db0",
+  "authoritative_assertions": {
+    "screen_text_is_authoritative": true,
+    "asr_is_boundary_timing_only": true,
+    "asr_plaintext_persisted": false,
+    "authoritative_transcript_modified": false
+  },
+  "candidate_count": 161,
+  "decisions": [
+    {
+      "ordinal": 1,
+      "revision_id": "voice-recording-boundary-revision-2a9e3e089ce498ab5f71",
+      "original_candidate_id": "voice-recording-alignment-candidate-000bee518d170caee691",
+      "output_audio_sha256": "931301f0a196df310039d36c056c784fa7c12f46600d2811d921e605250e9e50",
+      "authoritative_transcript_utf8_sha256": "d66aec5ead909ccfb79db1e062b941800e5b28c14f4bfc135b36705133dd4b86",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 2,
+      "revision_id": "voice-recording-boundary-revision-0ef9835ec870ff8c936e",
+      "original_candidate_id": "voice-recording-alignment-candidate-3c5619df7e7a2f94edc9",
+      "output_audio_sha256": "79757dc522b57bd9adf7cd9a191c50acdb97e0298b50470055c79432c8ad12dd",
+      "authoritative_transcript_utf8_sha256": "3a49258fbd894cbcb6687dbe9979627d9a895e7a07b1580ae20dece4553b856c",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 3,
+      "revision_id": "voice-recording-boundary-revision-dc613fa4c3fadf44adcf",
+      "original_candidate_id": "voice-recording-alignment-candidate-0893bd71a3b9db6be3e7",
+      "output_audio_sha256": "16e7a51fc1fd53635bb96342bc48877f631fc4728e4b4d70410c78c03015bf27",
+      "authoritative_transcript_utf8_sha256": "f8668839901c20dfc2cf9c9cf749c1100f9e50d27df582e66db10ace3161c2d1",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 4,
+      "revision_id": "voice-recording-boundary-revision-3fbbf71b06a12ff6809b",
+      "original_candidate_id": "voice-recording-alignment-candidate-6574b26f923564113783",
+      "output_audio_sha256": "c55da29c900ea6590b4461e95d4c07fcd94086a24dde31c9471972f570b46335",
+      "authoritative_transcript_utf8_sha256": "d1672a79cbfffbaa0d1c06cdca39fbedde35f065514bdbe6f4fa23f341225f72",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 5,
+      "revision_id": "voice-recording-boundary-revision-4f17954148d219a93457",
+      "original_candidate_id": "voice-recording-alignment-candidate-ebf6880eca9e146c6c05",
+      "output_audio_sha256": "65ea6a26936030005cc979667391ec95e72596b73de7f759786c206dc5635f50",
+      "authoritative_transcript_utf8_sha256": "71ff16c0226268398854380c4ec3abfe5f4a13accc596734f7d9b17538f04bbf",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 6,
+      "revision_id": "voice-recording-boundary-revision-41b482d106cca1c8be88",
+      "original_candidate_id": "voice-recording-alignment-candidate-82dd823de32131cde448",
+      "output_audio_sha256": "bef15193fa84946ede3a9fc08295e174069ffde49662432fffd5350c91163880",
+      "authoritative_transcript_utf8_sha256": "8f40133ebd8d92aceae2d16a238a3482e3be4f364cdf5e6f3443374bb21a5ee4",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 7,
+      "revision_id": "voice-recording-boundary-revision-78ddb69db2b097fff287",
+      "original_candidate_id": "voice-recording-alignment-candidate-3732626f46d313ee5bcb",
+      "output_audio_sha256": "96cb22eedd483925c6b44d4d314a5a55d573d281aa5a5605af3d9053df3ed0b6",
+      "authoritative_transcript_utf8_sha256": "c3471fde830d2ca65b224631561d18493e5ede348b290fe0d803c72b6f71354b",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 8,
+      "revision_id": "voice-recording-boundary-revision-a323b2947d5ed37fceb2",
+      "original_candidate_id": "voice-recording-alignment-candidate-1196b739a1b402173d67",
+      "output_audio_sha256": "c1430c1d04260b61426c18c33181748048f67636700b0bea86d2e645c8a7f956",
+      "authoritative_transcript_utf8_sha256": "a30a0c15c093fce3f3c6ed15ed3b1a3757b4ed244e61f74a9668096b9196eac1",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 9,
+      "revision_id": "voice-recording-boundary-revision-c90cb0f7a96f4f3b77a5",
+      "original_candidate_id": "voice-recording-alignment-candidate-80f55e3c335c8b8d6b9b",
+      "output_audio_sha256": "36ba49ec4bf7c690a5dcbe86d4b27fa03f5691a50bba6c784ba818302b8df37a",
+      "authoritative_transcript_utf8_sha256": "200f63513981544e1304f205e0310e3d9d63fdc8563b5b45b1823e3d3c2c9768",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 10,
+      "revision_id": "voice-recording-boundary-revision-9cdc6b854558f73bc816",
+      "original_candidate_id": "voice-recording-alignment-candidate-d6b3848d074bc475b3c7",
+      "output_audio_sha256": "1468f57d1d65e69cf0364852ef340e2c98ba4a8a0c698db6f2117a85cf190ea5",
+      "authoritative_transcript_utf8_sha256": "f924c809b10d1d2bde90ddacba6a20a49f3426803d7e7b72736cae3e47293bcc",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 11,
+      "revision_id": "voice-recording-boundary-revision-bddf62bab02eaa257161",
+      "original_candidate_id": "voice-recording-alignment-candidate-bae23a6e293e433318ef",
+      "output_audio_sha256": "01523361f74b437b4b88a98dc89553bfab531880d9a373ff97d362327c6f984f",
+      "authoritative_transcript_utf8_sha256": "27cd86525eb3a27ab0d53dd940215e5d52c6cbb9634ff5d8bdeceec4f06d6348",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 12,
+      "revision_id": "voice-recording-boundary-revision-d80316b0ad5d8f635647",
+      "original_candidate_id": "voice-recording-alignment-candidate-3eab2b668a5801a00cee",
+      "output_audio_sha256": "469b7b2e859f2bbe454258451e26cc6741d95ad754524f49fba3f9188d420de5",
+      "authoritative_transcript_utf8_sha256": "a08944684d3ea7f652bab5525bbc0fb93475e687efbf865a4443f6f0c11cbc04",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 13,
+      "revision_id": "voice-recording-boundary-revision-d821a7e76413220295fd",
+      "original_candidate_id": "voice-recording-alignment-candidate-67607778d55208cd328c",
+      "output_audio_sha256": "d208603101071d3411e612dc5b34d1ea6fee64de041d13d02ba7fb1b985c2839",
+      "authoritative_transcript_utf8_sha256": "3d2629a00eac3ececac855b7f97161376c154af26353f4368add8d1ee0bc42fb",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 14,
+      "revision_id": "voice-recording-boundary-revision-7d3154920a91a00e89b8",
+      "original_candidate_id": "voice-recording-alignment-candidate-fd8682eb6e084e4a62cd",
+      "output_audio_sha256": "504c69dddfac2508835a89dd0cbbcd8826a41d5a36130f3e9d2c4e3e31b5d325",
+      "authoritative_transcript_utf8_sha256": "784fa94262d5e4e671cbcd3e1f682e196ab55acfdef2a06487a8a6d64812d2a9",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 15,
+      "revision_id": "voice-recording-boundary-revision-38f6c8f1309d3d25e1a3",
+      "original_candidate_id": "voice-recording-alignment-candidate-cb189f3a9438a9ce9ae9",
+      "output_audio_sha256": "69456d8d82c118553cc3066e00283dc1b84c96bd36657b41e003eed7c0690924",
+      "authoritative_transcript_utf8_sha256": "8911d8f20f255c0c6400432e7580aa56a8dfedddf5cd76e1aeeaadbd311c746d",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 16,
+      "revision_id": "voice-recording-boundary-revision-bda9bc20fbac31d1a62c",
+      "original_candidate_id": "voice-recording-alignment-candidate-7d015fae5056d64f4983",
+      "output_audio_sha256": "463737886e6facd98b38bc76505dac81422302933aecdaaad05f9e9e5bb5764c",
+      "authoritative_transcript_utf8_sha256": "9fd95787c2ab4e95637b3b3201c3554b9f2e8bb1b88e1e2ab9e815e993690066",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 17,
+      "revision_id": "voice-recording-boundary-revision-a1760827ae1a172a5092",
+      "original_candidate_id": "voice-recording-alignment-candidate-48962a3f6ae2d1487655",
+      "output_audio_sha256": "355e673a2e6d06017d8c5593e6c78054825e34d9d67809a4c0c8caa9bc18f87b",
+      "authoritative_transcript_utf8_sha256": "8605ff9ae33f5ac16b2349872136ef261e75522ac2b637ac8469a88a17a06d64",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 18,
+      "revision_id": "voice-recording-boundary-revision-263979f3e50fca1ed308",
+      "original_candidate_id": "voice-recording-alignment-candidate-d99749b13fd2eb0bcbe7",
+      "output_audio_sha256": "c27cc6373347a20869fb0fad248890ce309c4a6e0d2e5114e322a770232de9db",
+      "authoritative_transcript_utf8_sha256": "ba92fab26425944db238047a30e6b2564a6db24158e35204511c0f3c6171dd9d",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 19,
+      "revision_id": "voice-recording-boundary-revision-c45a8dd9a2a3370effce",
+      "original_candidate_id": "voice-recording-alignment-candidate-eb345cd22648882ac882",
+      "output_audio_sha256": "f0ddfec3df47f4d31f2c87e0857a65a9a65cbc130b66dc6156c061f8e5f7d1b3",
+      "authoritative_transcript_utf8_sha256": "4d9d94ad2d4d11b5a2d27ea5dff2e4c2440c475b542861e3cd96e35154209f08",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 20,
+      "revision_id": "voice-recording-boundary-revision-1399f8c60050b2178a76",
+      "original_candidate_id": "voice-recording-alignment-candidate-f2c9c3861a014e941d42",
+      "output_audio_sha256": "ef8866d8311d4c2cd3a397e90ec3e063410f18e0051415e7025efee5279e5bff",
+      "authoritative_transcript_utf8_sha256": "5b610d49eaf63bca8f4b0b9dfc2b3cfeae589e9c1fb479864a648ca52905c513",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 21,
+      "revision_id": "voice-recording-boundary-revision-8d4a0a2002ac8c780317",
+      "original_candidate_id": "voice-recording-alignment-candidate-b52bc479a821298e1f43",
+      "output_audio_sha256": "a5305794ffdb78385cd2d44367ec7e2f395f381920a12a751300bfb8b1bc6bd3",
+      "authoritative_transcript_utf8_sha256": "ae184bc3089c2b4fa6815540d9f50de6a0eecd6f5d0b76dadeee421d54be74e3",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 22,
+      "revision_id": "voice-recording-boundary-revision-a17da6b671746e14c5a4",
+      "original_candidate_id": "voice-recording-alignment-candidate-42b8eb16bdeaa5cb0eab",
+      "output_audio_sha256": "a60a11cc27f9de9bae377c2f5791d25127f3c666e587edb6d6a927f232daa94b",
+      "authoritative_transcript_utf8_sha256": "283a0658da86d0de432e3d0880ee4fca3f5090e37d576b96ab7fbf89c16f1c86",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 23,
+      "revision_id": "voice-recording-boundary-revision-1e055cb0b35f4aed9200",
+      "original_candidate_id": "voice-recording-alignment-candidate-f368b25575eac81ecbe3",
+      "output_audio_sha256": "33e0544f621f1cc8618cad0ea7ced4ad928acc481a594e018a2217f0f3d51b07",
+      "authoritative_transcript_utf8_sha256": "be0da3f2bc62ee55bcfadad2b77ea2b8e4ebbbc286eebd072431a95818073377",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 24,
+      "revision_id": "voice-recording-boundary-revision-651e5bc8d57843072b1c",
+      "original_candidate_id": "voice-recording-alignment-candidate-98d42bf7c591e60ccf1a",
+      "output_audio_sha256": "502b8906ee782b221591826415227290834d03b50ea1609d927db0b6f71d5959",
+      "authoritative_transcript_utf8_sha256": "052174722b42cafdb5453b90dcb67684ebd941f031a4c1f756880823ca466539",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 25,
+      "revision_id": "voice-recording-boundary-revision-a7c720413891317a689b",
+      "original_candidate_id": "voice-recording-alignment-candidate-dbaff5d5eea0582c936c",
+      "output_audio_sha256": "4db318dae64419b9683f2ebde8971d108dbfc1855ba5c3e00323cb2e9eee5c5c",
+      "authoritative_transcript_utf8_sha256": "f7e121c27813d08ad47de2d902276dfcd3c46963b2b5a8161972e38cbdd9ab68",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 26,
+      "revision_id": "voice-recording-boundary-revision-dc2493d2f781d582219b",
+      "original_candidate_id": "voice-recording-alignment-candidate-0a3a7bc7816838358f8f",
+      "output_audio_sha256": "0a848bffc10301f3d6d7f46144cd939577bbaf455cade807b859b8ac86c8d435",
+      "authoritative_transcript_utf8_sha256": "7a4e324e2e9cd9e7a00c933b489ccffe8fe39ac528bc3a79a2e56d5f1d7d2f70",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 27,
+      "revision_id": "voice-recording-boundary-revision-374a25b8389939c0ec23",
+      "original_candidate_id": "voice-recording-alignment-candidate-59732ab1011f2eee2fe2",
+      "output_audio_sha256": "75daf6661c5b61a9415ecd8dc709f133007b59fdeec07ae2f5d0fdedaff28d5a",
+      "authoritative_transcript_utf8_sha256": "c723b549f7703d5b04daf6334aa4dd33be93697f5228839e5cfed190003133da",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 28,
+      "revision_id": "voice-recording-boundary-revision-b3bd32272090052e1bec",
+      "original_candidate_id": "voice-recording-alignment-candidate-e8f5173268b707a773b9",
+      "output_audio_sha256": "f8a7efe4fe0e653bd863606377d17260fbf93705972ae93d3c044dee47a7a5a4",
+      "authoritative_transcript_utf8_sha256": "ff4d5cb97cfb817cf75f0429802ae15d0f60b2137211fe27fe6acbbf09c82d68",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 29,
+      "revision_id": "voice-recording-boundary-revision-e15c23580c3b34f1e840",
+      "original_candidate_id": "voice-recording-alignment-candidate-925971c7cc607cf11b04",
+      "output_audio_sha256": "d37cf2b9fb8e9dad9aa066567ec21eeebdb42dcb6393381e16fe1aa2efd2120c",
+      "authoritative_transcript_utf8_sha256": "b817377573417e56a19df712754f38449ee31808137dd75a984b03569ebd08bb",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 30,
+      "revision_id": "voice-recording-boundary-revision-2ad8c6cf02bfa424aeb3",
+      "original_candidate_id": "voice-recording-alignment-candidate-2181c6c7c514ff221223",
+      "output_audio_sha256": "d29e377c551604da9b56b3ca8f7e6b6f8b2587226bbac95870e9a3d4e1e43289",
+      "authoritative_transcript_utf8_sha256": "83a759d5c556d70eb1c87b718dd81ed12291574c1b747285775c301b34e2aa4d",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 31,
+      "revision_id": "voice-recording-boundary-revision-e7c379b85852c0674af0",
+      "original_candidate_id": "voice-recording-alignment-candidate-0928194f5afa48b468bf",
+      "output_audio_sha256": "f29a7da6beefe6c6d993ede73ad83e4862647c90744f8bb61bd55682e4cfbaac",
+      "authoritative_transcript_utf8_sha256": "371923bc44071f0a64cc46a8802aed7104b24cbfb57d9c5af07d9736f216d96d",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 32,
+      "revision_id": "voice-recording-boundary-revision-564e0d23a20132ab1e10",
+      "original_candidate_id": "voice-recording-alignment-candidate-18ec1fa06002299fc0f8",
+      "output_audio_sha256": "9467fa91f2be1f58d77d59cc357774e2186fcff3a66e3e08560845921848dbb6",
+      "authoritative_transcript_utf8_sha256": "33b97d569f597dab1648407675c36f5a35c1b967b9f1daa2a276a2f2d778e431",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 33,
+      "revision_id": "voice-recording-boundary-revision-879a785bc073f190aa37",
+      "original_candidate_id": "voice-recording-alignment-candidate-891659118e15551c4baa",
+      "output_audio_sha256": "b602f8171228f659607319d5099ef3ea74b66977e0500faa3156192541a67656",
+      "authoritative_transcript_utf8_sha256": "999c7766c3b48cdeb08c7db8d69a53dfc8cb19871d98ca4d0d03d6722113fe5a",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 34,
+      "revision_id": "voice-recording-boundary-revision-1cfeb8ccb27ffd67cd7a",
+      "original_candidate_id": "voice-recording-alignment-candidate-784a11477fecddd4165c",
+      "output_audio_sha256": "355e26fd69e84579c8b3c3e4537a266ad343a53e6ce28e62e117465cd112c8e7",
+      "authoritative_transcript_utf8_sha256": "4352ecd71339df0482e2b57a7a00c8537a61ca675da9e5b9db89c54ade6785ff",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 35,
+      "revision_id": "voice-recording-boundary-revision-05d398939ee7936150db",
+      "original_candidate_id": "voice-recording-alignment-candidate-fa05c590841e9c85e6b9",
+      "output_audio_sha256": "b0d668cc654b3c2aae9a87ff84680cb75d10d19f690f297c8068db0661fefe40",
+      "authoritative_transcript_utf8_sha256": "70c83d13c3c858e23dd861c7cb817209454db65dd0e7ee4131c98ca280db0a9f",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 36,
+      "revision_id": "voice-recording-boundary-revision-13956712d6219382e0b0",
+      "original_candidate_id": "voice-recording-alignment-candidate-94485ecbe0042218192b",
+      "output_audio_sha256": "1f6cf87856bb20d562650a0e0f9dd9ac9ce3a11e8647e00f556c3f6cc341d1bb",
+      "authoritative_transcript_utf8_sha256": "b39632432dcbf4807932e05cb18c02c26f9aba600832d24dc6052ade3816cd2c",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 37,
+      "revision_id": "voice-recording-boundary-revision-c5b0025d74886a795fef",
+      "original_candidate_id": "voice-recording-alignment-candidate-6d1d2f6b356fbfec8dc6",
+      "output_audio_sha256": "61a158e00af5b5772647d79c60d5d95b6c241678bb4fb77d07e9d099419a3e96",
+      "authoritative_transcript_utf8_sha256": "575e3a09987ea43c35d3605843ab47bdef34ec3abe191ce144bca47df304ff48",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 38,
+      "revision_id": "voice-recording-boundary-revision-d97b6c60ebc2ba01b311",
+      "original_candidate_id": "voice-recording-alignment-candidate-941689b5b09412bb266a",
+      "output_audio_sha256": "8e02b9e7a2bd34af5e6b8646f25b6d6c80943f06ac9eca6dec234168cf7b702e",
+      "authoritative_transcript_utf8_sha256": "8b1ba267e22166383d5aefac3c50f3f108cf575cdc6a888b53d7087a4b9b5c2f",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 39,
+      "revision_id": "voice-recording-boundary-revision-10dfb325f218479b192a",
+      "original_candidate_id": "voice-recording-alignment-candidate-52f2f60f024fadadf849",
+      "output_audio_sha256": "c23949db9584aafd40a64a0aeb53b93e32efaccff8dae46df62c0cf31b0e7f4d",
+      "authoritative_transcript_utf8_sha256": "03e06a2f6aa4f0a8a0ec1ff285f3f58a080f217b1da765801a8ebc29f4b66ee2",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": [
+        "outside_preferred_duration",
+        "short_duration_not_standalone"
+      ]
+    },
+    {
+      "ordinal": 40,
+      "revision_id": "voice-recording-boundary-revision-e48ee2b24510bf99054a",
+      "original_candidate_id": "voice-recording-alignment-candidate-c7bfefd62ba7e028d240",
+      "output_audio_sha256": "b38e710d1755365a01f45e2fc947fc85635762af77a3699a3079f145a44ca5b7",
+      "authoritative_transcript_utf8_sha256": "2da00adedfee917fbfa7655c5b8242c13abc8b7541d59e843a2d341970da95d6",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 41,
+      "revision_id": "voice-recording-boundary-revision-64a392c505691268a86b",
+      "original_candidate_id": "voice-recording-alignment-candidate-d2a6a2137a6865c6cd72",
+      "output_audio_sha256": "8d6d3ec694c76d0d7b40ce36da5ee478db763ebca7d3b5094a978d7ccf8bd1b9",
+      "authoritative_transcript_utf8_sha256": "58ecd0cf282e1a900b09dcec63800b448b5fad2e0c0980567b6de6561db093dd",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 42,
+      "revision_id": "voice-recording-boundary-revision-2a8772408f64aecaf85e",
+      "original_candidate_id": "voice-recording-alignment-candidate-a2c7669bcbe8a9ac0551",
+      "output_audio_sha256": "6562fe30586318bff20bbbb2098bd2386defe8a01b151691753cb78994dc5903",
+      "authoritative_transcript_utf8_sha256": "07e91f250af7819d9c4f99c1e07abcb41c790cc671fc459fe48f9d159e008355",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 43,
+      "revision_id": "voice-recording-boundary-revision-faacd2ba59581c1a58ce",
+      "original_candidate_id": "voice-recording-alignment-candidate-6a3753a929a3e73d6747",
+      "output_audio_sha256": "37b00751eeb9b22846ba45aaba6a0a616e45f3545b30e3927ba5e8c5b0e9450e",
+      "authoritative_transcript_utf8_sha256": "f8f77de96645126dd8ed6883f5004e18fa6cd38ea72617eeb1ff8c466fb71cfe",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 44,
+      "revision_id": "voice-recording-boundary-revision-bb2c3c7e30cdc293b2ec",
+      "original_candidate_id": "voice-recording-alignment-candidate-535cf80116fd37be683e",
+      "output_audio_sha256": "28dc69d0edbcefa2eaaef2d7ade7327fc0ea645f4c70bb0e943655c6debe5510",
+      "authoritative_transcript_utf8_sha256": "510eb5dfdf3e07a25673dfb3d856d80078d6cac7434d56f26f39e2b91552cb67",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 45,
+      "revision_id": "voice-recording-boundary-revision-c16aebe181880642fd52",
+      "original_candidate_id": "voice-recording-alignment-candidate-dd6e4ea4352458d58cc7",
+      "output_audio_sha256": "ae50b0199919d62d65ebe322461c7388e687696715eb48ac6781844336bb2500",
+      "authoritative_transcript_utf8_sha256": "7023806038138d250a2010da5f845176e45ae7b76b1056288ab9c66a83023788",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 46,
+      "revision_id": "voice-recording-boundary-revision-55b8aa07cd511f1452f3",
+      "original_candidate_id": "voice-recording-alignment-candidate-072c3397b414f81cfa4d",
+      "output_audio_sha256": "6fe22aefc49114df2442fe376fcd1ec0093a772e52286f5d83d3b711f04a3b99",
+      "authoritative_transcript_utf8_sha256": "b89301794ee66f0498b3ce696f260adb21614058ad10cb0a411081fcc9b2d416",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 47,
+      "revision_id": "voice-recording-boundary-revision-94bfe8afbe024b07fb8d",
+      "original_candidate_id": "voice-recording-alignment-candidate-e853d1925c969a9d0945",
+      "output_audio_sha256": "36d076b106a7bd7950eaf7ac4328e5633173f25764dfb03aa108645ade306337",
+      "authoritative_transcript_utf8_sha256": "eb88b5e1ab2e352efb35cb0d1c19fca9dba557ca2771f3abceef142ef4f38ab3",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 48,
+      "revision_id": "voice-recording-boundary-revision-b3f27b1e34025e243c15",
+      "original_candidate_id": "voice-recording-alignment-candidate-4f6980c84f09fe8fd0d6",
+      "output_audio_sha256": "b0aa9346bafee02cdf8f773c3bdd526cb7162dd13a3ea2ecb26b0ab7c365a46e",
+      "authoritative_transcript_utf8_sha256": "f8f0311a03caf169de306c90534f885183117034cb532de6d40a132065cd6295",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 49,
+      "revision_id": "voice-recording-boundary-revision-313fa263677d6ce2f1c3",
+      "original_candidate_id": "voice-recording-alignment-candidate-35c9453517f080afef53",
+      "output_audio_sha256": "7d6bf5bbaac721f9e1133a6ec44c8c4a3fbf9a285bb0a86d941a6e12ae4a4ac0",
+      "authoritative_transcript_utf8_sha256": "85cca61e7610606d375bbab1af5defc74ed35a8b4f7d8d8c13fac199af21fd0d",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 50,
+      "revision_id": "voice-recording-boundary-revision-82b5f225775c9b3c3fb7",
+      "original_candidate_id": "voice-recording-alignment-candidate-8bda4b03bece1c52aedb",
+      "output_audio_sha256": "b68555700e804425f93a9ca11eddc3a5fd8e19ad9a76a9d973038b8caba2bcc9",
+      "authoritative_transcript_utf8_sha256": "1bdbd6cb675c7b7dcf9483f22d23e2ebc91a36232a6f8b7a28c191a0870f36fd",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 51,
+      "revision_id": "voice-recording-boundary-revision-679471c734ce1a46f8ef",
+      "original_candidate_id": "voice-recording-alignment-candidate-1778a458287341b5186f",
+      "output_audio_sha256": "d93635a9d47168cb2f7b8a068b3f33429afa3d5b501fdb586f83fc27f12af9b2",
+      "authoritative_transcript_utf8_sha256": "da92986c872121d8443f1bcf556d61f24606e02b93b42e23ad7e13817a17a260",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 52,
+      "revision_id": "voice-recording-boundary-revision-e68d7ebaa4689941bfcd",
+      "original_candidate_id": "voice-recording-alignment-candidate-ff3999da4d78a4be3902",
+      "output_audio_sha256": "be69d36cdfee6e6f9bcec6e062c0dca5942a5bdda46aff6b34f8be6f32d39661",
+      "authoritative_transcript_utf8_sha256": "13b792ae984d71ed6c7440bd2b86022cc3fc13e21c5f2c8d8762e03ca2abe46e",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 53,
+      "revision_id": "voice-recording-boundary-revision-f64da6076e73a6e1014f",
+      "original_candidate_id": "voice-recording-alignment-candidate-5384cfff4c2b6908179d",
+      "output_audio_sha256": "77e8747ce7de855b2038359e3c0a317840534a03f494ba90ac8e3079c22f5e27",
+      "authoritative_transcript_utf8_sha256": "b9b7b63f5c3038c00a370ece99dbcbc6b2cfa5f16de87bfb14cedd2d50f75d42",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 54,
+      "revision_id": "voice-recording-boundary-revision-c69a22442b77d864e582",
+      "original_candidate_id": "voice-recording-alignment-candidate-ce42c20fc59b014a64f7",
+      "output_audio_sha256": "4e6b38aca53aac24de8dc4f6e6fa6cbf6b7446b7ae3852ffdb5ead225d40b65f",
+      "authoritative_transcript_utf8_sha256": "021ff934172b9804a9e644a7f60a63c71e26babde58cff718bd3c331f12eb66c",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 55,
+      "revision_id": "voice-recording-boundary-revision-c5e947548aac1f54ddf9",
+      "original_candidate_id": "voice-recording-alignment-candidate-af39f3dcf17b8d318c49",
+      "output_audio_sha256": "9ba7003a6b102532672b2044f00d0dd0a99b623cb08f1e03c751005916fb7272",
+      "authoritative_transcript_utf8_sha256": "7225ac906b832228b1defd18c4091efecb8af65fc9f7dcf46de453be6e3732d4",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 56,
+      "revision_id": "voice-recording-boundary-revision-532f171e533148747a30",
+      "original_candidate_id": "voice-recording-alignment-candidate-91e67deecf9b76d63c37",
+      "output_audio_sha256": "80ec4747da638a68679006e8b41aeab6bab739ff62a047d6ded464cbbc557e68",
+      "authoritative_transcript_utf8_sha256": "98b0b8585342f57d12dfe20408c44468fcd12d5d59b420d3ff9bc7fa11b69fc4",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 57,
+      "revision_id": "voice-recording-boundary-revision-81689f494d293e333ef1",
+      "original_candidate_id": "voice-recording-alignment-candidate-ab3c13c4e0a79de250d9",
+      "output_audio_sha256": "937602ee545ed47cc5425e5c14e4481069274355cfb5b0565841b8363f0db584",
+      "authoritative_transcript_utf8_sha256": "2288aa31151a0fc5ae123c0ba5037227c60f54a88484ebbe7921a7c66303c3cd",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 58,
+      "revision_id": "voice-recording-boundary-revision-f09edb59c4eaadad8b68",
+      "original_candidate_id": "voice-recording-alignment-candidate-dbf397fed1d917f0c7a3",
+      "output_audio_sha256": "934155c09f981418407c0d00ee71bf4a80a9ad2a9ef9f6158a65c945f11c6dd0",
+      "authoritative_transcript_utf8_sha256": "b17ee4f1ba9bac77a9a02be44b64475d870c75c8e67e6e2637260959ee057afd",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 59,
+      "revision_id": "voice-recording-boundary-revision-6de6cfe63ba8d3a3bd79",
+      "original_candidate_id": "voice-recording-alignment-candidate-e617b417c8a358ce68fb",
+      "output_audio_sha256": "cbdaaa4bec6b50c84b6df6b7f2969c93c8a766c9330592233c9c1a1610090bb7",
+      "authoritative_transcript_utf8_sha256": "fef07d8aa57f53599b041a8db1126cdfd46e29a1085bf0c7ef2e6c6ba9232882",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 60,
+      "revision_id": "voice-recording-boundary-revision-463e67e7ee628c36ae50",
+      "original_candidate_id": "voice-recording-alignment-candidate-efed00e2feec00846538",
+      "output_audio_sha256": "cd69270958e0ecd233ed17f8c4e18e8943508e7af3541d54829006f8bcee05b7",
+      "authoritative_transcript_utf8_sha256": "0e2af41f84eedbc0dbd9b628b6c72585eb01f807cd393703b594e8ef74016333",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 61,
+      "revision_id": "voice-recording-boundary-revision-d6063659f6ecee902e35",
+      "original_candidate_id": "voice-recording-alignment-candidate-c0fac236904552b30dcc",
+      "output_audio_sha256": "d2eff653de4ba3339f8cf179f13f65ba5e549a26b55c2e3163871c54c7728245",
+      "authoritative_transcript_utf8_sha256": "941284a89028b9c15036f2a059cb1bfecef384edff1361616b5ef5cb5335506c",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 62,
+      "revision_id": "voice-recording-boundary-revision-c8e1f2f3964a92cb687c",
+      "original_candidate_id": "voice-recording-alignment-candidate-fa5bbbab8f0f55284d2b",
+      "output_audio_sha256": "cd87c9eca5de5e24983c1c54efff8ce2026d9f9e211eb6683721978e57619429",
+      "authoritative_transcript_utf8_sha256": "e51932081c5f80894e3c20dc799461a0ac33fe2e0046e95dfdc625b4c6ac3fd6",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 63,
+      "revision_id": "voice-recording-boundary-revision-da65a6ab61718e41addd",
+      "original_candidate_id": "voice-recording-alignment-candidate-02acc344e1e72a2c382c",
+      "output_audio_sha256": "4167e69036b785d20db8d889e81cead4a0f46f3f9874448da3815afa1d25611b",
+      "authoritative_transcript_utf8_sha256": "46acaacade645c464322e4421df3fb3d15b7becb1ab7d2cfbebab035b5a885f2",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 64,
+      "revision_id": "voice-recording-boundary-revision-f436e1eed4a740b34db6",
+      "original_candidate_id": "voice-recording-alignment-candidate-6934e8a8181ef2842194",
+      "output_audio_sha256": "c220b6163ff24ef0c2c67b3145e0e5950a2f2ed0b788d8bd83c3ae21f78d47b7",
+      "authoritative_transcript_utf8_sha256": "01e877a255698cb6297bfee03d55aa797182324e8e2a68c8d4278052536c07a0",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 65,
+      "revision_id": "voice-recording-boundary-revision-ab4d7c8c99cd9cd3eaa1",
+      "original_candidate_id": "voice-recording-alignment-candidate-11415f6ac9c5de2f959e",
+      "output_audio_sha256": "7a68f5291273f772c0af602f40ebbf89667b8821b415e4c1572892cc0b5b88d3",
+      "authoritative_transcript_utf8_sha256": "4b632159a3418648d250cd26c9dd0d7b39abf1bf15a1a5b77ca0f35288bfab10",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 66,
+      "revision_id": "voice-recording-boundary-revision-f4a61eb774ee9c5cf8fc",
+      "original_candidate_id": "voice-recording-alignment-candidate-94700374b57b7e7f2743",
+      "output_audio_sha256": "e7de86ac309ca20a254952bc525da85b0743f5f3da9ef662119dd6e25431cb40",
+      "authoritative_transcript_utf8_sha256": "1a361a0602f222584d182788b83ea1ba0b0ab5fa7fcc26ff2615f6f6c1815b7d",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 67,
+      "revision_id": "voice-recording-boundary-revision-f2f1d0c13a5f84d73fc1",
+      "original_candidate_id": "voice-recording-alignment-candidate-348f6b7c08079ccc7369",
+      "output_audio_sha256": "16c6ee7d6e92873c63ff2b58484fae6354d7f11024da3fa6461ad9519fc3f0d7",
+      "authoritative_transcript_utf8_sha256": "cb128bd33958b543c01ba9814052e9809209e190189f4c73e32f09c18ea4bcc9",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 68,
+      "revision_id": "voice-recording-boundary-revision-c7d74f528fe21e9740cb",
+      "original_candidate_id": "voice-recording-alignment-candidate-9b1f954a9482ee2c6a00",
+      "output_audio_sha256": "cd9315eba4e4225fa443e5c6417ae258658900050c1e334b9e174b61205bd00d",
+      "authoritative_transcript_utf8_sha256": "47751dd83436766aacb2c5f5d97042c2a4200f068c77e16e47cd3fcc8f42aadc",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 69,
+      "revision_id": "voice-recording-boundary-revision-e681d17bb3848e386576",
+      "original_candidate_id": "voice-recording-alignment-candidate-bdde0c139897c89ff408",
+      "output_audio_sha256": "7bc4dd05fcca50aec47654009c6bf29d8c2a101e7edeb6cddfe455e97c0bb7ff",
+      "authoritative_transcript_utf8_sha256": "57e93ffb6a2f186e5929f274cbc355d44ba8f7a38fb842eb696741b111bb4ae7",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 70,
+      "revision_id": "voice-recording-boundary-revision-209fe7d1cc87d485ad74",
+      "original_candidate_id": "voice-recording-alignment-candidate-0239796733734cd4fe23",
+      "output_audio_sha256": "72c115813036db2ba423028af9c38bf47ab8434a40429d30d2d885699a0098b3",
+      "authoritative_transcript_utf8_sha256": "30758bccbfdb99a9d393ea6d53d6603481016b11b3918e49aba5f3d88ca8deb2",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 71,
+      "revision_id": "voice-recording-boundary-revision-9ce794810e2ac9287ec8",
+      "original_candidate_id": "voice-recording-alignment-candidate-645bf1c981821a07b3ad",
+      "output_audio_sha256": "1e4be5ffafbbf7fad4b348e9350020f8db3d74f4c62136c73966201a18912fd2",
+      "authoritative_transcript_utf8_sha256": "cbee8b8bd423f96e280245f3f54965885e3c76a5279bb382a536b1ea1583918c",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 72,
+      "revision_id": "voice-recording-boundary-revision-e54dc772704d50a2c88f",
+      "original_candidate_id": "voice-recording-alignment-candidate-3ef6a1629def8543a769",
+      "output_audio_sha256": "de776f5f7e61bc7501d45a2ea18d76524d7d8a78580229dc97e58faf6934c7d8",
+      "authoritative_transcript_utf8_sha256": "d03ac0181f9f59cd7b709c5cb2f7e58a5b0f781deae285c905bebe1900eae3c7",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": [
+        "outside_preferred_duration",
+        "short_duration_not_standalone"
+      ]
+    },
+    {
+      "ordinal": 73,
+      "revision_id": "voice-recording-boundary-revision-14909f1a538d902d1400",
+      "original_candidate_id": "voice-recording-alignment-candidate-dc2d2a6895beb235d461",
+      "output_audio_sha256": "c7ecf1ea7931ebf2fea18c03e71b4b6f30d424ba485233238d5eb832c2e28cc7",
+      "authoritative_transcript_utf8_sha256": "f03a47a1062fb3a4e2e9026df35db71229d63c5d655023965b7b2930c8ff0e7a",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 74,
+      "revision_id": "voice-recording-boundary-revision-fc2dab9b232e8bdcf970",
+      "original_candidate_id": "voice-recording-alignment-candidate-9935943be6a458ab34b6",
+      "output_audio_sha256": "7818b752ea05c61865ccf79619b997e1c610a2a994dafe33d5b6af6afa9f22a8",
+      "authoritative_transcript_utf8_sha256": "ae0a052aa97b3e18b47cf2aaf99557fca585856a420f8ceba952f5c4ba5c41cd",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 75,
+      "revision_id": "voice-recording-boundary-revision-8a9a778be066da29295f",
+      "original_candidate_id": "voice-recording-alignment-candidate-6897b22c89a96b7c7f2a",
+      "output_audio_sha256": "b977726bc502df47739ea3cb4e01666b0c70677d05ee0919866e1f1837e72a60",
+      "authoritative_transcript_utf8_sha256": "c00ae93ab6f328e423fe409c97d78417d35d71ab12212fe5a5278034934eb1db",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 76,
+      "revision_id": "voice-recording-boundary-revision-d512a6f37996ea8a9803",
+      "original_candidate_id": "voice-recording-alignment-candidate-a04e4b8c8119e4d9453c",
+      "output_audio_sha256": "4129e454a87e33cf61c16ef55a979b250ffcb09eb0701adcad7354b347d456cb",
+      "authoritative_transcript_utf8_sha256": "22daf1745e9fbf71c7642d4592cd527e6cb219265bd0282fbbc6612f310b334a",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 77,
+      "revision_id": "voice-recording-boundary-revision-58c3e6853c74a5796652",
+      "original_candidate_id": "voice-recording-alignment-candidate-7d468451450c97fdbdd0",
+      "output_audio_sha256": "36de4b18e55260ca2b33a01feeaf1e98fbf240fa6a4ace4989b424f8b313d9da",
+      "authoritative_transcript_utf8_sha256": "c0fc25209e1215a601a13cb70bee47694de699591849ab3d3802c8345c196e5c",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 78,
+      "revision_id": "voice-recording-boundary-revision-8a4b2f8cf49a4a0cca2e",
+      "original_candidate_id": "voice-recording-alignment-candidate-954c8202a940503e599c",
+      "output_audio_sha256": "92115aea067e696e50db1399a3a8a0aceb485c8a5f50148abc60d0ef6638d013",
+      "authoritative_transcript_utf8_sha256": "e69588cac99f63942ff6f137402e38729c4144e8b2c4f1a1d1e7e4d543fa6530",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 79,
+      "revision_id": "voice-recording-boundary-revision-45fe486234175d5270d9",
+      "original_candidate_id": "voice-recording-alignment-candidate-9417a23b22d7203e13c2",
+      "output_audio_sha256": "94f3b7018331ecf4d6f8eba6cde49df294517142ccbbe8a6a77adeda286240d8",
+      "authoritative_transcript_utf8_sha256": "3c01d1682d51a9ff0ffe86d7c2e3cb627d354c099af485dbfea90a526c3bcba4",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 80,
+      "revision_id": "voice-recording-boundary-revision-074f2888a7de167277f7",
+      "original_candidate_id": "voice-recording-alignment-candidate-4fbffb7244d29a197dd3",
+      "output_audio_sha256": "66735eac9a1cb1296905707afb4a6a27707b17496aaaedf2d56b5e5db467a9ac",
+      "authoritative_transcript_utf8_sha256": "8ab2cf8d4471c9e4bdeecd8142c759e7b0c7dbd7374b3df1e2c8337fbeddd661",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 81,
+      "revision_id": "voice-recording-boundary-revision-d875344c47bc9f7df2d2",
+      "original_candidate_id": "voice-recording-alignment-candidate-305225edd800921604dd",
+      "output_audio_sha256": "9f19aa75798cad16e8ce2357613e263a9fc1fcce05c634e5b5e959a27af86f92",
+      "authoritative_transcript_utf8_sha256": "8e72ac2eb87b5201542fca4e986921d72ad25f2e8fa528ab2596925308f2469e",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 82,
+      "revision_id": "voice-recording-boundary-revision-9747e5eee132adafb2a9",
+      "original_candidate_id": "voice-recording-alignment-candidate-be68212cf6161fb02e3d",
+      "output_audio_sha256": "a2b385c687d67180e4bb250b3682762d719499295c6c6ba26aec76c367af8e4b",
+      "authoritative_transcript_utf8_sha256": "4cba7d6b8d61b3143e7e09860ed3e1e300cfb5e3940a07d02cc28585701be1b9",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 83,
+      "revision_id": "voice-recording-boundary-revision-87c68f839ff9d4b54283",
+      "original_candidate_id": "voice-recording-alignment-candidate-ea2fb17c05f253e6f9f2",
+      "output_audio_sha256": "32be641ecca64dfbedb2781a9b9979091a913b3c8f5aff33357fe78ad9b5a512",
+      "authoritative_transcript_utf8_sha256": "eb7f6fb56eed500753f98a78836314f602c8fa33c8704cf3aafd394f3ca9a1c0",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 84,
+      "revision_id": "voice-recording-boundary-revision-6010f96ad4ff894d80d7",
+      "original_candidate_id": "voice-recording-alignment-candidate-a49991b6370dd5fe837c",
+      "output_audio_sha256": "37d2897063a259e67278f6ddc60c1e7da64928c5b1137c6f7cc373b9ae009c10",
+      "authoritative_transcript_utf8_sha256": "c262539c7937c85a21d5190ec3369d5e5a3c5018fe2767c86cd487cbcf513531",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 85,
+      "revision_id": "voice-recording-boundary-revision-e93ce28270f939b5404a",
+      "original_candidate_id": "voice-recording-alignment-candidate-9eedd1131e1207591be7",
+      "output_audio_sha256": "1fbd4df10702fab87c99affdedc3e50cbcdc21c0cf59b3fcc210eb09d8e097e3",
+      "authoritative_transcript_utf8_sha256": "b1153b12e970bf92ee88c2f798916f94054586e3c14ce6760324cef16f61a63f",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 86,
+      "revision_id": "voice-recording-boundary-revision-c153f80b8b5081c8d673",
+      "original_candidate_id": "voice-recording-alignment-candidate-74ae5ce69717472ebfe5",
+      "output_audio_sha256": "d15c116caa79c4b5575f6297132da0989c67f367b5979fbf04ade7ec9d842dbe",
+      "authoritative_transcript_utf8_sha256": "de366707cf20ea61e8627d6062684e0ef5245ba4cb47b5af9a8b74e31304d0e2",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 87,
+      "revision_id": "voice-recording-boundary-revision-4cac17689dd5ce6c42bc",
+      "original_candidate_id": "voice-recording-alignment-candidate-ff96a7e058af46b2472b",
+      "output_audio_sha256": "db980624b1ccb33f64456a8c211251ac6ef5da4312bf14f5c6e4c23b6eedd3fe",
+      "authoritative_transcript_utf8_sha256": "1d28f3e3a7f3317c8f912d2b63a52114a3454df17ab7959981a6546524a2d45f",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 88,
+      "revision_id": "voice-recording-boundary-revision-e6e8ed7c4b9716f56ea9",
+      "original_candidate_id": "voice-recording-alignment-candidate-01ea60bf64f84d6efa62",
+      "output_audio_sha256": "7fb6785f5e33284e2bf31ff176c759f5670513bf791a5c53f70aa542b982e5f7",
+      "authoritative_transcript_utf8_sha256": "5c8cef2da06cd12ea7dce5cbcb51147186292c60f9b87b1120496db5943356a3",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": [
+        "tight_silence_trim_required"
+      ]
+    },
+    {
+      "ordinal": 89,
+      "revision_id": "voice-recording-boundary-revision-4b1472e23121f3fcc888",
+      "original_candidate_id": "voice-recording-alignment-candidate-cef882774876f7775cc6",
+      "output_audio_sha256": "489699cd3ac1c091d342b2092292fa72691cee20809cf03bb2bbc6f9bfef7e7e",
+      "authoritative_transcript_utf8_sha256": "d41007f8003aa6ab8e3c706f11f3620501cf4999bd6af1c74a182564bca59d60",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 90,
+      "revision_id": "voice-recording-boundary-revision-837a7c0ab5310c5d544c",
+      "original_candidate_id": "voice-recording-alignment-candidate-82c532c95cf10d81d949",
+      "output_audio_sha256": "7228ef467409a7668eeaa37d980a3a36885b50818b6aea13eb54d6065ed6ca72",
+      "authoritative_transcript_utf8_sha256": "d0c4c00e641761bd5160a8e0867412723eb8b0a4200d921a560693265b887425",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": [
+        "outside_preferred_duration"
+      ]
+    },
+    {
+      "ordinal": 91,
+      "revision_id": "voice-recording-boundary-revision-decdbc593295fb6acb55",
+      "original_candidate_id": "voice-recording-alignment-candidate-0e54c914aae3e2619526",
+      "output_audio_sha256": "b0e573f14ff9899fb5ccda99d7f9d998b67961c5c742ac689fbddb0b24832504",
+      "authoritative_transcript_utf8_sha256": "7800a7f1a0545ec9b85231e33b3cc9c2d4b376bff639d56450b7cadb515c2838",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": [
+        "outside_preferred_duration",
+        "short_duration_not_standalone"
+      ]
+    },
+    {
+      "ordinal": 92,
+      "revision_id": "voice-recording-boundary-revision-d0134c9a2bde70efaf27",
+      "original_candidate_id": "voice-recording-alignment-candidate-c98054336434a215641e",
+      "output_audio_sha256": "1eb6ce2fe1ab267f8973fdc645133c3e38469cbbe0c6eeb13d0469371dc84d9f",
+      "authoritative_transcript_utf8_sha256": "66d0c7033446ef9921c2bcdcd79e939cc3997181da0cf736dd6bd9b62c0eefc8",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 93,
+      "revision_id": "voice-recording-boundary-revision-d8210db42011147193aa",
+      "original_candidate_id": "voice-recording-alignment-candidate-102fd72347e818327742",
+      "output_audio_sha256": "28194a5bf95703c2c9147486f8344da9701b1da1ba77a15957c209a8c096cd4b",
+      "authoritative_transcript_utf8_sha256": "0dda4ade3e1355277ee494b6bdd5abc59bb431aef99dfb57b186f553f94cc47c",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 94,
+      "revision_id": "voice-recording-boundary-revision-82f14c6ed23cea166ad0",
+      "original_candidate_id": "voice-recording-alignment-candidate-b967628577725204ea95",
+      "output_audio_sha256": "928780fbfdf5574d02513e824ebb48c3d998201c81896f9499ce1011908a20ab",
+      "authoritative_transcript_utf8_sha256": "ec3f8dca5141c5c510deba172d799c8cf1edb2814d34e0aeef474be1e13278ed",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 95,
+      "revision_id": "voice-recording-boundary-revision-56a274d19197cf0e75ca",
+      "original_candidate_id": "voice-recording-alignment-candidate-9f1fe7711254d2fb9271",
+      "output_audio_sha256": "2666f5c74e1e1ee67421dc395d951e8d38d3c524b3de89cfa5441414a120e745",
+      "authoritative_transcript_utf8_sha256": "67e28989b1008beedf05dad078300a59835c26bd5eb4409bfdd347f756a68939",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": [
+        "outside_preferred_duration"
+      ]
+    },
+    {
+      "ordinal": 96,
+      "revision_id": "voice-recording-boundary-revision-760db006136b117db0ef",
+      "original_candidate_id": "voice-recording-alignment-candidate-aecaa03312d358940292",
+      "output_audio_sha256": "e86ceacb1c89e66b78d0007bff76891252c02ed8b475b4d0ef1b1370a5452b97",
+      "authoritative_transcript_utf8_sha256": "ba0ea4039195fd7b9f44d483626ff35fba820355d5130d77d31f00c893b43cba",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": [
+        "outside_preferred_duration",
+        "short_duration_not_standalone"
+      ]
+    },
+    {
+      "ordinal": 97,
+      "revision_id": "voice-recording-boundary-revision-79234a3a736b28cd2567",
+      "original_candidate_id": "voice-recording-alignment-candidate-41e657c1fc136034be28",
+      "output_audio_sha256": "477a9d0c216f8b75a83dd7765450ac968e49260f4d7d61e0e84e50026c28ef4f",
+      "authoritative_transcript_utf8_sha256": "56473fc59e34d49658b4cf3bbfb9f829c50477170506817b2d3b2ca33f6eb8d3",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 98,
+      "revision_id": "voice-recording-boundary-revision-bb3eb65fa653093d22eb",
+      "original_candidate_id": "voice-recording-alignment-candidate-612826d4de8db517e865",
+      "output_audio_sha256": "5251163a3e6a6afc17dac18e04a550e4166734ec8ef07c40fbcc677a998e83c7",
+      "authoritative_transcript_utf8_sha256": "61bdeb895b0e669b8949f995391c817376c5a4e9ddd1ae51c3e35ace1c37a2a0",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 99,
+      "revision_id": "voice-recording-boundary-revision-8491d22648b97cdf7906",
+      "original_candidate_id": "voice-recording-alignment-candidate-ff36238f63eb5c40f2d4",
+      "output_audio_sha256": "b149695b864716bce42449dd0589c76768dd93c0dad53aefbda031255699c112",
+      "authoritative_transcript_utf8_sha256": "c5d66295a095141b9f84e94d728e5b81063f4324ccb4c476571d167c47679cb8",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 100,
+      "revision_id": "voice-recording-boundary-revision-5d3d5f54f0e479f50e53",
+      "original_candidate_id": "voice-recording-alignment-candidate-393964743322a08ac2c5",
+      "output_audio_sha256": "42101ff32f5dce717f589f08bb2c8bfe0b8a171aa9a64e34be24c10f7bbc6fcf",
+      "authoritative_transcript_utf8_sha256": "6810751e6d60f45ab338e75f69230ff77986498a5928c8d588a4f20aa771447f",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 101,
+      "revision_id": "voice-recording-boundary-revision-c483397d83552c5e5516",
+      "original_candidate_id": "voice-recording-alignment-candidate-0a9af9a5df91abc8cd53",
+      "output_audio_sha256": "5524b6a4f12e97b72d81f5b1956a7ddb3f3102d35d712e445d03e0df44d99a09",
+      "authoritative_transcript_utf8_sha256": "1e7ad979c24d4f32bf74cb8dee6c1616e1476463b8b40b7c6a64b1d9d32b4787",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 102,
+      "revision_id": "voice-recording-boundary-revision-3c9247d5a62dc72db474",
+      "original_candidate_id": "voice-recording-alignment-candidate-e683c12561730e7dba17",
+      "output_audio_sha256": "1e16f3cb15652815fd3141a26afcbd287c97dac19f4cd661a828e15fbc4ed44b",
+      "authoritative_transcript_utf8_sha256": "86cd454536f6514ed4c89041682f89cd04334644f24ca3bc18fdd5efbc99f7a7",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": [
+        "outside_preferred_duration",
+        "short_duration_not_standalone"
+      ]
+    },
+    {
+      "ordinal": 103,
+      "revision_id": "voice-recording-boundary-revision-09fe59fc61c7a65a22c6",
+      "original_candidate_id": "voice-recording-alignment-candidate-6c40770abb32e8fc5da7",
+      "output_audio_sha256": "d6cf95df883b5b06f607632048ccdf2a2751b564d705d21d06b13ac870f8be0f",
+      "authoritative_transcript_utf8_sha256": "2fe68d7ac2e6aad10d354e01336791819e6b915c2714afa174ccc55a244d0c17",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 104,
+      "revision_id": "voice-recording-boundary-revision-eda540755bbd21cad62b",
+      "original_candidate_id": "voice-recording-alignment-candidate-d2a3e31ed5b65d8c203a",
+      "output_audio_sha256": "4e61cba453a68ca79050bd682d98f9ed1e43bfdb8166fed1077adac0ad605a57",
+      "authoritative_transcript_utf8_sha256": "d67e684b0aefe60711bfd98c17d46609f179e30c77ad669800eb48d7c015d23b",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 105,
+      "revision_id": "voice-recording-boundary-revision-167e28d53b211272e4ee",
+      "original_candidate_id": "voice-recording-alignment-candidate-5ba4c7ba970003c15674",
+      "output_audio_sha256": "fa97fff0db0e8af03aabac1a2d165dd24b8c02802ce41d354b8839d91439e7ae",
+      "authoritative_transcript_utf8_sha256": "74810bbf8661f903fdcb090befb232b10352ad3e8ae7ac030be5321dfcffe713",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 106,
+      "revision_id": "voice-recording-boundary-revision-9bc0492636e46c42487f",
+      "original_candidate_id": "voice-recording-alignment-candidate-d8916fda1d030698fd5d",
+      "output_audio_sha256": "885b77f9c747f54e5a0fa885e8ee4a1ebf3b6f1e0d0b655cd6bdf70c73220b28",
+      "authoritative_transcript_utf8_sha256": "bcc53b4006d93631aec957d629ae93239521ea6dca6b14c647f746cecb886e35",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 107,
+      "revision_id": "voice-recording-boundary-revision-b0dd48bcd4b9fe9fcba0",
+      "original_candidate_id": "voice-recording-alignment-candidate-5c013ed30713727eb573",
+      "output_audio_sha256": "1430fb4c05be6eabef58647a62ec575a312c90e41639214d8c24cf25f3d0c9cd",
+      "authoritative_transcript_utf8_sha256": "71f85916c8b1595bb3ad2c29bd7e8dd4b0e94f65cc163e3eb22adcf5cfaf27bd",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 108,
+      "revision_id": "voice-recording-boundary-revision-0f2dfcc4cd9887dd06d7",
+      "original_candidate_id": "voice-recording-alignment-candidate-07c3abdc34e2259e5160",
+      "output_audio_sha256": "b417227abecf781edf5bd7c7feaf3f71aecad4d8b8c379bd3d07f59f5504fd3f",
+      "authoritative_transcript_utf8_sha256": "84ad5533a6cf4f285409039c84f80c5c6118f2946db4e957d3bd96c5abcd173f",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 109,
+      "revision_id": "voice-recording-boundary-revision-5f1d329d5a71c1790b0d",
+      "original_candidate_id": "voice-recording-alignment-candidate-7dc853d119b7fcc24744",
+      "output_audio_sha256": "d2727d25f79ed296ae5c635f25e22f8008e06239868ab4367b340c982bd60059",
+      "authoritative_transcript_utf8_sha256": "16d822b1d1afd9ce178090a00ea426c99d332c936972d9e81e99e8f15fd443b8",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 110,
+      "revision_id": "voice-recording-boundary-revision-db19adaef4904d28ec13",
+      "original_candidate_id": "voice-recording-alignment-candidate-1b0718e51d7320957ef6",
+      "output_audio_sha256": "d3ef4d9e3b0cb6f6abbf94d710b5b7e94179eaf61b0b9ce79a69046bd1448552",
+      "authoritative_transcript_utf8_sha256": "773c159c86e954b67a57bc792b8b28d04d60800641d4107797051de1cd145fe2",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 111,
+      "revision_id": "voice-recording-boundary-revision-95ab40028c21221d0b09",
+      "original_candidate_id": "voice-recording-alignment-candidate-1584159442230997a1b9",
+      "output_audio_sha256": "e4a7cba54c7f615045525a235d9598d421fdc796abbddeb4689417333acc5738",
+      "authoritative_transcript_utf8_sha256": "4b9f099356db58dcb8872eb4ad7ee91d1bc6fc5dc05c1834657339feea717e06",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 112,
+      "revision_id": "voice-recording-boundary-revision-2a9bb070fce5c9701d12",
+      "original_candidate_id": "voice-recording-alignment-candidate-28ec819c0634e684bc64",
+      "output_audio_sha256": "f23a09d6c1e8c1f536c1a37dc850e90492b7a5001900f9016f081848e6840ea3",
+      "authoritative_transcript_utf8_sha256": "a57d052475a96a6ac0885ce4c413e9d3dd917e1da567e1adf64ebd763c91588b",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 113,
+      "revision_id": "voice-recording-boundary-revision-3e367d3f9cd6cb64132e",
+      "original_candidate_id": "voice-recording-alignment-candidate-3454efcab8f4708b5201",
+      "output_audio_sha256": "53d1176846a711476e44188eb8681103c0e5bad5e6f878208bd5e2a00afcb890",
+      "authoritative_transcript_utf8_sha256": "17dd8d7da799e06d804b30c8ab443382f341d1b9f44cea7704f38d675529a68a",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 114,
+      "revision_id": "voice-recording-boundary-revision-860954a5199d50837af5",
+      "original_candidate_id": "voice-recording-alignment-candidate-2e7ea46f5ef034a7941b",
+      "output_audio_sha256": "fa9f38c2ee1539ce920a62b6f0d21111e0c15c0b1b727dd7ff4e47777c7e6efa",
+      "authoritative_transcript_utf8_sha256": "6db9a5a0104c1343d4ce7b7f1d46f0f1f7d1408d26f2371d26e7e907a313e793",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": [
+        "outside_preferred_duration",
+        "short_duration_not_standalone"
+      ]
+    },
+    {
+      "ordinal": 115,
+      "revision_id": "voice-recording-boundary-revision-4663258fe37bff9102f2",
+      "original_candidate_id": "voice-recording-alignment-candidate-28d01ba0bd57000e1732",
+      "output_audio_sha256": "17ff59c577cbf03050ab8f00e47b16f742e5352d0073ff81c920417f9cedfc4f",
+      "authoritative_transcript_utf8_sha256": "42fc248ea03e088defb8c93a1799866c7981657ee17b212d19cc392e7dac8782",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 116,
+      "revision_id": "voice-recording-boundary-revision-85bf1cddf4621350fcb2",
+      "original_candidate_id": "voice-recording-alignment-candidate-f66f4acb320f7c6db066",
+      "output_audio_sha256": "68b0d4b12371361710765834ae5ddfec39e3ec2508e1904beb7d9444f3fe1604",
+      "authoritative_transcript_utf8_sha256": "771911db41cc75c17d67a4f3e3225cb742f56903a853271bd648ba4f98598d24",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 117,
+      "revision_id": "voice-recording-boundary-revision-39ffba159f4b63e03696",
+      "original_candidate_id": "voice-recording-alignment-candidate-42c45da4cdf8895e635c",
+      "output_audio_sha256": "3c5f5ef63af28c8dab9bad36731259aae22864a30047b5370e215b45a0621b3a",
+      "authoritative_transcript_utf8_sha256": "037ba3003d9c1e0567b922f2be0f6bc5a5d5d87750b04ab57d0eabad5b5cff0c",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 118,
+      "revision_id": "voice-recording-boundary-revision-97a822f5b792a77fd411",
+      "original_candidate_id": "voice-recording-alignment-candidate-bb2f12c5eac5f98b65ef",
+      "output_audio_sha256": "cfc5e59f4ca59e54ff505081527a22f30d1b4c6252e9079bfea469623ac41552",
+      "authoritative_transcript_utf8_sha256": "db87402e10c3d9f38a9bcde6da911f461e9826ed3dcf162dd51c5f02399b112b",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 119,
+      "revision_id": "voice-recording-boundary-revision-6bc461417b27115dc993",
+      "original_candidate_id": "voice-recording-alignment-candidate-38f90b1713112991ef6c",
+      "output_audio_sha256": "232a2b9c67a6c47f4a7c13362fe4ea01caa8f56f0edde978daae41183434af76",
+      "authoritative_transcript_utf8_sha256": "6899be102f7a05e34a7c05359a7759687a32ebeee6df2ea55409cdfe50400651",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 120,
+      "revision_id": "voice-recording-boundary-revision-00ea84decef9ed8bfb49",
+      "original_candidate_id": "voice-recording-alignment-candidate-ebec1ce92e7d4d08394b",
+      "output_audio_sha256": "364297a46089c3ff7889f757754a2301e3de74b41e353af1ae5be0aa7d336dc9",
+      "authoritative_transcript_utf8_sha256": "2c92edd3b726724597be78446c20868f45ec4ea805215d97edd50b3eecc0bba6",
+      "machine_disposition": "recut",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 121,
+      "revision_id": "voice-recording-boundary-revision-048f617b29e95ad7a04d",
+      "original_candidate_id": "voice-recording-alignment-candidate-59df0af1c1f5f50ca243",
+      "output_audio_sha256": "62a4d1a75c2be75d0cfe9dbdb00bae0283292993d8efac710b64f57507c064ba",
+      "authoritative_transcript_utf8_sha256": "7587e7ceb6ab647ed3b56bb36515fb1cfabbe4335be4f6a1958f04c1668a37ff",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 122,
+      "revision_id": "voice-recording-boundary-revision-a16679125d91c54a5585",
+      "original_candidate_id": "voice-recording-alignment-candidate-f04ae98ae23b53995346",
+      "output_audio_sha256": "238c2e30338919588d7f337f60095cb219070f96f29756edfc16086d1790bcd3",
+      "authoritative_transcript_utf8_sha256": "89fa5aacf8fcb6945ded979277584266e43ba366e2f01cc3d89930ff303a4d34",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 123,
+      "revision_id": "voice-recording-boundary-revision-d8b78b19d79f9822288a",
+      "original_candidate_id": "voice-recording-alignment-candidate-ba8c9804c44978e924b9",
+      "output_audio_sha256": "7b7c5b88c8d43f902066fc4af7c86c45d768c3144cca6419a2f29d022156dfbe",
+      "authoritative_transcript_utf8_sha256": "7a72f5d168d6b6432f7daa33c0f9f95022b69cf59bf9c9165217c8e0a8e89c8b",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 124,
+      "revision_id": "voice-recording-boundary-revision-fdf128005ddaa44500cd",
+      "original_candidate_id": "voice-recording-alignment-candidate-eaef773f3bb13803c825",
+      "output_audio_sha256": "6e6ee63d4855c171338edc3850576994a2d08cf2b6179120e5abcc96b744fd05",
+      "authoritative_transcript_utf8_sha256": "bb478369e56ba20a2350c2a40f6f97b19d725e592f028685e59a327b0d89d730",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 125,
+      "revision_id": "voice-recording-boundary-revision-b446a14dd1840c159e7b",
+      "original_candidate_id": "voice-recording-alignment-candidate-3db358e3f1e7b6e96254",
+      "output_audio_sha256": "8eba0f1274fe8c8e75f52b90ac1f16436374a9a9888eea1559c70e4de364b17d",
+      "authoritative_transcript_utf8_sha256": "212b8a60b36723efa918d40ba1c1b5318e778bcc35b58c78eeb86895bd5a579e",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 126,
+      "revision_id": "voice-recording-boundary-revision-a5e93d59fe49393cdf0a",
+      "original_candidate_id": "voice-recording-alignment-candidate-f7dd8a474f1a9582e5b3",
+      "output_audio_sha256": "25ec63984a034d4a513ce6084ba17b616b01dafd44b04ce4b595a5834e0393ce",
+      "authoritative_transcript_utf8_sha256": "4af5c3d23952bdb0eccc95e29af01f459e18e90bc7521b8868f6ad549375251c",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 127,
+      "revision_id": "voice-recording-boundary-revision-23d3423ba74af6855611",
+      "original_candidate_id": "voice-recording-alignment-candidate-54c9ab13c088a44d9836",
+      "output_audio_sha256": "b3eb31dc1ecec1322b9368a70269b1a6f3218c3dbbd2a507c5ef4655db5319f6",
+      "authoritative_transcript_utf8_sha256": "c43f53b92ede26388abaf2b6c697732a7d02eb8b5e0de3379d4336edc8917761",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 128,
+      "revision_id": "voice-recording-boundary-revision-1b97161281602a778937",
+      "original_candidate_id": "voice-recording-alignment-candidate-2c8c18c3b6d38f27c2ba",
+      "output_audio_sha256": "6ed5f4f601c8749b72c36e0316a71aee49bb9addf2e71977abf198fe73328635",
+      "authoritative_transcript_utf8_sha256": "a17a746c20811418e7869c6637f30cd421a5a107471316217d38d692ac10be67",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 129,
+      "revision_id": "voice-recording-boundary-revision-d094cabece4f1899a496",
+      "original_candidate_id": "voice-recording-alignment-candidate-4519b33fc28f00ce951a",
+      "output_audio_sha256": "c3d71db75e12788337924d1a1f9d92065ef5df2f6ddb5298e880a5f8f624629e",
+      "authoritative_transcript_utf8_sha256": "ddfc29200eee073d19babb906b48a2e430f297331fecca021de8ec5f8b6623e0",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 130,
+      "revision_id": "voice-recording-boundary-revision-94a395a05f1c95b0a890",
+      "original_candidate_id": "voice-recording-alignment-candidate-d0336d797f9eff6a3d51",
+      "output_audio_sha256": "a8c8ad71978d0998e588f3b93314acb7f2a2aff57e100173dc2e554086e4ad4b",
+      "authoritative_transcript_utf8_sha256": "4d52b12eeab4bbef86a357f67e9f64c9fde77ab81c067fa1e8df5f678a6a77ac",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 131,
+      "revision_id": "voice-recording-boundary-revision-5706000bea0abde4eac7",
+      "original_candidate_id": "voice-recording-alignment-candidate-d029961c613acb9653b2",
+      "output_audio_sha256": "cf74a58ab429c4553eecd4d625b571fbbd79e4781a007c77aee212dc0c78dbc1",
+      "authoritative_transcript_utf8_sha256": "6ebd514f872306d611e4a3c1a4ebb25999a57d375930fdc33fbfe51a2ff7207f",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 132,
+      "revision_id": "voice-recording-boundary-revision-4fe2ba4cb379164c48d6",
+      "original_candidate_id": "voice-recording-alignment-candidate-653ed7ee39ff65af70c1",
+      "output_audio_sha256": "0dbe5d99d4481c5f9c8f04cd9d6728dc3cf508ea34d92483d914f63bdc666eae",
+      "authoritative_transcript_utf8_sha256": "c85e4f22af1eb6d4ed6024be05cafbcfae3bbcba58bd0461d23e20d6832666de",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": [
+        "outside_preferred_duration"
+      ]
+    },
+    {
+      "ordinal": 133,
+      "revision_id": "voice-recording-boundary-revision-4f8e504152da720f6288",
+      "original_candidate_id": "voice-recording-alignment-candidate-6fbaf54f2b261cb9cd87",
+      "output_audio_sha256": "5eb1b5035bf792e316ff19d17bc9b6e78816f099075c5bb4ff128a474243af03",
+      "authoritative_transcript_utf8_sha256": "cd8ec916b783ccbc5158554ebfa0f74dc548807f1173a5bca7a7570f8451f9c4",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 134,
+      "revision_id": "voice-recording-boundary-revision-c4c32ca3de1a5015027a",
+      "original_candidate_id": "voice-recording-alignment-candidate-f78cf967985a853e46d8",
+      "output_audio_sha256": "569f406165cfd0fbcc0e8e2eb4346cc8031099c17d148a26485b6e441d235930",
+      "authoritative_transcript_utf8_sha256": "f3588b2409ff81f12c1aa1c25b1bd3c6e90f4777619ac748d433f484cac8933a",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 135,
+      "revision_id": "voice-recording-boundary-revision-ca5bf833c6317a0b1138",
+      "original_candidate_id": "voice-recording-alignment-candidate-dbc6d09e0ef54b52d719",
+      "output_audio_sha256": "7c6be8186a857b9d00c7d9387415282ea4665bde33d1527b46a26c795c6bcb6a",
+      "authoritative_transcript_utf8_sha256": "b0ea9e62541a91219ba0f1f1b1276c86419db4ac603f7832dae21f416b723381",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": [
+        "outside_preferred_duration",
+        "short_duration_not_standalone"
+      ]
+    },
+    {
+      "ordinal": 136,
+      "revision_id": "voice-recording-boundary-revision-93b2f3eaefbcef0bec11",
+      "original_candidate_id": "voice-recording-alignment-candidate-40c32e1c11119170cd62",
+      "output_audio_sha256": "f667fa34fab4b442200378accd9b6bf59bdaa705272a59a1738af2a566977eb8",
+      "authoritative_transcript_utf8_sha256": "f3d367d3844a28e2f42fce643e2f0189fde15d157c88b144cec79b0a76371aa3",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": [
+        "outside_preferred_duration",
+        "short_duration_not_standalone"
+      ]
+    },
+    {
+      "ordinal": 137,
+      "revision_id": "voice-recording-boundary-revision-f9050bd61ed76a051772",
+      "original_candidate_id": "voice-recording-alignment-candidate-f3b9be3c8e9ea1af0b1e",
+      "output_audio_sha256": "33426dd3253cc5f6d1c3ca6228aaf52cfa2f586f55464cd0104430e01b1d2191",
+      "authoritative_transcript_utf8_sha256": "9ab3519b0c3d8e90a46928ff29b26eabea6ad5ccc2a4b292d68be6a9e8001606",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 138,
+      "revision_id": "voice-recording-boundary-revision-1cb0f3898c71ebcc06f5",
+      "original_candidate_id": "voice-recording-alignment-candidate-fe1f027e51d4f3e14ccb",
+      "output_audio_sha256": "b684b5c0d1769803668167fef385d525b250568bc67f64e35259cad77474c830",
+      "authoritative_transcript_utf8_sha256": "80865cb10f35102e056d36b0f06edfb5637836e5af1449c9a23ccf7208a2582f",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 139,
+      "revision_id": "voice-recording-boundary-revision-161cf84bc99498067f15",
+      "original_candidate_id": "voice-recording-alignment-candidate-16336553cf84825f6318",
+      "output_audio_sha256": "54f3b8e7ddaa646107a9a0702d990e1d7dd4938f6f2ebcb63ca95ebc53aecb70",
+      "authoritative_transcript_utf8_sha256": "21383f33f65397b01e8dec01fbc842418a91e1eb19a16806a7dceb572f4b6362",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": [
+        "outside_preferred_duration",
+        "short_duration_not_standalone"
+      ]
+    },
+    {
+      "ordinal": 140,
+      "revision_id": "voice-recording-boundary-revision-9d167eef7b967423d53a",
+      "original_candidate_id": "voice-recording-alignment-candidate-f1199ab5cb87fc02c09d",
+      "output_audio_sha256": "a8eeeca5a0a6eddfec4f3289ded8de5e34556f4176cecb9a0fad5b8bc1d80bfe",
+      "authoritative_transcript_utf8_sha256": "7e1f7bed0f576c1543fafb1dbeadf797be039c3a850a01763be9219e89216bec",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 141,
+      "revision_id": "voice-recording-boundary-revision-4ff733ce355aabe35096",
+      "original_candidate_id": "voice-recording-alignment-candidate-7a8c4e5b4ba224978eae",
+      "output_audio_sha256": "5916d161ee865fb91429ef4cdb6db9357265837431717595287aa1610e2e3de3",
+      "authoritative_transcript_utf8_sha256": "a52063c6f886a9d463e2eef47597798e36f17d6de3bda6563ef503248a8dcaf2",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 142,
+      "revision_id": "voice-recording-boundary-revision-0a81b91d2d96926ea5c1",
+      "original_candidate_id": "voice-recording-alignment-candidate-ec0856742a3bb10feef7",
+      "output_audio_sha256": "154689321e1a55fdc899c0819edae7aa67635e9d7a65c749733d89393362eb6d",
+      "authoritative_transcript_utf8_sha256": "be4853a98b06af52430ea18c55ce24ca795ce8d31a8b53057087b5d5f7e81195",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 143,
+      "revision_id": "voice-recording-boundary-revision-7620fe6ab1dd53eb9522",
+      "original_candidate_id": "voice-recording-alignment-candidate-808831a25931be9710a1",
+      "output_audio_sha256": "93649d13d505b1dfe46e987be0b5ae2da1bf88900559032fc961f465bdbf347f",
+      "authoritative_transcript_utf8_sha256": "58974dc9ccaeb3d9737cf4f08a7d509613285084e6166c307b9d6d15eefdbdd3",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 144,
+      "revision_id": "voice-recording-boundary-revision-ff2ab4622e203dd9939f",
+      "original_candidate_id": "voice-recording-alignment-candidate-9fe17ec1e9d1cebd65cd",
+      "output_audio_sha256": "b0dc962078d475a516976efafa2626c0385620683784d780b96f37a462295bda",
+      "authoritative_transcript_utf8_sha256": "05a2e00b3db1210a4c9afd503a364049732cb5408d15281be00b232fb446fd91",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 145,
+      "revision_id": "voice-recording-boundary-revision-037d8265cab35f2ca2d2",
+      "original_candidate_id": "voice-recording-alignment-candidate-cb5b087143ae410febda",
+      "output_audio_sha256": "93f2fdd72afa0d727be65c20be1cc2b09daafffe958f80f703b88c3b3093c067",
+      "authoritative_transcript_utf8_sha256": "5d0dd4ccc817b49040ad1726e6a4ca5bd60296ce9c823fd75d4323f51a06b220",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "excluded_followup",
+      "sample_flags": [
+        "exclude_from_current_sample_selection"
+      ]
+    },
+    {
+      "ordinal": 146,
+      "revision_id": "voice-recording-boundary-revision-98e94b8535415250e96b",
+      "original_candidate_id": "voice-recording-alignment-candidate-c9945eede7f51d98859e",
+      "output_audio_sha256": "0c282fec1d59d9af657cd09e7dbb7a11c858c346c969110b421dcdcbc9942483",
+      "authoritative_transcript_utf8_sha256": "5a16d917d6147d03f2f4bff8f31081569dfb5256ecbbb0c4ea069862b29082b8",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 147,
+      "revision_id": "voice-recording-boundary-revision-1903fd6eca31dc05b989",
+      "original_candidate_id": "voice-recording-alignment-candidate-b2d630a32f61df8ad46f",
+      "output_audio_sha256": "3d26f23c7aa754997a7e29b211104c8a7eee5ba3ef623a43dc972ddb5f692681",
+      "authoritative_transcript_utf8_sha256": "c065a28ec7d7eaddae4a7c2fe9f5638f1a059ec3281f993407d8dc8718e82572",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": [
+        "outside_preferred_duration",
+        "short_duration_not_standalone"
+      ]
+    },
+    {
+      "ordinal": 148,
+      "revision_id": "voice-recording-boundary-revision-ffc99a695639717839dd",
+      "original_candidate_id": "voice-recording-alignment-candidate-e0b271507a3769754934",
+      "output_audio_sha256": "3191d371e7189d6734700572fd852e41e6a270b846c0709d662f3117aa264102",
+      "authoritative_transcript_utf8_sha256": "850e3977f5804967bfbee95f2e242634d5bab6f5a65494b6263c60833fce0cff",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 149,
+      "revision_id": "voice-recording-boundary-revision-23913daeb642842a8ff4",
+      "original_candidate_id": "voice-recording-alignment-candidate-46a3267712678044d57a",
+      "output_audio_sha256": "9e7841b2cc94b5f775ecc6754a751c94ee30050aecc78950e425ad1fb3385664",
+      "authoritative_transcript_utf8_sha256": "084b087a9e05cb4f7c45ecb453776302f7ff814be2efc973f5681c6f80b29fb3",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 150,
+      "revision_id": "voice-recording-boundary-revision-dbf43c93fb533edbba4c",
+      "original_candidate_id": "voice-recording-alignment-candidate-b6005c795ab8a8dab271",
+      "output_audio_sha256": "9ec3a777d1cc303e6c817c3e89ed9e7d4bef4a739bdd26118006e7f8c9270266",
+      "authoritative_transcript_utf8_sha256": "053cbf13d4e935006e0bf46e99c18000eacfd2b7c71cbeb68bf8187fdcb4a534",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 151,
+      "revision_id": "voice-recording-boundary-revision-70d28055abcc8e23b419",
+      "original_candidate_id": "voice-recording-alignment-candidate-af5918b5c5b153ed4d03",
+      "output_audio_sha256": "59d7a3eb568195af831531e07947564050de6fbc52e4c5ec2801c843aa693fa3",
+      "authoritative_transcript_utf8_sha256": "ab251fb2193ed618f7ce3e4690b234f3b5fe46a770f6ba66ec5f354e9e8aff6a",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 152,
+      "revision_id": "voice-recording-boundary-revision-3d89d5f5a8f0a8904a70",
+      "original_candidate_id": "voice-recording-alignment-candidate-8411c425b9aef71fd302",
+      "output_audio_sha256": "c142c0ac400975de8a5753214e8aa6c9b7fb838a66745f10baf96091cb3d07e8",
+      "authoritative_transcript_utf8_sha256": "2eb76ce7c3ca1fe2ea01f99ddae12842f9d94f64bc70455c2ecb5fefca52d334",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 153,
+      "revision_id": "voice-recording-boundary-revision-4062f107fbde9ad06ed1",
+      "original_candidate_id": "voice-recording-alignment-candidate-f30d2fef0812da06c961",
+      "output_audio_sha256": "ce4df596ea2eeebcb59de2a7e56a87465aef23a8eb14eebf0ac525b0992d1bd0",
+      "authoritative_transcript_utf8_sha256": "6bed378384434483a6bb2063e35d60c60f3595dd634f30d254ea4f24bfd20c72",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 154,
+      "revision_id": "voice-recording-boundary-revision-3adf975f67e3721bf067",
+      "original_candidate_id": "voice-recording-alignment-candidate-28010e95c2cd5eedf3e6",
+      "output_audio_sha256": "12a5406fc518746a756ce449dd0a61148828c0e43d78fc1cba249139db7e8550",
+      "authoritative_transcript_utf8_sha256": "2a0612c823c586b695ab9c4daf058ef971d5df7c566144d888998fc476ec8039",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 155,
+      "revision_id": "voice-recording-boundary-revision-544f6aef8efe5cf612b8",
+      "original_candidate_id": "voice-recording-alignment-candidate-0652c58f93b0a70a6113",
+      "output_audio_sha256": "72f7b8b62d1ed08b9b6e8f346687555ff0afe336a12b9d191513f26f167527e1",
+      "authoritative_transcript_utf8_sha256": "f3e2f7c9c2062fefc29defd3ec40844613b32cfbaee31539fdeb41caca101ad9",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 156,
+      "revision_id": "voice-recording-boundary-revision-fd01ed8a8dc791ed96ac",
+      "original_candidate_id": "voice-recording-alignment-candidate-ee999ea664338f44491d",
+      "output_audio_sha256": "64fcc1a714c3384080918039ff36e8a88036480f2e0b21432b3097fd43e01203",
+      "authoritative_transcript_utf8_sha256": "c3ce69dcf3b107a465b222ca2fa2f7f53c1c371466c3da7ad96f0bdadfb930da",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 157,
+      "revision_id": "voice-recording-boundary-revision-a9762163a30c55dfb3b8",
+      "original_candidate_id": "voice-recording-alignment-candidate-387283166a7510589043",
+      "output_audio_sha256": "bfa57500da9be09b785bbb9e4ad90e8e60f7b847128a0700079c4cf20440d857",
+      "authoritative_transcript_utf8_sha256": "abed9214b41f1e8b0da9f0731a208b384689bfcfc1895d16374c7b075cc88703",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 158,
+      "revision_id": "voice-recording-boundary-revision-0ef97e7630a62998fa9c",
+      "original_candidate_id": "voice-recording-alignment-candidate-4d6487c2c8a373dd0f6e",
+      "output_audio_sha256": "3d88a2dc09007ab5878b3a0f69241ac0247c9fa3f5aeb68c99460bc46a210ab6",
+      "authoritative_transcript_utf8_sha256": "b2ca3e85470d46552227afab35640f52cd7853f861f2215f8c1dd354b4aad7d2",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 159,
+      "revision_id": "voice-recording-boundary-revision-1f14fa4b3ab08b0d465a",
+      "original_candidate_id": "voice-recording-alignment-candidate-40529d1376b69ef9c4a0",
+      "output_audio_sha256": "655c6beb1a6634445886aa2ace2a0a75a5f7744cbca581d63c8d564d4aae3899",
+      "authoritative_transcript_utf8_sha256": "dfffe2ce0219743287b19af9c2db4cbde905ee7554caa8f22c4e305cee97ec75",
+      "machine_disposition": "recut",
+      "boundary_decision": "accepted_machine_recut",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 160,
+      "revision_id": "voice-recording-boundary-revision-334364b9f7ec982be645",
+      "original_candidate_id": "voice-recording-alignment-candidate-1db2636cbdcb6d7af0d1",
+      "output_audio_sha256": "ea6700870ca28500693a30381c8e6ecd69cf5bf0dc7bb031ccc3a51612c8bfe6",
+      "authoritative_transcript_utf8_sha256": "08deb72e0f5e2518328840bedff482544ee6ac6452b9b2db6f04abce3119de83",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    },
+    {
+      "ordinal": 161,
+      "revision_id": "voice-recording-boundary-revision-a83dae00936572c8ace6",
+      "original_candidate_id": "voice-recording-alignment-candidate-3748f10fb99b486eec32",
+      "output_audio_sha256": "4480aa0458ecab524af835927bd700184ddaaf9e17b10e93c19e5ec746e29e88",
+      "authoritative_transcript_utf8_sha256": "94700318eab15ce272bb1e360d0677a2e1064148552a7365744e00d8d48572fc",
+      "machine_disposition": "needs_agent_review",
+      "boundary_decision": "accepted_metric_review",
+      "sample_flags": []
+    }
+  ],
+  "summary": {
+    "accepted_machine_recut": 81,
+    "accepted_metric_review": 48,
+    "accepted_targeted_gpu_review": 0,
+    "excluded_followup": 32,
+    "accepted_boundary_count": 129,
+    "current_sample_selection_excluded_count": 32,
+    "short_duration_not_standalone_count": 10,
+    "outside_preferred_duration_count": 13,
+    "tight_silence_trim_required_count": 1
+  },
+  "unresolved_ordinals": [
+    1,
+    8,
+    11,
+    14,
+    16,
+    21,
+    23,
+    24,
+    27,
+    28,
+    37,
+    41,
+    43,
+    44,
+    47,
+    48,
+    49,
+    52,
+    70,
+    75,
+    77,
+    78,
+    80,
+    81,
+    86,
+    92,
+    104,
+    111,
+    120,
+    128,
+    140,
+    145
+  ],
+  "review_status": "boundary_adjudication_complete_with_followup_exclusions",
+  "scope_limits": {
+    "human_alignment_approved": false,
+    "text_audio_alignment_approved": false,
+    "training_use_approved": false,
+    "concatenation_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false
+  },
+  "executed": true,
+  "manifest_sha256": "771450af8423090ca972ba481fab9ff8b0a9c0bb950b275eedf38311b4d52c33"
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-025360defbcb5dc389db",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 41,
+  "trigger": "其他3",
+  "transcript": "事无巨细的回忆，并不会给选择带来任何帮助。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/d/d9/pc2x9xpk0n0edem1sraw9xol08fkot2.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 226787,
+  "content_sha256": "27e34b7177664628166392bec9edaab6ae8f3587329f0bf0d771bf4a641d5187",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

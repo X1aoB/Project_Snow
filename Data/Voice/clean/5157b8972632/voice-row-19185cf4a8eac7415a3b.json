@@ -1,0 +1,95 @@
+{
+  "schema_version": "project-snow-private-voice-clean-1",
+  "candidate_id": "voice-row-19185cf4a8eac7415a3b",
+  "character_id": "5157b8972632",
+  "input_sha256": "5082c3575999f7c6a49cc5bfb1f1d189036b38402604dc0282570229b9443a5d",
+  "output_sha256": "6f6a99c94b5d7d0c9d4fb4ec438c7f3a7fc67143c526dc5a699c9fa3e1a79177",
+  "transcript_sha256": "57dd8134e6a764e921373142a3413b1346a0970a045ce823e9ad94bcecc2e255",
+  "processing": {
+    "tool": "ffmpeg",
+    "arguments": [
+      "-nostdin",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\raw\\5157b8972632\\voice-row-19185cf4a8eac7415a3b.mp3",
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "24000",
+      "-c:a",
+      "pcm_s16le",
+      "-f",
+      "wav"
+    ],
+    "terminal_silence_trim": {
+      "method": "pcm16_rms_outer_bounds_v1",
+      "silence_threshold_dbfs": -50.0,
+      "analysis_window_ms": 20,
+      "safety_padding_ms": 300,
+      "sample_rate": 24000,
+      "input_frame_count": 72411,
+      "input_duration_seconds": 3.017125,
+      "active_content_detected": true,
+      "detected_active_start_frame": 3360,
+      "detected_active_end_frame_exclusive": 68640,
+      "kept_start_frame": 0,
+      "kept_end_frame_exclusive": 72411,
+      "trimmed_leading_frames": 0,
+      "trimmed_trailing_frames": 0,
+      "trimmed_leading_seconds": 0.0,
+      "trimmed_trailing_seconds": 0.0,
+      "output_frame_count": 72411,
+      "output_duration_seconds": 3.017125,
+      "applied": false,
+      "internal_audio_policy": "preserve_every_sample_between_kept_boundaries"
+    },
+    "trim_arguments": null,
+    "conservative_processing_only": true
+  },
+  "qc": {
+    "duration_seconds": 3.017125,
+    "sample_rate": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "sample_peak_dbfs": -2.869,
+    "true_peak_dbfs": -2.9,
+    "true_peak_measurement": "ffmpeg_ebur128_4x_oversampled",
+    "clipping_ratio": 0.0,
+    "silence_ratio": 0.271782,
+    "silence_ratio_measurement": {
+      "measurement": "qualifying_contiguous_low_rms_frames_over_total_pcm_frames",
+      "threshold_dbfs": -45.0,
+      "window_ms": 20,
+      "minimum_run_ms": 200,
+      "minimum_run_frames": 4800,
+      "qualifying_run_count": 1,
+      "qualifying_silence_frames": 19680
+    },
+    "estimated_snr_db": 61.144,
+    "automated_checks": {
+      "duration_10_to_20_seconds": false,
+      "estimated_snr_at_least_25_db": true,
+      "silence_ratio_at_most_0_20": false,
+      "true_peak_at_most_minus_1_dbfs": true,
+      "no_clipped_samples": true
+    },
+    "automated_qc_pass": false,
+    "manual_single_speaker_music_sfx_transcript_review_required": true
+  },
+  "manual_review": {
+    "single_speaker": null,
+    "music_or_sfx": null,
+    "transcript_verified": null,
+    "reviewer": null,
+    "decision": "pending"
+  },
+  "source_batch": {
+    "batch_id": "voice-source-batch-369db521c00aef1df75f",
+    "manifest_sha256": "a0727a505f7560fa5ce4390ae1cccb4b32bb235b2430e40594bb8b345722f8cf",
+    "download_audit_id": "voice-download-audit-20260826T030324952145Z-xiaob",
+    "download_audit_receipt_sha256": "df8683ea303840a2b18411cd5ce41ed4393b60a3017d29d57acfdc7aa3d01d55"
+  }
+}

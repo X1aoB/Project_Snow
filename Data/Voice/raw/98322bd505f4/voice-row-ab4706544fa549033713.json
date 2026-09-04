@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-ab4706544fa549033713",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 13,
+  "trigger": "交换2",
+  "transcript": "放心，我不会再被记忆迷惑。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/7/74/rhjmqu34zn5r7b7emeqwh1zhyxhms90.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 132746,
+  "content_sha256": "da5cfc5700f267c64a316e00cd6db3329f9734d6a7780c96a3c3e71cfa768da3",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

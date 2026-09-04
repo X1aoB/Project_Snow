@@ -1,0 +1,60 @@
+{
+  "schema_version": "project-snow-private-local-voice-dialogue-comparison-review-1",
+  "review_id": "voice-recording-dialogue-review-896557593d1f495cc286",
+  "reviewed_at": "2026-08-31T13:37:48.763268+00:00",
+  "artifact_purpose": "approve_fixed_local_dialogue_compaction_policy_only",
+  "reviewer_id": "xiaob",
+  "source_comparison": {
+    "package_id": "voice-recording-dialogue-comparison-e7fb590cbf6634457e5c",
+    "manifest_sha256": "0ba301c0fbed18f78d2bbe2220d9892ed12b30bb4a0180e6dbfdb080220b9aa7",
+    "sample_set_sha256": "c98007f06f54ab6ed7026b4310ce5068cb6b1761f2ccb535635d08680a26a203",
+    "quality_policy_sha256": "719a1268f56035ca905ee78cd375812b55ca38fc475ea76067dd734610b6d358",
+    "runtime_character_id": "43f05917bfa1",
+    "source_boundary_adjudication": {
+      "receipt_id": "voice-recording-boundary-adjudication-3c4102db6ee3378a7862",
+      "manifest_sha256": "771450af8423090ca972ba481fab9ff8b0a9c0bb950b275eedf38311b4d52c33",
+      "decision_set_sha256": "8016e4b63b84f593230f847cb0b2f01135a00110230913327876a4f009288db0",
+      "candidate_count": 161,
+      "accepted_candidate_count": 129,
+      "excluded_candidate_count": 32
+    }
+  },
+  "decisions": [
+    {
+      "slot": "A",
+      "candidate_ordinal": 53,
+      "authoritative_transcript_utf8_sha256": "b9b7b63f5c3038c00a370ece99dbcbc6b2cfa5f16de87bfb14cedd2d50f75d42",
+      "natural_wav_sha256": "b70c6b70115fc0632458cac20d2f5548b931ccac2ab8e3e1517f7afa64fcb82c",
+      "compacted_wav_sha256": "52e576ec0560821ab4a6a4cea65d37a033908df07a2f9111fb7b0b663a3f495b",
+      "decision": "compacted_accepted_no_issue",
+      "issue_codes": []
+    },
+    {
+      "slot": "B",
+      "candidate_ordinal": 55,
+      "authoritative_transcript_utf8_sha256": "7225ac906b832228b1defd18c4091efecb8af65fc9f7dcf46de453be6e3732d4",
+      "natural_wav_sha256": "6379c5a8846fcd3d0d4d296b0e6a14268bc47fcf454641e296a2286f89e02c8a",
+      "compacted_wav_sha256": "53abeef6e69bff1457cb4b4d4ca7a9ea168f1e0d38b69be3bdd8bd3513c8907a",
+      "decision": "compacted_accepted_no_issue",
+      "issue_codes": []
+    }
+  ],
+  "decision_set_sha256": "a2e4be845b20852d278723eca34c59dc4410427c0b82c0a7e22f0f77600b1800",
+  "overall_policy_decision": "approved_for_other_recorded_characters",
+  "approved_policy_sha256": "719a1268f56035ca905ee78cd375812b55ca38fc475ea76067dd734610b6d358",
+  "scope_grants": {
+    "natural_vs_compacted_comparison_approved": true,
+    "same_policy_local_recording_expansion_approved": true,
+    "automatic_signal_analysis_allowed": true
+  },
+  "scope_limits": {
+    "training_use_approved": false,
+    "voice_cloning_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false,
+    "public_rollout_allowed": false
+  },
+  "executed": true,
+  "manifest_sha256": "8629032fc7e7688a91fc4354fc16c16378ad1572763be9d6a11235173496916c"
+}

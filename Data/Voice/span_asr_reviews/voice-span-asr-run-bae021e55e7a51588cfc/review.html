@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; media-src 'self'; style-src 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project Snow 纯音频 ASR 人工审核</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 920px; margin: 2rem auto; padding: 0 1rem 4rem; line-height: 1.55; }
+    header, li { border: 1px solid #8886; border-radius: .8rem; padding: 1rem; margin: 1rem 0; }
+    ol { padding: 0; list-style-position: inside; }
+    audio { width: 100%; margin: .7rem 0; }
+    .text { font-size: 1.08rem; padding: .65rem; background: #8882; border-radius: .5rem; }
+    .priority { border-color: #d98b00; }
+    .tag { display: inline-block; border-radius: 1rem; padding: .1rem .55rem; background: #d98b0030; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>纯音频 ASR 人工审核</h1>
+    <p>这里只展示 WAV 与 Faster-Whisper 从该 WAV 独立得到的机器假设。旧 Wiki 逐字稿未作为输入，也未复制到本页。</p>
+    <p><code>run_id=voice-span-asr-run-bae021e55e7a51588cfc</code><br>
+       <code>manifest_sha256=9481d0a6246bb64093f2cf01f016272c60c9ebb0baef0c50b337acaf41cdad9c</code></p>
+    <p>逐段选择：<code>accepted_exact</code>、<code>corrected_from_audio</code>（附听辨文本），或 <code>rejected_range</code>。本页不会自动保存决定，请把结果发回 Codex，由工具写入独立哈希 receipt。</p>
+  </header>
+  <ol>
+    <li>
+      <code>voice-span-80d24e754e3621808ddc</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/001-voice-span-80d24e754e3621808ddc.wav"></audio>
+      <div class="text">昨天成功摸到分析员的腹肌了,那今天我可以……</div>
+    </li>
+    <li class="priority">
+      <span class="tag">重点复核：可能是不完整片段</span><br><code>voice-span-30b1e82c2219f5408c9f</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/002-voice-span-30b1e82c2219f5408c9f.wav"></audio>
+      <div class="text">啊啊啊</div>
+    </li>
+    <li class="priority">
+      <span class="tag">重点复核：可能是不完整片段</span><br><code>voice-span-f8f9e97cb60ff69edf84</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/003-voice-span-f8f9e97cb60ff69edf84.wav"></audio>
+      <div class="text">啊</div>
+    </li>
+    <li class="priority">
+      <span class="tag">重点复核：低可信同音</span><br><code>voice-span-05a93131340fcfc7474f</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/004-voice-span-05a93131340fcfc7474f.wav"></audio>
+      <div class="text">是分析人</div>
+    </li>
+    <li>
+      <code>voice-span-f015499d412ae75a1991</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/005-voice-span-f015499d412ae75a1991.wav"></audio>
+      <div class="text">果然没白等,今天我是第一个见到分析员的人。</div>
+    </li>
+    <li class="priority">
+      <span class="tag">重点复核：专名/同音</span><br><code>voice-span-fc23b647fab9a353c30b</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/006-voice-span-fc23b647fab9a353c30b.wav"></audio>
+      <div class="text">三夕元,我可以再走进去看看你吗?</div>
+    </li>
+    <li>
+      <code>voice-span-852e814262944c75c14b</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/007-voice-span-852e814262944c75c14b.wav"></audio>
+      <div class="text">那,我能摸摸你吗?我,我这都是为了下一部作品再取材,嗯。</div>
+    </li>
+    <li>
+      <code>voice-span-26756217f1f0f8e271b9</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/008-voice-span-26756217f1f0f8e271b9.wav"></audio>
+      <div class="text">如此重要的事情,我希望你不要忘记。</div>
+    </li>
+    <li class="priority">
+      <span class="tag">重点复核：诗句/专名同音</span><br><code>voice-span-428b35929bca0bcc35ad</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/009-voice-span-428b35929bca0bcc35ad.wav"></audio>
+      <div class="text">风雨会鸣,潮汐鱼音</div>
+    </li>
+    <li class="priority">
+      <span class="tag">重点复核：短句同音</span><br><code>voice-span-2204e9713a8251101b9b</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/010-voice-span-2204e9713a8251101b9b.wav"></audio>
+      <div class="text">接招前路</div>
+    </li>
+    <li>
+      <code>voice-span-4f7fa278be1234445da0</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/011-voice-span-4f7fa278be1234445da0.wav"></audio>
+      <div class="text">正确的选择,才能导向正确的结果。</div>
+    </li>
+    <li>
+      <code>voice-span-367175425cb532c43662</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/012-voice-span-367175425cb532c43662.wav"></audio>
+      <div class="text">正确的选择,才能导向正确的结果。</div>
+    </li>
+    <li>
+      <code>voice-span-65e3dbf47ea72878d122</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/013-voice-span-65e3dbf47ea72878d122.wav"></audio>
+      <div class="text">很快就能结束。</div>
+    </li>
+    <li>
+      <code>voice-span-6d5f5fed4df4f45d1659</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/014-voice-span-6d5f5fed4df4f45d1659.wav"></audio>
+      <div class="text">不要忘记看消息。</div>
+    </li>
+    <li>
+      <code>voice-span-ff0815edc0cc9e31abe0</code>
+      <audio controls preload="none" src="../../span_review_packages/voice-span-review-package-6bafdaecd6fa9468a9d7/clips/015-voice-span-ff0815edc0cc9e31abe0.wav"></audio>
+      <div class="text">我不想和别人有太多牵扯,也不想制造更多回忆。</div>
+    </li>
+  </ol>
+</body>
+</html>

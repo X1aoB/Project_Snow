@@ -1,0 +1,28 @@
+{
+  "schema_version": "project-snow-private-voice-span-materialization-approval-1",
+  "authorization_id": "voice-span-review-materialization-20260827-xiaob",
+  "recorded_at": "2026-08-27T09:22:11.560701+00:00",
+  "operator_id": "xiaob",
+  "span_review_queue_sha256": "160765819cda7794b82f6d51a65ab473bc632a046aaeb192da429deb2b4068f2",
+  "inventory_sha256": "bd9aa282c8bba4e18168f0d4f79cd8783b71f67f0630b6d6bcdccf6b1c22231b",
+  "operator_assertions": {
+    "review_clip_materialization_requested": true,
+    "authorized_action": "materialize_exact_pcm_review_clips",
+    "purpose": "local_human_span_listening_only"
+  },
+  "source_queue_state": {
+    "audio_files_created": false
+  },
+  "scope_limits": {
+    "review_clip_materialization_allowed": true,
+    "source_files_may_be_modified": false,
+    "span_review_may_be_marked_complete": false,
+    "transcript_alignment_may_be_marked_verified": false,
+    "concatenation_allowed": false,
+    "ab_winner_selection_allowed": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false
+  },
+  "receipt_sha256": "1261fc88a2dd25c66ef4880a1b0a4b8050432ce595bdce68fd394ef18b75188f"
+}

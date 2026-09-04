@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-1df45edfb3098d219f52",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 45,
+  "trigger": "购买成功",
+  "transcript": "先说好哦，千万别拿这些东西去做坏事哦。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/1/19/8qn3k109e04gou7js5r26x3djsn3v73.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 188125,
+  "content_sha256": "4cb8f0bb1b17cd23b3a965bcc2fefccd784b245e2bfa15c5ef12323d3133bba3",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

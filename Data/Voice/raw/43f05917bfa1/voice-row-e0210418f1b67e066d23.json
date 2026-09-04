@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-e0210418f1b67e066d23",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 32,
+  "trigger": "升级1",
+  "transcript": "我还能做更多工作。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/c/c6/8lovvrvp324le6u9k8hame9lqpwur5t.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 91995,
+  "content_sha256": "fba8e26b99ea5de2d80602f63645791c3f7df3d614a17e44d930ba35cfc7c765",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Project Snow 长对话样本对照</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 20px;color:#20242b;background:#f5f7fa}section{background:#fff;border:1px solid #d9dee8;border-radius:12px;padding:20px;margin:20px 0}.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}article{background:#f7f9fc;padding:12px;border-radius:8px}audio{width:100%}.text{white-space:normal}.metrics{color:#4a5568}.warning{padding:12px;background:#fff4d6;border-left:4px solid #d49b00}</style></head>
+<body><h1>Project Snow 长对话样本对照</h1>
+<p class="warning">仅用于本地自然节奏/安全静音压缩试听。未批准训练、声音克隆、Provider 注册、权利接受或公网发布。</p>
+<p>审核重点：压缩版是否出现吞字、切气口、节奏突兀或语义停顿被破坏。屏幕文本是逐字稿真值，ASR 不参与改写。</p>
+
+<section>
+  <h2>A · 妮塔 · candidate 42</h2>
+  <p class="text">只是有一次，我想学着烤些小点心，分析员居然提前扛起了灭火器，总觉得哪里不太对……不过还是“谢谢”嘞！</p>
+  <p><a href="A/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="A/natural.wav"></audio><p>15.057792 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="A/compacted.wav"></audio><p>14.518292 秒；压缩切点 1 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 4.96%；原始逐帧静音比 39.53%（仅观察）；SNR 31.801 dB；true peak -8.984 dBTP。</p>
+</section>
+<section>
+  <h2>B · 妮塔 · candidate 38</h2>
+  <p class="text">分析员帮我做手指操的时候，不是夸了一句我的指甲好看嘛~所以才想试试涂上了指甲油的效果……别以为我没看到你在憋笑！</p>
+  <p><a href="B/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="B/natural.wav"></audio><p>17.861667 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="B/compacted.wav"></audio><p>16.707167 秒；压缩切点 1 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 1.86%；原始逐帧静音比 34.69%（仅观察）；SNR 28.775 dB；true peak -8.945 dBTP。</p>
+</section></body></html>

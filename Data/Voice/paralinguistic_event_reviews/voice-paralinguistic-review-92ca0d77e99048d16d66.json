@@ -1,0 +1,181 @@
+{
+  "schema_version": "project-snow-private-voice-paralinguistic-review-1",
+  "review_id": "voice-paralinguistic-review-92ca0d77e99048d16d66",
+  "recorded_at": "2026-09-02T03:56:32+00:00",
+  "artifact_purpose": "immutable_paralinguistic_retention_classification",
+  "stable_identity": {
+    "classification_profile": "project-snow-paralinguistic-retention-profile-1",
+    "source_submission_id": "voice-span-asr-review-submission-4e6e7ca1d7a4c3c301b3",
+    "source_submission_receipt_sha256": "e1c67e17339362c60b9390e27ca3a643fd0f8e59f83206a3fdf7d30cfccb1c91",
+    "source_submission_byte_sha256": "377d8bd80bba53d3a875c41ef8dc9ee0a93be3a59247697aa5e1b09b9cf8523a",
+    "source_package_id": "voice-span-review-package-6bafdaecd6fa9468a9d7",
+    "source_package_manifest_sha256": "8b9b32857dd5a216deb19c5f6ca27bf8c74b8f5c1127fda9c01adf262ed089c1",
+    "reviewer_id": "xiaob",
+    "target_ordinals": [
+      2,
+      3
+    ],
+    "event_set_sha256": "5269fcdfdb4d938a899938780f1ba78d62a558d208f289ca96635a473fa37107"
+  },
+  "stable_identity_sha256": "92ca0d77e99048d16d66791db7b76626d9e0d9d0215038bb85ba7408d3078d12",
+  "source_artifacts": {
+    "submission": {
+      "submission_id": "voice-span-asr-review-submission-4e6e7ca1d7a4c3c301b3",
+      "receipt_sha256": "e1c67e17339362c60b9390e27ca3a643fd0f8e59f83206a3fdf7d30cfccb1c91",
+      "byte_sha256": "377d8bd80bba53d3a875c41ef8dc9ee0a93be3a59247697aa5e1b09b9cf8523a"
+    },
+    "asr_run": {
+      "run_id": "voice-span-asr-run-bae021e55e7a51588cfc",
+      "manifest_sha256": "9481d0a6246bb64093f2cf01f016272c60c9ebb0baef0c50b337acaf41cdad9c",
+      "byte_sha256": "b1033577409bc6a3a3135885418a27f336c07e6996eab2357549d2e351e21921"
+    },
+    "review_package": {
+      "package_id": "voice-span-review-package-6bafdaecd6fa9468a9d7",
+      "manifest_sha256": "8b9b32857dd5a216deb19c5f6ca27bf8c74b8f5c1127fda9c01adf262ed089c1",
+      "byte_sha256": "861c5a2ed25e1714d4d975a632097a1eb37554c365e8dabb79ca5e8fe4b8a891"
+    },
+    "span_review_queue": {
+      "byte_sha256": "160765819cda7794b82f6d51a65ab473bc632a046aaeb192da429deb2b4068f2"
+    }
+  },
+  "reviewer_assertions": {
+    "reviewer_id": "xiaob",
+    "target_clips_listened": true,
+    "retain_as_paralinguistic_only": true,
+    "lexical_transcript_resolution_claimed": false
+  },
+  "source_submission_state": {
+    "review_status": "needs_clarification",
+    "unresolved_ordinals": [
+      2,
+      3
+    ],
+    "source_submission_modified": false
+  },
+  "allowlist": {
+    "kinds": [
+      "paralinguistic_event"
+    ],
+    "event_types": [
+      "nonlexical_murmur"
+    ],
+    "base_tts_training_states": [
+      "excluded"
+    ],
+    "pending_states": [
+      "pending_human_event_qa"
+    ]
+  },
+  "event_set_sha256": "5269fcdfdb4d938a899938780f1ba78d62a558d208f289ca96635a473fa37107",
+  "events": [
+    {
+      "ordinal": 2,
+      "span_id": "voice-span-30b1e82c2219f5408c9f",
+      "character": {
+        "character_id": "5157b8972632",
+        "character_name": "薇蒂雅",
+        "selected_source": {
+          "source_page_id": "6d7ce3ae6026",
+          "armor_id": "30878200de72",
+          "armor_name": "龙舌兰",
+          "armor_semantics": "explicit_selected_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/002-voice-span-30b1e82c2219f5408c9f.wav",
+        "sha256": "07890d8bb74222da1c44015e87e91c13f662d8b09f0ddf4e12f52a6fa9c12058",
+        "byte_count": 133484,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 66720,
+        "duration_seconds": 2.78,
+        "source_range": {
+          "start_frame": 136800,
+          "end_frame_exclusive": 203520
+        }
+      },
+      "observation": {
+        "phonetic_surface": "啊啊啊",
+        "phonetic_surface_utf8_sha256": "19bc388febfecd6a6653652c3d5b258cb34dda22c358a37481493de7900600c0",
+        "evidence": "reviewer_listening_and_audio_only_asr_agreement"
+      },
+      "classification": {
+        "kind": "paralinguistic_event",
+        "event_type": "nonlexical_murmur",
+        "retention_disposition": "retained_for_paralinguistic_event_review",
+        "base_tts_training": "excluded",
+        "expressive_training": "pending_human_event_qa",
+        "event_bank_eligibility": "pending_human_event_qa",
+        "delivery_attributes": {
+          "breathiness": "unrated",
+          "emotion": "unrated",
+          "intensity": "unrated"
+        }
+      }
+    },
+    {
+      "ordinal": 3,
+      "span_id": "voice-span-f8f9e97cb60ff69edf84",
+      "character": {
+        "character_id": "5157b8972632",
+        "character_name": "薇蒂雅",
+        "selected_source": {
+          "source_page_id": "6d7ce3ae6026",
+          "armor_id": "30878200de72",
+          "armor_name": "龙舌兰",
+          "armor_semantics": "explicit_selected_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/003-voice-span-f8f9e97cb60ff69edf84.wav",
+        "sha256": "aacfb68f137cb4a99b707bd3cf14af10727831d6392b8ffd3f2755f162809006",
+        "byte_count": 92204,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 46080,
+        "duration_seconds": 1.92,
+        "source_range": {
+          "start_frame": 219840,
+          "end_frame_exclusive": 265920
+        }
+      },
+      "observation": {
+        "phonetic_surface": "啊",
+        "phonetic_surface_utf8_sha256": "7c2c50fbaf7b274733d5fa623040492ef299c898075f8fc47fd28356c7e08898",
+        "evidence": "reviewer_listening_and_audio_only_asr_agreement"
+      },
+      "classification": {
+        "kind": "paralinguistic_event",
+        "event_type": "nonlexical_murmur",
+        "retention_disposition": "retained_for_paralinguistic_event_review",
+        "base_tts_training": "excluded",
+        "expressive_training": "pending_human_event_qa",
+        "event_bank_eligibility": "pending_human_event_qa",
+        "delivery_attributes": {
+          "breathiness": "unrated",
+          "emotion": "unrated",
+          "intensity": "unrated"
+        }
+      }
+    }
+  ],
+  "scope_limits": {
+    "source_submission_modified": false,
+    "lexical_transcript_accepted": false,
+    "span_approved": false,
+    "transcript_alignment_verified": false,
+    "base_tts_training_approved": false,
+    "expressive_training_approved": false,
+    "event_bank_approved": false,
+    "concatenation_approved": false,
+    "automated_qc_overridden": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false
+  },
+  "receipt_sha256": "9c154faa195aec098c03a7ef86176f9f07dca2aa99b312ec7f41cc0bce5da4c0"
+}

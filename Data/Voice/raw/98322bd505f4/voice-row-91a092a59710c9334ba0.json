@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-91a092a59710c9334ba0",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 15,
+  "trigger": "信息提醒",
+  "transcript": "不要忘记看消息。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/b2/4puc93206k0ky3mznxudjo780rcf7pp.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 62738,
+  "content_sha256": "109a39e5c75233f2342911e2ddc861f50c633638626a2dc108a58e9b298f7b21",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

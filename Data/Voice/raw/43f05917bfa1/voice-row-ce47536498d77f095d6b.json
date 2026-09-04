@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-ce47536498d77f095d6b",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 49,
+  "trigger": "支援技",
+  "transcript": "抓到你了。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/3/3e/014pqbplnfxmd22aijn53ri1azrkd67.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 43929,
+  "content_sha256": "f3fa8fbebeaa5f1c9dba01488d1a8dd6e19f1e9d1696c14b156535e45c1d8c45",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

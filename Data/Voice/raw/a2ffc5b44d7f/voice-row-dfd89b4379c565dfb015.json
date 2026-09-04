@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-dfd89b4379c565dfb015",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 31,
+  "trigger": "获得物资2",
+  "transcript": "好重，谁来帮我搬一下！",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/7/7c/k0q6829qh148x8lbozfrag6oem168w0.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 213203,
+  "content_sha256": "d0a025875eddfd4eb7844d659c6e08d87fbd2a7c01b87f09858d11ec3031973d",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

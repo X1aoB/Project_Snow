@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-6fc1e88d6cffe51420a9",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 13,
+  "trigger": "交换2",
+  "transcript": "不错的登场时机。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/d/de/0funfap5494rv1rmz7qzc7kztdlxsai.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 94085,
+  "content_sha256": "f5fa430de3febd2cef79afb4381876f27b1730b316dcf276fb7ee2cd70800f39",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

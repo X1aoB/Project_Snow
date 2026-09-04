@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-0bec07e3894190b131fe",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 36,
+  "trigger": "看板娘展示1",
+  "transcript": "希望今天增加的也是愉快的记忆。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/5/56/1zpbrtkat79jso8qfxb5e82jvgv3a0b.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 262313,
+  "content_sha256": "4f0101705f85936898e439bc86f9fe9e44782b131b4c5ff6fc5df71cdb2b43a9",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

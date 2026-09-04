@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-8efae3e3169fb96276f2",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 41,
+  "trigger": "战斗胜利1",
+  "transcript": "现在没有事情能打扰我们了。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/2/2b/t4kh3j5y2kqzs6yyt21nh0br15yfs3c.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 370982,
+  "content_sha256": "f3d625ba909648af831a26032832d2e160678cb4fc6353219633bea09d06a35d",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

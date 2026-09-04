@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-a1b6f4630eedcc7d5fcf",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 23,
+  "trigger": "重伤退场",
+  "transcript": "我又冲动了呢。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/b2/85ali9t0qzfhbipw5jkaa10bfei48j9.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 197529,
+  "content_sha256": "e8ae903e532dce3f508be620e52f8897675d043d7c10716f97b297e68df0b00e",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

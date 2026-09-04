@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-8c49cf09c76bdf12e87c",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 7,
+  "trigger": "歼敌3",
+  "transcript": "我已观测到你的终局。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/bf/r6rnv4nb3ebvwtuh53j4z8lwhlnt8tw.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 113938,
+  "content_sha256": "52654856b53a6a8fdce81978c835727641cd0869452fcde9ad87cee9a5e82ad5",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

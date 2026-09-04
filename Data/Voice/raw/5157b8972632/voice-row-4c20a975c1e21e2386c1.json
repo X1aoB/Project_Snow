@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-4c20a975c1e21e2386c1",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 14,
+  "trigger": "节日",
+  "transcript": "节日是人类在连续时间中创造出的虚假片段。但我们都需要这样的美好，对吧？",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/bb/ri76jx1q0saapzooo21obxs2ty9ds4h.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 390836,
+  "content_sha256": "33df7ed6f676c7665906dc712a87384bbf8cbad2aadf17d89f3901295ce2ef24",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

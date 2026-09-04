@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-26e515677a175b535ccf",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 4,
+  "trigger": "完成目标",
+  "transcript": "目标达成，与战斗预演一致。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/4/4a/66xkethvp5r52mdr701hioityf9y81y.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 154689,
+  "content_sha256": "5fc618fbcc812e8332ca3335138c0bbee2e298edbcc5efefe3f1bd195fcb66ad",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

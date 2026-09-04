@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-dd6db188636caa9ce2d2",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 12,
+  "trigger": "交换1",
+  "transcript": "交给姐姐吧。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/d/da/hh3420c06zdqcyrthpnghuw0ycp091a.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 41840,
+  "content_sha256": "94272e09d13faf41e2720178ea85ad70d31b9d0fb158688ac02db7e30136f0e4",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

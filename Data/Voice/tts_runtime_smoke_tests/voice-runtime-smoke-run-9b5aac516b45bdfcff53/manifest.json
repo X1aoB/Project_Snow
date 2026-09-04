@@ -1,0 +1,118 @@
+{
+  "schema_version": "project-snow-private-local-voice-runtime-smoke-run-1",
+  "policy_version": "project-snow-five-locked-style-slot-smoke-1",
+  "run_id": "voice-runtime-smoke-run-9b5aac516b45bdfcff53",
+  "prepared_at": "2026-09-04T23:38:13+08:00",
+  "status": "prepared_for_authorized_five_slot_smoke",
+  "source_profile": {
+    "profile_id": "voice-runtime-profile-e95e7d8e42cdc7c3d241",
+    "manifest_sha256": "b3e3af75e61ed8f541ebafb389d649ddec9155b4b61c3275779e2789cca1e31d",
+    "manifest_byte_sha256": "c457cac0f845fe5a09b20e09af260de9a71403cd62725e84feb4d1f872289bf4"
+  },
+  "provider_contract": {
+    "region": "cn-beijing",
+    "target_model": "qwen3-tts-vc-realtime-2026-01-15",
+    "websocket_endpoint": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+    "response_format": "pcm",
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "instructions_sent": false
+  },
+  "pricing_contract": {
+    "planned_output_count": 5,
+    "planned_billable_characters": 179,
+    "estimated_cost_usd": "0.0025660187",
+    "hard_cost_ceiling_usd": "0.005"
+  },
+  "authorization_contract": {
+    "authorization_context": "direct_continuation_of_explicit_usd_0_005_scope",
+    "five_locked_slot_smoke_authorized": true,
+    "paused_slot_authorized": false,
+    "automatic_retry_authorized": false,
+    "voice_creation_authorized": false,
+    "voice_deletion_authorized": false,
+    "training_or_fine_tuning_authorized": false,
+    "publication_or_rollout_authorized": false
+  },
+  "planned_outputs": [
+    {
+      "output_id": "runtime-smoke-output-1fb0d14b6c7c0533",
+      "sequence": 1,
+      "case_id": "vidya-neutral-short",
+      "character_id": "5157b8972632",
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "style": "neutral",
+      "text": "今天的安排很清楚，我们按顺序继续就好。",
+      "text_sha256": "9aaf8ac803eaa15844d22815e3a884b541503a44a8d8205e46fb7d8d402cc97d",
+      "input_character_count": 19,
+      "billing_character_count": 36,
+      "private_audio_relative_path": "audio/vidya/01-runtime-smoke-output-1fb0d14b6c7c0533.wav"
+    },
+    {
+      "output_id": "runtime-smoke-output-c699a15caaf2c26d",
+      "sequence": 2,
+      "case_id": "vidya-heightened",
+      "character_id": "5157b8972632",
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "style": "heightened",
+      "text": "别移开视线！这一次，我绝不会让你逃走！",
+      "text_sha256": "f1e40f2a20daa49856b5bcf6b67ebe3fb45680b6afa97e533a928fa1e618204a",
+      "input_character_count": 19,
+      "billing_character_count": 35,
+      "private_audio_relative_path": "audio/vidya/02-runtime-smoke-output-c699a15caaf2c26d.wav"
+    },
+    {
+      "output_id": "runtime-smoke-output-56038a0c4b34dc17",
+      "sequence": 3,
+      "case_id": "chenxing-neutral-short",
+      "character_id": "98322bd505f4",
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "style": "neutral",
+      "text": "检查已经完成，接下来可以安心推进。",
+      "text_sha256": "e15cbd4a4234f2c3077305fc7eefe56de69fc4153178d48fded4a0d0f2d6068b",
+      "input_character_count": 17,
+      "billing_character_count": 32,
+      "private_audio_relative_path": "audio/chenxing/03-runtime-smoke-output-56038a0c4b34dc17.wav"
+    },
+    {
+      "output_id": "runtime-smoke-output-3d00c0a88674933e",
+      "sequence": 4,
+      "case_id": "chenxing-breathy-lexical",
+      "character_id": "98322bd505f4",
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "style": "breathy",
+      "text": "声音放轻些，我就在你身边，不必惊动其他人。",
+      "text_sha256": "6c2dc40127e978453a6774539ca767ea3a54ce4f2210bd43bca74b4266eadaef",
+      "input_character_count": 21,
+      "billing_character_count": 39,
+      "private_audio_relative_path": "audio/chenxing/04-runtime-smoke-output-3d00c0a88674933e.wav"
+    },
+    {
+      "output_id": "runtime-smoke-output-95faa96fb5b48453",
+      "sequence": 5,
+      "case_id": "chenxing-heightened",
+      "character_id": "98322bd505f4",
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "style": "heightened",
+      "text": "抓紧我的手！别回头，我们现在就离开这里！",
+      "text_sha256": "b0d6dd46b8b270f80b3f6abf45f7cbf27e8519b5ca9c1896b9b076335a670b26",
+      "input_character_count": 20,
+      "billing_character_count": 37,
+      "private_audio_relative_path": "audio/chenxing/05-runtime-smoke-output-95faa96fb5b48453.wav"
+    }
+  ],
+  "privacy_contract": {
+    "provider_voice_ids_in_manifest": false,
+    "workspace_id_in_manifest": false,
+    "provider_voice_ids_in_command_output": false,
+    "workspace_id_in_command_output": false,
+    "local_review_only": true
+  },
+  "manifest_sha256": "186e8d844f8933204c75168477791e07a56f362d5ebfae832e52de4f1f4615f5"
+}

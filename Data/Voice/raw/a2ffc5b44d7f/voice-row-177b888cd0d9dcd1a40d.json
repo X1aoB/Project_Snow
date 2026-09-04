@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-177b888cd0d9dcd1a40d",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 15,
+  "trigger": "信息提醒",
+  "transcript": "老是忘记及时查看信息的员工会被诅咒哦~今后从所有咖啡机里只能接出热水。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/7/72/7h7yk767ao8gdwjbflsoi0exfiemixu.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 318738,
+  "content_sha256": "a2faedbd8a8a7517f03c54a3065d26b3f193e1fa354ff14f3827946adcb8cb24",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

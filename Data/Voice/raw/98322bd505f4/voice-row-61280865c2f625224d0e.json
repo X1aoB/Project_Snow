@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-61280865c2f625224d0e",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 19,
+  "trigger": "共鸣2",
+  "transcript": "加入海姆达尔部队，有责任，也有我的私心。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/5/5d/jms23ok9s6p82hjdo36a8uxvny51kiz.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 211113,
+  "content_sha256": "95ebf3b29072e92b50185b7396fb771b0a0b864cbd38b168eadcaff72173d044",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

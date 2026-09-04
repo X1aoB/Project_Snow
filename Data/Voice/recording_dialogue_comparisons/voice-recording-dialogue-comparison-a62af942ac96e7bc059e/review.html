@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Project Snow 长对话样本对照</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 20px;color:#20242b;background:#f5f7fa}section{background:#fff;border:1px solid #d9dee8;border-radius:12px;padding:20px;margin:20px 0}.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}article{background:#f7f9fc;padding:12px;border-radius:8px}audio{width:100%}.text{white-space:normal}.metrics{color:#4a5568}.warning{padding:12px;background:#fff4d6;border-left:4px solid #d49b00}</style></head>
+<body><h1>Project Snow 长对话样本对照</h1>
+<p class="warning">仅用于本地自然节奏/安全静音压缩试听。未批准训练、声音克隆、Provider 注册、权利接受或公网发布。</p>
+<p>审核重点：压缩版是否出现吞字、切气口、节奏突兀或语义停顿被破坏。屏幕文本是逐字稿真值，ASR 不参与改写。</p>
+
+<section>
+  <h2>A · 薇蒂雅 · candidate 143</h2>
+  <p class="text">请尽量轻装上阵——手铐？我的高分子绳更结实；手电筒？瞳孔中只能找到您的倒影；手枪？</p>
+  <p><a href="A/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="A/natural.wav"></audio><p>16.397333 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="A/compacted.wav"></audio><p>14.959042 秒；压缩切点 2 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 2.34%；原始逐帧静音比 40.11%（仅观察）；SNR 30.61 dB；true peak -9.042 dBTP。</p>
+</section>
+<section>
+  <h2>B · 薇蒂雅 · candidate 137</h2>
+  <p class="text">没错，近日发生在您身上那些可疑事件，其实都与我有关——电脑上根据您习惯录入的快捷键，会议后口袋里多出的润喉糖，</p>
+  <p><a href="B/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="B/natural.wav"></audio><p>15.721292 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="B/compacted.wav"></audio><p>15.721292 秒；压缩切点 0 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 9.41%；原始逐帧静音比 37.23%（仅观察）；SNR 32.271 dB；true peak -9.063 dBTP。</p>
+</section></body></html>

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-346748f9c9e053cd9dbc",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 42,
+  "trigger": "购买失败",
+  "transcript": "再厉害的计算能力都没办法从空钱包里数出钱来哦。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/6/6a/7pmjoyhg37gu02ba94ddqzmjwrppl1z.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 169317,
+  "content_sha256": "7b748a36ff493043f4d18ea5a24e7442220e8859edc31b5bbca660c0e3b6a2b7",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

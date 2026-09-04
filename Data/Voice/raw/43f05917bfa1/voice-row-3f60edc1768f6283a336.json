@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-3f60edc1768f6283a336",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 8,
+  "trigger": "接敌1",
+  "transcript": "勇敢一点。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/b9/hsvzbr3o1zl1xk1ojnydhjoqs3okd39.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 41840,
+  "content_sha256": "1b9359c0c68a4bf38c7b82f85a1b66a401bffd9c4795c8a70b16991a0ed37938",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

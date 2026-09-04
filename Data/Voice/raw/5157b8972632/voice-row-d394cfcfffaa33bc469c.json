@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-d394cfcfffaa33bc469c",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 4,
+  "trigger": "完成目标",
+  "transcript": "好戏还在后头呢。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/4/48/5y172stbzbqgsc367hz52os64xgknen.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 74231,
+  "content_sha256": "0d7da0a2467ed59946925a83704ba49d834fc2572bcbed12100ba90d8ef96fcd",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

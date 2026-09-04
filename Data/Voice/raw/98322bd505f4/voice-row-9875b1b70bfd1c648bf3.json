@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-9875b1b70bfd1c648bf3",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 46,
+  "trigger": "常规技1",
+  "transcript": "你们已是笼中之雀。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/a/a6/0qbhs1ng295f4b62ioka6sjzgb2urg7.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 83636,
+  "content_sha256": "2ada1b44dab7e162913cec4ba53ceb60eb39b59e6744fa07794acbbcd4924efd",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

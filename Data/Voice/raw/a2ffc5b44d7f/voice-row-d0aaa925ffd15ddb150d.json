@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-d0aaa925ffd15ddb150d",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 20,
+  "trigger": "放弃",
+  "transcript": "干嘛急着放弃啊。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/2/2d/2lqia0jnwkkk42r8shrzksyk980mmes.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 97219,
+  "content_sha256": "297992feb8499ddb08e57c10bc6ec4b0803081ef0818e3edb26431b5ee5d0227",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

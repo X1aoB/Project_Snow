@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-ec7d0456e77cf0765109",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 9,
+  "trigger": "接敌2",
+  "transcript": "送他们离场吧。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/f/fc/emfoekuvzl69snmugmftq4mtroo7ao6.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 99309,
+  "content_sha256": "2490fd3e58990aa2359ea1040b598c984cb1342ffb22bbfa530b71d2dfbfca26",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

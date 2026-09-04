@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-e251d6ca0af04cf0d63d",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 11,
+  "trigger": "战斗开始2",
+  "transcript": "万物类象，胜负皆有迹可循。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/e/e7/nr3np87i7c4olsg7jut8w9q7hnaj9pr.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 162003,
+  "content_sha256": "99676e8eb14c39732ceb2fbe994995f577f2e209f56f22036a63ac0f178d07f4",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

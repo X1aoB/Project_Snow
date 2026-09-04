@@ -1,0 +1,6 @@
+{
+  "schema_version": "project-snow-private-voice-review-overlay-1",
+  "inventory_sha256": "bd9aa282c8bba4e18168f0d4f79cd8783b71f67f0630b6d6bcdccf6b1c22231b",
+  "notice": "Private operator overlay. Keep reviews empty until automated QC, human listening/transcript review, risk acceptance, and publication approval are all real and recorded.",
+  "reviews": []
+}

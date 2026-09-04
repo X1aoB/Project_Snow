@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-a4b87b8aa499294ce767",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 4,
+  "trigger": "完成目标",
+  "transcript": "大家都没受伤吧。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/b5/nrf57q3hx194tay5k09045l0cvivduc.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 122297,
+  "content_sha256": "aaa38a0fbade460d52c12982c38469f63c4bcc3421ae484ff710d72fc7875e94",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

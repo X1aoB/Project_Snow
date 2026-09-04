@@ -1,0 +1,540 @@
+{
+  "schema_version": "project-snow-private-local-voice-dialogue-comparison-1",
+  "package_id": "voice-recording-dialogue-comparison-25d6dd724181c0924b08",
+  "created_at": "2026-08-31T13:49:09.177444+00:00",
+  "artifact_purpose": "offline_natural_vs_safely_compacted_dialogue_qc_only",
+  "source_boundary_adjudication": {
+    "receipt_id": "voice-recording-boundary-adjudication-3c4102db6ee3378a7862",
+    "manifest_sha256": "771450af8423090ca972ba481fab9ff8b0a9c0bb950b275eedf38311b4d52c33",
+    "decision_set_sha256": "8016e4b63b84f593230f847cb0b2f01135a00110230913327876a4f009288db0",
+    "candidate_count": 161,
+    "accepted_candidate_count": 129,
+    "excluded_candidate_count": 32
+  },
+  "quality_policy": {
+    "audio_format": {
+      "encoding": "pcm_s16le",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "sample_width_bytes": 2
+    },
+    "energy_frame_ms": 20,
+    "adaptive_cut_threshold": {
+      "noise_percentile": 0.2,
+      "margin_db": 8.0,
+      "minimum_dbfs": -55.0,
+      "maximum_dbfs": -45.0
+    },
+    "outer_padding_ms": 120,
+    "minimum_compactable_internal_gap_ms": 1000,
+    "normal_pause_allowance_per_quiet_run_ms": 750,
+    "synthetic_join_silence_ms": 240,
+    "target_retained_pause_ms": 480,
+    "cut_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+    "legacy_raw_silence_measurement": {
+      "method": "20ms_frame_rms",
+      "threshold_dbfs": -45.0,
+      "gate": false
+    },
+    "sustained_silence_measurement": {
+      "method": "quiet_run_duration_exceeding_750ms_v1",
+      "threshold_dbfs": -45.0,
+      "maximum_excess_ratio": 0.2,
+      "gate": true
+    },
+    "duration_seconds": {
+      "minimum": 10.0,
+      "maximum": 20.0,
+      "applies_to": "compacted_audio"
+    },
+    "true_peak": {
+      "oversample_factor": 4,
+      "interpolator": "catmull_rom_cubic",
+      "maximum_dbtp": -1.0
+    },
+    "maximum_clipped_sample_count": 0,
+    "snr": {
+      "method": "energy_vad_rms_v1_source_only",
+      "minimum_db": 25.0,
+      "synthetic_join_silence_excluded": true
+    }
+  },
+  "authoritative_assertions": {
+    "screen_text_is_authoritative": true,
+    "authoritative_transcript_modified": false,
+    "asr_used_as_transcript_source": false,
+    "all_detected_voiced_regions_retained": true,
+    "only_low_energy_silence_compacted": true,
+    "normal_pauses_up_to_750ms_tolerated": true,
+    "legacy_raw_silence_ratio_used_as_gate": false,
+    "parent_candidate_count_separate_from_internal_cut_count": true,
+    "excluded_candidates_reintroduced": false,
+    "new_runtime_character_created": false
+  },
+  "sample_count": 2,
+  "samples": [
+    {
+      "slot": "A",
+      "parent_candidate_count": 1,
+      "internal_silence_compaction_cut_count": 1,
+      "candidate_ordinal": 134,
+      "revision_id": "voice-recording-boundary-revision-c4c32ca3de1a5015027a",
+      "original_candidate_id": "voice-recording-alignment-candidate-f78cf967985a853e46d8",
+      "source_id": "voice-recording-source-63d4890c068d5db56f0e",
+      "source_kind": "speaker_aggregate",
+      "role_name": "莫尔索",
+      "batch_name": "战术讨论",
+      "runtime_character_id": "8d5b5c3912bb",
+      "runtime_character_name": "琴诺",
+      "source_persona_id": "1ebefe906ab6",
+      "speaker_variant": "morso",
+      "selectable_character": false,
+      "authoritative_locator": {
+        "block_index": 0,
+        "start_char": 54,
+        "end_char_exclusive": 107
+      },
+      "authoritative_transcript_utf8_sha256": "f3588b2409ff81f12c1aa1c25b1bd3c6e90f4777619ac748d433f484cac8933a",
+      "displayed_text": {
+        "relative_path": "A/displayed_text.txt",
+        "utf8_sha256": "f3588b2409ff81f12c1aa1c25b1bd3c6e90f4777619ac748d433f484cac8933a",
+        "byte_count": 159
+      },
+      "input_candidate_audio": {
+        "wav_sha256": "569f406165cfd0fbcc0e8e2eb4346cc8031099c17d148a26485b6e441d235930",
+        "pcm_sha256": "8169f172bcce0d7d45e7548aa34827cb2446cf80760f3cad6708df0120122b8a",
+        "byte_count": 629564,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 314760,
+          "duration_seconds": 13.115
+        },
+        "source_frame_range": {
+          "start_frame": 296280,
+          "end_frame_exclusive": 611040,
+          "start_seconds": 12.345,
+          "end_seconds": 25.46,
+          "duration_seconds": 13.115
+        }
+      },
+      "adaptive_cut_threshold_dbfs": -55.0,
+      "detected_active_island_count": 14,
+      "outer_trim": {
+        "candidate_local_retained_range": {
+          "start_frame": 2922,
+          "end_frame_exclusive": 314749
+        },
+        "source_retained_range": {
+          "start_frame": 299202,
+          "end_frame_exclusive": 611029,
+          "start_seconds": 12.46675,
+          "end_seconds": 25.459542
+        },
+        "left_removed_frames": 2922,
+        "right_removed_frames": 11,
+        "left_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -72.512,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 522
+        },
+        "right_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -57.689,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 2531
+        }
+      },
+      "internal_silence_compaction_cuts": [
+        {
+          "after_active_island_index": 2,
+          "candidate_local_removed_range": {
+            "start_frame": 58560,
+            "end_frame_exclusive": 81600
+          },
+          "source_removed_range": {
+            "start_frame": 354840,
+            "end_frame_exclusive": 377880,
+            "start_seconds": 14.785,
+            "end_seconds": 15.745
+          },
+          "source_gap_duration_ms": 1200.0,
+          "removed_source_duration_ms": 960.0,
+          "inserted_silence_ms": 240,
+          "net_duration_reduction_ms": 720.0,
+          "left_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -95.246,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 0
+          },
+          "right_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -89.749,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 0
+          },
+          "compacted_join_output_range": {
+            "start_frame": 55638,
+            "end_frame_exclusive": 61398
+          }
+        }
+      ],
+      "retained_long_gaps": [],
+      "compacted_source_spans": [
+        {
+          "candidate_local_range": {
+            "start_frame": 2922,
+            "end_frame_exclusive": 58560
+          },
+          "source_range": {
+            "start_frame": 299202,
+            "end_frame_exclusive": 354840,
+            "start_seconds": 12.46675,
+            "end_seconds": 14.785
+          },
+          "compacted_output_range": {
+            "start_frame": 0,
+            "end_frame_exclusive": 55638
+          }
+        },
+        {
+          "candidate_local_range": {
+            "start_frame": 81600,
+            "end_frame_exclusive": 314749
+          },
+          "source_range": {
+            "start_frame": 377880,
+            "end_frame_exclusive": 611029,
+            "start_seconds": 15.745,
+            "end_seconds": 25.459542
+          },
+          "compacted_output_range": {
+            "start_frame": 61398,
+            "end_frame_exclusive": 294547
+          }
+        }
+      ],
+      "natural_audio": {
+        "relative_path": "A/natural.wav",
+        "wav_sha256": "053f86173e2ee7d7aa3e4efbb393a911d9600ba76f4c277b922460153746e354",
+        "pcm_sha256": "277f60e03dd13016ff7e9bd57a69406b4f058f9b5e63697a7501c7cd06ded1a3",
+        "byte_count": 623698,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 311827,
+          "duration_seconds": 12.992792
+        },
+        "metrics": {
+          "duration_seconds": 12.992792,
+          "true_peak_4x_dbtp": -7.385,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.370769,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 29.017,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 23,
+          "quiet_runs_exceeding_allowance_count": 3,
+          "sustained_silence_excess_seconds": 0.99,
+          "sustained_silence_excess_ratio": 0.076196
+        }
+      },
+      "compacted_audio": {
+        "relative_path": "A/compacted.wav",
+        "wav_sha256": "9ddb6f6a24e010c6ed4599c45ed117d4a861e2e68397862efcb0b8408915d000",
+        "pcm_sha256": "c43226deef34b533c0aa1cd152df3b52735d18ac7da68c25be7b64f50e69cdc6",
+        "byte_count": 589138,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 294547,
+          "duration_seconds": 12.272792
+        },
+        "metrics": {
+          "duration_seconds": 12.272792,
+          "true_peak_4x_dbtp": -7.385,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.333876,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 28.053,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 23,
+          "quiet_runs_exceeding_allowance_count": 2,
+          "sustained_silence_excess_seconds": 0.48,
+          "sustained_silence_excess_ratio": 0.039111
+        }
+      },
+      "quality_gates": {
+        "duration_10_to_20_seconds": true,
+        "true_peak_at_or_below_minus_1_dbtp": true,
+        "no_clipped_samples": true,
+        "sustained_silence_excess_at_or_below_20_percent": true,
+        "snr_at_or_above_25_db": true
+      },
+      "all_quality_gates_passed": true
+    },
+    {
+      "slot": "B",
+      "parent_candidate_count": 1,
+      "internal_silence_compaction_cut_count": 1,
+      "candidate_ordinal": 133,
+      "revision_id": "voice-recording-boundary-revision-4f8e504152da720f6288",
+      "original_candidate_id": "voice-recording-alignment-candidate-6fbaf54f2b261cb9cd87",
+      "source_id": "voice-recording-source-63d4890c068d5db56f0e",
+      "source_kind": "speaker_aggregate",
+      "role_name": "莫尔索",
+      "batch_name": "战术讨论",
+      "runtime_character_id": "8d5b5c3912bb",
+      "runtime_character_name": "琴诺",
+      "source_persona_id": "1ebefe906ab6",
+      "speaker_variant": "morso",
+      "selectable_character": false,
+      "authoritative_locator": {
+        "block_index": 0,
+        "start_char": 0,
+        "end_char_exclusive": 54
+      },
+      "authoritative_transcript_utf8_sha256": "cd8ec916b783ccbc5158554ebfa0f74dc548807f1173a5bca7a7570f8451f9c4",
+      "displayed_text": {
+        "relative_path": "B/displayed_text.txt",
+        "utf8_sha256": "cd8ec916b783ccbc5158554ebfa0f74dc548807f1173a5bca7a7570f8451f9c4",
+        "byte_count": 162
+      },
+      "input_candidate_audio": {
+        "wav_sha256": "5eb1b5035bf792e316ff19d17bc9b6e78816f099075c5bb4ff128a474243af03",
+        "pcm_sha256": "f61a75e021af82822771c3132142439babf9f72db1075ab634a5395aea09e913",
+        "byte_count": 579164,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 289560,
+          "duration_seconds": 12.065
+        },
+        "source_frame_range": {
+          "start_frame": 6720,
+          "end_frame_exclusive": 296280,
+          "start_seconds": 0.28,
+          "end_seconds": 12.345,
+          "duration_seconds": 12.065
+        }
+      },
+      "adaptive_cut_threshold_dbfs": -55.0,
+      "detected_active_island_count": 8,
+      "outer_trim": {
+        "candidate_local_retained_range": {
+          "start_frame": 1,
+          "end_frame_exclusive": 284160
+        },
+        "source_retained_range": {
+          "start_frame": 6721,
+          "end_frame_exclusive": 290880,
+          "start_seconds": 0.280042,
+          "end_seconds": 12.12
+        },
+        "left_removed_frames": 1,
+        "right_removed_frames": 5400,
+        "left_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -84.876,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 1921
+        },
+        "right_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -63.095,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 0
+        }
+      },
+      "internal_silence_compaction_cuts": [
+        {
+          "after_active_island_index": 4,
+          "candidate_local_removed_range": {
+            "start_frame": 162720,
+            "end_frame_exclusive": 182735
+          },
+          "source_removed_range": {
+            "start_frame": 169440,
+            "end_frame_exclusive": 189455,
+            "start_seconds": 7.06,
+            "end_seconds": 7.893958
+          },
+          "source_gap_duration_ms": 1080.0,
+          "removed_source_duration_ms": 833.958,
+          "inserted_silence_ms": 240,
+          "net_duration_reduction_ms": 593.958,
+          "left_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -87.579,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 0
+          },
+          "right_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -83.531,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 145
+          },
+          "compacted_join_output_range": {
+            "start_frame": 162719,
+            "end_frame_exclusive": 168479
+          }
+        }
+      ],
+      "retained_long_gaps": [],
+      "compacted_source_spans": [
+        {
+          "candidate_local_range": {
+            "start_frame": 1,
+            "end_frame_exclusive": 162720
+          },
+          "source_range": {
+            "start_frame": 6721,
+            "end_frame_exclusive": 169440,
+            "start_seconds": 0.280042,
+            "end_seconds": 7.06
+          },
+          "compacted_output_range": {
+            "start_frame": 0,
+            "end_frame_exclusive": 162719
+          }
+        },
+        {
+          "candidate_local_range": {
+            "start_frame": 182735,
+            "end_frame_exclusive": 284160
+          },
+          "source_range": {
+            "start_frame": 189455,
+            "end_frame_exclusive": 290880,
+            "start_seconds": 7.893958,
+            "end_seconds": 12.12
+          },
+          "compacted_output_range": {
+            "start_frame": 168479,
+            "end_frame_exclusive": 269904
+          }
+        }
+      ],
+      "natural_audio": {
+        "relative_path": "B/natural.wav",
+        "wav_sha256": "599f60d9083c5b3b8b51b1725d5c31b8c6d9cda06ab60fd971e5a1c2cecf0138",
+        "pcm_sha256": "7139f1ef511d2a8892688bc6a30da70226c46b2659cba08893310ccd868248d0",
+        "byte_count": 568362,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 284159,
+          "duration_seconds": 11.839958
+        },
+        "metrics": {
+          "duration_seconds": 11.839958,
+          "true_peak_4x_dbtp": -7.492,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.344595,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 29.84,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 14,
+          "quiet_runs_exceeding_allowance_count": 3,
+          "sustained_silence_excess_seconds": 0.67,
+          "sustained_silence_excess_ratio": 0.056588
+        }
+      },
+      "compacted_audio": {
+        "relative_path": "B/compacted.wav",
+        "wav_sha256": "6ccc503f68414e2e7b9dcfe430559b7bcd2ae84fa5d0afd7797d25fd38ed8a4b",
+        "pcm_sha256": "e7db56d1f3134e8b39b4d8e46ae9ee16530d508bf616e1ce3c693f775e04236d",
+        "byte_count": 539852,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 269904,
+          "duration_seconds": 11.246
+        },
+        "metrics": {
+          "duration_seconds": 11.246,
+          "true_peak_4x_dbtp": -7.492,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.312611,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 28.988,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 15,
+          "quiet_runs_exceeding_allowance_count": 2,
+          "sustained_silence_excess_seconds": 0.28,
+          "sustained_silence_excess_ratio": 0.024898
+        }
+      },
+      "quality_gates": {
+        "duration_10_to_20_seconds": true,
+        "true_peak_at_or_below_minus_1_dbtp": true,
+        "no_clipped_samples": true,
+        "sustained_silence_excess_at_or_below_20_percent": true,
+        "snr_at_or_above_25_db": true
+      },
+      "all_quality_gates_passed": true
+    }
+  ],
+  "sample_set_sha256": "a293f9dba32659f81d88fc296aaf9558f64d1bbefa9442fa6aa54f8e4d4dee26",
+  "quality_summary": {
+    "all_compacted_samples_passed_signal_qc": true,
+    "sample_count": 2
+  },
+  "review_page": {
+    "relative_path": "review.html",
+    "sha256": "1c706268fb472bddca843a68de1103a0fdee1658908bd74aaf277b43477d9f35",
+    "byte_count": 2615
+  },
+  "review_status": "awaiting_human_natural_vs_compacted_comparison",
+  "scope_limits": {
+    "human_listening_approved": false,
+    "natural_vs_compacted_comparison_approved": false,
+    "training_use_approved": false,
+    "voice_cloning_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false,
+    "public_rollout_allowed": false
+  },
+  "executed": true,
+  "manifest_sha256": "2206c83c15635b03417ac697d291ca4ce85c239897e3117a65efeee5584c55b9"
+}

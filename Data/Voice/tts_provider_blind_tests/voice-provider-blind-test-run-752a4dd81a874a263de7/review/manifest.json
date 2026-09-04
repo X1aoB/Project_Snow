@@ -1,0 +1,403 @@
+{
+  "schema_version": "project-snow-local-voice-provider-blind-test-review-1",
+  "rating_submission_schema_version": "project-snow-local-voice-provider-blind-test-ratings-1",
+  "blind_test_run_id": "voice-provider-blind-test-run-752a4dd81a874a263de7",
+  "status": "ready_for_local_human_blind_review",
+  "privacy_contract": {
+    "candidate_mapping_included": false,
+    "provider_voice_ids_included": false,
+    "candidate_a_b_labels_included": false,
+    "local_review_only": true,
+    "publication_authorized": false
+  },
+  "synthesis_contract": {
+    "target_model": "qwen3-tts-vc-realtime-2026-01-15",
+    "region": "cn-beijing",
+    "same_parameters_within_every_pair": true,
+    "parameters": {
+      "mode": "commit",
+      "language_type": "Chinese",
+      "response_format": "pcm",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "sample_width_bytes": 2,
+      "post_processing": "none",
+      "loudness_policy": "same_non_destructive_policy_no_normalization"
+    },
+    "post_processing": "none"
+  },
+  "cost_summary": {
+    "rendered_output_count": 24,
+    "current_run_provider_reported_or_fallback_input_characters": 1056,
+    "prior_stage_provider_usage_characters": 36,
+    "whole_stage_provider_usage_characters": 1092,
+    "estimated_current_run_cost_usd": "0.0151380768",
+    "estimated_whole_stage_cost_usd": "0.0156541476",
+    "whole_stage_cost_ceiling_usd": "0.02",
+    "actual_charge_status": "unknown_until_provider_billing_reconciliation"
+  },
+  "review_instructions": {
+    "listen_with_matched_playback_volume": true,
+    "do_not_infer_label_mapping": true,
+    "score_each_dimension_as_integer_0_to_5": true,
+    "mark_every_audible_critical_failure": true,
+    "pair_preference_values": [
+      "first_sample",
+      "second_sample",
+      "tie_or_unsure"
+    ]
+  },
+  "rating_rubric": {
+    "scale": {
+      "minimum": 0,
+      "maximum": 5,
+      "integer_only": true
+    },
+    "dimensions": [
+      "speaker_identity_similarity",
+      "intelligibility",
+      "naturalness",
+      "character_fit",
+      "prosody_and_breath_stability",
+      "artifact_absence"
+    ],
+    "critical_failures": [
+      "wrong_or_unstable_voice_identity",
+      "truncation_or_missing_content",
+      "hallucinated_or_repeated_words",
+      "clipping_discontinuity_or_audible_seam"
+    ]
+  },
+  "decision_rule": {
+    "no_critical_failures": true,
+    "minimum_median_per_dimension": 4.0,
+    "minimum_paired_case_wins_out_of_six": 4,
+    "minimum_mean_composite_lead": 0.25,
+    "otherwise": "tie_or_collect_more_samples",
+    "winner_scope": "one_winner_per_character_only"
+  },
+  "paralinguistic_event_lane": {
+    "ordinals": [
+      2,
+      3
+    ],
+    "included_in_this_review": false,
+    "base_tts_training": "excluded",
+    "event_bank_eligibility": "pending_human_event_qa"
+  },
+  "cases": [
+    {
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "case_id": "vidya-neutral-short",
+      "case_index": 1,
+      "category": "neutral_short",
+      "text": "今天的状态很稳定，我们可以按计划继续。",
+      "samples": [
+        {
+          "opaque_label_id": "sample-gkwg",
+          "display_label": "样本 GKWG",
+          "audio_relative_path": "audio/vidya/01-sample-gkwg.wav",
+          "duration_seconds": 4.0,
+          "wav_sha256": "d1c837d910e90c0d8e00f3ce166f53538348d418db424c204cbabff4bbc0bd87",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-xkby",
+          "display_label": "样本 XKBY",
+          "audio_relative_path": "audio/vidya/01-sample-xkby.wav",
+          "duration_seconds": 4.16,
+          "wav_sha256": "966e93660612d53005cc5a378f01e134be3410295bd41e0425278f2710c31a42",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "case_id": "vidya-long-punctuation",
+      "case_index": 2,
+      "category": "long_punctuation",
+      "text": "先别急着回答；等灯光暗下来、四周安静以后，再把你真正担心的事，一件一件告诉我。",
+      "samples": [
+        {
+          "opaque_label_id": "sample-gkwg",
+          "display_label": "样本 GKWG",
+          "audio_relative_path": "audio/vidya/02-sample-gkwg.wav",
+          "duration_seconds": 9.04,
+          "wav_sha256": "bbb21f20a30b374f058cc38662ee7c6782d7ff0890f588a873680f0dc72a984c",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-xkby",
+          "display_label": "样本 XKBY",
+          "audio_relative_path": "audio/vidya/02-sample-xkby.wav",
+          "duration_seconds": 9.12,
+          "wav_sha256": "2cc3938ac7bd3063203b11211eb8e4c5cd20e186eaed544fb3ac926de98f8e20",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "case_id": "vidya-question",
+      "case_index": 3,
+      "category": "question_information",
+      "text": "如果把时间改到明晚，你还会按约定来见我吗？",
+      "samples": [
+        {
+          "opaque_label_id": "sample-xkby",
+          "display_label": "样本 XKBY",
+          "audio_relative_path": "audio/vidya/03-sample-xkby.wav",
+          "duration_seconds": 4.48,
+          "wav_sha256": "3b655e6704e384a2edc66c63143ca7747b54eb4769848b9b4115e27ac1bf2959",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-gkwg",
+          "display_label": "样本 GKWG",
+          "audio_relative_path": "audio/vidya/03-sample-gkwg.wav",
+          "duration_seconds": 4.96,
+          "wav_sha256": "7785ece5826b621d250ca2554f87482273b85f55c63c982dd8bd19b99e49fba5",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "case_id": "vidya-breathy-lexical",
+      "case_index": 4,
+      "category": "restrained_breathy_lexical",
+      "text": "靠近一点，我只想把这句话轻轻说给你听。",
+      "samples": [
+        {
+          "opaque_label_id": "sample-xkby",
+          "display_label": "样本 XKBY",
+          "audio_relative_path": "audio/vidya/04-sample-xkby.wav",
+          "duration_seconds": 3.6,
+          "wav_sha256": "e5dbdb9da0b1ab512b53ad8ef193ea8eee2c9321b5d5bd7d2b38e5bf3eccbe6f",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-gkwg",
+          "display_label": "样本 GKWG",
+          "audio_relative_path": "audio/vidya/04-sample-gkwg.wav",
+          "duration_seconds": 4.72,
+          "wav_sha256": "edf0155a8419da74b023449a616cb04c70959169918f7495c8d7179da7bc9ebe",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "case_id": "vidya-heightened",
+      "case_index": 5,
+      "category": "heightened_fixated_lexical",
+      "text": "终于等到你了，别想让我现在移开视线！",
+      "samples": [
+        {
+          "opaque_label_id": "sample-gkwg",
+          "display_label": "样本 GKWG",
+          "audio_relative_path": "audio/vidya/05-sample-gkwg.wav",
+          "duration_seconds": 4.24,
+          "wav_sha256": "2de9b8766f0c39251d4e5ee42626f1cddb88e85dd13a29635344e45db6966d5e",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-xkby",
+          "display_label": "样本 XKBY",
+          "audio_relative_path": "audio/vidya/05-sample-xkby.wav",
+          "duration_seconds": 3.68,
+          "wav_sha256": "3a08f06ea6cc8ebf0329e72cb0f82c9e74437750945fa7c4ac5f984cb80028cf",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "vidya",
+      "runtime_character_name": "薇蒂雅",
+      "case_id": "vidya-mixed",
+      "case_index": 6,
+      "category": "numbers_english_pronunciation",
+      "text": "请在九月二日二十一点检查 Project Snow 的 A3 记录。",
+      "samples": [
+        {
+          "opaque_label_id": "sample-gkwg",
+          "display_label": "样本 GKWG",
+          "audio_relative_path": "audio/vidya/06-sample-gkwg.wav",
+          "duration_seconds": 6.24,
+          "wav_sha256": "fbbd91f4949110409fa48aff9577add2ca05073ca11f7dadc993c647017e434d",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-xkby",
+          "display_label": "样本 XKBY",
+          "audio_relative_path": "audio/vidya/06-sample-xkby.wav",
+          "duration_seconds": 5.92,
+          "wav_sha256": "eabe95c58f6b0a5462c1b03d633a040eee1200d55952d5c17266c2333d2b613b",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "case_id": "chenxing-neutral-short",
+      "case_index": 1,
+      "category": "neutral_short",
+      "text": "设备运行正常，下一项检查可以开始。",
+      "samples": [
+        {
+          "opaque_label_id": "sample-rspr",
+          "display_label": "样本 RSPR",
+          "audio_relative_path": "audio/chenxing/01-sample-rspr.wav",
+          "duration_seconds": 4.24,
+          "wav_sha256": "80eb3d27914bfb2996a398e50d1535d36d1f2d565702202ee3644768ec44b5ab",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-5kmz",
+          "display_label": "样本 5KMZ",
+          "audio_relative_path": "audio/chenxing/01-sample-5kmz.wav",
+          "duration_seconds": 3.36,
+          "wav_sha256": "976adcc313ff39dd61922ac14eb8fe585dd5e4d78c5a86c7ba488b2b975f01d9",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "case_id": "chenxing-long-punctuation",
+      "case_index": 2,
+      "category": "long_punctuation",
+      "text": "先确认坐标，再核对路线；即使外面的风雪变大，我们也必须保持联络，并按顺序撤离。",
+      "samples": [
+        {
+          "opaque_label_id": "sample-5kmz",
+          "display_label": "样本 5KMZ",
+          "audio_relative_path": "audio/chenxing/02-sample-5kmz.wav",
+          "duration_seconds": 8.16,
+          "wav_sha256": "4f0b20798522255bb595b10556741dd6956ba43c10600944ecfb6683d64c75eb",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-rspr",
+          "display_label": "样本 RSPR",
+          "audio_relative_path": "audio/chenxing/02-sample-rspr.wav",
+          "duration_seconds": 8.08,
+          "wav_sha256": "76ee4c6278d3b1f86f78b330ffb90fba35f1ee7eb61006fb1f7830ea248e9654",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "case_id": "chenxing-question",
+      "case_index": 3,
+      "category": "question_information",
+      "text": "你刚才记录的温度，是零下十二点五度吗？",
+      "samples": [
+        {
+          "opaque_label_id": "sample-rspr",
+          "display_label": "样本 RSPR",
+          "audio_relative_path": "audio/chenxing/03-sample-rspr.wav",
+          "duration_seconds": 4.24,
+          "wav_sha256": "f198f1f36eeba7efab9902d7e587f1ce32e4e431407e508659f6d843a6f0f344",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-5kmz",
+          "display_label": "样本 5KMZ",
+          "audio_relative_path": "audio/chenxing/03-sample-5kmz.wav",
+          "duration_seconds": 4.0,
+          "wav_sha256": "868994d83a4b7e4cde22545d7ae4c5c5712f511d04930582198ec465b399dd04",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "case_id": "chenxing-breathy-lexical",
+      "case_index": 4,
+      "category": "restrained_breathy_lexical",
+      "text": "声音放轻些，我就在这里，不必惊动其他人。",
+      "samples": [
+        {
+          "opaque_label_id": "sample-rspr",
+          "display_label": "样本 RSPR",
+          "audio_relative_path": "audio/chenxing/04-sample-rspr.wav",
+          "duration_seconds": 5.2,
+          "wav_sha256": "f72e822916110b8521e52b060b77aa7d1f7b6d479e86f7358d3768cfcc1a78d4",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-5kmz",
+          "display_label": "样本 5KMZ",
+          "audio_relative_path": "audio/chenxing/04-sample-5kmz.wav",
+          "duration_seconds": 4.48,
+          "wav_sha256": "73e342a38e561eaf8dd82fa2bbf3a75cd738400bbe755717f275d27a6fe26d75",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "case_id": "chenxing-heightened",
+      "case_index": 5,
+      "category": "heightened_urgent_lexical",
+      "text": "看着我，保持清醒，我们一定能一起回去！",
+      "samples": [
+        {
+          "opaque_label_id": "sample-rspr",
+          "display_label": "样本 RSPR",
+          "audio_relative_path": "audio/chenxing/05-sample-rspr.wav",
+          "duration_seconds": 4.72,
+          "wav_sha256": "46043ec46f632073e29f298a44e8cdee4ea3030ba5aac3d19b48839d0c884308",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-5kmz",
+          "display_label": "样本 5KMZ",
+          "audio_relative_path": "audio/chenxing/05-sample-5kmz.wav",
+          "duration_seconds": 4.64,
+          "wav_sha256": "e46a1b3634b1959a551aacc98c38a3110e81d24b2d872d9918eec7233eb637ab",
+          "full_scale_sample_count": 0
+        }
+      ]
+    },
+    {
+      "character_slug": "chenxing",
+      "runtime_character_name": "辰星",
+      "case_id": "chenxing-mixed",
+      "case_index": 6,
+      "category": "numbers_english_pronunciation",
+      "text": "倒计时 thirty seconds，随后切换到 B2 通讯频道。",
+      "samples": [
+        {
+          "opaque_label_id": "sample-5kmz",
+          "display_label": "样本 5KMZ",
+          "audio_relative_path": "audio/chenxing/06-sample-5kmz.wav",
+          "duration_seconds": 5.04,
+          "wav_sha256": "bc904aff9753de657f51d2cf52de46bdb0fb4e12f98478493019fd95ca3d153b",
+          "full_scale_sample_count": 0
+        },
+        {
+          "opaque_label_id": "sample-rspr",
+          "display_label": "样本 RSPR",
+          "audio_relative_path": "audio/chenxing/06-sample-rspr.wav",
+          "duration_seconds": 5.92,
+          "wav_sha256": "74ad714eca2e49bab9434aac132289e017236c12572ae80b68258a169e8d37b9",
+          "full_scale_sample_count": 0
+        }
+      ]
+    }
+  ],
+  "manifest_sha256": "33ae35b8795f87252454da16bbe59ef5c1e79495dc30fda02cb911f9678fd13b"
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-32e5c9da0174a9e59dc2",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 21,
+  "trigger": "轻伤",
+  "transcript": "小伤，没有影响。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/6/63/qitgi0dexlqqeu84284l7aj0c97ywfd.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 101399,
+  "content_sha256": "abfe31bd82ca333a5d60a1f43b785e6b79f56c5abab6a7c66d11d9a17eb8b346",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

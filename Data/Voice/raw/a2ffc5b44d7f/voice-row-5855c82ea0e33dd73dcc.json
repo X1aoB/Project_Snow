@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-5855c82ea0e33dd73dcc",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 8,
+  "trigger": "接敌1",
+  "transcript": "哎，他们就不会计算胜率吗？",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/1/1d/hx4tdpbqlzwq50apfwxkkp1wzmjjy51.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 190215,
+  "content_sha256": "14c6a6ea366bc1c4a0a8b98db9e16de1f91ab0491ac5bb87c714f0fd8b8d1b66",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

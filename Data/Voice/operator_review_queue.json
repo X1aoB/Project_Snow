@@ -1,0 +1,186 @@
+{
+  "schema_version": "project-snow-private-voice-operator-review-queue-1",
+  "generated_on": "2026-08-25",
+  "inventory_sha256": "bd9aa282c8bba4e18168f0d4f79cd8783b71f67f0630b6d6bcdccf6b1c22231b",
+  "sample_audit_file_sha256": "763013915d51ca6e8ada0034b619af150128d2d8eba0d11979e6ec591f81970b",
+  "status": "needs_human_review",
+  "enrollment_allowed": false,
+  "notice": "This queue is automated triage only. It is not a rights decision, publication approval, human QC result, A/B selection, or concatenation approval.",
+  "automated_policy": {
+    "sample_rate_hz": 24000,
+    "channels": 1,
+    "sample_format": "pcm_s16le",
+    "target_duration_seconds": {
+      "minimum": 10,
+      "maximum": 20
+    },
+    "estimated_snr_db_minimum": 25,
+    "silence_ratio_maximum": 0.2,
+    "silence_measurement": {
+      "threshold_dbfs": -45,
+      "window_ms": 20,
+      "minimum_qualifying_run_ms": 200
+    },
+    "true_peak_dbfs_maximum": -1,
+    "clipping_allowed": false,
+    "maximum_composite_segments": 4,
+    "composite_join_silence_ms": 150
+  },
+  "summary": {
+    "paired_source_candidates": 194,
+    "standalone_automated_pass": 0,
+    "segment_pass_by_character": {
+      "43f05917bfa1": 8,
+      "a2ffc5b44d7f": 10,
+      "5157b8972632": 2,
+      "98322bd505f4": 2
+    },
+    "manual_review_pending": 194
+  },
+  "characters": [
+    {
+      "character_id": "43f05917bfa1",
+      "character_name": "恩雅",
+      "source_form": "本体",
+      "status": "candidate_composites_need_human_review",
+      "provisional_samples": [
+        {
+          "slot": "A",
+          "source_candidate_ids": [
+            "voice-row-1862fef4395fce3bee06",
+            "voice-row-4d5bb54c0750a12e89ae",
+            "voice-row-94b30d26ce30779b60a4",
+            "voice-row-ab9a4ebfb34d068a8803"
+          ],
+          "triggers": [
+            "歼敌1",
+            "邮件提醒",
+            "歼敌2",
+            "战斗开始2"
+          ],
+          "estimated_joined_duration_seconds": 10.676958,
+          "status": "needs_human_segment_review_and_explicit_concatenation_approval"
+        },
+        {
+          "slot": "B",
+          "source_candidate_ids": [
+            "voice-row-4d5bb54c0750a12e89ae",
+            "voice-row-82e471676e10fc4b9bca",
+            "voice-row-94b30d26ce30779b60a4",
+            "voice-row-ab9a4ebfb34d068a8803"
+          ],
+          "triggers": [
+            "邮件提醒",
+            "交换2",
+            "歼敌2",
+            "战斗开始2"
+          ],
+          "estimated_joined_duration_seconds": 10.807583,
+          "status": "needs_human_segment_review_and_explicit_concatenation_approval",
+          "warning": "This provisional B sample overlaps A in three source segments; the reviewer must decide whether that is acceptable for the intended A/B experiment."
+        }
+      ],
+      "review_candidate_ids": [
+        "voice-row-1862fef4395fce3bee06",
+        "voice-row-3003423e107603a7d4d5",
+        "voice-row-3f60edc1768f6283a336",
+        "voice-row-4d5bb54c0750a12e89ae",
+        "voice-row-82e471676e10fc4b9bca",
+        "voice-row-94b30d26ce30779b60a4",
+        "voice-row-ab9a4ebfb34d068a8803",
+        "voice-row-dd6db188636caa9ce2d2"
+      ],
+      "review_directory": "Data/Voice/clean/43f05917bfa1"
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "character_name": "芙提雅",
+      "source_form": "小太阳",
+      "status": "candidate_composites_need_human_review",
+      "provisional_samples": [
+        {
+          "slot": "A",
+          "source_candidate_ids": [
+            "voice-row-250bea99b157a52fbd12",
+            "voice-row-7b0512ddf1ed64a6d8d7"
+          ],
+          "triggers": [
+            "活动提醒",
+            "换弹"
+          ],
+          "estimated_joined_duration_seconds": 11.953292,
+          "status": "needs_human_segment_review_and_explicit_concatenation_approval"
+        },
+        {
+          "slot": "B",
+          "source_candidate_ids": [
+            "voice-row-b1c80000139018725991",
+            "voice-row-d2de3c49030408c4017d",
+            "voice-row-dfd89b4379c565dfb015"
+          ],
+          "triggers": [
+            "互动1",
+            "其他1",
+            "获得物资2"
+          ],
+          "estimated_joined_duration_seconds": 11.98775,
+          "status": "needs_human_segment_review_and_explicit_concatenation_approval"
+        }
+      ],
+      "review_candidate_ids": [
+        "voice-row-250bea99b157a52fbd12",
+        "voice-row-7b0512ddf1ed64a6d8d7",
+        "voice-row-b1c80000139018725991",
+        "voice-row-d2de3c49030408c4017d",
+        "voice-row-dfd89b4379c565dfb015"
+      ],
+      "review_directory": "Data/Voice/clean/a2ffc5b44d7f"
+    },
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "source_form": "龙舌兰",
+      "status": "insufficient_strict_segments",
+      "automated_segment_pass_ids": [
+        "voice-row-b5235524215523493875",
+        "voice-row-c9332222dd7159da5536"
+      ],
+      "maximum_joined_duration_seconds": 1.351666,
+      "duration_eligible_but_silence_failed_ids": [
+        "voice-row-56cd9aee2b273e7ca137",
+        "voice-row-60f034e32905cf617bd6",
+        "voice-row-6537f395367b994c28f0"
+      ],
+      "next_action": "A human must inspect the duration-eligible files and define acceptable continuous speech spans or a 2-4 segment plan, then rerun normalization and QC. Do not waive the 20 percent silence threshold.",
+      "review_directory": "Data/Voice/clean/5157b8972632"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "source_form": "本体",
+      "status": "insufficient_strict_segments",
+      "automated_segment_pass_ids": [
+        "voice-row-22311b0b26252737cd67",
+        "voice-row-91a092a59710c9334ba0"
+      ],
+      "maximum_joined_duration_seconds": 3.325125,
+      "manual_span_discovery_candidate_ids": [
+        "voice-row-2516c7ac96ca7e144d0a",
+        "voice-row-f41cf1b726e2b47cc935",
+        "voice-row-6ea08b799c03a7c7af13",
+        "voice-row-709a1fcbd56913f9c493"
+      ],
+      "next_action": "A human must identify acceptable speech spans and a 2-4 segment plan, then rerun normalization and QC. Every listed discovery candidate currently fails the strict silence gate and is not eligible as-is.",
+      "review_directory": "Data/Voice/clean/98322bd505f4"
+    }
+  ],
+  "required_human_checks": [
+    "single speaker only",
+    "no music, sound effects, or cross-talk",
+    "transcript exactly matches the reviewed audio",
+    "same character form across composite segments",
+    "explicit concatenation approval for every composite",
+    "A/B slot decision and reviewer identity",
+    "independent risk acceptance and publication approval"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-73633880d6f002d1fb2c",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 7,
+  "trigger": "歼敌3",
+  "transcript": "抱歉，你杀青了。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/1/16/6869cmptziipqeri2qh4lg4t4k0suot.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 106623,
+  "content_sha256": "0b5b2e21de66dcfd9a326ff77f1056219a4790b8e905aa5359589a20f9a4574e",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-db8a82c1435f4f0bdcb8",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 50,
+  "trigger": "战斗胜利1",
+  "transcript": "辛苦了，抱一下。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/c/cf/1wm7iqoak478mqlpcpki0nuofb2s0xq.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 145285,
+  "content_sha256": "dff0e9993b240ec773da55e888ecb968109567743a1a9cb32253a5b14855d0f1",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

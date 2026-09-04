@@ -1,0 +1,416 @@
+{
+  "schema_version": "project-snow-private-local-voice-dialogue-comparison-batch-1",
+  "batch_id": "voice-recording-dialogue-comparison-batch-2b1a6205488b251038a3",
+  "created_at": "2026-08-31T13:49:09.177444+00:00",
+  "artifact_purpose": "fixed_policy_local_dialogue_comparison_generation_only",
+  "source_corpus_analysis": {
+    "analysis_id": "voice-recording-dialogue-corpus-analysis-062491a22ef42237f9d3",
+    "manifest_sha256": "5c8eced4da50638c2f2016f002fa9803528e2c718d00303c39a1a1ee50b2ccce",
+    "profile_set_sha256": "afc767ab99e3fff633c4fed36183bfa2dceebffc39f5f899696544fb1d9cd941"
+  },
+  "source_policy_review": {
+    "review_id": "voice-recording-dialogue-review-896557593d1f495cc286",
+    "manifest_sha256": "8629032fc7e7688a91fc4354fc16c16378ad1572763be9d6a11235173496916c",
+    "approved_policy_sha256": "719a1268f56035ca905ee78cd375812b55ca38fc475ea76067dd734610b6d358",
+    "reviewer_id": "xiaob",
+    "reviewed_at": "2026-08-31T13:37:48.763268+00:00"
+  },
+  "source_boundary_adjudication": {
+    "receipt_id": "voice-recording-boundary-adjudication-3c4102db6ee3378a7862",
+    "manifest_sha256": "771450af8423090ca972ba481fab9ff8b0a9c0bb950b275eedf38311b4d52c33",
+    "decision_set_sha256": "8016e4b63b84f593230f847cb0b2f01135a00110230913327876a4f009288db0",
+    "candidate_count": 161,
+    "accepted_candidate_count": 129,
+    "excluded_candidate_count": 32
+  },
+  "package_count": 21,
+  "packages": [
+    {
+      "profile_id": "voice-dialogue-profile-18f3f6e64608edf3077f",
+      "runtime_character_id": "1b0a6b35719a",
+      "runtime_character_name": "芬妮",
+      "source_persona_id": "1b0a6b35719a",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        119,
+        117
+      ],
+      "package_id": "voice-recording-dialogue-comparison-d226ab9534b3e1d3bbba",
+      "manifest_sha256": "94029da1b72e491c33378ed58e10b3955dabb1295a3f39d2d86d1ae45538bdad",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-d226ab9534b3e1d3bbba",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-f49bd9dae80a8e77245b",
+      "runtime_character_id": "25b23cb64398",
+      "runtime_character_name": "凯茜娅",
+      "source_persona_id": "25b23cb64398",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        19,
+        15
+      ],
+      "package_id": "voice-recording-dialogue-comparison-2680da329d52d7b5823b",
+      "manifest_sha256": "06abc763e43d1ca576008ad6449397fcefefc657cc3374226f36ea1bf442fb06",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-2680da329d52d7b5823b",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-fda65bc8e2e62cfd776d",
+      "runtime_character_id": "41b7444e39cc",
+      "runtime_character_name": "奈莉德",
+      "source_persona_id": "41b7444e39cc",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        31,
+        33
+      ],
+      "package_id": "voice-recording-dialogue-comparison-61ca7be7bf5c965050ef",
+      "manifest_sha256": "c70fb498b59fb1eaf5425a1408988c7828ace013707adb83fb656524d5709c68",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-61ca7be7bf5c965050ef",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-37653f8dc681896db2d5",
+      "runtime_character_id": "4370a74d6fda",
+      "runtime_character_name": "妮塔",
+      "source_persona_id": "4370a74d6fda",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        42,
+        38
+      ],
+      "package_id": "voice-recording-dialogue-comparison-03163c80463207b4e8b0",
+      "manifest_sha256": "a7aa24b9802c2a6bd1646689a00a6e13c37e337b7d1b4ad1a87160a577e1519d",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-03163c80463207b4e8b0",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-c8f17a89268ccfd67c70",
+      "runtime_character_id": "43f05917bfa1",
+      "runtime_character_name": "恩雅",
+      "source_persona_id": "43f05917bfa1",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        53,
+        55
+      ],
+      "package_id": "voice-recording-dialogue-comparison-e7fb590cbf6634457e5c",
+      "manifest_sha256": "0ba301c0fbed18f78d2bbe2220d9892ed12b30bb4a0180e6dbfdb080220b9aa7",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-e7fb590cbf6634457e5c",
+      "reused_existing_approved_comparison": true,
+      "resumed_existing_batch_package": false
+    },
+    {
+      "profile_id": "voice-dialogue-profile-148e0e8de98a86740285",
+      "runtime_character_id": "5157b8972632",
+      "runtime_character_name": "薇蒂雅",
+      "source_persona_id": "5157b8972632",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        143,
+        137
+      ],
+      "package_id": "voice-recording-dialogue-comparison-a62af942ac96e7bc059e",
+      "manifest_sha256": "79c921ffa02b59d1ec792b34be48fe5d46be7da7cfecb58caee004232f220aec",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-a62af942ac96e7bc059e",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-f0cba895304ea3ea2583",
+      "runtime_character_id": "6455a5dcff6a",
+      "runtime_character_name": "卜卜",
+      "source_persona_id": "6455a5dcff6a",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        22,
+        26
+      ],
+      "package_id": "voice-recording-dialogue-comparison-4e1f292798ba26823659",
+      "manifest_sha256": "3b4b9522b0e4320f2312a26d5381b623cf5ea4a1ff3f051d593e07701bd6843e",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-4e1f292798ba26823659",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-56114d8b073fa4ccaf09",
+      "runtime_character_id": "673ba6851b05",
+      "runtime_character_name": "苔丝",
+      "source_persona_id": "673ba6851b05",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        121,
+        125
+      ],
+      "package_id": "voice-recording-dialogue-comparison-bc1dc25367b56704782d",
+      "manifest_sha256": "f7be440cb2047733c9969fdf17fcfd88c514d2c70d491df7591d6a7a07715918",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-bc1dc25367b56704782d",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-0e90d2e1f56229eb89e1",
+      "runtime_character_id": "6862c43d2ac9",
+      "runtime_character_name": "猫汐尔",
+      "source_persona_id": "6862c43d2ac9",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        67,
+        68
+      ],
+      "package_id": "voice-recording-dialogue-comparison-8bace395242551377926",
+      "manifest_sha256": "fa17e6c5822a2729dd089b6d8453003d2ac42ced2045660e4abc2a6174d572d1",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-8bace395242551377926",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-af7e6682b42117bb3c26",
+      "runtime_character_id": "702f4375675b",
+      "runtime_character_name": "米娅",
+      "source_persona_id": "702f4375675b",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        90,
+        87
+      ],
+      "package_id": "voice-recording-dialogue-comparison-e9ca47490908d086aaab",
+      "manifest_sha256": "caf76e503e813b1ca0cc6c1ea0c663511675de30c940e30cbf801c97532ac3e9",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-e9ca47490908d086aaab",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-45d5fdb8985e0245e9ec",
+      "runtime_character_id": "78aa7ab99154",
+      "runtime_character_name": "伊切尔",
+      "source_persona_id": "78aa7ab99154",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        5,
+        6
+      ],
+      "package_id": "voice-recording-dialogue-comparison-c1f3ea10a7e61111013e",
+      "manifest_sha256": "d1592ddfb4eafb02b878ae073cf52707637c089ba1a208ab2b959e7401680841",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-c1f3ea10a7e61111013e",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-2ec81667cb61b11a39cd",
+      "runtime_character_id": "85b205f6f623",
+      "runtime_character_name": "瑟瑞斯",
+      "source_persona_id": "85b205f6f623",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        79,
+        83
+      ],
+      "package_id": "voice-recording-dialogue-comparison-3025e51a80cc0ccbdd1c",
+      "manifest_sha256": "5964c5db0f94827fd708965f5618f1bd435524b1526214453c57077f95cbabdb",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-3025e51a80cc0ccbdd1c",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-388bd9d9bad8a68af0e0",
+      "runtime_character_id": "8d5b5c3912bb",
+      "runtime_character_name": "琴诺",
+      "source_persona_id": "1ebefe906ab6",
+      "speaker_variant": "morso",
+      "selectable_character": false,
+      "candidate_ordinals": [
+        134,
+        133
+      ],
+      "package_id": "voice-recording-dialogue-comparison-25d6dd724181c0924b08",
+      "manifest_sha256": "2206c83c15635b03417ac697d291ca4ce85c239897e3117a65efeee5584c55b9",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-25d6dd724181c0924b08",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-9e21ecc30cbe8be3174c",
+      "runtime_character_id": "8d5b5c3912bb",
+      "runtime_character_name": "琴诺",
+      "source_persona_id": "8d5b5c3912bb",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        73,
+        76
+      ],
+      "package_id": "voice-recording-dialogue-comparison-1b76abcd8e47be0160dd",
+      "manifest_sha256": "ef4a846b6c779a4b17bc7874c1c7d4cac0581666b70178c4e8db890da8806836",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-1b76abcd8e47be0160dd",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-e0345197c48412dd8bea",
+      "runtime_character_id": "921f9ef0cc4e",
+      "runtime_character_name": "晴",
+      "source_persona_id": "921f9ef0cc4e",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        60,
+        59
+      ],
+      "package_id": "voice-recording-dialogue-comparison-b18a77c310e7ebe0a981",
+      "manifest_sha256": "b56466834dfffcb15ae56b8c1b5828d835b0f77d534deafffdc63b672d20e1ef",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-b18a77c310e7ebe0a981",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-4ecf3f2b4fdac1080bcf",
+      "runtime_character_id": "98322bd505f4",
+      "runtime_character_name": "辰星",
+      "source_persona_id": "98322bd505f4",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        149,
+        148
+      ],
+      "package_id": "voice-recording-dialogue-comparison-9eaa4601e56ff9917069",
+      "manifest_sha256": "725e493488b13d6b5073e889afbc32c2cf251a4c91a05c61578128a31ca3f03c",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-9eaa4601e56ff9917069",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-855af7693e0574bd4089",
+      "runtime_character_id": "9f5804761c56",
+      "runtime_character_name": "安卡希雅",
+      "source_persona_id": "9f5804761c56",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        46,
+        45
+      ],
+      "package_id": "voice-recording-dialogue-comparison-eb4394e21fb47cde95d8",
+      "manifest_sha256": "d654483edc215255da25da1dfc3bec0cd55f39b11bf1f3caf3012f8e792084eb",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-eb4394e21fb47cde95d8",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": true
+    },
+    {
+      "profile_id": "voice-dialogue-profile-af32ed55084c5d592920",
+      "runtime_character_id": "a2ffc5b44d7f",
+      "runtime_character_name": "芙提雅",
+      "source_persona_id": "a2ffc5b44d7f",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        109,
+        108
+      ],
+      "package_id": "voice-recording-dialogue-comparison-212eb35448cba2b08823",
+      "manifest_sha256": "0304941f02ede054d57bd4ff79ac96a204c1a46d1b0b2dadaf61b23e5aa8e8db",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-212eb35448cba2b08823",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": false
+    },
+    {
+      "profile_id": "voice-dialogue-profile-d3afe65950a669d0a737",
+      "runtime_character_id": "ca0144ccd81b",
+      "runtime_character_name": "里芙",
+      "source_persona_id": "ca0144ccd81b",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        155,
+        156
+      ],
+      "package_id": "voice-recording-dialogue-comparison-9cc0cf12e328ef8f9193",
+      "manifest_sha256": "46de07fb4ba5e3a3fc9210a92853925d351395d09dbd9d0d3116689ecca07c54",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-9cc0cf12e328ef8f9193",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": false
+    },
+    {
+      "profile_id": "voice-dialogue-profile-6a123b077c8ddb49a169",
+      "runtime_character_id": "cf0569ac6de9",
+      "runtime_character_name": "肴",
+      "source_persona_id": "cf0569ac6de9",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        99,
+        93
+      ],
+      "package_id": "voice-recording-dialogue-comparison-b3a4724e5586b0448532",
+      "manifest_sha256": "3e1fe7bc40d5f85cd918963ba917798ab136342d3aba53f74158b48a5413c896",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-b3a4724e5586b0448532",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": false
+    },
+    {
+      "profile_id": "voice-dialogue-profile-7667c84446fa560c4d37",
+      "runtime_character_id": "daab0f4cceb4",
+      "runtime_character_name": "茉莉安",
+      "source_persona_id": "daab0f4cceb4",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "candidate_ordinals": [
+        129,
+        131
+      ],
+      "package_id": "voice-recording-dialogue-comparison-aded860bed2c429fdeea",
+      "manifest_sha256": "fd6de0d5054770890180bf84160b06606f4319fd44ef6ae6b4d804ebe08fa8e1",
+      "package_path": "C:\\Users\\25685\\Desktop\\Myprojects\\Project_Snow\\Data\\Voice\\recording_dialogue_comparisons\\voice-recording-dialogue-comparison-aded860bed2c429fdeea",
+      "reused_existing_approved_comparison": false,
+      "resumed_existing_batch_package": false
+    }
+  ],
+  "package_set_sha256": "c0dbed70a6a00182b673ec726179d6704481e41d44317b4df15511d573a6f65c",
+  "pending_profile_count": 2,
+  "pending_profiles": [
+    {
+      "profile_id": "voice-dialogue-profile-de53943a77b0e2107f43",
+      "runtime_character_id": "447ed3c401c9",
+      "runtime_character_name": "胧嫣",
+      "source_persona_id": "447ed3c401c9",
+      "speaker_variant": null,
+      "reason": "requires_two_to_four_parent_composition_plan"
+    },
+    {
+      "profile_id": "voice-dialogue-profile-9326b8fe79cc6353ce0d",
+      "runtime_character_id": "d5ecfceba959",
+      "runtime_character_name": "克罗瑞娜",
+      "source_persona_id": "d5ecfceba959",
+      "speaker_variant": null,
+      "reason": "requires_two_to_four_parent_composition_plan"
+    }
+  ],
+  "scope_limits": {
+    "training_use_approved": false,
+    "voice_cloning_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false,
+    "public_rollout_allowed": false
+  },
+  "executed": true,
+  "manifest_sha256": "f397560a7b979da7d8f59db364058a81bba142cb668b427ed246973f5eecf684"
+}

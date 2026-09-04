@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Project Snow 长对话样本对照</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 20px;color:#20242b;background:#f5f7fa}section{background:#fff;border:1px solid #d9dee8;border-radius:12px;padding:20px;margin:20px 0}.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}article{background:#f7f9fc;padding:12px;border-radius:8px}audio{width:100%}.text{white-space:normal}.metrics{color:#4a5568}.warning{padding:12px;background:#fff4d6;border-left:4px solid #d49b00}</style></head>
+<body><h1>Project Snow 长对话样本对照</h1>
+<p class="warning">仅用于本地自然节奏/安全静音压缩试听。未批准训练、声音克隆、Provider 注册、权利接受或公网发布。</p>
+<p>审核重点：压缩版是否出现吞字、切气口、节奏突兀或语义停顿被破坏。屏幕文本是逐字稿真值，ASR 不参与改写。</p>
+
+<section>
+  <h2>A · 芬妮 · candidate 119</h2>
+  <p class="text">除了交握的指间添上了一对戒指，其他一切一如既往——<br><br>“亲爱的，再与我跳一支舞吧~”<br><br>总想扑倒你的小狮子<br><br>芬妮</p>
+  <p><a href="A/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="A/natural.wav"></audio><p>18.685958 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="A/compacted.wav"></audio><p>16.070792 秒；压缩切点 3 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 7.96%；原始逐帧静音比 43.41%（仅观察）；SNR 35.627 dB；true peak -8.979 dBTP。</p>
+</section>
+<section>
+  <h2>B · 芬妮 · candidate 117</h2>
+  <p class="text">嗯哼，明明还只是本小姐的“舞蹈学徒”，却凭着一派从容魅力主导着舞步，让骄傲的狮子对你露出最脆弱的脖颈，</p>
+  <p><a href="B/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="B/natural.wav"></audio><p>14.455333 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="B/compacted.wav"></audio><p>13.175833 秒；压缩切点 2 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 2.13%；原始逐帧静音比 39.15%（仅观察）；SNR 30.527 dB；true peak -9.021 dBTP。</p>
+</section></body></html>

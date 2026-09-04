@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-acf0a15bf5badbf45f9e",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 27,
+  "trigger": "互动3",
+  "transcript": "微分几何，天体物理还是工程原理，有不明白的事情，尽管问我。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/1/1f/qmu5g7rsi1lllql5mf2xja5tnnmkh2o.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 264403,
+  "content_sha256": "aeb08a2784816a55b35e083d6b5f4c8d30194d2dca5eb86f9bd98caa71b1259f",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

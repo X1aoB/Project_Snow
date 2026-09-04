@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-c126ce422171add697a1",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 3,
+  "trigger": "操作装置",
+  "transcript": "操作方式，我记得一清二楚。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/4/44/8wf5lnlwmwqtr4qdtp1zh0w7kmv2z6r.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 131701,
+  "content_sha256": "06340115312f8da6aaba5c0ec89526a4166f3dc4913da68fe0b3a6313c3cdb4e",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

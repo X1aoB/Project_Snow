@@ -1,0 +1,593 @@
+{
+  "schema_version": "project-snow-private-local-voice-dialogue-comparison-1",
+  "package_id": "voice-recording-dialogue-comparison-9cc0cf12e328ef8f9193",
+  "created_at": "2026-08-31T13:49:09.177444+00:00",
+  "artifact_purpose": "offline_natural_vs_safely_compacted_dialogue_qc_only",
+  "source_boundary_adjudication": {
+    "receipt_id": "voice-recording-boundary-adjudication-3c4102db6ee3378a7862",
+    "manifest_sha256": "771450af8423090ca972ba481fab9ff8b0a9c0bb950b275eedf38311b4d52c33",
+    "decision_set_sha256": "8016e4b63b84f593230f847cb0b2f01135a00110230913327876a4f009288db0",
+    "candidate_count": 161,
+    "accepted_candidate_count": 129,
+    "excluded_candidate_count": 32
+  },
+  "quality_policy": {
+    "audio_format": {
+      "encoding": "pcm_s16le",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "sample_width_bytes": 2
+    },
+    "energy_frame_ms": 20,
+    "adaptive_cut_threshold": {
+      "noise_percentile": 0.2,
+      "margin_db": 8.0,
+      "minimum_dbfs": -55.0,
+      "maximum_dbfs": -45.0
+    },
+    "outer_padding_ms": 120,
+    "minimum_compactable_internal_gap_ms": 1000,
+    "normal_pause_allowance_per_quiet_run_ms": 750,
+    "synthetic_join_silence_ms": 240,
+    "target_retained_pause_ms": 480,
+    "cut_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+    "legacy_raw_silence_measurement": {
+      "method": "20ms_frame_rms",
+      "threshold_dbfs": -45.0,
+      "gate": false
+    },
+    "sustained_silence_measurement": {
+      "method": "quiet_run_duration_exceeding_750ms_v1",
+      "threshold_dbfs": -45.0,
+      "maximum_excess_ratio": 0.2,
+      "gate": true
+    },
+    "duration_seconds": {
+      "minimum": 10.0,
+      "maximum": 20.0,
+      "applies_to": "compacted_audio"
+    },
+    "true_peak": {
+      "oversample_factor": 4,
+      "interpolator": "catmull_rom_cubic",
+      "maximum_dbtp": -1.0
+    },
+    "maximum_clipped_sample_count": 0,
+    "snr": {
+      "method": "energy_vad_rms_v1_source_only",
+      "minimum_db": 25.0,
+      "synthetic_join_silence_excluded": true
+    }
+  },
+  "authoritative_assertions": {
+    "screen_text_is_authoritative": true,
+    "authoritative_transcript_modified": false,
+    "asr_used_as_transcript_source": false,
+    "all_detected_voiced_regions_retained": true,
+    "only_low_energy_silence_compacted": true,
+    "normal_pauses_up_to_750ms_tolerated": true,
+    "legacy_raw_silence_ratio_used_as_gate": false,
+    "parent_candidate_count_separate_from_internal_cut_count": true,
+    "excluded_candidates_reintroduced": false,
+    "new_runtime_character_created": false
+  },
+  "sample_count": 2,
+  "samples": [
+    {
+      "slot": "A",
+      "parent_candidate_count": 1,
+      "internal_silence_compaction_cut_count": 1,
+      "candidate_ordinal": 155,
+      "revision_id": "voice-recording-boundary-revision-544f6aef8efe5cf612b8",
+      "original_candidate_id": "voice-recording-alignment-candidate-0652c58f93b0a70a6113",
+      "source_id": "voice-recording-source-03eee67833d8c4294e4d",
+      "source_kind": "mail",
+      "role_name": "里芙",
+      "batch_name": "海姆达尔最广阔的天地",
+      "runtime_character_id": "ca0144ccd81b",
+      "runtime_character_name": "里芙",
+      "source_persona_id": "ca0144ccd81b",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "authoritative_locator": {
+        "block_index": 0,
+        "start_char": 0,
+        "end_char_exclusive": 64
+      },
+      "authoritative_transcript_utf8_sha256": "f3e2f7c9c2062fefc29defd3ec40844613b32cfbaee31539fdeb41caca101ad9",
+      "displayed_text": {
+        "relative_path": "A/displayed_text.txt",
+        "utf8_sha256": "f3e2f7c9c2062fefc29defd3ec40844613b32cfbaee31539fdeb41caca101ad9",
+        "byte_count": 192
+      },
+      "input_candidate_audio": {
+        "wav_sha256": "72f7b8b62d1ed08b9b6e8f346687555ff0afe336a12b9d191513f26f167527e1",
+        "pcm_sha256": "103364d45eb8921ce17cb50e2b7ba459663cb19b29f78ac1f3ff2fb986d8292e",
+        "byte_count": 776444,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 388200,
+          "duration_seconds": 16.175
+        },
+        "source_frame_range": {
+          "start_frame": 55200,
+          "end_frame_exclusive": 443400,
+          "start_seconds": 2.3,
+          "end_seconds": 18.475,
+          "duration_seconds": 16.175
+        }
+      },
+      "adaptive_cut_threshold_dbfs": -55.0,
+      "detected_active_island_count": 12,
+      "outer_trim": {
+        "candidate_local_retained_range": {
+          "start_frame": 4800,
+          "end_frame_exclusive": 379269
+        },
+        "source_retained_range": {
+          "start_frame": 60000,
+          "end_frame_exclusive": 434469,
+          "start_seconds": 2.5,
+          "end_seconds": 18.102875
+        },
+        "left_removed_frames": 4800,
+        "right_removed_frames": 8931,
+        "left_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -120.0,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 0
+        },
+        "right_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -75.848,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 69
+        }
+      },
+      "internal_silence_compaction_cuts": [
+        {
+          "after_active_island_index": 0,
+          "candidate_local_removed_range": {
+            "start_frame": 33685,
+            "end_frame_exclusive": 53280
+          },
+          "source_removed_range": {
+            "start_frame": 88885,
+            "end_frame_exclusive": 108480,
+            "start_seconds": 3.703542,
+            "end_seconds": 4.52
+          },
+          "source_gap_duration_ms": 1060.0,
+          "removed_source_duration_ms": 816.458,
+          "inserted_silence_ms": 240,
+          "net_duration_reduction_ms": 576.458,
+          "left_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -69.209,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 85
+          },
+          "right_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -97.437,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 0
+          },
+          "compacted_join_output_range": {
+            "start_frame": 28885,
+            "end_frame_exclusive": 34645
+          }
+        }
+      ],
+      "retained_long_gaps": [],
+      "compacted_source_spans": [
+        {
+          "candidate_local_range": {
+            "start_frame": 4800,
+            "end_frame_exclusive": 33685
+          },
+          "source_range": {
+            "start_frame": 60000,
+            "end_frame_exclusive": 88885,
+            "start_seconds": 2.5,
+            "end_seconds": 3.703542
+          },
+          "compacted_output_range": {
+            "start_frame": 0,
+            "end_frame_exclusive": 28885
+          }
+        },
+        {
+          "candidate_local_range": {
+            "start_frame": 53280,
+            "end_frame_exclusive": 379269
+          },
+          "source_range": {
+            "start_frame": 108480,
+            "end_frame_exclusive": 434469,
+            "start_seconds": 4.52,
+            "end_seconds": 18.102875
+          },
+          "compacted_output_range": {
+            "start_frame": 34645,
+            "end_frame_exclusive": 360634
+          }
+        }
+      ],
+      "natural_audio": {
+        "relative_path": "A/natural.wav",
+        "wav_sha256": "b70d07b14ab1d5bdf99a87d17d9759ab35b5dcac288d67da414e0fee9e4a1ae4",
+        "pcm_sha256": "a5ef636e339547d73f421cc20d214c6833791dd43639ce7e92db9fc4f5c5a145",
+        "byte_count": 748982,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 374469,
+          "duration_seconds": 15.602875
+        },
+        "metrics": {
+          "duration_seconds": 15.602875,
+          "true_peak_4x_dbtp": -9.081,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.350832,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 32.774,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 17,
+          "quiet_runs_exceeding_allowance_count": 3,
+          "sustained_silence_excess_seconds": 0.93,
+          "sustained_silence_excess_ratio": 0.059604
+        }
+      },
+      "compacted_audio": {
+        "relative_path": "A/compacted.wav",
+        "wav_sha256": "9b1b9ee652c264f9498b0d7c83c92f835c027c133fed005df8f8196898380923",
+        "pcm_sha256": "068ad67e3e7ef9433e3dc16eff95c15e114ea151023d8cf584c557ed5030c76f",
+        "byte_count": 721312,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 360634,
+          "duration_seconds": 15.026417
+        },
+        "metrics": {
+          "duration_seconds": 15.026417,
+          "true_peak_4x_dbtp": -9.081,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.328457,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 32.065,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 19,
+          "quiet_runs_exceeding_allowance_count": 2,
+          "sustained_silence_excess_seconds": 0.56,
+          "sustained_silence_excess_ratio": 0.037268
+        }
+      },
+      "quality_gates": {
+        "duration_10_to_20_seconds": true,
+        "true_peak_at_or_below_minus_1_dbtp": true,
+        "no_clipped_samples": true,
+        "sustained_silence_excess_at_or_below_20_percent": true,
+        "snr_at_or_above_25_db": true
+      },
+      "all_quality_gates_passed": true
+    },
+    {
+      "slot": "B",
+      "parent_candidate_count": 1,
+      "internal_silence_compaction_cut_count": 2,
+      "candidate_ordinal": 156,
+      "revision_id": "voice-recording-boundary-revision-fd01ed8a8dc791ed96ac",
+      "original_candidate_id": "voice-recording-alignment-candidate-ee999ea664338f44491d",
+      "source_id": "voice-recording-source-03eee67833d8c4294e4d",
+      "source_kind": "mail",
+      "role_name": "里芙",
+      "batch_name": "海姆达尔最广阔的天地",
+      "runtime_character_id": "ca0144ccd81b",
+      "runtime_character_name": "里芙",
+      "source_persona_id": "ca0144ccd81b",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "authoritative_locator": {
+        "block_index": 0,
+        "start_char": 64,
+        "end_char_exclusive": 127
+      },
+      "authoritative_transcript_utf8_sha256": "c3ce69dcf3b107a465b222ca2fa2f7f53c1c371466c3da7ad96f0bdadfb930da",
+      "displayed_text": {
+        "relative_path": "B/displayed_text.txt",
+        "utf8_sha256": "c3ce69dcf3b107a465b222ca2fa2f7f53c1c371466c3da7ad96f0bdadfb930da",
+        "byte_count": 189
+      },
+      "input_candidate_audio": {
+        "wav_sha256": "64fcc1a714c3384080918039ff36e8a88036480f2e0b21432b3097fd43e01203",
+        "pcm_sha256": "35310da7447e1df5f0b6e37f437c3511d4a1b11745f929ab7846af2597c007fe",
+        "byte_count": 783404,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 391680,
+          "duration_seconds": 16.32
+        },
+        "source_frame_range": {
+          "start_frame": 443400,
+          "end_frame_exclusive": 835080,
+          "start_seconds": 18.475,
+          "end_seconds": 34.795,
+          "duration_seconds": 16.32
+        }
+      },
+      "adaptive_cut_threshold_dbfs": -55.0,
+      "detected_active_island_count": 9,
+      "outer_trim": {
+        "candidate_local_retained_range": {
+          "start_frame": 8160,
+          "end_frame_exclusive": 387386
+        },
+        "source_retained_range": {
+          "start_frame": 451560,
+          "end_frame_exclusive": 830786,
+          "start_seconds": 18.815,
+          "end_seconds": 34.616083
+        },
+        "left_removed_frames": 8160,
+        "right_removed_frames": 4294,
+        "left_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -96.747,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 0
+        },
+        "right_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -73.427,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 26
+        }
+      },
+      "internal_silence_compaction_cuts": [
+        {
+          "after_active_island_index": 6,
+          "candidate_local_removed_range": {
+            "start_frame": 270300,
+            "end_frame_exclusive": 293777
+          },
+          "source_removed_range": {
+            "start_frame": 713700,
+            "end_frame_exclusive": 737177,
+            "start_seconds": 29.7375,
+            "end_seconds": 30.715708
+          },
+          "source_gap_duration_ms": 1220.0,
+          "removed_source_duration_ms": 978.208,
+          "inserted_silence_ms": 240,
+          "net_duration_reduction_ms": 738.208,
+          "left_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -69.606,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 60
+          },
+          "right_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -74.956,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 17
+          },
+          "compacted_join_output_range": {
+            "start_frame": 262140,
+            "end_frame_exclusive": 267900
+          }
+        },
+        {
+          "after_active_island_index": 7,
+          "candidate_local_removed_range": {
+            "start_frame": 314879,
+            "end_frame_exclusive": 337440
+          },
+          "source_removed_range": {
+            "start_frame": 758279,
+            "end_frame_exclusive": 780840,
+            "start_seconds": 31.594958,
+            "end_seconds": 32.535
+          },
+          "source_gap_duration_ms": 1180.0,
+          "removed_source_duration_ms": 940.042,
+          "inserted_silence_ms": 240,
+          "net_duration_reduction_ms": 700.042,
+          "left_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -77.489,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 1
+          },
+          "right_source_cut_evidence": {
+            "method": "low_energy_silence_zero_crossing_cut",
+            "rms_dbfs": -81.533,
+            "threshold_dbfs": -55.0,
+            "zero_crossing_confirmed": true,
+            "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+            "padding_target_distance_frames": 0
+          },
+          "compacted_join_output_range": {
+            "start_frame": 289002,
+            "end_frame_exclusive": 294762
+          }
+        }
+      ],
+      "retained_long_gaps": [],
+      "compacted_source_spans": [
+        {
+          "candidate_local_range": {
+            "start_frame": 8160,
+            "end_frame_exclusive": 270300
+          },
+          "source_range": {
+            "start_frame": 451560,
+            "end_frame_exclusive": 713700,
+            "start_seconds": 18.815,
+            "end_seconds": 29.7375
+          },
+          "compacted_output_range": {
+            "start_frame": 0,
+            "end_frame_exclusive": 262140
+          }
+        },
+        {
+          "candidate_local_range": {
+            "start_frame": 293777,
+            "end_frame_exclusive": 314879
+          },
+          "source_range": {
+            "start_frame": 737177,
+            "end_frame_exclusive": 758279,
+            "start_seconds": 30.715708,
+            "end_seconds": 31.594958
+          },
+          "compacted_output_range": {
+            "start_frame": 267900,
+            "end_frame_exclusive": 289002
+          }
+        },
+        {
+          "candidate_local_range": {
+            "start_frame": 337440,
+            "end_frame_exclusive": 387386
+          },
+          "source_range": {
+            "start_frame": 780840,
+            "end_frame_exclusive": 830786,
+            "start_seconds": 32.535,
+            "end_seconds": 34.616083
+          },
+          "compacted_output_range": {
+            "start_frame": 294762,
+            "end_frame_exclusive": 344708
+          }
+        }
+      ],
+      "natural_audio": {
+        "relative_path": "B/natural.wav",
+        "wav_sha256": "b54036e4f5cadb666b66b416fcf57e612dea8ac11f1df62d8f6a90879a493e34",
+        "pcm_sha256": "5582eb235de47fe3b5b7600056e1621882ef35dedc0761099f353d608a2a2f67",
+        "byte_count": 758496,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 379226,
+          "duration_seconds": 15.801083
+        },
+        "metrics": {
+          "duration_seconds": 15.801083,
+          "true_peak_4x_dbtp": -8.989,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.403287,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 33.896,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 18,
+          "quiet_runs_exceeding_allowance_count": 5,
+          "sustained_silence_excess_seconds": 1.33,
+          "sustained_silence_excess_ratio": 0.084171
+        }
+      },
+      "compacted_audio": {
+        "relative_path": "B/compacted.wav",
+        "wav_sha256": "6ee15066fb53598f2e8dcdd7657761142d3ceeaafaf6f39e4cffbfa37c56c76a",
+        "pcm_sha256": "3f96fcb8b6c89223b2f2dd09738e4dd108dbd19b2d69d096d712cbf22e83f164",
+        "byte_count": 689460,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 344708,
+          "duration_seconds": 14.362833
+        },
+        "metrics": {
+          "duration_seconds": 14.362833,
+          "true_peak_4x_dbtp": -8.989,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.340751,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 32.705,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 17,
+          "quiet_runs_exceeding_allowance_count": 3,
+          "sustained_silence_excess_seconds": 0.37,
+          "sustained_silence_excess_ratio": 0.025761
+        }
+      },
+      "quality_gates": {
+        "duration_10_to_20_seconds": true,
+        "true_peak_at_or_below_minus_1_dbtp": true,
+        "no_clipped_samples": true,
+        "sustained_silence_excess_at_or_below_20_percent": true,
+        "snr_at_or_above_25_db": true
+      },
+      "all_quality_gates_passed": true
+    }
+  ],
+  "sample_set_sha256": "ee08eeb49171e7cb5a9afd363f7a10bf16ed5d1afdc26309b49de041ea679c8a",
+  "quality_summary": {
+    "all_compacted_samples_passed_signal_qc": true,
+    "sample_count": 2
+  },
+  "review_page": {
+    "relative_path": "review.html",
+    "sha256": "c52bbbde118ff50d196571c1ef869604272253ecc394b700dc8001e41fdf5344",
+    "byte_count": 2672
+  },
+  "review_status": "awaiting_human_natural_vs_compacted_comparison",
+  "scope_limits": {
+    "human_listening_approved": false,
+    "natural_vs_compacted_comparison_approved": false,
+    "training_use_approved": false,
+    "voice_cloning_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false,
+    "public_rollout_allowed": false
+  },
+  "executed": true,
+  "manifest_sha256": "46de07fb4ba5e3a3fc9210a92853925d351395d09dbd9d0d3116689ecca07c54"
+}

@@ -1,0 +1,132 @@
+{
+  "schema_version": "project-snow-private-voice-composite-1",
+  "sample_id": "voice-sample-enya-provisional-b",
+  "character_id": "43f05917bfa1",
+  "source_candidate_ids": [
+    "voice-row-4d5bb54c0750a12e89ae",
+    "voice-row-82e471676e10fc4b9bca",
+    "voice-row-94b30d26ce30779b60a4",
+    "voice-row-ab9a4ebfb34d068a8803"
+  ],
+  "source_form": {
+    "armor_id": "",
+    "armor_name": "",
+    "armor_semantics": "selected_default_armor_voice_source"
+  },
+  "source_clean_sha256": [
+    "9ee40b17a2cb967b7e18ae899926bbf5d3de924f592b339e3a3656ef19ecbfa7",
+    "26f5fd9cb18e99fb999d45b54505d977e88474721481071b9742275c0d625209",
+    "6a407e444c4918ce9679213ff44b892c6b6fcb1010a50057809ab5a21dd09efe",
+    "d1b500ba6e215354494e8212c297b2e2ecdca98fe82745677c5c6b13cf771507"
+  ],
+  "composition_processing": {
+    "method": {
+      "join_silence_ms": 150,
+      "internal_boundary_trim": {
+        "method": "reviewed_active_bounds_adaptive_v1",
+        "active_threshold_dbfs": -50.0,
+        "outer_boundaries_preserved": true,
+        "maximum_padding_ms": 300,
+        "minimum_padding_ms": 0,
+        "padding_step_ms": 10,
+        "selection": "largest_padding_that_passes_all_non_true_peak_qc_gates"
+      }
+    },
+    "selected_internal_padding_ms": 70,
+    "segment_boundaries": [
+      {
+        "candidate_id": "voice-row-4d5bb54c0750a12e89ae",
+        "input_frame_count": 76800,
+        "kept_start_frame": 0,
+        "kept_end_frame_exclusive": 71280,
+        "trimmed_leading_frames": 0,
+        "trimmed_trailing_frames": 5520
+      },
+      {
+        "candidate_id": "voice-row-82e471676e10fc4b9bca",
+        "input_frame_count": 41378,
+        "kept_start_frame": 1680,
+        "kept_end_frame_exclusive": 39120,
+        "trimmed_leading_frames": 1680,
+        "trimmed_trailing_frames": 2258
+      },
+      {
+        "candidate_id": "voice-row-94b30d26ce30779b60a4",
+        "input_frame_count": 67710,
+        "kept_start_frame": 2160,
+        "kept_end_frame_exclusive": 65040,
+        "trimmed_leading_frames": 2160,
+        "trimmed_trailing_frames": 2670
+      },
+      {
+        "candidate_id": "voice-row-ab9a4ebfb34d068a8803",
+        "input_frame_count": 62694,
+        "kept_start_frame": 2160,
+        "kept_end_frame_exclusive": 62694,
+        "trimmed_leading_frames": 2160,
+        "trimmed_trailing_frames": 0
+      }
+    ]
+  },
+  "output_sha256": "c0b69ecd09cae4213d887cfef5661c0954ba8ec64b2f1c4cdf3c6069ef7c9ed2",
+  "transcript_sha256": "c04e6fe5b4c53916ea56a2e6f7455a9dec2a496f39472b0f219203e57e63f780",
+  "concatenation": {
+    "approved": true,
+    "purpose": "ab_voice_sample_internal_evaluation_only",
+    "ab_slot": "B",
+    "approval_id": "voice-composition-approval-20260827T070901664905Z-xiaob",
+    "approval_receipt_sha256": "7e5e5ad35960b36c638244ca1f28dd3376abfaf9bb1402d543b505ad35f1f09f",
+    "approved_by": "xiaob",
+    "source_policy": {
+      "decision_id": "single-selected-armor-source-per-character-20260826",
+      "file_sha256": "9bb8018f7e0f0f4360a15ba7f028fe83bccc4687eaea9e439f3c11c2fdaae885"
+    },
+    "silence_between_segments_ms": 150
+  },
+  "qc": {
+    "duration_seconds": 10.12225,
+    "sample_rate": 24000,
+    "channels": 1,
+    "sample_width_bytes": 2,
+    "sample_peak_dbfs": -3.183,
+    "true_peak_dbfs": -3.1,
+    "true_peak_measurement": "ffmpeg_ebur128_4x_oversampled",
+    "clipping_ratio": 0.0,
+    "silence_ratio": 0.197585,
+    "silence_ratio_measurement": {
+      "measurement": "qualifying_contiguous_low_rms_frames_over_total_pcm_frames",
+      "threshold_dbfs": -45.0,
+      "window_ms": 20,
+      "minimum_run_ms": 200,
+      "minimum_run_frames": 4800,
+      "qualifying_run_count": 6,
+      "qualifying_silence_frames": 48000
+    },
+    "estimated_snr_db": 43.494,
+    "automated_checks": {
+      "duration_10_to_20_seconds": true,
+      "estimated_snr_at_least_25_db": true,
+      "silence_ratio_at_most_0_20": true,
+      "true_peak_at_most_minus_1_dbfs": true,
+      "no_clipped_samples": true
+    },
+    "automated_qc_pass": true,
+    "manual_single_speaker_music_sfx_transcript_review_required": true
+  },
+  "manual_review": {
+    "single_speaker": null,
+    "music_or_sfx": null,
+    "transcript_verified": null,
+    "reviewer": null,
+    "decision": "pending"
+  },
+  "waveform_review": {
+    "review_id": "voice-waveform-review-20260827T075045897807Z-xiaob",
+    "review_receipt_sha256": "80dec5f7ef07c8fc9a0a6116674a3d05cea45e768ed0e358ee1f2070b18b57c7",
+    "reviewed_at": "2026-08-27T07:50:45.897807+00:00",
+    "reviewer": "xiaob",
+    "decision": "pass",
+    "scope": "internal_ab_listening_only",
+    "operator_note": "为什么A和B内容是一样的"
+  }
+}

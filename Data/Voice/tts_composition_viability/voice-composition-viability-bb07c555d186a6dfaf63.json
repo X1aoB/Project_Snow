@@ -1,0 +1,204 @@
+{
+  "schema_version": "project-snow-private-voice-composition-viability-1",
+  "viability_id": "voice-composition-viability-bb07c555d186a6dfaf63",
+  "recorded_at": "2026-09-02T04:55:38+00:00",
+  "artifact_purpose": "immutable_post_routing_ab_duration_viability_audit",
+  "stable_identity": {
+    "viability_profile": "project-snow-post-routing-ab-duration-viability-1",
+    "routing_id": "voice-corpus-routing-14f909c7aab99190ef66",
+    "routing_receipt_sha256": "4b2a74833d41905cfe5f93b8ccb84acb1448fb3a99e46e8b57e53f54f62548c1",
+    "routing_byte_sha256": "63a37fa41ce41976e84a44f2f181138ffb8c10251cd2ade42c5c88e556f69984",
+    "policy_report_byte_sha256": "7ac5ce2b1bcf2e3ba43cfd7c03bf48aa086a5d2a04a2f99a4980c022f150a96f",
+    "reviewer_id": "xiaob",
+    "result_set_sha256": "c4de067dc3fae7444c9de7f70dce8ad33c54b524fd29ad0db42c52832a38a92e"
+  },
+  "stable_identity_sha256": "bb07c555d186a6dfaf636518dda4a4cb54aa0bbbf89b1f49eccc872551449ae0",
+  "source_artifacts": {
+    "corpus_routing": {
+      "routing_id": "voice-corpus-routing-14f909c7aab99190ef66",
+      "receipt_sha256": "4b2a74833d41905cfe5f93b8ccb84acb1448fb3a99e46e8b57e53f54f62548c1",
+      "byte_sha256": "63a37fa41ce41976e84a44f2f181138ffb8c10251cd2ade42c5c88e556f69984"
+    },
+    "review_package": {
+      "package_id": "voice-span-review-package-6bafdaecd6fa9468a9d7",
+      "manifest_sha256": "8b9b32857dd5a216deb19c5f6ca27bf8c74b8f5c1127fda9c01adf262ed089c1",
+      "byte_sha256": "861c5a2ed25e1714d4d975a632097a1eb37554c365e8dabb79ca5e8fe4b8a891"
+    },
+    "span_review_queue": {
+      "byte_sha256": "160765819cda7794b82f6d51a65ab473bc632a046aaeb192da429deb2b4068f2"
+    },
+    "fixed_policy_report": {
+      "relative_path": "tts_corpus_status/2026-08-31-public-four-fragment-feasibility.md",
+      "byte_sha256": "7ac5ce2b1bcf2e3ba43cfd7c03bf48aa086a5d2a04a2f99a4980c022f150a96f"
+    }
+  },
+  "fixed_rules": {
+    "minimum_duration_seconds": 10.0,
+    "maximum_duration_seconds": 20.0,
+    "minimum_component_count": 1,
+    "maximum_component_count": 4,
+    "join_silence_ms": 150,
+    "ab_must_not_share_audio_or_text_hashes": true
+  },
+  "analysis_limits": {
+    "analysis_kind": "duration_and_retained_content_independence_only",
+    "audio_composed": false,
+    "full_acoustic_qc_run_after_routing": false,
+    "duration_eligibility_is_not_full_qc_approval": true
+  },
+  "result_set_sha256": "c4de067dc3fae7444c9de7f70dce8ad33c54b524fd29ad0db42c52832a38a92e",
+  "slots": [
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "slot": "A",
+      "source_ordinals": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "retained_lexical_ordinals": [
+        1,
+        4
+      ],
+      "paralinguistic_ordinals": [
+        2,
+        3
+      ],
+      "excluded_duplicate_ordinals": [],
+      "original_predicted_duration_seconds": 12.65,
+      "retained_lexical_duration_seconds": 7.65,
+      "duration_deficit_to_minimum_seconds": 2.35,
+      "retained_component_count": 2,
+      "duration_eligible": false,
+      "component_count_eligible": true,
+      "duration_status": "insufficient_lexical_duration",
+      "full_acoustic_qc_status": "not_run_after_routing"
+    },
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "slot": "B",
+      "source_ordinals": [
+        5,
+        6,
+        7
+      ],
+      "retained_lexical_ordinals": [
+        5,
+        6,
+        7
+      ],
+      "paralinguistic_ordinals": [],
+      "excluded_duplicate_ordinals": [],
+      "original_predicted_duration_seconds": 12.64,
+      "retained_lexical_duration_seconds": 12.64,
+      "duration_deficit_to_minimum_seconds": 0.0,
+      "retained_component_count": 3,
+      "duration_eligible": true,
+      "component_count_eligible": true,
+      "duration_status": "duration_candidate_pending_full_qc",
+      "full_acoustic_qc_status": "not_run_after_routing"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "slot": "A",
+      "source_ordinals": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "retained_lexical_ordinals": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "paralinguistic_ordinals": [],
+      "excluded_duplicate_ordinals": [],
+      "original_predicted_duration_seconds": 10.0,
+      "retained_lexical_duration_seconds": 10.0,
+      "duration_deficit_to_minimum_seconds": 0.0,
+      "retained_component_count": 4,
+      "duration_eligible": true,
+      "component_count_eligible": true,
+      "duration_status": "duration_candidate_pending_full_qc",
+      "full_acoustic_qc_status": "not_run_after_routing"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "slot": "B",
+      "source_ordinals": [
+        12,
+        13,
+        14,
+        15
+      ],
+      "retained_lexical_ordinals": [
+        13,
+        14,
+        15
+      ],
+      "paralinguistic_ordinals": [],
+      "excluded_duplicate_ordinals": [
+        12
+      ],
+      "original_predicted_duration_seconds": 10.0,
+      "retained_lexical_duration_seconds": 6.52,
+      "duration_deficit_to_minimum_seconds": 3.48,
+      "retained_component_count": 3,
+      "duration_eligible": false,
+      "component_count_eligible": true,
+      "duration_status": "insufficient_lexical_duration",
+      "full_acoustic_qc_status": "not_run_after_routing"
+    }
+  ],
+  "character_pairs": [
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "retained_ab_content_independent": true,
+      "both_slots_duration_eligible": false,
+      "complete_ab_candidate": false,
+      "blocking_slots": [
+        "A"
+      ],
+      "full_acoustic_qc_status": "not_run_after_routing"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "retained_ab_content_independent": true,
+      "both_slots_duration_eligible": false,
+      "complete_ab_candidate": false,
+      "blocking_slots": [
+        "B"
+      ],
+      "full_acoustic_qc_status": "not_run_after_routing"
+    }
+  ],
+  "summary": {
+    "character_count": 2,
+    "slot_count": 4,
+    "duration_eligible_slot_count": 2,
+    "insufficient_duration_slot_count": 2,
+    "complete_ab_candidate_character_count": 0,
+    "full_acoustic_qc_completed_slot_count": 0
+  },
+  "scope_limits": {
+    "source_artifacts_modified": false,
+    "composition_approved": false,
+    "full_acoustic_qc_completed": false,
+    "training_use_approved": false,
+    "voice_cloning_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false,
+    "public_rollout_allowed": false
+  },
+  "receipt_sha256": "614c460981be375c2f30a9cc5b22a85a74d77d522c2e1b89312cac17577b74ad"
+}

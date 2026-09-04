@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-8ce72f2f211d7d3c2948",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 24,
+  "trigger": "被破盾",
+  "transcript": "护盾没了？应急预案呢？",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/e/ef/j73vrwboydwvlxwx4jhv9z5x5dkbzt9.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 127521,
+  "content_sha256": "efb931f756736be8870f178970b799ecd9feaa62125e6d6cfc2842fda2ade463",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

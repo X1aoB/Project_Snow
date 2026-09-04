@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-6ea08b799c03a7c7af13",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 33,
+  "trigger": "升级2",
+  "transcript": "正确的选择才能导向正确的结果。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/0/02/ef5e5arftur9fhe1pjm7sma74xpge2l.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 158868,
+  "content_sha256": "efc724cf2a82b8df2a1b866c51a63a3e48a76846e48309e102a31e132c369bf9",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

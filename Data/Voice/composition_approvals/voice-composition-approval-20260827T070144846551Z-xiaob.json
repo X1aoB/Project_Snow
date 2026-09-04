@@ -1,0 +1,236 @@
+{
+  "schema_version": "project-snow-private-voice-composition-approval-1",
+  "approval_id": "voice-composition-approval-20260827T070144846551Z-xiaob",
+  "recorded_at": "2026-08-27T07:01:44.846551+00:00",
+  "operator_id": "xiaob",
+  "inventory_sha256": "bd9aa282c8bba4e18168f0d4f79cd8783b71f67f0630b6d6bcdccf6b1c22231b",
+  "operator_review_queue_sha256": "091bba1594c478cd6ccc9aa63addd1b7d06e6d891b962a198d2cb298facaf2bf",
+  "source_policy": {
+    "decision_id": "single-selected-armor-source-per-character-20260826",
+    "file_sha256": "9bb8018f7e0f0f4360a15ba7f028fe83bccc4687eaea9e439f3c11c2fdaae885"
+  },
+  "character_ids": [
+    "43f05917bfa1",
+    "a2ffc5b44d7f"
+  ],
+  "plans": [
+    {
+      "sample_id": "voice-sample-enya-provisional-a",
+      "character_id": "43f05917bfa1",
+      "ab_slot": "A",
+      "selected_source": {
+        "source_page_id": "38fa2e9ad23e",
+        "armor_id": "",
+        "armor_name": "",
+        "armor_semantics": "selected_default_armor_voice_source"
+      },
+      "source_candidate_ids": [
+        "voice-row-1862fef4395fce3bee06",
+        "voice-row-4d5bb54c0750a12e89ae",
+        "voice-row-94b30d26ce30779b60a4",
+        "voice-row-ab9a4ebfb34d068a8803"
+      ],
+      "cross_slot_overlap_candidate_ids": [
+        "voice-row-4d5bb54c0750a12e89ae",
+        "voice-row-94b30d26ce30779b60a4",
+        "voice-row-ab9a4ebfb34d068a8803"
+      ],
+      "cross_slot_overlap_accepted": true,
+      "source_bindings": [
+        {
+          "candidate_id": "voice-row-1862fef4395fce3bee06",
+          "raw_sha256": "97fd1780972c02aae7c5ac78af2d08c58ee35cd631455906ad2a6efd7d48fb27",
+          "clean_sha256": "1a3eeb459c91cfbf3ce72de33c75f4d5a9b21c903f6b49810bff270ecaf4fdee",
+          "transcript_sha256": "5b8d9633277751d2986f856810210fcee315bdb02073da62cec89959e3be9854",
+          "qc_sha256": "61922d7bd0c2cc49b67c98eb28f13e66d411012ed37cb986018516fc8b1871f9",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        },
+        {
+          "candidate_id": "voice-row-4d5bb54c0750a12e89ae",
+          "raw_sha256": "106ec587e3a62c09e3768e68617229738bd5d491e407b28b1f8027b5d1efbf2c",
+          "clean_sha256": "9ee40b17a2cb967b7e18ae899926bbf5d3de924f592b339e3a3656ef19ecbfa7",
+          "transcript_sha256": "b7a84dfb3c176368099fae6cf4b7727e99ef29557907ace6bc86c5473fdbfa0c",
+          "qc_sha256": "d23224735e4faf8c642e21f728ca067705437df1a1a1b56005bd2e46714dab0e",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        },
+        {
+          "candidate_id": "voice-row-94b30d26ce30779b60a4",
+          "raw_sha256": "8665c8aec1c16f1a27cded2b3c491b5da382c1bbdb9c1d75abf22969be8212a5",
+          "clean_sha256": "6a407e444c4918ce9679213ff44b892c6b6fcb1010a50057809ab5a21dd09efe",
+          "transcript_sha256": "7167b8698fac814f9fef85e4bb440bc4e26e3b56d089f7dcfa1163dbc25fdaf5",
+          "qc_sha256": "1297d2bf734cc9c05937a2c5fd045b7bff259861614c1321837f589cac767f0b",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        },
+        {
+          "candidate_id": "voice-row-ab9a4ebfb34d068a8803",
+          "raw_sha256": "5d468cf52b4d54159f4297562b9291bd2852f212919f222df86822fd05481237",
+          "clean_sha256": "d1b500ba6e215354494e8212c297b2e2ecdca98fe82745677c5c6b13cf771507",
+          "transcript_sha256": "9ec7aefebd69c376fdf70034500741c8165526a549670a5b93e461231a7ebc45",
+          "qc_sha256": "fcbb11ff459ef534ec5224c261c6b58885c853d228b860f7b1cb2181fb69b18d",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        }
+      ]
+    },
+    {
+      "sample_id": "voice-sample-enya-provisional-b",
+      "character_id": "43f05917bfa1",
+      "ab_slot": "B",
+      "selected_source": {
+        "source_page_id": "38fa2e9ad23e",
+        "armor_id": "",
+        "armor_name": "",
+        "armor_semantics": "selected_default_armor_voice_source"
+      },
+      "source_candidate_ids": [
+        "voice-row-4d5bb54c0750a12e89ae",
+        "voice-row-82e471676e10fc4b9bca",
+        "voice-row-94b30d26ce30779b60a4",
+        "voice-row-ab9a4ebfb34d068a8803"
+      ],
+      "cross_slot_overlap_candidate_ids": [
+        "voice-row-4d5bb54c0750a12e89ae",
+        "voice-row-94b30d26ce30779b60a4",
+        "voice-row-ab9a4ebfb34d068a8803"
+      ],
+      "cross_slot_overlap_accepted": true,
+      "source_bindings": [
+        {
+          "candidate_id": "voice-row-4d5bb54c0750a12e89ae",
+          "raw_sha256": "106ec587e3a62c09e3768e68617229738bd5d491e407b28b1f8027b5d1efbf2c",
+          "clean_sha256": "9ee40b17a2cb967b7e18ae899926bbf5d3de924f592b339e3a3656ef19ecbfa7",
+          "transcript_sha256": "b7a84dfb3c176368099fae6cf4b7727e99ef29557907ace6bc86c5473fdbfa0c",
+          "qc_sha256": "d23224735e4faf8c642e21f728ca067705437df1a1a1b56005bd2e46714dab0e",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        },
+        {
+          "candidate_id": "voice-row-82e471676e10fc4b9bca",
+          "raw_sha256": "58901fee97fdc25b8d326e3519f4af9413247a4d6925e32d258f285bb025d561",
+          "clean_sha256": "26f5fd9cb18e99fb999d45b54505d977e88474721481071b9742275c0d625209",
+          "transcript_sha256": "fa9d62a9e2eaa3e7632a4c3e99471bbcab057feab3b75abbe114bafea7c83d4b",
+          "qc_sha256": "20d9076b56098b28d04d3cdab700fe6012a27656bcadf1461b03d6714179e898",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        },
+        {
+          "candidate_id": "voice-row-94b30d26ce30779b60a4",
+          "raw_sha256": "8665c8aec1c16f1a27cded2b3c491b5da382c1bbdb9c1d75abf22969be8212a5",
+          "clean_sha256": "6a407e444c4918ce9679213ff44b892c6b6fcb1010a50057809ab5a21dd09efe",
+          "transcript_sha256": "7167b8698fac814f9fef85e4bb440bc4e26e3b56d089f7dcfa1163dbc25fdaf5",
+          "qc_sha256": "1297d2bf734cc9c05937a2c5fd045b7bff259861614c1321837f589cac767f0b",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        },
+        {
+          "candidate_id": "voice-row-ab9a4ebfb34d068a8803",
+          "raw_sha256": "5d468cf52b4d54159f4297562b9291bd2852f212919f222df86822fd05481237",
+          "clean_sha256": "d1b500ba6e215354494e8212c297b2e2ecdca98fe82745677c5c6b13cf771507",
+          "transcript_sha256": "9ec7aefebd69c376fdf70034500741c8165526a549670a5b93e461231a7ebc45",
+          "qc_sha256": "fcbb11ff459ef534ec5224c261c6b58885c853d228b860f7b1cb2181fb69b18d",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        }
+      ]
+    },
+    {
+      "sample_id": "voice-sample-fritia-provisional-a",
+      "character_id": "a2ffc5b44d7f",
+      "ab_slot": "A",
+      "selected_source": {
+        "source_page_id": "fb50d151cf7f",
+        "armor_id": "6e4cda85e2ad",
+        "armor_name": "小太阳",
+        "armor_semantics": "explicit_selected_armor_voice_source"
+      },
+      "source_candidate_ids": [
+        "voice-row-250bea99b157a52fbd12",
+        "voice-row-7b0512ddf1ed64a6d8d7"
+      ],
+      "cross_slot_overlap_candidate_ids": [],
+      "cross_slot_overlap_accepted": false,
+      "source_bindings": [
+        {
+          "candidate_id": "voice-row-250bea99b157a52fbd12",
+          "raw_sha256": "298e30f2e2d1c5c7cac14bed87ccff841dc3f7d749aefde4db428fc139f3b501",
+          "clean_sha256": "e2b431016da4c106a6b0b29850319cfde282fc2fab2718e937ea5566e1e74d58",
+          "transcript_sha256": "62ba68fa2eb9b0ab08d04771eb78902eca52d52d89f7005af26d8a1dd16cdb97",
+          "qc_sha256": "f2dffc294ee1f6a3f7112ddf574060fb7c9cff8b161ad66fe290601e04881ba9",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        },
+        {
+          "candidate_id": "voice-row-7b0512ddf1ed64a6d8d7",
+          "raw_sha256": "0419e5f83651ddd20012a86de61fad6b2db11a395769d976259d07fa5e759c2c",
+          "clean_sha256": "b5aaad98fc43d8b82072b63d4b57daf9db8b387b52aef8ad1a4bf02d352dd7fa",
+          "transcript_sha256": "357cdb73fc7d511a6fba92661b5f0e6b31cc6383f8bda62d39a171085b17eb06",
+          "qc_sha256": "6fa6fc65b9ee020110055a55f5e66142165a6c2307868e576140a12b41043a21",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        }
+      ]
+    },
+    {
+      "sample_id": "voice-sample-fritia-provisional-b",
+      "character_id": "a2ffc5b44d7f",
+      "ab_slot": "B",
+      "selected_source": {
+        "source_page_id": "fb50d151cf7f",
+        "armor_id": "6e4cda85e2ad",
+        "armor_name": "小太阳",
+        "armor_semantics": "explicit_selected_armor_voice_source"
+      },
+      "source_candidate_ids": [
+        "voice-row-b1c80000139018725991",
+        "voice-row-d2de3c49030408c4017d",
+        "voice-row-dfd89b4379c565dfb015"
+      ],
+      "cross_slot_overlap_candidate_ids": [],
+      "cross_slot_overlap_accepted": false,
+      "source_bindings": [
+        {
+          "candidate_id": "voice-row-b1c80000139018725991",
+          "raw_sha256": "57270c972715f8d3acca41969e4bd4e0d8b9a27069e91296250631232be28f84",
+          "clean_sha256": "d85267975628816946038d93006daf5c3a5f2fae7618a5d859ba7ed017fe4828",
+          "transcript_sha256": "521a17ada35c2d33b7f14f627644540f0276e85de76e95859eb37b847c3d1136",
+          "qc_sha256": "f292013ce9722079e24af5141234ec07f59c0265db3662d56133c5240f44f30c",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        },
+        {
+          "candidate_id": "voice-row-d2de3c49030408c4017d",
+          "raw_sha256": "ecd4d78c9c6ab9e3b2ba4b5e57c2f4f44b5c8ec8f1d89d66bca551712baa95da",
+          "clean_sha256": "3b10f33d903014fbb184a82ba3cc2fde36f590d65bdc0a4758d25b30304b7314",
+          "transcript_sha256": "bd14cf5d25dd5869839c4fe4af2937104e147a670b46c5f18fa553d1291caa8a",
+          "qc_sha256": "c1341eff0873e6b47b1766cb317701d9e557ec0bd567c0891f198df05126893f",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        },
+        {
+          "candidate_id": "voice-row-dfd89b4379c565dfb015",
+          "raw_sha256": "d0a025875eddfd4eb7844d659c6e08d87fbd2a7c01b87f09858d11ec3031973d",
+          "clean_sha256": "c460ab4ae600d83bfd97225766999c99c8e0f2d940078a43a89a97e556e71853",
+          "transcript_sha256": "4bc693381669529979e772fa45078b7c8a452e6d55e68182c4f4a00f2610d50e",
+          "qc_sha256": "dea971f3bde46fcb714ced8059e6dc2a5a6426bbbd53e407adfb3eb77a51ff50",
+          "operator_review_id": "voice-segment-review-20260826T044759691113Z-xiaob",
+          "operator_review_receipt_sha256": "4f93e3d03b24e17dbb4ccd9cf7a16bba1edb78ea276dbebd7279651f850f52dc"
+        }
+      ]
+    }
+  ],
+  "scope_limits": {
+    "purpose": "ab_voice_sample_internal_evaluation_only",
+    "concatenation_approved": true,
+    "approved_plan_only": true,
+    "ab_candidate_pair_approved": true,
+    "ab_winner_selected": false,
+    "automated_qc_overridden": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false
+  },
+  "receipt_sha256": "ac42b854a78a60307accc7e858f058f3cfa7167772030ed06fe87e05d2bec06b"
+}

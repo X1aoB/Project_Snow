@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-2ab8e5c295a8db72e27c",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 11,
+  "trigger": "战斗开始2",
+  "transcript": "别出意外了！别……出……意……外……",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/6/67/0p21heubb3zruwbq56izm9itw3pua0y.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 359489,
+  "content_sha256": "1333961c0875cee107451e517bb152d9a7f2bab5ac6ad8139775e29bb4bcf69f",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

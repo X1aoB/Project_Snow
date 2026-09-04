@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-bf09df7e11878cb7d1b5",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 8,
+  "trigger": "接敌1",
+  "transcript": "我会快速解决的。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/5/53/8djcqgixryf5n5u28p52wome5voclwu.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 73187,
+  "content_sha256": "2e77460666872916cd3ab184b628df23cd9f14fea55c734af0aab8fcb8bfb798",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

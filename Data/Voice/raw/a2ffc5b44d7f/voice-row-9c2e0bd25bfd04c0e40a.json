@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-9c2e0bd25bfd04c0e40a",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 44,
+  "trigger": "放弃购买",
+  "transcript": "啊？诶诶……怎么看完又不买了啊，真是捉摸不透的家伙。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/1/12/thj47xcvua618xe1pxojw8hmixkythi.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 279031,
+  "content_sha256": "66a1787312419c5ef63274fa51f25bf874085b83ca62d242101a4c76e98d6575",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

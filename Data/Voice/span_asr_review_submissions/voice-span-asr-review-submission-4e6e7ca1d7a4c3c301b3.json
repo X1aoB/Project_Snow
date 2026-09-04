@@ -1,0 +1,321 @@
+{
+  "schema_version": "project-snow-private-voice-span-asr-review-submission-1",
+  "submission_id": "voice-span-asr-review-submission-4e6e7ca1d7a4c3c301b3",
+  "recorded_at": "2026-08-29T04:23:33.339523+00:00",
+  "artifact_purpose": "immutable_partial_human_audio_review_submission",
+  "reviewer_id": "xiaob",
+  "source_run": {
+    "run_id": "voice-span-asr-run-bae021e55e7a51588cfc",
+    "manifest_sha256": "9481d0a6246bb64093f2cf01f016272c60c9ebb0baef0c50b337acaf41cdad9c",
+    "created_at": "2026-08-28T12:34:44+00:00",
+    "source_package_manifest_sha256": "8b9b32857dd5a216deb19c5f6ca27bf8c74b8f5c1127fda9c01adf262ed089c1",
+    "input_audio_set_sha256": "819dbdf0f3a0ed699afd9cda1e7462ad6bbff61facb0863eb325837fb76d3dd1",
+    "transcript_set_sha256": "d8fdfd1fd0b03bb4461084d5c641ced274c517251601fa91351caa70a057935e",
+    "clip_count": 15
+  },
+  "reviewer_assertions": {
+    "audio_only_review": true
+  },
+  "source_decisions_sha256": "299405e2701202a8e1e3780b9cf43666d96e68f0c6df29c65ec00e97110e7e13",
+  "decision_set_sha256": "6f37a99f2c65270c73ba2a040f378a1cd342acf1da0f1fd9507a734b70ea6485",
+  "clip_count": 15,
+  "decisions": [
+    {
+      "ordinal": 1,
+      "span_id": "voice-span-80d24e754e3621808ddc",
+      "audio_sha256": "1d23be2ea45ba7e07059963d7db7fc432b2c0cae1de7c13991df0f6d88e9fb60",
+      "asr_hypothesis_text_sha256": "17751585420fb933f8cb6a555afedebed03d0c274fc930a247a2b4b8ffdb2b50",
+      "transcript_review": {
+        "decision": "accepted_exact",
+        "reviewed_text": "昨天成功摸到分析员的腹肌了,那今天我可以……",
+        "reviewed_text_utf8_sha256": "17751585420fb933f8cb6a555afedebed03d0c274fc930a247a2b4b8ffdb2b50",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 2,
+      "span_id": "voice-span-30b1e82c2219f5408c9f",
+      "audio_sha256": "07890d8bb74222da1c44015e87e91c13f662d8b09f0ddf4e12f52a6fa9c12058",
+      "asr_hypothesis_text_sha256": "19bc388febfecd6a6653652c3d5b258cb34dda22c358a37481493de7900600c0",
+      "transcript_review": {
+        "decision": "needs_clarification",
+        "reviewed_text": null,
+        "reviewed_text_utf8_sha256": null,
+        "reason_code": "needs_exact_transcript_decision",
+        "operator_note": "只有发出的啊啊声，不确定是否能用于训练"
+      },
+      "training_use": {
+        "disposition": "excluded_from_current_training_set",
+        "reason_code": "nonlexical_vocalization",
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 3,
+      "span_id": "voice-span-f8f9e97cb60ff69edf84",
+      "audio_sha256": "aacfb68f137cb4a99b707bd3cf14af10727831d6392b8ffd3f2755f162809006",
+      "asr_hypothesis_text_sha256": "7c2c50fbaf7b274733d5fa623040492ef299c898075f8fc47fd28356c7e08898",
+      "transcript_review": {
+        "decision": "needs_clarification",
+        "reviewed_text": null,
+        "reviewed_text_utf8_sha256": null,
+        "reason_code": "needs_exact_transcript_decision",
+        "operator_note": "只有发出的啊啊声，不确定是否能用于训练"
+      },
+      "training_use": {
+        "disposition": "excluded_from_current_training_set",
+        "reason_code": "nonlexical_vocalization",
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 4,
+      "span_id": "voice-span-05a93131340fcfc7474f",
+      "audio_sha256": "393dde17682fa39edc72be1c3c3184ad680042b73cb373414182d0e498a3ff86",
+      "asr_hypothesis_text_sha256": "e5ab0e1ccfe4422a9364f1f654a69910134b7c213f1d1af8995237e260321f10",
+      "transcript_review": {
+        "decision": "corrected_from_audio",
+        "reviewed_text": "是..是分析员",
+        "reviewed_text_utf8_sha256": "501e5f3b2ea9c31419a64f9d14adf40515365a333b6dfa423fd04a17528dbf63",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 5,
+      "span_id": "voice-span-f015499d412ae75a1991",
+      "audio_sha256": "5419b30ed0d59a5cdafda1748dd130bc6919085b251db5a061648c8b527955eb",
+      "asr_hypothesis_text_sha256": "be80de965b862362a2934d9d11e16cf965f5dd9e01fe615794fe24c71dcec867",
+      "transcript_review": {
+        "decision": "accepted_exact",
+        "reviewed_text": "果然没白等,今天我是第一个见到分析员的人。",
+        "reviewed_text_utf8_sha256": "be80de965b862362a2934d9d11e16cf965f5dd9e01fe615794fe24c71dcec867",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 6,
+      "span_id": "voice-span-fc23b647fab9a353c30b",
+      "audio_sha256": "7c1c35de4b41824bd5f908b860d41ade8a4a3b7f5ac0a696948194e2788c97a5",
+      "asr_hypothesis_text_sha256": "77c6b5da78cebea708e5eae9dca4c3fd8e6efde201d4261ef2447dd1c422e1b0",
+      "transcript_review": {
+        "decision": "corrected_from_audio",
+        "reviewed_text": "分析员，我可以走近些看看你吗？",
+        "reviewed_text_utf8_sha256": "aa142cb9d45b5f496c9eec9e39d6e02495d6da8595c32443aa34b1bccb555066",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 7,
+      "span_id": "voice-span-852e814262944c75c14b",
+      "audio_sha256": "e218d13aadcd22ea38fc3e144fb7614e7eb33557174606cae3f68c3a38e95ebd",
+      "asr_hypothesis_text_sha256": "b8f8cf64a2f665b8c3ffaae0fe3a6855410cc146afc5214f6980f3495a00f595",
+      "transcript_review": {
+        "decision": "corrected_from_audio",
+        "reviewed_text": "那,我能摸摸你吗?我,我这都是为了下一部作品在取材,嗯。",
+        "reviewed_text_utf8_sha256": "f236a49a3dba4881827e19add8a3cf1bcd878de29b86ac6609fa68af6ba98a20",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 8,
+      "span_id": "voice-span-26756217f1f0f8e271b9",
+      "audio_sha256": "1ee7de161ed0e9d863866f4a4a4320541610cd84a20b3c873db7ff02ec4e93cb",
+      "asr_hypothesis_text_sha256": "1230a642407e07141dce7dd12676d64f76cd412c7a6529e314f1c79e7099e362",
+      "transcript_review": {
+        "decision": "accepted_exact",
+        "reviewed_text": "如此重要的事情,我希望你不要忘记。",
+        "reviewed_text_utf8_sha256": "1230a642407e07141dce7dd12676d64f76cd412c7a6529e314f1c79e7099e362",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 9,
+      "span_id": "voice-span-428b35929bca0bcc35ad",
+      "audio_sha256": "5a3d33e10d34743baab2b31c2bab8513457d987b04c2b01ec17d84a97335598e",
+      "asr_hypothesis_text_sha256": "f8926c1da20700f0753e8c4c75148a5af7f6bd15535ff415734f6f8902900eeb",
+      "transcript_review": {
+        "decision": "corrected_from_audio",
+        "reviewed_text": "风雨晦明，潮汐云烟",
+        "reviewed_text_utf8_sha256": "79c86514a5d50bf73e51be854c0bcd8a46f335b261b2d9b4092a0770c0b0d4b7",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 10,
+      "span_id": "voice-span-2204e9713a8251101b9b",
+      "audio_sha256": "99dfd0a4af1a46d87f81ef142e30ee82d8fbce029b901956bcdfbf7a01a2ce3f",
+      "asr_hypothesis_text_sha256": "6aa8240a39dcb1cbebbe3ee78d469503cf8309aa870f4ad63f7438f62c4d106e",
+      "transcript_review": {
+        "decision": "corrected_from_audio",
+        "reviewed_text": "皆昭前路",
+        "reviewed_text_utf8_sha256": "1e9fd4f26901e7d7fecc036a749922abaac0f569a02f6c11f1103128901e3d5a",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 11,
+      "span_id": "voice-span-4f7fa278be1234445da0",
+      "audio_sha256": "1078e851e2875fe368cebe5d395034fe8b5267b3f11dac75738b07927de613d1",
+      "asr_hypothesis_text_sha256": "0dc610b8cf17ae97bb8442d38d72d7b689c76df914dba824e6121c54d1b0565d",
+      "transcript_review": {
+        "decision": "accepted_exact",
+        "reviewed_text": "正确的选择,才能导向正确的结果。",
+        "reviewed_text_utf8_sha256": "0dc610b8cf17ae97bb8442d38d72d7b689c76df914dba824e6121c54d1b0565d",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 12,
+      "span_id": "voice-span-367175425cb532c43662",
+      "audio_sha256": "bcf7ca09a3099d4f5c0d8f07df2eb4c689d141e4d1cb6d7929429ed3f7fbf322",
+      "asr_hypothesis_text_sha256": "0dc610b8cf17ae97bb8442d38d72d7b689c76df914dba824e6121c54d1b0565d",
+      "transcript_review": {
+        "decision": "accepted_exact",
+        "reviewed_text": "正确的选择,才能导向正确的结果。",
+        "reviewed_text_utf8_sha256": "0dc610b8cf17ae97bb8442d38d72d7b689c76df914dba824e6121c54d1b0565d",
+        "reason_code": null,
+        "operator_note": "与第 11 段内容重复"
+      },
+      "training_use": {
+        "disposition": "excluded_from_current_training_set",
+        "reason_code": "duplicate_utterance_text",
+        "duplicate_of_ordinal": 11
+      }
+    },
+    {
+      "ordinal": 13,
+      "span_id": "voice-span-65e3dbf47ea72878d122",
+      "audio_sha256": "11874cb6caf5df3507cdb6aa0c2635579b1883c322e246404b7ac570690acb9c",
+      "asr_hypothesis_text_sha256": "5803f72184aa39a7932820b99bbc8e59cb0cb5f399501bd59bc50bc168a2d6e5",
+      "transcript_review": {
+        "decision": "accepted_exact",
+        "reviewed_text": "很快就能结束。",
+        "reviewed_text_utf8_sha256": "5803f72184aa39a7932820b99bbc8e59cb0cb5f399501bd59bc50bc168a2d6e5",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 14,
+      "span_id": "voice-span-6d5f5fed4df4f45d1659",
+      "audio_sha256": "ec3986302688e00bc150030837f520af2efd0cbe127eae00d83da1f7073d4512",
+      "asr_hypothesis_text_sha256": "549bb41fd4e06feecd53c6b7bd210dcde1a83ef08892c6c96d94d211c447a654",
+      "transcript_review": {
+        "decision": "accepted_exact",
+        "reviewed_text": "不要忘记看消息。",
+        "reviewed_text_utf8_sha256": "549bb41fd4e06feecd53c6b7bd210dcde1a83ef08892c6c96d94d211c447a654",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    },
+    {
+      "ordinal": 15,
+      "span_id": "voice-span-ff0815edc0cc9e31abe0",
+      "audio_sha256": "7f6369b0b4b76c697977c42a30509b310308a223acce9090f170d72c19fb4690",
+      "asr_hypothesis_text_sha256": "57442aa69ddd1bda7a1b10df2296c76615c087f26a259667baee9a31040a8184",
+      "transcript_review": {
+        "decision": "accepted_exact",
+        "reviewed_text": "我不想和别人有太多牵扯,也不想制造更多回忆。",
+        "reviewed_text_utf8_sha256": "57442aa69ddd1bda7a1b10df2296c76615c087f26a259667baee9a31040a8184",
+        "reason_code": null,
+        "operator_note": null
+      },
+      "training_use": {
+        "disposition": "not_assessed",
+        "reason_code": null,
+        "duplicate_of_ordinal": null
+      }
+    }
+  ],
+  "review_status": "needs_clarification",
+  "unresolved_ordinals": [
+    2,
+    3
+  ],
+  "summary": {
+    "accepted_exact_count": 8,
+    "corrected_from_audio_count": 5,
+    "rejected_range_count": 0,
+    "needs_clarification_count": 2,
+    "training_excluded_count": 3,
+    "training_not_assessed_count": 12
+  },
+  "scope_limits": {
+    "human_transcript_review_completed": false,
+    "transcript_accepted": false,
+    "span_approved": false,
+    "transcript_alignment_verified": false,
+    "training_use_approved": false,
+    "concatenation_approved": false,
+    "ab_winner_selected": false,
+    "automated_qc_overridden": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false
+  },
+  "receipt_sha256": "e1c67e17339362c60b9390e27ca3a643fd0f8e59f83206a3fdf7d30cfccb1c91"
+}

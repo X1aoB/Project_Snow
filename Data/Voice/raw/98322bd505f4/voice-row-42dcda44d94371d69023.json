@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-42dcda44d94371d69023",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 1,
+  "trigger": "换弹",
+  "transcript": "正在换弹。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/8/88/cpcphveh2eisfg7yyizl0aanxdonaiz.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 56468,
+  "content_sha256": "757a2321a80cfe7dcabd13fc96673017397301c110d1e852571e35119c613c41",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

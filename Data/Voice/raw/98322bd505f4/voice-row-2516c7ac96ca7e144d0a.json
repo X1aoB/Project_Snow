@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-2516c7ac96ca7e144d0a",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 16,
+  "trigger": "活动提醒",
+  "transcript": "如此重要的事情，我希望你不要忘记。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/a/a5/cxlo2iuntcpqw6hh58qzertqjr1te6b.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 130656,
+  "content_sha256": "5b6c63bf5e5377962514b2cdcd7810d33ebe53029c313717aeee400711248348",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

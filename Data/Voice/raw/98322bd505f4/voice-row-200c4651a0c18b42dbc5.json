@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-200c4651a0c18b42dbc5",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 51,
+  "trigger": "战斗开始2",
+  "transcript": "美好的回忆又多了一份。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/d/d2/pr8d5bel2ppqgvf4t1vlhmk3zdo8sad.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 143195,
+  "content_sha256": "6e5da447bf887d9af8651b94ce00450578d19c0316050b048725a1d0e1e4aeba",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

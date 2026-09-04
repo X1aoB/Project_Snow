@@ -1,0 +1,142 @@
+{
+  "schema_version": "project-snow-private-voice-span-asr-review-decisions-1",
+  "run_id": "voice-span-asr-run-bae021e55e7a51588cfc",
+  "reviewer_id": "xiaob",
+  "decisions": [
+    {
+      "ordinal": 1,
+      "transcript_decision": "accepted_exact",
+      "corrected_text": null,
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 2,
+      "transcript_decision": "needs_clarification",
+      "corrected_text": null,
+      "operator_note": "只有发出的啊啊声，不确定是否能用于训练",
+      "training_disposition": "excluded_from_current_training_set",
+      "training_reason_code": "nonlexical_vocalization",
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 3,
+      "transcript_decision": "needs_clarification",
+      "corrected_text": null,
+      "operator_note": "只有发出的啊啊声，不确定是否能用于训练",
+      "training_disposition": "excluded_from_current_training_set",
+      "training_reason_code": "nonlexical_vocalization",
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 4,
+      "transcript_decision": "corrected_from_audio",
+      "corrected_text": "是..是分析员",
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 5,
+      "transcript_decision": "accepted_exact",
+      "corrected_text": null,
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 6,
+      "transcript_decision": "corrected_from_audio",
+      "corrected_text": "分析员，我可以走近些看看你吗？",
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 7,
+      "transcript_decision": "corrected_from_audio",
+      "corrected_text": "那,我能摸摸你吗?我,我这都是为了下一部作品在取材,嗯。",
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 8,
+      "transcript_decision": "accepted_exact",
+      "corrected_text": null,
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 9,
+      "transcript_decision": "corrected_from_audio",
+      "corrected_text": "风雨晦明，潮汐云烟",
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 10,
+      "transcript_decision": "corrected_from_audio",
+      "corrected_text": "皆昭前路",
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 11,
+      "transcript_decision": "accepted_exact",
+      "corrected_text": null,
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 12,
+      "transcript_decision": "accepted_exact",
+      "corrected_text": null,
+      "operator_note": "与第 11 段内容重复",
+      "training_disposition": "excluded_from_current_training_set",
+      "training_reason_code": "duplicate_utterance_text",
+      "duplicate_of_ordinal": 11
+    },
+    {
+      "ordinal": 13,
+      "transcript_decision": "accepted_exact",
+      "corrected_text": null,
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 14,
+      "transcript_decision": "accepted_exact",
+      "corrected_text": null,
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    },
+    {
+      "ordinal": 15,
+      "transcript_decision": "accepted_exact",
+      "corrected_text": null,
+      "operator_note": null,
+      "training_disposition": "not_assessed",
+      "training_reason_code": null,
+      "duplicate_of_ordinal": null
+    }
+  ]
+}

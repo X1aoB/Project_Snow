@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-49a19fd55f9070f7755d",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 46,
+  "trigger": "常规技1",
+  "transcript": "精准命中。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/c/c9/kjdkoe2ks28d97q8fo6v4u79wb6nzws.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 86770,
+  "content_sha256": "3eed7be02dab9ba9fa31475954929452845caf6d755bdcf3b5a35696595bebf5",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-1280d9a97ab9829f75c5",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 29,
+  "trigger": "获得补给2",
+  "transcript": "以此可获先机。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/5/53/phr6r3xpbc5ef8uylgarx84d0c1i7m0.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 96174,
+  "content_sha256": "d131921c646750c312fbb6fb5d2f619a5e7010e655dec7f349f24f0a751475c1",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

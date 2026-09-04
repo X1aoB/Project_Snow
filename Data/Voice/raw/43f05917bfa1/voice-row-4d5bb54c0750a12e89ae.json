@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-4d5bb54c0750a12e89ae",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 14,
+  "trigger": "邮件提醒",
+  "transcript": "及时查看邮件是基本的礼貌。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/e/e6/0zivz1rfuph3krd2do3rl6wdd0aj6hy.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 133791,
+  "content_sha256": "106ec587e3a62c09e3768e68617229738bd5d491e407b28b1f8027b5d1efbf2c",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

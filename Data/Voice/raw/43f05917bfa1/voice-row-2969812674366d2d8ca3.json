@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-2969812674366d2d8ca3",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 43,
+  "trigger": "进入商店",
+  "transcript": "记得看清楚再下单哦。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/6/68/qo51h0jlkb6kuyk5cl22bxz5i2prpqb.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 86770,
+  "content_sha256": "0d93f0a91464f62091ef073ee242b4abff3e6dd10bf9adf8d46e637ffc72cf13",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

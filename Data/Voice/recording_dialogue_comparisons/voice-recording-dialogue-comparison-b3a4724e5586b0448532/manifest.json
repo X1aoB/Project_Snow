@@ -1,0 +1,432 @@
+{
+  "schema_version": "project-snow-private-local-voice-dialogue-comparison-1",
+  "package_id": "voice-recording-dialogue-comparison-b3a4724e5586b0448532",
+  "created_at": "2026-08-31T13:49:09.177444+00:00",
+  "artifact_purpose": "offline_natural_vs_safely_compacted_dialogue_qc_only",
+  "source_boundary_adjudication": {
+    "receipt_id": "voice-recording-boundary-adjudication-3c4102db6ee3378a7862",
+    "manifest_sha256": "771450af8423090ca972ba481fab9ff8b0a9c0bb950b275eedf38311b4d52c33",
+    "decision_set_sha256": "8016e4b63b84f593230f847cb0b2f01135a00110230913327876a4f009288db0",
+    "candidate_count": 161,
+    "accepted_candidate_count": 129,
+    "excluded_candidate_count": 32
+  },
+  "quality_policy": {
+    "audio_format": {
+      "encoding": "pcm_s16le",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "sample_width_bytes": 2
+    },
+    "energy_frame_ms": 20,
+    "adaptive_cut_threshold": {
+      "noise_percentile": 0.2,
+      "margin_db": 8.0,
+      "minimum_dbfs": -55.0,
+      "maximum_dbfs": -45.0
+    },
+    "outer_padding_ms": 120,
+    "minimum_compactable_internal_gap_ms": 1000,
+    "normal_pause_allowance_per_quiet_run_ms": 750,
+    "synthetic_join_silence_ms": 240,
+    "target_retained_pause_ms": 480,
+    "cut_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+    "legacy_raw_silence_measurement": {
+      "method": "20ms_frame_rms",
+      "threshold_dbfs": -45.0,
+      "gate": false
+    },
+    "sustained_silence_measurement": {
+      "method": "quiet_run_duration_exceeding_750ms_v1",
+      "threshold_dbfs": -45.0,
+      "maximum_excess_ratio": 0.2,
+      "gate": true
+    },
+    "duration_seconds": {
+      "minimum": 10.0,
+      "maximum": 20.0,
+      "applies_to": "compacted_audio"
+    },
+    "true_peak": {
+      "oversample_factor": 4,
+      "interpolator": "catmull_rom_cubic",
+      "maximum_dbtp": -1.0
+    },
+    "maximum_clipped_sample_count": 0,
+    "snr": {
+      "method": "energy_vad_rms_v1_source_only",
+      "minimum_db": 25.0,
+      "synthetic_join_silence_excluded": true
+    }
+  },
+  "authoritative_assertions": {
+    "screen_text_is_authoritative": true,
+    "authoritative_transcript_modified": false,
+    "asr_used_as_transcript_source": false,
+    "all_detected_voiced_regions_retained": true,
+    "only_low_energy_silence_compacted": true,
+    "normal_pauses_up_to_750ms_tolerated": true,
+    "legacy_raw_silence_ratio_used_as_gate": false,
+    "parent_candidate_count_separate_from_internal_cut_count": true,
+    "excluded_candidates_reintroduced": false,
+    "new_runtime_character_created": false
+  },
+  "sample_count": 2,
+  "samples": [
+    {
+      "slot": "A",
+      "parent_candidate_count": 1,
+      "internal_silence_compaction_cut_count": 0,
+      "candidate_ordinal": 99,
+      "revision_id": "voice-recording-boundary-revision-8491d22648b97cdf7906",
+      "original_candidate_id": "voice-recording-alignment-candidate-ff36238f63eb5c40f2d4",
+      "source_id": "voice-recording-source-32143dad4c7202d1e376",
+      "source_kind": "mail",
+      "role_name": "肴",
+      "batch_name": "一起醒来，一起下班",
+      "runtime_character_id": "cf0569ac6de9",
+      "runtime_character_name": "肴",
+      "source_persona_id": "cf0569ac6de9",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "authoritative_locator": {
+        "block_index": 0,
+        "start_char": 273,
+        "end_char_exclusive": 327
+      },
+      "authoritative_transcript_utf8_sha256": "c5d66295a095141b9f84e94d728e5b81063f4324ccb4c476571d167c47679cb8",
+      "displayed_text": {
+        "relative_path": "A/displayed_text.txt",
+        "utf8_sha256": "c5d66295a095141b9f84e94d728e5b81063f4324ccb4c476571d167c47679cb8",
+        "byte_count": 154
+      },
+      "input_candidate_audio": {
+        "wav_sha256": "b149695b864716bce42449dd0589c76768dd93c0dad53aefbda031255699c112",
+        "pcm_sha256": "a610b087aea6f4756ac5dd2794c45e1269df3d3f97cb63fcc9d56802de6e7b19",
+        "byte_count": 712844,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 356400,
+          "duration_seconds": 14.85
+        },
+        "source_frame_range": {
+          "start_frame": 2028120,
+          "end_frame_exclusive": 2384520,
+          "start_seconds": 84.505,
+          "end_seconds": 99.355,
+          "duration_seconds": 14.85
+        }
+      },
+      "adaptive_cut_threshold_dbfs": -55.0,
+      "detected_active_island_count": 19,
+      "outer_trim": {
+        "candidate_local_retained_range": {
+          "start_frame": 1,
+          "end_frame_exclusive": 354095
+        },
+        "source_retained_range": {
+          "start_frame": 2028121,
+          "end_frame_exclusive": 2382215,
+          "start_seconds": 84.505042,
+          "end_seconds": 99.258958
+        },
+        "left_removed_frames": 1,
+        "right_removed_frames": 2305,
+        "left_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -94.938,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 1
+        },
+        "right_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -65.834,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 335
+        }
+      },
+      "internal_silence_compaction_cuts": [],
+      "retained_long_gaps": [],
+      "compacted_source_spans": [
+        {
+          "candidate_local_range": {
+            "start_frame": 1,
+            "end_frame_exclusive": 354095
+          },
+          "source_range": {
+            "start_frame": 2028121,
+            "end_frame_exclusive": 2382215,
+            "start_seconds": 84.505042,
+            "end_seconds": 99.258958
+          },
+          "compacted_output_range": {
+            "start_frame": 0,
+            "end_frame_exclusive": 354094
+          }
+        }
+      ],
+      "natural_audio": {
+        "relative_path": "A/natural.wav",
+        "wav_sha256": "182496dcdffa51f7c0e4954e71f718229458c9ffa35f43215a33c6b24cef80bf",
+        "pcm_sha256": "caac3f1f9e37165ee14e338d67663450b2cf8648ae59420015e845f47793571a",
+        "byte_count": 708232,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 354094,
+          "duration_seconds": 14.753917
+        },
+        "metrics": {
+          "duration_seconds": 14.753917,
+          "true_peak_4x_dbtp": -9.006,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.379404,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 31.235,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 27,
+          "quiet_runs_exceeding_allowance_count": 3,
+          "sustained_silence_excess_seconds": 0.11,
+          "sustained_silence_excess_ratio": 0.007456
+        }
+      },
+      "compacted_audio": {
+        "relative_path": "A/compacted.wav",
+        "wav_sha256": "182496dcdffa51f7c0e4954e71f718229458c9ffa35f43215a33c6b24cef80bf",
+        "pcm_sha256": "caac3f1f9e37165ee14e338d67663450b2cf8648ae59420015e845f47793571a",
+        "byte_count": 708232,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 354094,
+          "duration_seconds": 14.753917
+        },
+        "metrics": {
+          "duration_seconds": 14.753917,
+          "true_peak_4x_dbtp": -9.006,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.379404,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 31.235,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 27,
+          "quiet_runs_exceeding_allowance_count": 3,
+          "sustained_silence_excess_seconds": 0.11,
+          "sustained_silence_excess_ratio": 0.007456
+        }
+      },
+      "quality_gates": {
+        "duration_10_to_20_seconds": true,
+        "true_peak_at_or_below_minus_1_dbtp": true,
+        "no_clipped_samples": true,
+        "sustained_silence_excess_at_or_below_20_percent": true,
+        "snr_at_or_above_25_db": true
+      },
+      "all_quality_gates_passed": true
+    },
+    {
+      "slot": "B",
+      "parent_candidate_count": 1,
+      "internal_silence_compaction_cut_count": 0,
+      "candidate_ordinal": 93,
+      "revision_id": "voice-recording-boundary-revision-d8210db42011147193aa",
+      "original_candidate_id": "voice-recording-alignment-candidate-102fd72347e818327742",
+      "source_id": "voice-recording-source-32143dad4c7202d1e376",
+      "source_kind": "mail",
+      "role_name": "肴",
+      "batch_name": "一起醒来，一起下班",
+      "runtime_character_id": "cf0569ac6de9",
+      "runtime_character_name": "肴",
+      "source_persona_id": "cf0569ac6de9",
+      "speaker_variant": null,
+      "selectable_character": true,
+      "authoritative_locator": {
+        "block_index": 0,
+        "start_char": 0,
+        "end_char_exclusive": 47
+      },
+      "authoritative_transcript_utf8_sha256": "0dda4ade3e1355277ee494b6bdd5abc59bb431aef99dfb57b186f553f94cc47c",
+      "displayed_text": {
+        "relative_path": "B/displayed_text.txt",
+        "utf8_sha256": "0dda4ade3e1355277ee494b6bdd5abc59bb431aef99dfb57b186f553f94cc47c",
+        "byte_count": 141
+      },
+      "input_candidate_audio": {
+        "wav_sha256": "28194a5bf95703c2c9147486f8344da9701b1da1ba77a15957c209a8c096cd4b",
+        "pcm_sha256": "b14fb8929bf8ca009fcb602da66164ebfb1fc6240bdce654f5f154d275c83960",
+        "byte_count": 680924,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 340440,
+          "duration_seconds": 14.185
+        },
+        "source_frame_range": {
+          "start_frame": 53280,
+          "end_frame_exclusive": 393720,
+          "start_seconds": 2.22,
+          "end_seconds": 16.405,
+          "duration_seconds": 14.185
+        }
+      },
+      "adaptive_cut_threshold_dbfs": -55.0,
+      "detected_active_island_count": 13,
+      "outer_trim": {
+        "candidate_local_retained_range": {
+          "start_frame": 3360,
+          "end_frame_exclusive": 338400
+        },
+        "source_retained_range": {
+          "start_frame": 56640,
+          "end_frame_exclusive": 391680,
+          "start_seconds": 2.36,
+          "end_seconds": 16.32
+        },
+        "left_removed_frames": 3360,
+        "right_removed_frames": 2040,
+        "left_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -100.046,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 0
+        },
+        "right_cut_evidence": {
+          "method": "low_energy_silence_zero_crossing_cut",
+          "rms_dbfs": -90.046,
+          "threshold_dbfs": -55.0,
+          "zero_crossing_confirmed": true,
+          "zero_crossing_policy": "nearest_120ms_padding_target_within_low_energy_window_v1",
+          "padding_target_distance_frames": 0
+        }
+      },
+      "internal_silence_compaction_cuts": [],
+      "retained_long_gaps": [],
+      "compacted_source_spans": [
+        {
+          "candidate_local_range": {
+            "start_frame": 3360,
+            "end_frame_exclusive": 338400
+          },
+          "source_range": {
+            "start_frame": 56640,
+            "end_frame_exclusive": 391680,
+            "start_seconds": 2.36,
+            "end_seconds": 16.32
+          },
+          "compacted_output_range": {
+            "start_frame": 0,
+            "end_frame_exclusive": 335040
+          }
+        }
+      ],
+      "natural_audio": {
+        "relative_path": "B/natural.wav",
+        "wav_sha256": "ed808dca442eb779509d4e8085352932184fa829dbdd35fcfcd1961dff990b57",
+        "pcm_sha256": "4e4c28abe6ca59b56c7c760d4fa22ea6f26716a8e6562918113dc1674c49fc90",
+        "byte_count": 670124,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 335040,
+          "duration_seconds": 13.96
+        },
+        "metrics": {
+          "duration_seconds": 13.96,
+          "true_peak_4x_dbtp": -9.008,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.369628,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 33.834,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 18,
+          "quiet_runs_exceeding_allowance_count": 2,
+          "sustained_silence_excess_seconds": 0.3,
+          "sustained_silence_excess_ratio": 0.02149
+        }
+      },
+      "compacted_audio": {
+        "relative_path": "B/compacted.wav",
+        "wav_sha256": "ed808dca442eb779509d4e8085352932184fa829dbdd35fcfcd1961dff990b57",
+        "pcm_sha256": "4e4c28abe6ca59b56c7c760d4fa22ea6f26716a8e6562918113dc1674c49fc90",
+        "byte_count": 670124,
+        "audio_format": {
+          "encoding": "pcm_s16le",
+          "sample_rate_hz": 24000,
+          "channels": 1,
+          "sample_width_bytes": 2,
+          "frame_count": 335040,
+          "duration_seconds": 13.96
+        },
+        "metrics": {
+          "duration_seconds": 13.96,
+          "true_peak_4x_dbtp": -9.008,
+          "clipped_sample_count": 0,
+          "raw_frame_silence_ratio": 0.369628,
+          "silence_threshold_dbfs": -45.0,
+          "snr_db": 33.834,
+          "snr_method": "energy_vad_rms_v1_source_only",
+          "raw_frame_silence_ratio_is_gate": false,
+          "normal_pause_allowance_ms": 750,
+          "quiet_run_count": 18,
+          "quiet_runs_exceeding_allowance_count": 2,
+          "sustained_silence_excess_seconds": 0.3,
+          "sustained_silence_excess_ratio": 0.02149
+        }
+      },
+      "quality_gates": {
+        "duration_10_to_20_seconds": true,
+        "true_peak_at_or_below_minus_1_dbtp": true,
+        "no_clipped_samples": true,
+        "sustained_silence_excess_at_or_below_20_percent": true,
+        "snr_at_or_above_25_db": true
+      },
+      "all_quality_gates_passed": true
+    }
+  ],
+  "sample_set_sha256": "5f6e9e5b9e6ae03649879f31429569e1ef1b3bc4b2cc1f878ce016ee9e4efc88",
+  "quality_summary": {
+    "all_compacted_samples_passed_signal_qc": true,
+    "sample_count": 2
+  },
+  "review_page": {
+    "relative_path": "review.html",
+    "sha256": "0f6b8f50e9cdccc99f0d4b8dc8eb4d0232aeffe8c90d934b657f1da50c1dbafe",
+    "byte_count": 2576
+  },
+  "review_status": "awaiting_human_natural_vs_compacted_comparison",
+  "scope_limits": {
+    "human_listening_approved": false,
+    "natural_vs_compacted_comparison_approved": false,
+    "training_use_approved": false,
+    "voice_cloning_approved": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false,
+    "public_rollout_allowed": false
+  },
+  "executed": true,
+  "manifest_sha256": "3e1fe7bc40d5f85cd918963ba917798ab136342d3aba53f74158b48a5413c896"
+}

@@ -1,0 +1,633 @@
+{
+  "schema_version": "project-snow-private-voice-download-audit-1",
+  "audit_id": "voice-download-audit-20260826T030324952145Z-xiaob",
+  "recorded_at": "2026-08-26T03:03:24.952145+00:00",
+  "authorized_by": "xiaob",
+  "decision": "approved_for_download_audit_only",
+  "batch_id": "voice-source-batch-369db521c00aef1df75f",
+  "source_batch_manifest_sha256": "a0727a505f7560fa5ce4390ae1cccb4b32bb235b2430e40594bb8b345722f8cf",
+  "base_inventory_sha256": "bd9aa282c8bba4e18168f0d4f79cd8783b71f67f0630b6d6bcdccf6b1c22231b",
+  "candidate_count": 61,
+  "total_bytes": 3567849,
+  "scope_limits": {
+    "human_listening_review_complete": false,
+    "selected_for_voice_clone": false,
+    "changes_first_round_selection": false,
+    "enrollment_allowed": false,
+    "rights_accepted": false,
+    "publication_approved": false
+  },
+  "candidates": [
+    {
+      "candidate_id": "voice-row-49e4ab4550cce2945939",
+      "character_id": "5157b8972632",
+      "byte_length": 61248,
+      "source_file_sha1": "3e14be983a2de0a0e6917866b100b1f65a855ac9",
+      "content_sha256": "5c76b96833268614f20b4839cf68cd3faf5652240dacf19fe05842668f5fef20",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-e2cefef243ec6d663aee",
+      "character_id": "5157b8972632",
+      "byte_length": 95102,
+      "source_file_sha1": "a42a020119ac76aeadb87e400488c5452b502918",
+      "content_sha256": "b59d2346c3c739b58e339de601c2b58ef45ca3e99b91606d2de1d20db75b5bfa",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-cb0cd7ac41e3a4318e9f",
+      "character_id": "5157b8972632",
+      "byte_length": 122897,
+      "source_file_sha1": "232dfbcf9ce0910857a2e8c2c325b1bd77481b8a",
+      "content_sha256": "ab7fbd9612b21896241f3f4c99b793414624ce5be59d67f1642fdf4fd1e5858b",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-3b7091bb6aa3e6ebf56c",
+      "character_id": "5157b8972632",
+      "byte_length": 170753,
+      "source_file_sha1": "5975c20761c05bab4a86668a78e10fb835b1a770",
+      "content_sha256": "ed792ad490b46767e7919c62f14b9c5a2d604712d23b13473e92e93a38e6a332",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-60abab7902ababe65e2c",
+      "character_id": "5157b8972632",
+      "byte_length": 70652,
+      "source_file_sha1": "6f2bd28f586b8ea719b18bce0833c3262a25f805",
+      "content_sha256": "785314e7e7b9e9c16348a79dc7e4c3810b8a4d39e0265fbeb0b2107b0112fbfb",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-8485e294ae7605fda175",
+      "character_id": "5157b8972632",
+      "byte_length": 101372,
+      "source_file_sha1": "f73be31fc05ab2c3d28064581f2a84d333cd3468",
+      "content_sha256": "4ac3ab6dd4f6bf66cd9fb0fcce641b4eca120be8c037d94b3bd88702ba593a18",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-5d70af1a890a8c7ad15b",
+      "character_id": "5157b8972632",
+      "byte_length": 18616,
+      "source_file_sha1": "2d62e32ff3bbf4a99d24dd57dc0cf0def6c8f26e",
+      "content_sha256": "116f8fc4869bdfbf3b27bc3388bd9f2a9a83f5595d1ceb490d552464b23e7694",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-b6cc5f04a02ee20c8a2b",
+      "character_id": "5157b8972632",
+      "byte_length": 25721,
+      "source_file_sha1": "0d9036741ca4a0bc661bcea9ca217b0264b52450",
+      "content_sha256": "fc15e8a9733bef0c23973a618154002d164d86fa69bf3b50323f1ec037930d7a",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-dfb6c442cac6447e5c33",
+      "character_id": "5157b8972632",
+      "byte_length": 30319,
+      "source_file_sha1": "c93da920f7580eb972207fc57ed2f746587b4170",
+      "content_sha256": "af803ad29c6da457075201abaf8eb568c602f877131d39d8238714e3f6c8ecf1",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-6aeca63220184dac2927",
+      "character_id": "5157b8972632",
+      "byte_length": 27811,
+      "source_file_sha1": "e0228c8945564e3857c15655c5eb84230eece69f",
+      "content_sha256": "f8de9332cb4e076191d6f679ce904d3e75f3fe2b654a0ac826c2d393bf687059",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-b3ea0cbbeef92de79059",
+      "character_id": "5157b8972632",
+      "byte_length": 15899,
+      "source_file_sha1": "6f4966820b1a62376e6ca1572499ee59488c7366",
+      "content_sha256": "1701383751e7e2efe3e9dbcb3d3210114bec1dbda536c5105ee542b5c9efbe3d",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-20546314fe23d397afed",
+      "character_id": "5157b8972632",
+      "byte_length": 16944,
+      "source_file_sha1": "83ad221440af20a8923795819d6f3f3a783b37b4",
+      "content_sha256": "60598684b1a6d5a8f92cfdfc60b1cef02db57ffd0ddce6f8824c1744aac5a46d",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-9f82309391505fe886d3",
+      "character_id": "5157b8972632",
+      "byte_length": 53933,
+      "source_file_sha1": "419fe875ad90948095a783c5aa3f25456bfb0f05",
+      "content_sha256": "cf310516c85ba84d5a70a3a731d4bd6b717f2ccb73f51fd65edd6b18f07184df",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-c809a14964ca370a0482",
+      "character_id": "5157b8972632",
+      "byte_length": 46201,
+      "source_file_sha1": "7e179b1d7aae8a5945ca972b9ce675752bfcf860",
+      "content_sha256": "631ca344c5945a25ffbd19633198c2eb0b533b71dc2d4e83d357bdb32ad35805",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-26cfd410812ee44bd92a",
+      "character_id": "5157b8972632",
+      "byte_length": 24676,
+      "source_file_sha1": "6164df4e5186d1b88a4db6b5170e78826f4f9b14",
+      "content_sha256": "72f2752223cbbe42f0cfb8ef953a5c02fab8ad24bb9b0365e86422a0e0cc328d",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-e2cb66905a80380d13f8",
+      "character_id": "5157b8972632",
+      "byte_length": 23422,
+      "source_file_sha1": "4bf9cf666be9be566cb546589069787c6d7e64ae",
+      "content_sha256": "f213d03ae5cd5080d27e3e0cd545b174320e1f0663639e781f63d375bc527ee6",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-11c3ba01beb743b660a9",
+      "character_id": "5157b8972632",
+      "byte_length": 27184,
+      "source_file_sha1": "d9ada79a167277024ccf0170f1e7245f4022d158",
+      "content_sha256": "76383df7324789f7b88d2f3e65d74eecf9bfdec87bee0575b94ad38c79f204b4",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-d517438fc18bb0909691",
+      "character_id": "5157b8972632",
+      "byte_length": 9839,
+      "source_file_sha1": "b9b9809cf56c5a77da6cf054ab8a2e6e371b61b7",
+      "content_sha256": "1229eacbfd5360d8e78fd7bf50fb866ddb8adbdb249f36ce2f618c6d163bacef",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-19185cf4a8eac7415a3b",
+      "character_id": "5157b8972632",
+      "byte_length": 24676,
+      "source_file_sha1": "4bd9408285445cef20f05c69620e57feb9cb9630",
+      "content_sha256": "5082c3575999f7c6a49cc5bfb1f1d189036b38402604dc0282570229b9443a5d",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-70c9d7ccf341a54f9c31",
+      "character_id": "5157b8972632",
+      "byte_length": 10257,
+      "source_file_sha1": "8ddd9f15a9f51d3184dc63c1bfe6743b05b6b0e5",
+      "content_sha256": "a40f399fbf920ba1ae9164e929d1bfa7d4822240e791f6593c6ad56d440ebfb4",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-b890d373c5a68031f6a4",
+      "character_id": "5157b8972632",
+      "byte_length": 15272,
+      "source_file_sha1": "a6749c85f1ab2e8ee5b8a92562b1d24363caa779",
+      "content_sha256": "af2e575c4f6f94655cd204721de03f2fe65aeebac0dde292da25fe25448ea3b5",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-7e8e40ddb7e38a960008",
+      "character_id": "5157b8972632",
+      "byte_length": 30110,
+      "source_file_sha1": "725b71c398bca57cfe53871f40b1adfdc2f63692",
+      "content_sha256": "30e3c9c0dbc62a3eea4aa1d7ec84a738e11eec664e0c4d9f701ccd518a236cc1",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-52a89175e131fa3d18f3",
+      "character_id": "5157b8972632",
+      "byte_length": 45156,
+      "source_file_sha1": "3f9b02565ed004e0a41a30c44dcf12f03cd4b762",
+      "content_sha256": "c9a51e4ab40f5e1049ea266aa8bebdeda7642adecbe3f0dd191fb332744dcf4d",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-4b614a0a7feaa968afa2",
+      "character_id": "5157b8972632",
+      "byte_length": 23422,
+      "source_file_sha1": "33f184c270b7783fdb3caf2335f70e98e750ec79",
+      "content_sha256": "bfc49c8ec497ac9eee2ae57db338e67007dd33bede9704e33ad2af07edca9f4f",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-4ec1ad3ab8d94d39022f",
+      "character_id": "5157b8972632",
+      "byte_length": 9003,
+      "source_file_sha1": "d7c7899f12612dd26e54dd6c07e2bbadd8e25d92",
+      "content_sha256": "44b73edece1593826eec2004a372fd4e5e9ecc826146f3cddf52956d370b1f22",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-65c733792cc18a057fad",
+      "character_id": "5157b8972632",
+      "byte_length": 23631,
+      "source_file_sha1": "4826f5b3842a9a9c0511687b4abc3db414f2789f",
+      "content_sha256": "f745844a656024631c24bcce40adf41ba981528ccce01ce23d47de22d6e7c431",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-c79f2198a02f95fa54dc",
+      "character_id": "5157b8972632",
+      "byte_length": 11928,
+      "source_file_sha1": "f25b0af1eabce914b37f6b0b09e27c950f1f5098",
+      "content_sha256": "e1a8f73a56077b6a43d38151b80ce790639d0c3ec6447842593aa1546a9ac0b5",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-5d7b91175256356fec5e",
+      "character_id": "5157b8972632",
+      "byte_length": 25721,
+      "source_file_sha1": "72270ba8f4fa242cab50cfb7ffc45ea52c5da0d1",
+      "content_sha256": "9281dff1236c86e3d4aaac756e7c13aecf30597958050287b6ce734f14d31daa",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-737850c013360a513147",
+      "character_id": "5157b8972632",
+      "byte_length": 18616,
+      "source_file_sha1": "e2d7d784ae68a54c698600486de85dc6bf6150aa",
+      "content_sha256": "4699f530a52d90bee314eb36687c9d531b72a1cec1719bc5538483794ae8bc64",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-49b092ddf508085e034b",
+      "character_id": "5157b8972632",
+      "byte_length": 10048,
+      "source_file_sha1": "91d83a0ceacf6cbb806d92430d6edcdcf5705285",
+      "content_sha256": "aa699af59df8126753dafbfbff71fecf500521342beae6551db3f3c9b57a1426",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-a3469509e500f4771527",
+      "character_id": "5157b8972632",
+      "byte_length": 29901,
+      "source_file_sha1": "61bb3b66597d9f8ec4476749b226d1bc7602d535",
+      "content_sha256": "08d01db1aa9b62f8dd574f925b21675fa536a520b4cc422e1fdbbaccb415ecb5",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-2d899356a1472852c91c",
+      "character_id": "5157b8972632",
+      "byte_length": 26975,
+      "source_file_sha1": "85f7f129842f2615defcebb381e9c2385d2d8467",
+      "content_sha256": "14b175b39440f904e2ccf553459f36d3442307097abff8e664edfd21cb4d52c3",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-e8e68c180b816099cb33",
+      "character_id": "5157b8972632",
+      "byte_length": 10674,
+      "source_file_sha1": "b8fd8d49bca2d84a690b6546b2710d2c22f5c5ec",
+      "content_sha256": "dfab16cedd9ca1d19fa9218694d94e743e9a346e9eccd92cd1d566ff6d97466d",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-ef98620b8155a11d767e",
+      "character_id": "5157b8972632",
+      "byte_length": 10883,
+      "source_file_sha1": "f7b4c4fb4e3e2d3c496416a763d4f3116191c4f5",
+      "content_sha256": "81433cf8ac0f0f864a8ef9b07e10a25ceaaebd0133ba0eeb563db0c0f39ef0ac",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-01fd31a6e3bf26c8b4a9",
+      "character_id": "5157b8972632",
+      "byte_length": 11719,
+      "source_file_sha1": "9a7a8af22a265d29456fb48d477224d758e6a358",
+      "content_sha256": "7ee4560a291579fae55fa3dc89e06964f64d660e7e9174f1bc3ddd66a9af08d6",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-a1de8840f5bd2f821561",
+      "character_id": "5157b8972632",
+      "byte_length": 95102,
+      "source_file_sha1": "9518e7814dde339ce8fb5200dc0ec1203f6a2a79",
+      "content_sha256": "d318487a57c31d2534e2811aeb7bff465fed25fc10ab8cd3dcf970b5f9381ebe",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-e497e8f492f32d4e4943",
+      "character_id": "5157b8972632",
+      "byte_length": 193950,
+      "source_file_sha1": "3c20eed6a1285adc4f85a1a75b5b9668892e8548",
+      "content_sha256": "a705fd3f14c0bfd93d79903480d2a62824ff305e146c81089e08ba9aa9727574",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-4c34fa7f501cd7bd135c",
+      "character_id": "5157b8972632",
+      "byte_length": 175350,
+      "source_file_sha1": "465f3efb4d926c34e9ef4d8ca1db2838580a8dcb",
+      "content_sha256": "898480f02d74e03df352cc25e46722b21f8846468aebbee2d31b327267244bbd",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-8a51ac3f44512a7b9f1f",
+      "character_id": "5157b8972632",
+      "byte_length": 112866,
+      "source_file_sha1": "7162102745993c41b6e60558a4d6e90e729a4d00",
+      "content_sha256": "ef70022a35ebed3524a8183accb27a44e55cff664b3a861c26b3423aada884fe",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-2042ff672bbc4da88039",
+      "character_id": "5157b8972632",
+      "byte_length": 102208,
+      "source_file_sha1": "4bfe7d0a364c1126aebf4ecc9e24265797fc5066",
+      "content_sha256": "6dd57e8d4f8d2e0ae29711fef538baf76c9952d25b340a5cfa85bc96f8b819bb",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-c0ce7d863c4ad1bafe57",
+      "character_id": "5157b8972632",
+      "byte_length": 25721,
+      "source_file_sha1": "0c0ede3faaf92b2a30cbf3be69be36735e06259e",
+      "content_sha256": "96e59b581e4f95a0f84d8ec97970e9c53ce2f8e23f6623d109ce5e6abbffa430",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-ee3ee5155435bc2dffcc",
+      "character_id": "5157b8972632",
+      "byte_length": 64591,
+      "source_file_sha1": "0766b5047ac398053573bb7c8a87d957572285ca",
+      "content_sha256": "9d7337c02ffbe5f4dfff7fc3b603fd17b674a575218909e73852ce1b3c5d08c5",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-03b3a2e36259170bd7e8",
+      "character_id": "5157b8972632",
+      "byte_length": 38051,
+      "source_file_sha1": "01fcbdfbdf91d074e3ae86c8f48acbe9f7fff024",
+      "content_sha256": "08b951189990b787881b5d9f0b8c93426aaf922cd74618c07c228b4d1a4d5388",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-c6e0e554cdf8b27189b9",
+      "character_id": "5157b8972632",
+      "byte_length": 51426,
+      "source_file_sha1": "1d2728df74226bbacbe037cf8a10feea1ee2968c",
+      "content_sha256": "3cc2cd00dab3e73a6c965a45c25f42642ade7da2442d477888c1ebcb88632632",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-762d41a50d4680fbae75",
+      "character_id": "5157b8972632",
+      "byte_length": 24885,
+      "source_file_sha1": "b76cbf87ad8fc5f316428af3793731212e92e6a4",
+      "content_sha256": "bc3b3d2c48a4e547fa99f5b38720aa88c83512850a0729c12d00f462ba9543e9",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-b11a545501569bbcb808",
+      "character_id": "5157b8972632",
+      "byte_length": 30737,
+      "source_file_sha1": "97a2eb552a17b67815bbd7f549841dce0fae9650",
+      "content_sha256": "089a413080f3072d3c7c0d90898b2e5e98c194c395b917ba0c004c22b1914ec1",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-beaabdaf88dbd3c7fa5f",
+      "character_id": "5157b8972632",
+      "byte_length": 54351,
+      "source_file_sha1": "2429f55d7db6d3fbca114fadc7d4d6b4759d4fe1",
+      "content_sha256": "2aa2a6497fc4739008fc2bb7779593373f8326bfab482fb1299277edc05f564a",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-95e745ceb730ce42f183",
+      "character_id": "5157b8972632",
+      "byte_length": 58113,
+      "source_file_sha1": "f430e0e22665afe1bfd704d6a727346c34137f04",
+      "content_sha256": "4d2a5245969cab06ca82dd4bd574604d28b179d5eeaa8025ef7896454d4a33dc",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-bf0345036f9fa4db5f3f",
+      "character_id": "5157b8972632",
+      "byte_length": 123583,
+      "source_file_sha1": "14418ed9df3bc4e6b24dd72c5885acdfd433237e",
+      "content_sha256": "ce5fb4b59143c3e1eb17045f949bd8ae6af31a7a5b736a0aa18e0f73bae051d0",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-a16a88ab329f7429dafe",
+      "character_id": "5157b8972632",
+      "byte_length": 182108,
+      "source_file_sha1": "8a0ad7443a5f54c3eaa705007eb818afe1c062d0",
+      "content_sha256": "4bd33e2f28b2a0dfe34a26f5b47d5cca26e8f8ce7c1ad3ed7527810648af3bc7",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-c107a5b4cf64d5915fab",
+      "character_id": "5157b8972632",
+      "byte_length": 177674,
+      "source_file_sha1": "ba9192ab2fc91e1a75a5cf80936cb1971bd41471",
+      "content_sha256": "b1a87bd57ab624f26c1975d407f71706979f615f4f6db171e4fa7861fbf65e9f",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-059a1f0e594f05db0d81",
+      "character_id": "5157b8972632",
+      "byte_length": 213352,
+      "source_file_sha1": "a1e50d90ef66d65f8716cb0dd7ca8f32571c62b1",
+      "content_sha256": "c242c4c359c469269e5c5900eab96413295daa54eb1fdc99a12fd077c5647ef3",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-c13ed718e1d4c7b42019",
+      "character_id": "5157b8972632",
+      "byte_length": 194658,
+      "source_file_sha1": "6b06d6dc353ab4e15b3c0dcb6d16fd8f66c1069b",
+      "content_sha256": "f07bc372fa8603f8ff67c3daef2f0f075e4e6e5034d1e501c72306bf1e13f1fd",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-01caa25849a7cf613427",
+      "character_id": "5157b8972632",
+      "byte_length": 15637,
+      "source_file_sha1": "605145b38b7d82c04552be683377a1249dacc01d",
+      "content_sha256": "2614676236c09cff9ad6b27af8c6781ed7258271397f3631544056074f881c63",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-c1511093d15620a48b34",
+      "character_id": "5157b8972632",
+      "byte_length": 17307,
+      "source_file_sha1": "714279fe3cd2faa042007abd84c1816fb1b0c533",
+      "content_sha256": "90a3cc885c3a42f13631da88a4051473e2c7e929ecfe61e0e2883f0b6913a7f9",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-7b0d456bcd20a521e005",
+      "character_id": "5157b8972632",
+      "byte_length": 56832,
+      "source_file_sha1": "32695b1bbfb851cae9243422567170b2c86748a0",
+      "content_sha256": "f514cd400654c831dc86cb21606555b344cf02cde3607eb371faca190a1413a5",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-4bc55378ca46624e990c",
+      "character_id": "5157b8972632",
+      "byte_length": 61270,
+      "source_file_sha1": "a086beaeedc4a136d8b35b0e16f67f19cef2ec1a",
+      "content_sha256": "be840669f9a2149e2de7716784b3f49dd8b799d866316d3f8dbbd0b956265170",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-18a1027fbd260ce9d108",
+      "character_id": "5157b8972632",
+      "byte_length": 21635,
+      "source_file_sha1": "df4d130a4de0bed0da06807775aa18a1136ffbe1",
+      "content_sha256": "801d63cf6f6da4c79038ddc5a57391aa7929cc14fc2bec9ddd3a2113ff697191",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-0808f130f9fb33eb9ecc",
+      "character_id": "5157b8972632",
+      "byte_length": 33233,
+      "source_file_sha1": "63c5cbeda12d59d166ea19d8441ef08ba52bf2e3",
+      "content_sha256": "8c9096b59708cebee6f3a116a461705df1602678011fccc6ec348e5267187dc5",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-584bfcf40e06347eed9b",
+      "character_id": "5157b8972632",
+      "byte_length": 77706,
+      "source_file_sha1": "a447e4eb613012f29e2d280393c1003d309ad791",
+      "content_sha256": "4978e8e65573dfedf9e79e44599c638e05aa7d04319c234f451ec783be2c3404",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    },
+    {
+      "candidate_id": "voice-row-392b6508caefb0fcf1da",
+      "character_id": "5157b8972632",
+      "byte_length": 84922,
+      "source_file_sha1": "085217a20e6d943b577e6510dce9b2612d3f938a",
+      "content_sha256": "1747ba06e10ff34cbdfbb732e682c5845f935ac4854272796f16e02bce493d2c",
+      "content_type": "audio/mpeg",
+      "mp3_magic_verified": true,
+      "full_audio_stream_decoded": true
+    }
+  ],
+  "receipt_sha256": "df8683ea303840a2b18411cd5ce41ed4393b60a3017d29d57acfdc7aa3d01d55"
+}

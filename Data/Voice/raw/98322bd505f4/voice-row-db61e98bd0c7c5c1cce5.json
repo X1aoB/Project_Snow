@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-db61e98bd0c7c5c1cce5",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 34,
+  "trigger": "标题",
+  "transcript": "尘白禁区",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/be/7kww0nen7l5oe82j69jjch7nxwfwmm6.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 84680,
+  "content_sha256": "5b2c5b0ff646ed7caef583be498fd864d09411ebd1327e17e9a791281e0a3628",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-c2a0fcb068b4eb9e0d13",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 18,
+  "trigger": "共鸣1",
+  "transcript": "芙提雅·伊格尼斯，全长一米六零！真的哦~",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/f/ff/mftcohqfeoy2bdn1f1de4jaep16kgi4.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 192305,
+  "content_sha256": "e8ac435abc3cbfe39a5d11f3f3b1096de44925b9e521225daa8cee06f0c8a307",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

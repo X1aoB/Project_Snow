@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-250bea99b157a52fbd12",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 16,
+  "trigger": "活动提醒",
+  "transcript": "你知道吗？养成一个好习惯，需要坚持一百八十天，但堕落的话只要一个念头就够了。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/2/2e/rko50vdrlwp683vp5ywnu6a1lolpqzr.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 303064,
+  "content_sha256": "298e30f2e2d1c5c7cac14bed87ccff841dc3f7d749aefde4db428fc139f3b501",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-56cd9aee2b273e7ca137",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 28,
+  "trigger": "看板娘展示1",
+  "transcript": "啊？哎呀，果然没白等，今天我是第一个见到分析员的人。嗯哼~",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/b/b0/neoshyh11hnfb11db82v0mckoygfjkh.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 497415,
+  "content_sha256": "07212d7fc8647502ce06168e97fe5e90f23977b2f78129621ca74c0a5694a9ec",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

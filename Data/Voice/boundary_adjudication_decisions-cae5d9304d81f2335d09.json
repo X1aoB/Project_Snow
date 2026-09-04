@@ -1,0 +1,83 @@
+{
+  "schema_version": "project-snow-private-local-voice-boundary-adjudication-decisions-1",
+  "audit_id": "voice-recording-boundary-audit-cae5d9304d81f2335d09",
+  "audit_manifest_sha256": "3b5907abc86e2048a47732b1ab284d3009cd5d5ede9b89dd850238104d51a176",
+  "candidate_set_sha256": "e2827cd644caaba28a533de8da474fab72fd1665e37deb91b328e451c3e261d8",
+  "reviewer_id": "codex_gpu_boundary_review",
+  "decision_ordinals": {
+    "accepted_machine_recut": [
+      4, 5, 9, 10, 12, 13, 15, 17, 18, 19, 22, 26, 29, 30, 31,
+      33, 34, 35, 36, 38, 39, 42, 45, 46, 50, 51, 54, 55, 56, 57,
+      58, 59, 60, 62, 63, 66, 67, 68, 71, 72, 74, 79, 82, 90, 93,
+      97, 99, 100, 101, 103, 105, 109, 110, 112, 113, 114, 115, 119,
+      122, 123, 125, 126, 127, 129, 130, 131, 134, 135, 139, 141,
+      142, 144, 146, 147, 151, 152, 154, 155, 156, 157, 159
+    ],
+    "accepted_metric_review": [
+      2, 3, 6, 7, 20, 25, 32, 40, 53, 61, 64, 65, 69, 73, 76,
+      83, 84, 85, 87, 88, 89, 91, 94, 95, 96, 98, 102, 106, 107,
+      108, 116, 117, 118, 121, 124, 132, 133, 136, 137, 138, 143,
+      148, 149, 150, 153, 158, 160, 161
+    ],
+    "accepted_targeted_gpu_review": [],
+    "excluded_followup": [
+      1, 8, 11, 14, 16, 21, 23, 24, 27, 28, 37, 41, 43, 44, 47,
+      48, 49, 52, 70, 75, 77, 78, 80, 81, 86, 92, 104, 111, 120,
+      128, 140, 145
+    ]
+  },
+  "sample_flags_by_ordinal": {
+    "39": [
+      "outside_preferred_duration",
+      "short_duration_not_standalone"
+    ],
+    "72": [
+      "outside_preferred_duration",
+      "short_duration_not_standalone"
+    ],
+    "88": [
+      "tight_silence_trim_required"
+    ],
+    "90": [
+      "outside_preferred_duration"
+    ],
+    "91": [
+      "outside_preferred_duration",
+      "short_duration_not_standalone"
+    ],
+    "95": [
+      "outside_preferred_duration"
+    ],
+    "96": [
+      "outside_preferred_duration",
+      "short_duration_not_standalone"
+    ],
+    "102": [
+      "outside_preferred_duration",
+      "short_duration_not_standalone"
+    ],
+    "114": [
+      "outside_preferred_duration",
+      "short_duration_not_standalone"
+    ],
+    "132": [
+      "outside_preferred_duration"
+    ],
+    "135": [
+      "outside_preferred_duration",
+      "short_duration_not_standalone"
+    ],
+    "136": [
+      "outside_preferred_duration",
+      "short_duration_not_standalone"
+    ],
+    "139": [
+      "outside_preferred_duration",
+      "short_duration_not_standalone"
+    ],
+    "147": [
+      "outside_preferred_duration",
+      "short_duration_not_standalone"
+    ]
+  }
+}

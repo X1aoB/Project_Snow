@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-2ef57900f7deb176f886",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 18,
+  "trigger": "共鸣1",
+  "transcript": "身为观测者，我可以看清前路所向。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/2/23/ei0nj0k0pyyobgs5bxpgwj2k5042n7w.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 163048,
+  "content_sha256": "447f387f1040b70f3bf4ff16d1960708b9eb9cf1943cea4255aa83e059ff9d00",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

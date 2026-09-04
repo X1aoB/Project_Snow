@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-f8c3fded371f6603e7c3",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 29,
+  "trigger": "获得补给2",
+  "transcript": "马上就好了哦。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/d/d2/fsvuhig6abvmw8yu3dup0i2u16r3ci5.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 58558,
+  "content_sha256": "6f9913eb4333343e88eaf89394727f15dc5eccea6f831c72576c661c8575a639",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

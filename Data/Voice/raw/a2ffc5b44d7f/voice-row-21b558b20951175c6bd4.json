@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-21b558b20951175c6bd4",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 33,
+  "trigger": "升级2",
+  "transcript": "投入和变强是守恒的哟。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/d/d7/1hohopkuiqni5pn5jqei8ies0vulm9d.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 112893,
+  "content_sha256": "384844f7b89b898f790eec92487b2a786e9ead8b2d04b0fc9a82f9dc516dc7ed",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

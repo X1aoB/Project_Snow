@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-556bf032bec866c69fc4",
+  "character_id": "a2ffc5b44d7f",
+  "character_name": "芙提雅",
+  "armor_id": "6e4cda85e2ad",
+  "armor_name": "小太阳",
+  "source_page_id": "fb50d151cf7f",
+  "source_html_sha256": "b659279eb0a463ab8340ded0882af0e9b8e8dbf4a30a01f114d33858dd01d38b",
+  "row_ordinal": 23,
+  "trigger": "重伤退场",
+  "transcript": "和计算结果……差距好大……",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/0/06/djayodjy6e2w1t3cpuqppyb9kzm3ag0.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 234101,
+  "content_sha256": "0ead1070a7047668b7e5340e237efcbe1e4297850db5d81c56ea0ab3b356a3f0",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

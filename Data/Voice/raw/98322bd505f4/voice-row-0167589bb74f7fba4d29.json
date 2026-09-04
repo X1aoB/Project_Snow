@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-0167589bb74f7fba4d29",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 20,
+  "trigger": "放弃",
+  "transcript": "以退为进。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/2/20/qe8c0ynir9t3vcxgiew3olkiqe14g9a.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 73187,
+  "content_sha256": "b1f82d8e8f191628649fd0f2c5d12b418ce98981667f7f5fd02a83871e847136",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

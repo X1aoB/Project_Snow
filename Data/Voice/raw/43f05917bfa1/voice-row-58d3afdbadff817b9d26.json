@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-58d3afdbadff817b9d26",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 9,
+  "trigger": "接敌2",
+  "transcript": "别怕我在的。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/e/e8/41o3cyuux4bexg27xkxiuhxontx99yr.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 61693,
+  "content_sha256": "5e63b985eb40fabb05186c06c9243fd6b6f586f6a6681fac9bbd81fedcc04fa8",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

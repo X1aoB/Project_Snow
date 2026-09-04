@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-f4991de6ef745743fd9f",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 31,
+  "trigger": "获得物资2",
+  "transcript": "如虎添翼。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/5/51/h5tr5svdvmx8mh5btsj20n5yr89oxlv.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 70052,
+  "content_sha256": "daad1342cff2d1bb01ea39bb60fb17d8fe7125169a5cf239f53ac299f65515fa",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

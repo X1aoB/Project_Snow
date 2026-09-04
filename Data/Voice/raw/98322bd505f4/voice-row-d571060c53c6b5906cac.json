@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-d571060c53c6b5906cac",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 27,
+  "trigger": "互动3",
+  "transcript": "我最近读了一本有趣的书，要不要讲给你听？",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/0/0e/48x6so6j2h11wx1lz16jse3948m1bjm.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 178721,
+  "content_sha256": "5975e8f4c3d508110b621ab6181f01b3a0fd617a7b8b41a39e4e46b7404cee67",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

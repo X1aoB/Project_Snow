@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-bad1ce3b60ddb58ad303",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 32,
+  "trigger": "升级1",
+  "transcript": "变强，就能保护好她了。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/e/e7/qzgbhc63xfd0ferjg290aiwapjoc322.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 122297,
+  "content_sha256": "6248d5bb49c5eae71330f23e5af3b932e2e724d39e5fd270b693027f8e4c965e",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

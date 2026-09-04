@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-c9abc6bd7e4a85e94cd5",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 17,
+  "trigger": "节日",
+  "transcript": "每一次节日都会增加，特别的回忆，不要错过。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/8/8f/s1h82yikl6qtqpxpz1unkv3pf43y5xh.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 199619,
+  "content_sha256": "1cf0966cc4bd4032d325239ce6c292c006c1f1d6fe571c09e6d806e993186485",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

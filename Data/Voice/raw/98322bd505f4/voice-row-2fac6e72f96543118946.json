@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-2fac6e72f96543118946",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 39,
+  "trigger": "其他1",
+  "transcript": "泰坦降临那天的每一个细节我都不会忘记，不是因为超抑症，而是我想要记住。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/d/dc/40nsreg02akm60gan52slhhaa00d16r.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 382476,
+  "content_sha256": "72e55610c97472bf9450885fab8aa5b37037974ac0cec9824b95762b384701e8",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

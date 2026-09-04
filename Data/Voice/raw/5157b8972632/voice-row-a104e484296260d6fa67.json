@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-a104e484296260d6fa67",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 42,
+  "trigger": "战斗胜利2",
+  "transcript": "啊，接下来就是独属于我们的世界。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/f/f7/72xiyx22sazm8i2nxapm0qmuoqbjhbw.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 322917,
+  "content_sha256": "d35d7c225ced76da1026cea34bcac7e88062f29b65b46d046d7a6a39431590ea",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

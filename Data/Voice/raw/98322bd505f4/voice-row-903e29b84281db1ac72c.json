@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-903e29b84281db1ac72c",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 47,
+  "trigger": "常规技2",
+  "transcript": "部署就位，保持火力。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/4/44/lakj8h8pbyron6uq7qhzuasctfgsduz.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 106623,
+  "content_sha256": "c5301a266ea9df65b8638b3a5590fa90d210d98067548c12eed85189413138ac",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

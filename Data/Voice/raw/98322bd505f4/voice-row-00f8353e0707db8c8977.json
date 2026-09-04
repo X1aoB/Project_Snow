@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-00f8353e0707db8c8977",
+  "character_id": "98322bd505f4",
+  "character_name": "辰星",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "5a83e22ff597",
+  "source_html_sha256": "351dc092ec4525893501f2892a9335df7d227c1fd91bdec49997382632200186",
+  "row_ordinal": 37,
+  "trigger": "看板娘展示2",
+  "transcript": "我有被赋予的使命，但我更想为自己的愿望而战。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/9/91/gr1p43b51au35eo1p1925wnkr4nyq02.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 261268,
+  "content_sha256": "7d0719da4e0937b3fcd0278b86ac3e7cc01308416039450e9f0655399a5b6b0e",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

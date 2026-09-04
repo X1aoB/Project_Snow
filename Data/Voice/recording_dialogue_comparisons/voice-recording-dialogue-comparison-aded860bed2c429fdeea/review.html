@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Project Snow 长对话样本对照</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:32px auto;padding:0 20px;color:#20242b;background:#f5f7fa}section{background:#fff;border:1px solid #d9dee8;border-radius:12px;padding:20px;margin:20px 0}.pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}article{background:#f7f9fc;padding:12px;border-radius:8px}audio{width:100%}.text{white-space:normal}.metrics{color:#4a5568}.warning{padding:12px;background:#fff4d6;border-left:4px solid #d49b00}</style></head>
+<body><h1>Project Snow 长对话样本对照</h1>
+<p class="warning">仅用于本地自然节奏/安全静音压缩试听。未批准训练、声音克隆、Provider 注册、权利接受或公网发布。</p>
+<p>审核重点：压缩版是否出现吞字、切气口、节奏突兀或语义停顿被破坏。屏幕文本是逐字稿真值，ASR 不参与改写。</p>
+
+<section>
+  <h2>A · 茉莉安 · candidate 129</h2>
+  <p class="text">普通子弹只能对天启者造成皮外伤，战术装备带来的压迫感我也挺得过去，唯有您赋予的痛楚，像一把无形却锋利的佩剑，</p>
+  <p><a href="A/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="A/natural.wav"></audio><p>16.545375 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="A/compacted.wav"></audio><p>14.985917 秒；压缩切点 2 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 10.74%；原始逐帧静音比 41.20%（仅观察）；SNR 31.305 dB；true peak -9.432 dBTP。</p>
+</section>
+<section>
+  <h2>B · 茉莉安 · candidate 131</h2>
+  <p class="text">但又因这一切都来自分析员，我会全盘欣然接受。<br><br>既已确定终极所指的方向，那么能够满足我好奇心的，就只有分析员了。</p>
+  <p><a href="B/displayed_text.txt">逐字屏幕文本</a></p>
+  <div class="pair">
+    <article><h3>自然节奏版</h3><audio controls preload="metadata" src="B/natural.wav"></audio><p>16.21 秒</p></article>
+    <article><h3>安全压缩版</h3><audio controls preload="metadata" src="B/compacted.wav"></audio><p>13.2535 秒；压缩切点 3 个</p></article>
+  </div>
+  <p class="metrics">持续静音超额比 4.75%；原始逐帧静音比 28.05%（仅观察）；SNR 29.598 dB；true peak -9.712 dBTP。</p>
+</section></body></html>

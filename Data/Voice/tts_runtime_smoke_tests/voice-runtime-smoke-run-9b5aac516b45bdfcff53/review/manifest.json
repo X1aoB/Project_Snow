@@ -1,0 +1,79 @@
+{
+  "schema_version": "project-snow-local-voice-runtime-smoke-review-1",
+  "run_id": "voice-runtime-smoke-run-9b5aac516b45bdfcff53",
+  "status": "ready_for_local_runtime_smoke_listening",
+  "source_manifest_sha256": "186e8d844f8933204c75168477791e07a56f362d5ebfae832e52de4f1f4615f5",
+  "summary": {
+    "sample_count": 5,
+    "paused_slot_called": false,
+    "new_preference_round_created": false
+  },
+  "privacy_contract": {
+    "provider_voice_ids_included": false,
+    "workspace_id_included": false,
+    "local_review_only": true
+  },
+  "samples": [
+    {
+      "sequence": 1,
+      "case_id": "vidya-neutral-short",
+      "runtime_character_name": "薇蒂雅",
+      "style": "neutral",
+      "text": "今天的安排很清楚，我们按顺序继续就好。",
+      "audio_relative_path": "../audio/vidya/01-runtime-smoke-output-1fb0d14b6c7c0533.wav",
+      "duration_seconds": 3.92,
+      "peak_dbfs": -12.675601,
+      "full_scale_sample_count": 0,
+      "wav_sha256": "8e221a0e08d38c426d0a29892f0428c172612fa505a12f581e4fcdcdd2136cff"
+    },
+    {
+      "sequence": 2,
+      "case_id": "vidya-heightened",
+      "runtime_character_name": "薇蒂雅",
+      "style": "heightened",
+      "text": "别移开视线！这一次，我绝不会让你逃走！",
+      "audio_relative_path": "../audio/vidya/02-runtime-smoke-output-c699a15caaf2c26d.wav",
+      "duration_seconds": 5.84,
+      "peak_dbfs": -8.937119,
+      "full_scale_sample_count": 0,
+      "wav_sha256": "361588c15d7b6a560fa71e3e38a3abff1016b904be0096ca050b42fa196247c3"
+    },
+    {
+      "sequence": 3,
+      "case_id": "chenxing-neutral-short",
+      "runtime_character_name": "辰星",
+      "style": "neutral",
+      "text": "检查已经完成，接下来可以安心推进。",
+      "audio_relative_path": "../audio/chenxing/03-runtime-smoke-output-56038a0c4b34dc17.wav",
+      "duration_seconds": 4.0,
+      "peak_dbfs": -11.774949,
+      "full_scale_sample_count": 0,
+      "wav_sha256": "ba0b98e2d503d4eb3b466f5f253b2f3fa0db92dd3373a38658bb1d41dfb4bc59"
+    },
+    {
+      "sequence": 4,
+      "case_id": "chenxing-breathy-lexical",
+      "runtime_character_name": "辰星",
+      "style": "breathy",
+      "text": "声音放轻些，我就在你身边，不必惊动其他人。",
+      "audio_relative_path": "../audio/chenxing/04-runtime-smoke-output-3d00c0a88674933e.wav",
+      "duration_seconds": 5.12,
+      "peak_dbfs": -12.110394,
+      "full_scale_sample_count": 0,
+      "wav_sha256": "2ff1a9e838bfa445b98a916dfe9935d41d43fdb57e012f4ca50cf66ed48829e5"
+    },
+    {
+      "sequence": 5,
+      "case_id": "chenxing-heightened",
+      "runtime_character_name": "辰星",
+      "style": "heightened",
+      "text": "抓紧我的手！别回头，我们现在就离开这里！",
+      "audio_relative_path": "../audio/chenxing/05-runtime-smoke-output-95faa96fb5b48453.wav",
+      "duration_seconds": 5.12,
+      "peak_dbfs": -7.866648,
+      "full_scale_sample_count": 0,
+      "wav_sha256": "8f5c3a312dd6ef61fbe11e02720a9838d4234ef2ee5776225b0221484a77650b"
+    }
+  ],
+  "manifest_sha256": "ead91cb9111a61d99bb7a2c8e1bc2999fbc37ff2bf1f3615a99ac3b7e3d4d829"
+}

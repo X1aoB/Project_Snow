@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-7f9e79e76ba305efaf06",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 15,
+  "trigger": "信息提醒",
+  "transcript": "有信息哦，记得查看错过重要的事就不好了。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/e/e8/scbt0vgc2mtpwlgx30jy6ynn1qfh9mr.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 197529,
+  "content_sha256": "761712ab114acb48ee746728995269b999237f35f49d0e749c10aacf34394953",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

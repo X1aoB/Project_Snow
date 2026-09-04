@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-6537f395367b994c28f0",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 30,
+  "trigger": "登录",
+  "transcript": "嗯，你有空的话，稍后再陪我走一遍戏吧。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/8/87/stoa87pr3ez6fnxt31015s3o979377d.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 493236,
+  "content_sha256": "eba6c16d92897381944730e4c101ef1dfdbf23785da8606261536f6dd1046eb2",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

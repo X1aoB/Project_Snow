@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-d13d8873eff5a075ce6d",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 40,
+  "trigger": "其他2",
+  "transcript": "加入海姆达尔部队，是因为我找到了必须要做的事。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/5/52/ocn1mt8hvr8bd35qx2pmvx87hedadql.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 207978,
+  "content_sha256": "cd9443523c0307b52e1b87111bf944479a6ee538d5389f82051b57cd0eeed2da",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

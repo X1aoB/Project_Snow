@@ -1,0 +1,716 @@
+{
+  "schema_version": "project-snow-private-voice-corpus-routing-1",
+  "routing_id": "voice-corpus-routing-14f909c7aab99190ef66",
+  "recorded_at": "2026-09-02T04:25:53+00:00",
+  "artifact_purpose": "immutable_candidate_only_voice_corpus_routing",
+  "routing_status": "complete_as_candidate_only",
+  "stable_identity": {
+    "routing_profile": "project-snow-reviewed-span-routing-profile-1",
+    "source_submission_id": "voice-span-asr-review-submission-4e6e7ca1d7a4c3c301b3",
+    "source_submission_receipt_sha256": "e1c67e17339362c60b9390e27ca3a643fd0f8e59f83206a3fdf7d30cfccb1c91",
+    "source_submission_byte_sha256": "377d8bd80bba53d3a875c41ef8dc9ee0a93be3a59247697aa5e1b09b9cf8523a",
+    "source_package_id": "voice-span-review-package-6bafdaecd6fa9468a9d7",
+    "source_package_manifest_sha256": "8b9b32857dd5a216deb19c5f6ca27bf8c74b8f5c1127fda9c01adf262ed089c1",
+    "paralinguistic_review_id": "voice-paralinguistic-review-92ca0d77e99048d16d66",
+    "paralinguistic_receipt_sha256": "9c154faa195aec098c03a7ef86176f9f07dca2aa99b312ec7f41cc0bce5da4c0",
+    "reviewer_id": "xiaob",
+    "route_set_sha256": "755f5cae861c8342fb469ae6240b100d6e90e62fbd873a44d9425eb04f104ae7"
+  },
+  "stable_identity_sha256": "14f909c7aab99190ef663e2af7f221456a43795077cc7056e25ee46e236d1545",
+  "source_artifacts": {
+    "submission": {
+      "submission_id": "voice-span-asr-review-submission-4e6e7ca1d7a4c3c301b3",
+      "receipt_sha256": "e1c67e17339362c60b9390e27ca3a643fd0f8e59f83206a3fdf7d30cfccb1c91",
+      "byte_sha256": "377d8bd80bba53d3a875c41ef8dc9ee0a93be3a59247697aa5e1b09b9cf8523a"
+    },
+    "asr_run": {
+      "run_id": "voice-span-asr-run-bae021e55e7a51588cfc",
+      "manifest_sha256": "9481d0a6246bb64093f2cf01f016272c60c9ebb0baef0c50b337acaf41cdad9c",
+      "byte_sha256": "b1033577409bc6a3a3135885418a27f336c07e6996eab2357549d2e351e21921"
+    },
+    "review_package": {
+      "package_id": "voice-span-review-package-6bafdaecd6fa9468a9d7",
+      "manifest_sha256": "8b9b32857dd5a216deb19c5f6ca27bf8c74b8f5c1127fda9c01adf262ed089c1",
+      "byte_sha256": "861c5a2ed25e1714d4d975a632097a1eb37554c365e8dabb79ca5e8fe4b8a891"
+    },
+    "span_review_queue": {
+      "byte_sha256": "160765819cda7794b82f6d51a65ab473bc632a046aaeb192da429deb2b4068f2"
+    },
+    "paralinguistic_review": {
+      "review_id": "voice-paralinguistic-review-92ca0d77e99048d16d66",
+      "receipt_sha256": "9c154faa195aec098c03a7ef86176f9f07dca2aa99b312ec7f41cc0bce5da4c0",
+      "byte_sha256": "c792986bcc2da3afad31ced8850a5d1cc086d77d82c591ec8693b84d001afc08"
+    }
+  },
+  "routing_rules": {
+    "lexical_ordinals": [
+      1,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      13,
+      14,
+      15
+    ],
+    "paralinguistic_ordinals": [
+      2,
+      3
+    ],
+    "duplicate_ordinal": 12,
+    "duplicate_of_ordinal": 11,
+    "candidate_does_not_mean_training_approved": true
+  },
+  "route_set_sha256": "755f5cae861c8342fb469ae6240b100d6e90e62fbd873a44d9425eb04f104ae7",
+  "routes": [
+    {
+      "ordinal": 1,
+      "span_id": "voice-span-80d24e754e3621808ddc",
+      "character": {
+        "character_id": "5157b8972632",
+        "character_name": "薇蒂雅",
+        "selected_source": {
+          "source_page_id": "6d7ce3ae6026",
+          "armor_id": "30878200de72",
+          "armor_name": "龙舌兰",
+          "armor_semantics": "explicit_selected_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/001-voice-span-80d24e754e3621808ddc.wav",
+        "sha256": "1d23be2ea45ba7e07059963d7db7fc432b2c0cae1de7c13991df0f6d88e9fb60",
+        "byte_count": 232364,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 116160,
+        "duration_seconds": 4.84,
+        "source_range": {
+          "start_frame": 5280,
+          "end_frame_exclusive": 121440
+        }
+      },
+      "transcript": {
+        "decision": "accepted_exact",
+        "text": "昨天成功摸到分析员的腹肌了,那今天我可以……",
+        "text_utf8_sha256": "17751585420fb933f8cb6a555afedebed03d0c274fc930a247a2b4b8ffdb2b50",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 2,
+      "span_id": "voice-span-30b1e82c2219f5408c9f",
+      "character": {
+        "character_id": "5157b8972632",
+        "character_name": "薇蒂雅",
+        "selected_source": {
+          "source_page_id": "6d7ce3ae6026",
+          "armor_id": "30878200de72",
+          "armor_name": "龙舌兰",
+          "armor_semantics": "explicit_selected_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/002-voice-span-30b1e82c2219f5408c9f.wav",
+        "sha256": "07890d8bb74222da1c44015e87e91c13f662d8b09f0ddf4e12f52a6fa9c12058",
+        "byte_count": 133484,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 66720,
+        "duration_seconds": 2.78,
+        "source_range": {
+          "start_frame": 136800,
+          "end_frame_exclusive": 203520
+        }
+      },
+      "paralinguistic_event": {
+        "review_id": "voice-paralinguistic-review-92ca0d77e99048d16d66",
+        "event_type": "nonlexical_murmur",
+        "phonetic_surface": "啊啊啊",
+        "phonetic_surface_utf8_sha256": "19bc388febfecd6a6653652c3d5b258cb34dda22c358a37481493de7900600c0"
+      },
+      "routing": {
+        "track": "paralinguistic_event_candidate",
+        "status": "retained_pending_human_event_qa",
+        "base_tts_training": "excluded"
+      }
+    },
+    {
+      "ordinal": 3,
+      "span_id": "voice-span-f8f9e97cb60ff69edf84",
+      "character": {
+        "character_id": "5157b8972632",
+        "character_name": "薇蒂雅",
+        "selected_source": {
+          "source_page_id": "6d7ce3ae6026",
+          "armor_id": "30878200de72",
+          "armor_name": "龙舌兰",
+          "armor_semantics": "explicit_selected_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/003-voice-span-f8f9e97cb60ff69edf84.wav",
+        "sha256": "aacfb68f137cb4a99b707bd3cf14af10727831d6392b8ffd3f2755f162809006",
+        "byte_count": 92204,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 46080,
+        "duration_seconds": 1.92,
+        "source_range": {
+          "start_frame": 219840,
+          "end_frame_exclusive": 265920
+        }
+      },
+      "paralinguistic_event": {
+        "review_id": "voice-paralinguistic-review-92ca0d77e99048d16d66",
+        "event_type": "nonlexical_murmur",
+        "phonetic_surface": "啊",
+        "phonetic_surface_utf8_sha256": "7c2c50fbaf7b274733d5fa623040492ef299c898075f8fc47fd28356c7e08898"
+      },
+      "routing": {
+        "track": "paralinguistic_event_candidate",
+        "status": "retained_pending_human_event_qa",
+        "base_tts_training": "excluded"
+      }
+    },
+    {
+      "ordinal": 4,
+      "span_id": "voice-span-05a93131340fcfc7474f",
+      "character": {
+        "character_id": "5157b8972632",
+        "character_name": "薇蒂雅",
+        "selected_source": {
+          "source_page_id": "6d7ce3ae6026",
+          "armor_id": "30878200de72",
+          "armor_name": "龙舌兰",
+          "armor_semantics": "explicit_selected_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/004-voice-span-05a93131340fcfc7474f.wav",
+        "sha256": "393dde17682fa39edc72be1c3c3184ad680042b73cb373414182d0e498a3ff86",
+        "byte_count": 127724,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 63840,
+        "duration_seconds": 2.66,
+        "source_range": {
+          "start_frame": 296160,
+          "end_frame_exclusive": 360000
+        }
+      },
+      "transcript": {
+        "decision": "corrected_from_audio",
+        "text": "是..是分析员",
+        "text_utf8_sha256": "501e5f3b2ea9c31419a64f9d14adf40515365a333b6dfa423fd04a17528dbf63",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 5,
+      "span_id": "voice-span-f015499d412ae75a1991",
+      "character": {
+        "character_id": "5157b8972632",
+        "character_name": "薇蒂雅",
+        "selected_source": {
+          "source_page_id": "6d7ce3ae6026",
+          "armor_id": "30878200de72",
+          "armor_name": "龙舌兰",
+          "armor_semantics": "explicit_selected_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/005-voice-span-f015499d412ae75a1991.wav",
+        "sha256": "5419b30ed0d59a5cdafda1748dd130bc6919085b251db5a061648c8b527955eb",
+        "byte_count": 151724,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 75840,
+        "duration_seconds": 3.16,
+        "source_range": {
+          "start_frame": 113760,
+          "end_frame_exclusive": 189600
+        }
+      },
+      "transcript": {
+        "decision": "accepted_exact",
+        "text": "果然没白等,今天我是第一个见到分析员的人。",
+        "text_utf8_sha256": "be80de965b862362a2934d9d11e16cf965f5dd9e01fe615794fe24c71dcec867",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 6,
+      "span_id": "voice-span-fc23b647fab9a353c30b",
+      "character": {
+        "character_id": "5157b8972632",
+        "character_name": "薇蒂雅",
+        "selected_source": {
+          "source_page_id": "6d7ce3ae6026",
+          "armor_id": "30878200de72",
+          "armor_name": "龙舌兰",
+          "armor_semantics": "explicit_selected_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/006-voice-span-fc23b647fab9a353c30b.wav",
+        "sha256": "7c1c35de4b41824bd5f908b860d41ade8a4a3b7f5ac0a696948194e2788c97a5",
+        "byte_count": 143084,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 71520,
+        "duration_seconds": 2.98,
+        "source_range": {
+          "start_frame": 6240,
+          "end_frame_exclusive": 77760
+        }
+      },
+      "transcript": {
+        "decision": "corrected_from_audio",
+        "text": "分析员，我可以走近些看看你吗？",
+        "text_utf8_sha256": "aa142cb9d45b5f496c9eec9e39d6e02495d6da8595c32443aa34b1bccb555066",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 7,
+      "span_id": "voice-span-852e814262944c75c14b",
+      "character": {
+        "character_id": "5157b8972632",
+        "character_name": "薇蒂雅",
+        "selected_source": {
+          "source_page_id": "6d7ce3ae6026",
+          "armor_id": "30878200de72",
+          "armor_name": "龙舌兰",
+          "armor_semantics": "explicit_selected_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/007-voice-span-852e814262944c75c14b.wav",
+        "sha256": "e218d13aadcd22ea38fc3e144fb7614e7eb33557174606cae3f68c3a38e95ebd",
+        "byte_count": 297644,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 148800,
+        "duration_seconds": 6.2,
+        "source_range": {
+          "start_frame": 97920,
+          "end_frame_exclusive": 246720
+        }
+      },
+      "transcript": {
+        "decision": "corrected_from_audio",
+        "text": "那,我能摸摸你吗?我,我这都是为了下一部作品在取材,嗯。",
+        "text_utf8_sha256": "f236a49a3dba4881827e19add8a3cf1bcd878de29b86ac6609fa68af6ba98a20",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 8,
+      "span_id": "voice-span-26756217f1f0f8e271b9",
+      "character": {
+        "character_id": "98322bd505f4",
+        "character_name": "辰星",
+        "selected_source": {
+          "source_page_id": "5a83e22ff597",
+          "armor_id": "",
+          "armor_name": "",
+          "armor_semantics": "selected_default_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/008-voice-span-26756217f1f0f8e271b9.wav",
+        "sha256": "1ee7de161ed0e9d863866f4a4a4320541610cd84a20b3c873db7ff02ec4e93cb",
+        "byte_count": 139244,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 69600,
+        "duration_seconds": 2.9,
+        "source_range": {
+          "start_frame": 1440,
+          "end_frame_exclusive": 71040
+        }
+      },
+      "transcript": {
+        "decision": "accepted_exact",
+        "text": "如此重要的事情,我希望你不要忘记。",
+        "text_utf8_sha256": "1230a642407e07141dce7dd12676d64f76cd412c7a6529e314f1c79e7099e362",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 9,
+      "span_id": "voice-span-428b35929bca0bcc35ad",
+      "character": {
+        "character_id": "98322bd505f4",
+        "character_name": "辰星",
+        "selected_source": {
+          "source_page_id": "5a83e22ff597",
+          "armor_id": "",
+          "armor_name": "",
+          "armor_semantics": "selected_default_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/009-voice-span-428b35929bca0bcc35ad.wav",
+        "sha256": "5a3d33e10d34743baab2b31c2bab8513457d987b04c2b01ec17d84a97335598e",
+        "byte_count": 118124,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 59040,
+        "duration_seconds": 2.46,
+        "source_range": {
+          "start_frame": 1920,
+          "end_frame_exclusive": 60960
+        }
+      },
+      "transcript": {
+        "decision": "corrected_from_audio",
+        "text": "风雨晦明，潮汐云烟",
+        "text_utf8_sha256": "79c86514a5d50bf73e51be854c0bcd8a46f335b261b2d9b4092a0770c0b0d4b7",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 10,
+      "span_id": "voice-span-2204e9713a8251101b9b",
+      "character": {
+        "character_id": "98322bd505f4",
+        "character_name": "辰星",
+        "selected_source": {
+          "source_page_id": "5a83e22ff597",
+          "armor_id": "",
+          "armor_name": "",
+          "armor_semantics": "selected_default_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/010-voice-span-2204e9713a8251101b9b.wav",
+        "sha256": "99dfd0a4af1a46d87f81ef142e30ee82d8fbce029b901956bcdfbf7a01a2ce3f",
+        "byte_count": 42284,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 21120,
+        "duration_seconds": 0.88,
+        "source_range": {
+          "start_frame": 72960,
+          "end_frame_exclusive": 94080
+        }
+      },
+      "transcript": {
+        "decision": "corrected_from_audio",
+        "text": "皆昭前路",
+        "text_utf8_sha256": "1e9fd4f26901e7d7fecc036a749922abaac0f569a02f6c11f1103128901e3d5a",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 11,
+      "span_id": "voice-span-4f7fa278be1234445da0",
+      "character": {
+        "character_id": "98322bd505f4",
+        "character_name": "辰星",
+        "selected_source": {
+          "source_page_id": "5a83e22ff597",
+          "armor_id": "",
+          "armor_name": "",
+          "armor_semantics": "selected_default_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/011-voice-span-4f7fa278be1234445da0.wav",
+        "sha256": "1078e851e2875fe368cebe5d395034fe8b5267b3f11dac75738b07927de613d1",
+        "byte_count": 158924,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 79440,
+        "duration_seconds": 3.31,
+        "source_range": {
+          "start_frame": 6240,
+          "end_frame_exclusive": 85680
+        }
+      },
+      "transcript": {
+        "decision": "accepted_exact",
+        "text": "正确的选择,才能导向正确的结果。",
+        "text_utf8_sha256": "0dc610b8cf17ae97bb8442d38d72d7b689c76df914dba824e6121c54d1b0565d",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 12,
+      "span_id": "voice-span-367175425cb532c43662",
+      "character": {
+        "character_id": "98322bd505f4",
+        "character_name": "辰星",
+        "selected_source": {
+          "source_page_id": "5a83e22ff597",
+          "armor_id": "",
+          "armor_name": "",
+          "armor_semantics": "selected_default_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/012-voice-span-367175425cb532c43662.wav",
+        "sha256": "bcf7ca09a3099d4f5c0d8f07df2eb4c689d141e4d1cb6d7929429ed3f7fbf322",
+        "byte_count": 159884,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 79920,
+        "duration_seconds": 3.33,
+        "source_range": {
+          "start_frame": 3120,
+          "end_frame_exclusive": 83040
+        }
+      },
+      "transcript": {
+        "decision": "accepted_exact",
+        "text": "正确的选择,才能导向正确的结果。",
+        "text_utf8_sha256": "0dc610b8cf17ae97bb8442d38d72d7b689c76df914dba824e6121c54d1b0565d",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "excluded_duplicate",
+        "status": "excluded",
+        "reason_code": "duplicate_utterance_text",
+        "duplicate_of_ordinal": 11,
+        "base_tts_training": "excluded"
+      }
+    },
+    {
+      "ordinal": 13,
+      "span_id": "voice-span-65e3dbf47ea72878d122",
+      "character": {
+        "character_id": "98322bd505f4",
+        "character_name": "辰星",
+        "selected_source": {
+          "source_page_id": "5a83e22ff597",
+          "armor_id": "",
+          "armor_name": "",
+          "armor_semantics": "selected_default_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/013-voice-span-65e3dbf47ea72878d122.wav",
+        "sha256": "11874cb6caf5df3507cdb6aa0c2635579b1883c322e246404b7ac570690acb9c",
+        "byte_count": 57644,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 28800,
+        "duration_seconds": 1.2,
+        "source_range": {
+          "start_frame": 3360,
+          "end_frame_exclusive": 32160
+        }
+      },
+      "transcript": {
+        "decision": "accepted_exact",
+        "text": "很快就能结束。",
+        "text_utf8_sha256": "5803f72184aa39a7932820b99bbc8e59cb0cb5f399501bd59bc50bc168a2d6e5",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 14,
+      "span_id": "voice-span-6d5f5fed4df4f45d1659",
+      "character": {
+        "character_id": "98322bd505f4",
+        "character_name": "辰星",
+        "selected_source": {
+          "source_page_id": "5a83e22ff597",
+          "armor_id": "",
+          "armor_name": "",
+          "armor_semantics": "selected_default_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/014-voice-span-6d5f5fed4df4f45d1659.wav",
+        "sha256": "ec3986302688e00bc150030837f520af2efd0cbe127eae00d83da1f7073d4512",
+        "byte_count": 51884,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 25920,
+        "duration_seconds": 1.08,
+        "source_range": {
+          "start_frame": 4320,
+          "end_frame_exclusive": 30240
+        }
+      },
+      "transcript": {
+        "decision": "accepted_exact",
+        "text": "不要忘记看消息。",
+        "text_utf8_sha256": "549bb41fd4e06feecd53c6b7bd210dcde1a83ef08892c6c96d94d211c447a654",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    },
+    {
+      "ordinal": 15,
+      "span_id": "voice-span-ff0815edc0cc9e31abe0",
+      "character": {
+        "character_id": "98322bd505f4",
+        "character_name": "辰星",
+        "selected_source": {
+          "source_page_id": "5a83e22ff597",
+          "armor_id": "",
+          "armor_name": "",
+          "armor_semantics": "selected_default_armor_voice_source"
+        }
+      },
+      "audio": {
+        "package_relative_path": "clips/015-voice-span-ff0815edc0cc9e31abe0.wav",
+        "sha256": "7f6369b0b4b76c697977c42a30509b310308a223acce9090f170d72c19fb4690",
+        "byte_count": 189164,
+        "encoding": "pcm_s16le",
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "sample_width_bytes": 2,
+        "frame_count": 94560,
+        "duration_seconds": 3.94,
+        "source_range": {
+          "start_frame": 5280,
+          "end_frame_exclusive": 99840
+        }
+      },
+      "transcript": {
+        "decision": "accepted_exact",
+        "text": "我不想和别人有太多牵扯,也不想制造更多回忆。",
+        "text_utf8_sha256": "57442aa69ddd1bda7a1b10df2296c76615c087f26a259667baee9a31040a8184",
+        "source": "human_audio_review"
+      },
+      "routing": {
+        "track": "lexical_base_candidate",
+        "status": "candidate_only",
+        "base_tts_training": "pending_dataset_qc_and_rights"
+      }
+    }
+  ],
+  "summary": {
+    "source_span_count": 15,
+    "transcript_resolved_count": 13,
+    "lexical_candidate_count": 12,
+    "paralinguistic_candidate_count": 2,
+    "duplicate_excluded_count": 1,
+    "duration_seconds_by_track": {
+      "lexical_base_candidate": 35.61,
+      "paralinguistic_event_candidate": 4.7,
+      "excluded_duplicate": 3.33
+    },
+    "characters": [
+      {
+        "character_id": "5157b8972632",
+        "character_name": "薇蒂雅",
+        "lexical_candidate_count": 5,
+        "paralinguistic_candidate_count": 2,
+        "duplicate_excluded_count": 0
+      },
+      {
+        "character_id": "98322bd505f4",
+        "character_name": "辰星",
+        "lexical_candidate_count": 7,
+        "paralinguistic_candidate_count": 0,
+        "duplicate_excluded_count": 1
+      }
+    ]
+  },
+  "scope_limits": {
+    "source_artifacts_modified": false,
+    "dataset_qc_completed": false,
+    "training_use_approved": false,
+    "voice_cloning_approved": false,
+    "expressive_training_approved": false,
+    "event_bank_approved": false,
+    "concatenation_approved": false,
+    "ab_winner_selected": false,
+    "rights_accepted": false,
+    "publication_approved": false,
+    "provider_enrollment_allowed": false,
+    "public_rollout_allowed": false
+  },
+  "receipt_sha256": "4b2a74833d41905cfe5f93b8ccb84acb1448fb3a99e46e8b57e53f54f62548c1"
+}

@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-3c4ea6ccddc0e5c236d1",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 17,
+  "trigger": "放弃",
+  "transcript": "没关系，重来一次吧。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/d/d8/54659q9ywfurq45n8dzgv0ntn6f3xb4.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 155733,
+  "content_sha256": "0d7c616a2c30a5f104de8baae7e5e4a4b28d9dcd041cd93655aef1ef4df930a3",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

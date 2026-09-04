@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-3003423e107603a7d4d5",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 7,
+  "trigger": "歼敌3",
+  "transcript": "我会记住你的。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/2/25/rxys9wstvd4aaj2kp7pn17acexetjd0.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 54378,
+  "content_sha256": "5f1f23624e743d85d94f03cc93ff2c1bc7ba70b6d4bfc3264540f9116482220c",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

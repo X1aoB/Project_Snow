@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-78f5f6ade86709a6e70b",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 21,
+  "trigger": "被破盾",
+  "transcript": "多余的保护措施。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/9/90/8ipa37msd0fhpmx5pz7k1as9ksdqrzr.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 86770,
+  "content_sha256": "07fb2a5a44a57ed19d07d6c0480b942d42faee91f9f686d5f848cbef15c55bbe",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

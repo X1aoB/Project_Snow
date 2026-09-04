@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-4422e282eb2bccfa105e",
+  "character_id": "43f05917bfa1",
+  "character_name": "恩雅",
+  "armor_id": "",
+  "armor_name": "",
+  "source_page_id": "38fa2e9ad23e",
+  "source_html_sha256": "ad78541e2d4bdf17f0009f9f68277cf7d7e09f29f71a96869a8ae0d574bed61b",
+  "row_ordinal": 4,
+  "trigger": "完成目标",
+  "transcript": "原地休息一会儿吧。",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/a/ad/ew11eqq625wmzwmzlt6r1cad2da40l2.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 96174,
+  "content_sha256": "46bbde923b4619be2920f2c82fdfdd6d7a38b483d5fb8a05eff0e63f87d2cde7",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}

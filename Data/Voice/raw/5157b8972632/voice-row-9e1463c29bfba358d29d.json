@@ -1,0 +1,24 @@
+{
+  "schema_version": "project-snow-private-voice-raw-1",
+  "candidate_id": "voice-row-9e1463c29bfba358d29d",
+  "character_id": "5157b8972632",
+  "character_name": "薇蒂雅",
+  "armor_id": "30878200de72",
+  "armor_name": "龙舌兰",
+  "source_page_id": "6d7ce3ae6026",
+  "source_html_sha256": "aaf70904e67a43e1e508356458645e15d89c4861dd58f1acb4edee9c189ac26d",
+  "row_ordinal": 34,
+  "trigger": "进入商店",
+  "transcript": "需要购物清单吗？",
+  "remote_url": "https://patchwiki.biligame.com/images/sonw/f/f5/nhghjsf8mga3ioro1c62p9m7ukhgs26.mp3",
+  "content_type": "audio/mpeg",
+  "byte_length": 73187,
+  "content_sha256": "a4c7065532a38f103062e999b170123d5cc007d140eb59610b88293681f16f6e",
+  "decode_validation": {
+    "tool": "ffmpeg.exe",
+    "full_audio_stream_decoded": true
+  },
+  "rights_basis": "unverified_fanwork_source",
+  "selected_for_voice_clone": false,
+  "raw_original_read_only": true
+}
