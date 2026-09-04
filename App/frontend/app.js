@@ -1071,7 +1071,7 @@ async function monitorAgentRun(message, thread) {
       }
       if (state.selectedCharacterId === thread.characterId) {
         renderTimeline(false);
-        if (snapshot.status === "succeeded" && thread.voiceReply && message.result.audio?.status === "completed") {
+        if (snapshot.status === "succeeded" && thread.voiceReply && message.result.audio?.status === "completed" && message.result.audio?.auto_play !== false) {
           requestAnimationFrame(() => {
             const audio = document.querySelector(`[data-message-id="${CSS.escape(message.id)}"] audio.voice-reply`);
             audio?.play().catch(() => {});
@@ -1293,7 +1293,7 @@ async function dispatchPending({ channel = null, presenceAction = null } = {}) {
   renderInfo();
   updateRequestStatus();
   const latest = thread?.messages?.slice(-1)[0];
-  if (latest?.role === "assistant" && !latest.result?.agent_run_id && latest.result?.audio?.status === "completed" && thread.voiceReply) {
+  if (latest?.role === "assistant" && !latest.result?.agent_run_id && latest.result?.audio?.status === "completed" && thread.voiceReply && latest.result.audio?.auto_play !== false) {
     requestAnimationFrame(() => {
       const audio = document.querySelector(`[data-message-id="${CSS.escape(latest.id)}"] audio.voice-reply`);
       audio?.play().catch(() => {});

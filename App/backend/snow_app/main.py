@@ -61,6 +61,7 @@ from .persona_gateway import (
 from .repository import MACHINE_REVIEW_FILTERS, REVIEW_RISK_LEVELS, REVIEW_TIERS, RuntimeRepository
 from .review_automation import ReviewAutomationService
 from .deepseek_review_completion import DeepSeekReviewCompletionService
+from .local_voice import LocalVoiceRuntime, LocalVoiceSlotPaused, decide_voice_reply
 from .mvp_service import (
     MVPChatDisabled,
     MVPCommunicationConflict,
@@ -83,6 +84,15 @@ agent_store = AgentStore(settings.runtime_root / "chat" / "agent.sqlite3")
 provider_registry = ProviderRegistry(agent_store)
 attachment_manager = AttachmentManager(settings.runtime_root, agent_store)
 connector_manager = ConnectorManager(agent_store, provider_registry.vault)
+local_voice_runtime = (
+    LocalVoiceRuntime.from_data_root(
+        settings.data_root,
+        api_key=settings.local_voice_api_key,
+        explicit_profile_path=settings.local_voice_profile_path,
+    )
+    if settings.local_voice_enabled
+    else None
+)
 agent_runtime = AgentRuntime(
     agent_store,
     provider_registry,
@@ -247,6 +257,28 @@ def _transcribe_attachment(record: dict, model_override: dict | None = None) -> 
 
 
 def _synthesize_voice(character_id: str, text_value: str) -> dict:
+    if local_voice_runtime is not None and local_voice_runtime.supports(character_id):
+        try:
+            local_result = local_voice_runtime.synthesize(character_id, text_value[:8000])
+        except LocalVoiceSlotPaused as error:
+            return {
+                "status": "unavailable",
+                "reason": "style_slot_paused",
+                "style": error.style,
+                "case_id": error.case_id,
+                "fallback_used": False,
+            }
+        audio_bytes = local_result.pop("audio_bytes")
+        attachment = attachment_manager.save_bytes(
+            local_result.pop("filename"),
+            audio_bytes,
+            local_result.pop("content_type"),
+        )
+        return {
+            **local_result,
+            "attachment_id": attachment["attachment_id"],
+            "content_url": f"/api/v1/attachments/{attachment['attachment_id']}/content",
+        }
     selection = provider_registry.route(
         {"text_to_speech"}, required_data_types={"text"}, profile="text_to_speech"
     )
@@ -1265,10 +1297,55 @@ def mvp_chat(request: MVPChatRequest) -> dict:
                     merged_usage[key] = value
             result["usage"] = merged_usage
         if request.voice_reply:
-            try:
-                result["audio"] = _synthesize_voice(request.character_id, str(result.get("answer") or ""))
-            except Exception as exc:
-                result["audio"] = {"status": "failed", "error": str(exc)[:500]}
+            local_decision = None
+            if local_voice_runtime is not None and local_voice_runtime.supports(
+                request.character_id
+            ):
+                local_decision = decide_voice_reply(
+                    enabled_by_user=True,
+                    communication_channel=str(
+                        result.get("communication_channel")
+                        or request.communication_channel
+                        or "text"
+                    ),
+                    character_id=request.character_id,
+                    message_id=str(
+                        result.get("message_id")
+                        or request.client_message_id
+                        or request.session_id
+                        or ""
+                    ),
+                    text=str(result.get("answer") or ""),
+                    text_probability=settings.local_voice_text_probability,
+                    emotion_probability=settings.local_voice_emotion_probability,
+                )
+            if local_decision is None or local_decision.should_synthesize:
+                try:
+                    audio = _synthesize_voice(
+                        request.character_id, str(result.get("answer") or "")
+                    )
+                    if local_decision is not None:
+                        audio.update(
+                            {
+                                "auto_play": (
+                                    local_decision.auto_play
+                                    if audio.get("status") == "completed"
+                                    else False
+                                ),
+                                "selection_reason": local_decision.reason,
+                                "selection_probability": local_decision.probability,
+                            }
+                        )
+                    result["audio"] = audio
+                except Exception as exc:
+                    result["audio"] = {"status": "failed", "error": str(exc)[:500]}
+            else:
+                result["audio"] = {
+                    "status": "skipped",
+                    "reason": local_decision.reason,
+                    "selection_probability": local_decision.probability,
+                    "auto_play": False,
+                }
         for attachment_id in current_attachment_ids:
             agent_store.link_attachment(str(result.get("message_id") or ""), attachment_id)
             resolved_attachment_session = str(result.get("session_id") or request.session_id or "")

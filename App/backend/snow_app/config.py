@@ -89,6 +89,13 @@ class Settings:
     mvp_chat_model: str = ""
     mvp_chat_timeout_seconds: float = 120.0
     mvp_chat_credential_ref: str = ""
+    # The selected clone profile is private and remains opt-in until a paid
+    # runtime smoke call is explicitly authorized.
+    local_voice_enabled: bool = False
+    local_voice_profile_path: str = ""
+    local_voice_api_key: str = ""
+    local_voice_text_probability: float = 0.25
+    local_voice_emotion_probability: float = 0.45
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -102,6 +109,9 @@ class Settings:
         origins = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:8080").split(",") if origin.strip()]
         credential_ref = os.getenv("MVP_CHAT_CREDENTIAL_REF", "").strip()
         api_key = os.getenv("MVP_CHAT_API_KEY", "")
+        local_voice_enabled = (
+            os.getenv("LOCAL_VOICE_ENABLED", "false").lower() == "true"
+        )
         if not api_key and credential_ref and keyring is not None:
             try:
                 api_key = str(keyring.get_password("ProjectSnow", credential_ref) or "")
@@ -138,6 +148,20 @@ class Settings:
             ),
             mvp_chat_timeout_seconds=float(os.getenv("MVP_CHAT_TIMEOUT_SECONDS", "120")),
             mvp_chat_credential_ref=credential_ref,
+            local_voice_enabled=local_voice_enabled,
+            local_voice_profile_path=os.getenv("LOCAL_VOICE_PROFILE_PATH", "").strip(),
+            local_voice_api_key=(
+                _secret_value("LOCAL_VOICE_API_KEY")
+                or _secret_value("DASHSCOPE_API_KEY")
+                if local_voice_enabled
+                else ""
+            ),
+            local_voice_text_probability=float(
+                os.getenv("LOCAL_VOICE_TEXT_PROBABILITY", "0.25")
+            ),
+            local_voice_emotion_probability=float(
+                os.getenv("LOCAL_VOICE_EMOTION_PROBABILITY", "0.45")
+            ),
         )
 
 
