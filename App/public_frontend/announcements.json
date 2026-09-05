@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "timezone": "Asia/Shanghai",
+  "updates": [
+    {
+      "id": "2026-09-05-announcements",
+      "published_at": "2026-09-05T13:00:00+08:00",
+      "title": "公告与生日提醒上线",
+      "summary": "站点动态和角色生日，现在可以随时查看。",
+      "items": [
+        "右上角的「!」可查看最新公告与角色生日。",
+        "新公告只自动提示一次；角色生日统一按北京时间提醒。",
+        "模型设置的人机验证已修复，获取模型列表与保存会话会显示处理进度。"
+      ]
+    }
+  ],
+  "birthdays": [
+    {
+      "character_id": "78aa7ab99154",
+      "display_name": "伊切尔",
+      "month": 11,
+      "day": 29,
+      "source_url": "https://wiki.biligame.com/sonw/%E4%BC%8A%E5%88%87%E5%B0%94%C2%B7%E8%B1%B9%E8%B1%B9?oldid=18429"
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "display_name": "克罗瑞娜",
+      "month": 3,
+      "day": 13,
+      "source_url": "https://wiki.biligame.com/sonw/%E5%85%8B%E7%BD%97%E7%91%9E%E5%A8%9C?oldid=31037"
+    },
+    {
+      "character_id": "25b23cb64398",
+      "display_name": "凯茜娅",
+      "month": 11,
+      "day": 8,
+      "source_url": "https://wiki.biligame.com/sonw/%E5%87%AF%E8%8C%9C%E5%A8%85%C2%B7%E6%9C%9D%E7%BF%BC?oldid=18873"
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "display_name": "卜卜",
+      "month": 1,
+      "day": 31,
+      "source_url": "https://wiki.biligame.com/sonw/%E5%8D%9C%E5%8D%9C?oldid=34881"
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "display_name": "奈莉德",
+      "month": 12,
+      "day": 31,
+      "source_url": "https://wiki.biligame.com/sonw/%E5%A5%88%E8%8E%89%E5%BE%B7%C2%B7%E5%86%A5%E6%B2%B3%E4%BB%A3%E7%90%86%E4%BA%BA?oldid=28165"
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "display_name": "妮塔",
+      "month": 5,
+      "day": 5,
+      "source_url": "https://wiki.biligame.com/sonw/%E5%A6%AE%E5%A1%94%C2%B7%E5%9B%9B%E6%89%8B?oldid=32004"
+    },
+    {
+      "character_id": "9f5804761c56",
+      "display_name": "安卡希雅",
+      "month": 12,
+      "day": 20,
+      "source_url": "https://wiki.biligame.com/sonw/%E5%AE%89%E5%8D%A1%E5%B8%8C%E9%9B%85?oldid=33258"
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "display_name": "恩雅",
+      "month": 1,
+      "day": 19,
+      "source_url": "https://wiki.biligame.com/sonw/%E6%81%A9%E9%9B%85%C2%B7%E6%BE%9C%E9%A3%8E?oldid=18688"
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "display_name": "晴",
+      "month": 8,
+      "day": 20,
+      "source_url": "https://wiki.biligame.com/sonw/%E6%99%B4?oldid=28500"
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "display_name": "猫汐尔",
+      "month": 10,
+      "day": 10,
+      "source_url": "https://wiki.biligame.com/sonw/%E7%8C%AB%E6%B1%90%E5%B0%94?oldid=28039"
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "display_name": "琴诺",
+      "month": 2,
+      "day": 27,
+      "source_url": "https://wiki.biligame.com/sonw/%E7%90%B4%E8%AF%BA?oldid=21206"
+    },
+    {
+      "character_id": "85b205f6f623",
+      "display_name": "瑟瑞斯",
+      "month": 7,
+      "day": 19,
+      "source_url": "https://wiki.biligame.com/sonw/%E7%91%9F%E7%91%9E%E6%96%AF?oldid=28059"
+    },
+    {
+      "character_id": "702f4375675b",
+      "display_name": "米娅",
+      "month": 8,
+      "day": 15,
+      "source_url": "https://wiki.biligame.com/sonw/%E7%B1%B3%E5%A8%85%C2%B7%E6%98%9F%E5%BD%A9?oldid=28164"
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "display_name": "肴",
+      "month": 12,
+      "day": 23,
+      "source_url": "https://wiki.biligame.com/sonw/%E8%82%B4?oldid=30057"
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "display_name": "胧嫣",
+      "month": 2,
+      "day": 1,
+      "source_url": "https://wiki.biligame.com/sonw/%E8%83%A7%E5%AB%A3%C2%B7%E7%91%9E%E7%8B%90?oldid=33791"
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "display_name": "芙提雅",
+      "month": 4,
+      "day": 23,
+      "source_url": "https://wiki.biligame.com/sonw/%E8%8A%99%E6%8F%90%E9%9B%85?oldid=34873"
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "display_name": "芬妮",
+      "month": 7,
+      "day": 30,
+      "source_url": "https://wiki.biligame.com/sonw/%E8%8A%AC%E5%A6%AE?oldid=29860"
+    },
+    {
+      "character_id": "673ba6851b05",
+      "display_name": "苔丝",
+      "month": 9,
+      "day": 16,
+      "source_url": "https://wiki.biligame.com/sonw/%E8%8B%94%E4%B8%9D?oldid=34876"
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "display_name": "茉莉安",
+      "month": 9,
+      "day": 5,
+      "source_url": "https://wiki.biligame.com/sonw/%E8%8C%89%E8%8E%89%E5%AE%89?oldid=33325"
+    },
+    {
+      "character_id": "5157b8972632",
+      "display_name": "薇蒂雅",
+      "month": 6,
+      "day": 14,
+      "source_url": "https://wiki.biligame.com/sonw/%E8%96%87%E8%92%82%E9%9B%85%C2%B7%E5%A4%A9%E9%B9%85%E5%BA%A7?oldid=23388"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "display_name": "辰星",
+      "month": 11,
+      "day": 5,
+      "source_url": "https://wiki.biligame.com/sonw/%E8%BE%B0%E6%98%9F?oldid=18436"
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "display_name": "里芙",
+      "month": 3,
+      "day": 21,
+      "source_url": "https://wiki.biligame.com/sonw/%E9%87%8C%E8%8A%99%C2%B7%E6%97%A0%E9%99%90%E4%B9%8B%E8%A7%86?oldid=18426"
+    }
+  ]
+}

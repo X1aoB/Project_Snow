@@ -41,6 +41,7 @@
               <button id="header-config-model" class="secondary-button model-entry" type="button">配置模型</button>
               <button id="go-in-person" class="presence-switch" type="button"><span id="go-in-person-label">去见她</span></button>
               <button id="open-info" class="icon-button" type="button" aria-label="角色与场景">i</button>
+              <button id="open-announcements" class="icon-button announcement-entry" type="button" aria-label="公告与生日" aria-haspopup="dialog" aria-controls="announcements-dialog" title="公告与生日"><span aria-hidden="true">!</span><span class="announcement-unread-dot" hidden aria-hidden="true"></span></button>
             </div>
           </header>
           <section id="timeline" class="timeline" aria-label="文字通讯记录" tabindex="0">
@@ -75,6 +76,7 @@
                   <a href="/privacy/">隐私与素材</a>
                 </div>
               </details>
+              <button id="stage-open-announcements" class="scene-tool-button icon-only announcement-entry" type="button" aria-label="公告与生日" aria-haspopup="dialog" aria-controls="announcements-dialog" title="公告与生日"><span aria-hidden="true">!</span><span class="announcement-unread-dot" hidden aria-hidden="true"></span></button>
             </div>
           </header>
           <div id="scene-stage" class="scene-stage">
@@ -141,6 +143,18 @@
       </aside>
       <div id="drawer-scrim" class="drawer-scrim" hidden></div>
     </div>
+
+    <dialog id="announcements-dialog" class="modal announcements-modal" aria-labelledby="announcements-title" aria-describedby="announcements-date">
+      <header class="announcements-header"><div><span class="panel-kicker">PROJECT SNOW · 消息</span><h2 id="announcements-title">公告与生日</h2><p id="announcements-date" class="announcements-date"></p></div><button class="icon-button" type="button" data-close-dialog="announcements-dialog" aria-label="关闭公告">×</button></header>
+      <div class="announcement-tabs" role="tablist" aria-label="公告分类">
+        <button id="announcement-tab-updates" type="button" role="tab" aria-selected="true" aria-controls="announcement-panel-updates" data-announcement-tab="updates">更新公告<span id="announcement-update-badge" class="announcement-tab-badge" hidden>新</span></button>
+        <button id="announcement-tab-birthdays" type="button" role="tab" aria-selected="false" aria-controls="announcement-panel-birthdays" tabindex="-1" data-announcement-tab="birthdays">生日提醒<span id="announcement-birthday-badge" class="announcement-tab-badge" hidden></span></button>
+      </div>
+      <div id="announcement-status" class="announcement-status" role="status" aria-live="polite" hidden><p id="announcement-status-text"></p><button id="retry-announcements" class="secondary-button" type="button" hidden>重新加载</button></div>
+      <section id="announcement-panel-updates" class="announcement-panel" role="tabpanel" aria-labelledby="announcement-tab-updates" tabindex="0"><div id="announcement-birthday-highlight"></div><div id="announcement-updates"></div></section>
+      <section id="announcement-panel-birthdays" class="announcement-panel" role="tabpanel" aria-labelledby="announcement-tab-birthdays" tabindex="0" hidden><div id="announcement-birthdays-today"></div><h3 class="announcement-section-title">接下来的生日</h3><div id="announcement-birthdays-upcoming"></div><details class="birthday-calendar"><summary id="birthday-calendar-label">查看全部角色生日</summary><div id="announcement-birthday-calendar"></div></details><p class="birthday-attribution">生日日期整理自尘白禁区 Wiki，角色条目可查看原始资料。</p></section>
+      <footer class="announcements-footer"><span>随时点右上角「!」回看</span><button id="acknowledge-announcements" class="primary-button" type="button" data-close-dialog="announcements-dialog">知道了</button></footer>
+    </dialog>
 
     <dialog id="presence-dialog" class="modal">
       <form method="dialog"><header><div><span class="panel-kicker">场景转换</span><h2>去见她</h2></div><button class="icon-button" type="button" data-close-dialog="presence-dialog">×</button></header><div class="presence-dialog-scene"><div><strong id="presence-dialog-location">正在读取地点</strong><p id="presence-dialog-activity">请稍候。</p></div></div><p class="modal-context">前往后将进入面对面场景，并可能触发一次主动到场反应。</p><div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="presence-dialog">取消</button><button id="stay-on-communicator" type="button" class="secondary-button">继续通讯</button><button id="confirm-presence-transition" type="button" class="primary-button">前往</button></div></form>

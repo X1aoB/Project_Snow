@@ -78,6 +78,176 @@ function TypingIndicatorState({ channel, characterId, requestId, phase = "typing
 let dbPromise = null;
 let storageWarningShown = false;
 
+const ANNOUNCEMENT_READ_KEY = "project-snow-public:announcements:read:v1";
+const announcements = {
+  feed: null, pending: null, error: false, ready: false, tab: "updates",
+  read: new Set(), attempted: new Set(), visibleKeys: new Set(), lastFetch: 0, day: "", renderSignature: "",
+};
+
+function announcementDay(timestamp = Date.now()) {
+  return new Date(timestamp + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+function announcementDateLabel(day) {
+  const [, month, date] = day.split("-").map(Number);
+  return `${month}月${date}日`;
+}
+function announcementUpdateKey(update) {
+  return `update:${update.id}:${update.updated_at || update.published_at}`;
+}
+function readAnnouncementHistory() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ANNOUNCEMENT_READ_KEY) || "[]");
+    if (Array.isArray(stored)) stored.filter((key) => typeof key === "string" && key.length < 256).forEach((key) => announcements.read.add(key));
+  } catch { /* The in-memory receipt still prevents repeat prompts this visit. */ }
+}
+function acknowledgeAnnouncements() {
+  announcements.visibleKeys.forEach((key) => announcements.read.add(key));
+  announcements.visibleKeys.clear();
+  try { localStorage.setItem(ANNOUNCEMENT_READ_KEY, JSON.stringify([...announcements.read].slice(-200))); } catch { /* Retain receipts in memory when storage is unavailable. */ }
+  renderAnnouncementBadges();
+}
+function normalizeAnnouncementFeed(payload) {
+  if (payload?.schema_version !== 1 || payload.timezone !== "Asia/Shanghai" || !Array.isArray(payload.updates) || !Array.isArray(payload.birthdays)) throw new Error("invalid_announcement_feed");
+  const updates = payload.updates.map((item) => {
+    if (!item?.id || typeof item.title !== "string" || !Array.isArray(item.items) || !item.items.every((line) => typeof line === "string") || !Number.isFinite(Date.parse(item.published_at)) || (item.updated_at && !Number.isFinite(Date.parse(item.updated_at)))) throw new Error("invalid_announcement_update");
+    return { ...item, id: plain(item.id), summary: plain(item.summary) };
+  }).sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at));
+  const birthdays = payload.birthdays.map((item) => {
+    const date = new Date(Date.UTC(2024, item.month - 1, item.day));
+    if (!item?.character_id || typeof item.display_name !== "string" || !Number.isInteger(item.month) || !Number.isInteger(item.day) || date.getUTCMonth() + 1 !== item.month || date.getUTCDate() !== item.day) throw new Error("invalid_announcement_birthday");
+    return { ...item, character_id: plain(item.character_id), source_url: safeExternalUrl(item.source_url) };
+  });
+  if (new Set(updates.map((item) => item.id)).size !== updates.length || new Set(birthdays.map((item) => item.character_id)).size !== birthdays.length) throw new Error("duplicate_announcement_entry");
+  return { updates, birthdays };
+}
+function announcementView() {
+  const day = announcementDay();
+  const [year, month, date] = day.split("-").map(Number);
+  const todayTime = Date.UTC(year, month - 1, date);
+  const updates = (announcements.feed?.updates || []).filter((item) => Date.parse(item.published_at) <= Date.now());
+  const birthdays = (announcements.feed?.birthdays || []).map((item) => {
+    let nextYear = year;
+    let nextDate;
+    do {
+      nextDate = new Date(Date.UTC(nextYear++, item.month - 1, item.day));
+    } while (nextDate.getUTCMonth() + 1 !== item.month || nextDate.getUTCDate() !== item.day || nextDate.getTime() < todayTime);
+    return { ...item, days: Math.round((nextDate.getTime() - todayTime) / 86400000) };
+  }).sort((a, b) => a.days - b.days || a.display_name.localeCompare(b.display_name, "zh-CN"));
+  const today = birthdays.filter((item) => item.days === 0);
+  const birthdayKeys = today.map((item) => `birthday:${day}:${item.character_id}`);
+  const updateKey = updates[0] ? announcementUpdateKey(updates[0]) : "";
+  const unread = [updateKey, ...birthdayKeys].filter((key) => key && !announcements.read.has(key));
+  return { day, updates, birthdays, today, birthdayKeys, updateKey, unread };
+}
+function renderAnnouncementBadges(view = announcementView()) {
+  document.querySelectorAll(".announcement-entry").forEach((button) => {
+    button.querySelector(".announcement-unread-dot").hidden = !view.unread.length;
+    button.setAttribute("aria-label", view.unread.length ? `公告与生日，有 ${view.unread.length} 条新消息` : "公告与生日");
+  });
+  $("announcement-update-badge").hidden = !view.updateKey || announcements.read.has(view.updateKey);
+  $("announcement-birthday-badge").hidden = !view.today.length;
+  $("announcement-birthday-badge").textContent = String(view.today.length);
+}
+function birthdayRow(item, { today = false, calendar = false } = {}) {
+  const name = escapeHtml(item.display_name);
+  const source = item.source_url ? `<a class="birthday-source" href="${escapeHtml(item.source_url)}" target="_blank" rel="noreferrer" aria-label="查看${name}的生日资料">资料 ↗</a>` : "";
+  const countdown = today ? "生日快乐" : item.days === 1 ? "明天" : `还有 ${item.days} 天`;
+  return `<article class="birthday-row${today ? " birthday-today" : ""}" data-birthday-character="${escapeHtml(item.character_id)}"><span class="birthday-monogram" aria-hidden="true">${escapeHtml(Array.from(item.display_name)[0])}</span><div class="birthday-row-copy"><strong>${name}</strong><span>${item.month}月${item.day}日${calendar ? "" : ` · ${countdown}`}</span></div>${source}${calendar ? `<span class="birthday-countdown">${countdown}</span>` : ""}</article>`;
+}
+function announcementRenderSignature(view = announcementView()) {
+  return JSON.stringify([announcements.feed, view.day, view.updateKey, announcements.error]);
+}
+function renderAnnouncementStatus() {
+  const loading = Boolean(announcements.pending);
+  $("announcement-status").hidden = Boolean(announcements.feed) && !announcements.error;
+  $("announcement-status-text").textContent = loading ? "正在读取公告…" : !announcements.error ? "" : announcements.feed ? "暂时无法更新公告，下面显示已加载的内容。" : "公告暂时无法加载，请稍后重试。";
+  $("retry-announcements").hidden = loading || !announcements.error;
+}
+function renderAnnouncements() {
+  const view = announcementView();
+  announcements.day = view.day;
+  announcements.renderSignature = announcementRenderSignature(view);
+  renderAnnouncementBadges(view);
+  $("announcements-date").textContent = `${view.day.slice(0, 4)}年${announcementDateLabel(view.day)} · 北京时间`;
+  renderAnnouncementStatus();
+  document.querySelectorAll("[data-announcement-tab]").forEach((button) => {
+    const selected = button.dataset.announcementTab === announcements.tab;
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  $("announcement-panel-updates").hidden = !announcements.feed || announcements.tab !== "updates";
+  $("announcement-panel-birthdays").hidden = !announcements.feed || announcements.tab !== "birthdays";
+  $("announcement-birthday-highlight").innerHTML = view.today.length ? `<button class="birthday-highlight" type="button"><span class="birthday-highlight-mark" aria-hidden="true">✧</span><span><strong>今天是${view.today.map((item) => escapeHtml(item.display_name)).join("、")}的生日</strong><small>留一份生日祝福</small></span><span aria-hidden="true">↗</span></button>` : "";
+  $("announcement-birthday-highlight").querySelector("button")?.addEventListener("click", () => selectAnnouncementTab("birthdays", true));
+  $("announcement-updates").innerHTML = view.updates.length ? view.updates.map((update, index) => `<article class="announcement-update${index === 0 ? " is-latest" : ""}"><div class="announcement-update-meta"><span>${index === 0 ? "最新更新" : "过往更新"}</span><time datetime="${escapeHtml(update.published_at)}">${announcementDateLabel(announcementDay(Date.parse(update.published_at)))}</time></div><h3>${escapeHtml(update.title)}</h3><p>${escapeHtml(update.summary)}</p><ul>${update.items.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul></article>`).join("") : '<p class="announcement-empty">暂时没有站点更新。新的公告会出现在这里。</p>';
+  $("announcement-birthdays-today").innerHTML = view.today.length ? `<div class="birthday-section-heading"><span>今天的寿星</span><strong>${announcementDateLabel(view.day)}</strong></div>${view.today.map((item) => birthdayRow(item, { today: true })).join("")}` : '<div class="birthday-quiet"><span aria-hidden="true">✧</span><p>今天没有角色生日</p><small>下一个特别的日子，也值得期待。</small></div>';
+  $("announcement-birthdays-upcoming").innerHTML = view.birthdays.filter((item) => item.days > 0).slice(0, 3).map((item) => birthdayRow(item)).join("") || '<p class="announcement-empty">暂无即将到来的生日。</p>';
+  $("birthday-calendar-label").textContent = `查看全部 ${view.birthdays.length} 位角色的生日`;
+  $("announcement-birthday-calendar").innerHTML = [...view.birthdays].sort((a, b) => a.month - b.month || a.day - b.day).map((item) => birthdayRow(item, { today: item.days === 0, calendar: true })).join("");
+  if ($("announcements-dialog").open) {
+    view.birthdayKeys.forEach((key) => announcements.visibleKeys.add(key));
+    if (announcements.tab === "updates" && view.updateKey) announcements.visibleKeys.add(view.updateKey);
+  }
+}
+function selectAnnouncementTab(tab, focus = false) {
+  announcements.tab = tab === "birthdays" ? "birthdays" : "updates";
+  renderAnnouncements();
+  if (focus) $(`announcement-tab-${announcements.tab}`).focus();
+}
+function openAnnouncements({ automatic = false } = {}) {
+  if ($("announcements-dialog").open) return;
+  const view = announcementView();
+  announcements.tab = automatic && (!view.updateKey || announcements.read.has(view.updateKey)) && view.today.length ? "birthdays" : "updates";
+  announcements.visibleKeys.clear();
+  view.unread.forEach((key) => announcements.attempted.add(key));
+  $("announcements-dialog").showModal();
+  renderAnnouncements();
+  if (!announcements.feed && !announcements.pending) void refreshAnnouncements();
+}
+function maybeShowAnnouncements() {
+  if (!announcements.ready || !announcements.feed || document.hidden || document.querySelector("dialog[open]") || globalRequestBusy()) return;
+  if (document.activeElement?.matches("input, textarea") && document.activeElement.value) return;
+  if (announcementView().unread.some((key) => !announcements.attempted.has(key))) openAnnouncements({ automatic: true });
+}
+async function refreshAnnouncements() {
+  if (announcements.pending) return announcements.pending;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 10000);
+  announcements.error = false;
+  announcements.pending = (async () => {
+    try {
+      const response = await fetch("/announcements.json", { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error("announcement_fetch_failed");
+      announcements.feed = normalizeAnnouncementFeed(await response.json());
+    } catch { announcements.error = true; }
+    finally {
+      window.clearTimeout(timeout);
+      announcements.pending = null;
+      announcements.lastFetch = Date.now();
+      // An unchanged background refresh must preserve keyboard focus and
+      // the reader's place inside the open announcement or birthday list.
+      if (announcementRenderSignature() !== announcements.renderSignature) renderAnnouncements();
+      else { renderAnnouncementStatus(); renderAnnouncementBadges(); }
+      maybeShowAnnouncements();
+    }
+  })();
+  renderAnnouncementStatus();
+  return announcements.pending;
+}
+function announcementTick() {
+  if (!announcements.ready || document.hidden) return;
+  if (announcements.day !== announcementDay()) renderAnnouncements();
+  renderAnnouncementBadges();
+  maybeShowAnnouncements();
+  if (Date.now() - announcements.lastFetch >= 5 * 60 * 1000) void refreshAnnouncements();
+}
+function startAnnouncements() {
+  readAnnouncementHistory();
+  announcements.ready = true;
+  void refreshAnnouncements();
+  window.setInterval(announcementTick, 30000);
+}
+
 function useMemoryStorage() {
   state.storageAvailable = false;
   dbPromise = Promise.resolve(null);
@@ -3951,6 +4121,27 @@ $("open-contacts").onclick = () => toggleContacts({ mobileOpen: true });
 $("open-stage-contacts").onclick = () => toggleContacts();
 $("close-contacts").onclick = () => toggleContacts({ mobileOpen: false });
 $("open-info").onclick = () => openDrawer("info-panel");
+$("open-announcements").onclick = $("stage-open-announcements").onclick = () => openAnnouncements();
+$("retry-announcements").onclick = () => refreshAnnouncements();
+document.querySelectorAll("[data-announcement-tab]").forEach((button) => {
+  button.onclick = () => selectAnnouncementTab(button.dataset.announcementTab);
+  button.onkeydown = (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? "updates" : event.key === "End" ? "birthdays" : announcements.tab === "updates" ? "birthdays" : "updates";
+    selectAnnouncementTab(next, true);
+  };
+});
+$("announcements-dialog").addEventListener("cancel", acknowledgeAnnouncements);
+$("announcements-dialog").addEventListener("close", acknowledgeAnnouncements);
+document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("close", () => window.setTimeout(maybeShowAnnouncements, 0)));
+window.addEventListener("focus", announcementTick);
+document.addEventListener("visibilitychange", announcementTick);
+window.addEventListener("storage", (event) => {
+  if (event.key !== ANNOUNCEMENT_READ_KEY) return;
+  readAnnouncementHistory();
+  renderAnnouncementBadges();
+});
 $("open-transcript").onclick = () => openDrawer("transcript-panel");
 $("close-info").onclick = $("close-transcript").onclick = $("drawer-scrim").onclick = closeDrawers;
 $("toggle-stage-ui").onclick = () => { $("in-person-surface").classList.add("ui-hidden"); $("restore-stage-ui").hidden = false; };
@@ -3990,7 +4181,12 @@ $("delete-character-history").onclick = async () => { if (globalRequestBusy()) r
 $("clear-all-history").onclick = async () => { if (globalRequestBusy()) return; if (!window.confirm("确定清空全部 Project Snow 本地历史与世界状态吗？")) return; await storeClear("threads"); await storeClear("messages"); await storeClear("app_state"); state.threads.clear(); state.worldPackage = ""; state.drafts.clear(); state.pinnedCharacters.clear(); state.favoriteStickerIds.clear(); state.favoriteStickers.clear(); state.recentStickerIds = []; state.rendezvousDismissals.clear(); if (state.selected) { await dbGetThread(state.selected); await resolvePresence(); } renderAll(); openSettings("history"); toast("全部本地历史已清空"); };
 document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   if (!button.getAttribute("aria-label")) button.setAttribute("aria-label", "关闭对话框");
-  button.onclick = () => $(button.dataset.closeDialog).close();
+  button.onclick = () => {
+    // Persist before close(): its event is asynchronous and a quick reload
+    // must not lose the receipt or show the same announcement again.
+    if (button.dataset.closeDialog === "announcements-dialog") acknowledgeAnnouncements();
+    $(button.dataset.closeDialog).close();
+  };
 });
 $("feedback-dialog").addEventListener("close", () => prepareFeedbackVerification({ cancelPending: true }));
 $("settings-dialog").addEventListener("close", () => modelSetupController?.abort());
@@ -4038,6 +4234,7 @@ async function boot() {
   restoreDraft();
   renderOnboarding();
   if (!state.storageAvailable) showBanner("浏览器未开放本地存储，本次聊天不会保存；仍可继续使用。 ");
+  startAnnouncements();
 }
 boot().catch((error) => {
   $("connection-status").textContent = "连接失败";

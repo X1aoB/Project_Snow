@@ -89,6 +89,15 @@ class PublicAPITests(TestCase):
         self.assertFalse(path.is_relative_to(self.internal_settings.runtime_root))
         self.assertIn("project-snow-public", path.parts)
 
+    def test_public_announcements_are_available_without_a_model_session(self) -> None:
+        response = self.client.get("/announcements.json")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("application/json", response.headers["content-type"])
+        payload = response.json()
+        self.assertEqual(payload["timezone"], "Asia/Shanghai")
+        self.assertEqual(len(payload["birthdays"]), 22)
+        self.assertTrue(payload["updates"])
+
     def test_public_routes_do_not_expose_internal_api(self) -> None:
         self.assertEqual(self.client.get("/api/v1/mvp/bootstrap").status_code, 404)
         config = self.client.get("/public/v1/config")

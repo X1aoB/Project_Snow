@@ -78,6 +78,9 @@ class BrowserLaunchContractTests(TestCase):
 
 
 class PublicFrontendHandler(BaseHTTPRequestHandler):
+    announcement_payload: dict[str, object] | None = None
+    announcement_failures = 0
+    announcement_requests = 0
     chat_stream_started: threading.Event | None = None
     chat_stream_release: threading.Event | None = None
     arrival_started: threading.Event | None = None
@@ -106,6 +109,16 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if path == "/announcements.json":
+            type(self).announcement_requests += 1
+            if type(self).announcement_failures:
+                type(self).announcement_failures -= 1
+                self._json({"error": "temporarily unavailable"}, status=503)
+            else:
+                self._json(type(self).announcement_payload or {
+                    "schema_version": 1, "timezone": "Asia/Shanghai", "updates": [], "birthdays": [],
+                })
+            return
         if path == "/public/v1/config":
             self._json(
                 {
@@ -623,6 +636,9 @@ class PublicFrontendE2ETests(TestCase):
         cls.thread.join(timeout=5)
 
     def setUp(self) -> None:
+        PublicFrontendHandler.announcement_payload = None
+        PublicFrontendHandler.announcement_failures = 0
+        PublicFrontendHandler.announcement_requests = 0
         PublicFrontendHandler.chat_stream_started = None
         PublicFrontendHandler.chat_stream_release = None
         PublicFrontendHandler.arrival_started = None
@@ -655,6 +671,207 @@ class PublicFrontendE2ETests(TestCase):
         page.locator("#model-id").fill("gpt-e2e")
         page.locator("#save-model").click()
         page.locator("#settings-dialog").wait_for(state="hidden")
+
+    def _announcement_page(self, page, now="2026-09-05T05:30:00Z"):
+        page.add_init_script(f"Date.now = () => Date.parse({json.dumps(now)});")
+        page.goto(self.base_url, wait_until="networkidle")
+        page.locator("#accept-experience-notice").click()
+        page.wait_for_function("document.querySelector('#connection-status').textContent === '服务已连接'")
+        page.wait_for_function("document.querySelector('#announcements-date').textContent.includes('北京时间')")
+
+    @staticmethod
+    def _announcement_screenshot(page, name):
+        if directory := os.environ.get("SNOW_ANNOUNCEMENT_SCREENSHOTS"):
+            path = Path(directory)
+            path.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(path / f"{name}.png"), full_page=True)
+
+    def test_announcements_auto_once_reopen_and_notify_revised_content(self):
+        PublicFrontendHandler.announcement_payload = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(viewport={"width": 1280, "height": 900}, timezone_id="America/Los_Angeles")
+            errors = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            self._announcement_page(page)
+            page.locator("#announcements-dialog[open]").wait_for()
+            self.assertIn("公告与生日提醒上线", page.locator("#announcement-updates").inner_text())
+            self.assertIn("茉莉安", page.locator("#announcement-birthday-highlight").inner_text())
+            self.assertIn("有 2 条新消息", page.locator("#open-announcements").get_attribute("aria-label"))
+            self._announcement_screenshot(page, "desktop-updates")
+            page.locator("#announcement-tab-updates").focus()
+            page.keyboard.press("ArrowRight")
+            self.assertEqual(page.locator("#announcement-tab-birthdays").get_attribute("aria-selected"), "true")
+            self.assertIn("茉莉安", page.locator("#announcement-birthdays-today").inner_text())
+            self.assertIn("苔丝", page.locator("#announcement-birthdays-upcoming .birthday-row").first.inner_text())
+            page.locator("#birthday-calendar-label").click()
+            self.assertEqual(page.locator("#announcement-birthday-calendar .birthday-row").count(), 22)
+            self.assertEqual(page.locator("#announcement-birthday-calendar a[href*='oldid=']").count(), 22)
+            self._announcement_screenshot(page, "desktop-birthdays")
+            source = page.locator("#announcement-birthday-calendar a").first
+            source.focus()
+            with page.expect_response("**/announcements.json"):
+                page.evaluate("Date.now = () => Date.parse('2026-09-05T05:36:00Z'); window.dispatchEvent(new Event('focus'));")
+            page.wait_for_function("document.querySelector('#announcement-status-text').textContent === ''")
+            self.assertTrue(source.evaluate("element => element === document.activeElement"))
+            page.locator("#acknowledge-announcements").click()
+            page.reload(wait_until="networkidle")
+            page.wait_for_function("document.querySelector('#announcements-date').textContent.includes('北京时间')")
+            self.assertFalse(page.locator("#announcements-dialog").is_visible())
+            self.assertFalse(page.locator("#open-announcements .announcement-unread-dot").is_visible())
+            page.locator("#open-announcements").click()
+            page.keyboard.press("Escape")
+            page.wait_for_function("document.activeElement.id === 'open-announcements'")
+            PublicFrontendHandler.announcement_payload["updates"][0]["updated_at"] = "2026-09-05T13:30:00+08:00"
+            PublicFrontendHandler.announcement_payload["updates"][0]["title"] = "公告内容已修订"
+            page.reload(wait_until="networkidle")
+            page.locator("#announcements-dialog[open]").wait_for()
+            self.assertIn("公告内容已修订", page.locator("#announcement-updates").inner_text())
+            self.assertEqual(errors, [])
+            browser.close()
+
+    def test_announcements_birthday_changes_at_beijing_midnight_and_next_year(self):
+        PublicFrontendHandler.announcement_payload = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        PublicFrontendHandler.announcement_payload["updates"] = []
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(timezone_id="America/Los_Angeles")
+            self._announcement_page(page, "2026-09-04T15:59:59Z")
+            self.assertFalse(page.locator("#announcements-dialog").is_visible())
+            page.evaluate("Date.now = () => Date.parse('2026-09-04T16:00:00Z'); window.dispatchEvent(new Event('focus'));")
+            page.locator("#announcements-dialog[open]").wait_for()
+            self.assertEqual(page.locator("#announcement-tab-birthdays").get_attribute("aria-selected"), "true")
+            self.assertIn("茉莉安", page.locator("#announcement-birthdays-today").inner_text())
+            page.locator("#acknowledge-announcements").click()
+            page.evaluate("window.dispatchEvent(new Event('focus'))")
+            self.assertFalse(page.locator("#announcements-dialog").is_visible())
+            page.evaluate("Date.now = () => Date.parse('2027-09-04T16:00:00Z'); window.dispatchEvent(new Event('focus'));")
+            page.locator("#announcements-dialog[open]").wait_for()
+            self.assertIn("2027年9月5日", page.locator("#announcements-date").inner_text())
+            self.assertIn("茉莉安", page.locator("#announcement-birthdays-today").inner_text())
+            browser.close()
+
+    def test_announcements_calendar_handles_year_boundary_leap_year_and_shared_birthdays(self):
+        feed = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        feed["updates"] = []
+        PublicFrontendHandler.announcement_payload = feed
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            self._announcement_page(page, "2026-12-31T16:00:00Z")
+            page.locator("#open-announcements").click()
+            page.locator("#announcement-tab-birthdays").click()
+            first = page.locator("#announcement-birthdays-upcoming .birthday-row").first
+            self.assertIn("恩雅", first.inner_text())
+            self.assertIn("还有 18 天", first.inner_text())
+            page.keyboard.press("Escape")
+            page.evaluate("Date.now = () => Date.parse('2028-02-27T16:00:00Z'); window.dispatchEvent(new Event('focus'));")
+            page.locator("#open-announcements").click()
+            page.locator("#announcement-tab-birthdays").click()
+            self.assertIn("克罗瑞娜", first.inner_text())
+            self.assertIn("还有 14 天", first.inner_text())
+            page.keyboard.press("Escape")
+            # Two birthday notices on one day retain separate annual receipts.
+            for item in feed["birthdays"][:2]:
+                item["month"], item["day"] = 2, 28
+            page.evaluate("Date.now = () => Date.parse('2028-02-28T01:00:00Z'); window.dispatchEvent(new Event('focus'));")
+            page.locator("#announcements-dialog[open]").wait_for()
+            self.assertEqual(page.locator("#announcement-birthdays-today .birthday-row").count(), 2)
+            page.locator("#acknowledge-announcements").click()
+            receipts = page.evaluate("JSON.parse(localStorage.getItem('project-snow-public:announcements:read:v1'))")
+            self.assertEqual(len([key for key in receipts if key.startswith("birthday:2028-02-28:")]), 2)
+            browser.close()
+
+    def test_announcements_loading_retry_storage_fallback_and_safe_text(self):
+        feed = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        feed["updates"][0]["title"] = '<img src=x onerror="window.injected=true">公告'
+        PublicFrontendHandler.announcement_payload = feed
+        PublicFrontendHandler.announcement_failures = 2
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            errors = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.add_init_script("const originalSet = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) { if (key.includes('announcements:read')) throw new Error('storage unavailable'); return originalSet.call(this, key, value); };")
+            self._announcement_page(page)
+            self.assertFalse(page.locator("#announcements-dialog").is_visible())
+            self.assertEqual(page.locator("#connection-status").inner_text(), "服务已连接")
+            page.locator("#open-announcements").click()
+            page.locator("#retry-announcements").wait_for()
+            self.assertIn("暂时无法加载", page.locator("#announcement-status-text").inner_text())
+            page.locator("#retry-announcements").click()
+            page.locator("#announcement-updates h3").wait_for()
+            self.assertIn("<img", page.locator("#announcement-updates h3").inner_text())
+            self.assertEqual(page.locator("#announcement-updates img").count(), 0)
+            page.locator("#acknowledge-announcements").click()
+            page.evaluate("window.dispatchEvent(new Event('focus'))")
+            self.assertFalse(page.locator("#announcements-dialog").is_visible())
+            self.assertFalse(page.locator("#open-announcements .announcement-unread-dot").is_visible())
+            self.assertEqual(errors, [])
+            browser.close()
+
+    def test_announcements_wait_for_settings_and_do_not_publish_future_updates(self):
+        feed = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        feed["birthdays"] = []
+        feed["updates"][0]["published_at"] = "2026-09-05T14:00:00+08:00"
+        PublicFrontendHandler.announcement_payload = feed
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            self._announcement_page(page)
+            self.assertFalse(page.locator("#announcements-dialog").is_visible())
+            page.locator("#open-announcements").click()
+            self.assertEqual(page.locator("#announcement-updates article").count(), 0)
+            page.keyboard.press("Escape")
+            page.locator("#open-settings").click()
+            page.evaluate("Date.now = () => Date.parse('2026-09-05T06:00:00Z'); window.dispatchEvent(new Event('focus'));")
+            self.assertFalse(page.locator("#announcements-dialog").is_visible())
+            self.assertTrue(page.locator("#settings-dialog").is_visible())
+            page.keyboard.press("Escape")
+            page.locator("#announcements-dialog[open]").wait_for()
+            self.assertEqual(page.locator("dialog[open]").count(), 1)
+            self.assertEqual(page.locator("#announcement-updates article").count(), 1)
+            browser.close()
+
+    def test_announcements_mobile_button_and_dialog_fit_both_surfaces(self):
+        PublicFrontendHandler.announcement_payload = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            for width, height in ((390, 844), (320, 568)):
+                with self.subTest(width=width):
+                    page = browser.new_page(viewport={"width": width, "height": height})
+                    self._announcement_page(page)
+                    page.locator("#announcements-dialog[open]").wait_for()
+                    self._assert_no_horizontal_overflow(page)
+                    box = page.locator("#announcements-dialog").bounding_box()
+                    self.assertGreaterEqual(box["x"], 0)
+                    self.assertLessEqual(box["x"] + box["width"], width)
+                    self._announcement_screenshot(page, f"mobile-{width}-updates")
+                    page.locator("#announcement-tab-birthdays").click()
+                    self._announcement_screenshot(page, f"mobile-{width}-birthdays")
+                    page.locator("#acknowledge-announcements").click()
+                    self._assert_visible_controls_do_not_overlap(page, ".chat-header button")
+                    self.assertGreaterEqual(page.locator("#active-character h1").bounding_box()["width"], 35)
+                    entry = page.locator("#open-announcements").bounding_box()
+                    self.assertLessEqual(entry["x"] + entry["width"], width)
+                    self.assertLess(entry["y"], 100)
+                    self._announcement_screenshot(page, f"mobile-{width}-text")
+                    page.locator("#open-contacts").click()
+                    self._configure_model(page)
+                    page.locator("#close-contacts").click()
+                    page.locator("#go-in-person").click()
+                    page.locator("#confirm-presence-transition").click()
+                    page.locator("#in-person-surface:not([hidden])").wait_for()
+                    page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+                    self._assert_visible_controls_do_not_overlap(page, ".scene-hud button, .scene-menu > summary")
+                    entry = page.locator("#stage-open-announcements").bounding_box()
+                    self.assertLessEqual(entry["x"] + entry["width"], width)
+                    page.locator("#stage-open-announcements").click()
+                    page.locator("#announcements-dialog[open]").wait_for()
+                    page.keyboard.press("Escape")
+                    self._announcement_screenshot(page, f"mobile-{width}-stage")
+                    page.close()
+            browser.close()
 
     def _open_model_settings_with_interactive_verification(self, page, *, mobile=False) -> None:
         PublicFrontendHandler.turnstile_site_key = "e2e-site-key"

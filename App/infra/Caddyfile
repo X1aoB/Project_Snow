@@ -29,7 +29,7 @@
 	respond @invalid_write_content_type 415
 	@private_health path /public/v1/health/ready /public/v1/health/full
 	respond @private_health 404
-	@frontend_assets path / /index.html /app.js /app.css
+	@frontend_assets path / /index.html /app.js /app.css /announcements.json
 	header @frontend_assets Cache-Control "no-store, max-age=0"
 	@privacy_document path /privacy/ /privacy/index.html
 	header @privacy_document Cache-Control "no-store, max-age=0"
