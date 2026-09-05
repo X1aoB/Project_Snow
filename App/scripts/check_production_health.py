@@ -72,6 +72,8 @@ def check(url: str = DEFAULT_URL, *, attempts: int = 4) -> str:
     if attempts < 1:
         raise ValueError("attempts must be positive")
     opener = build_opener(NoRedirect())
+    # Give the monitor a stable identity; generic client signatures can be
+    # rejected by the edge before the application receives the health request.
     request = Request(url, headers={
         "Accept": "application/json",
         "Cache-Control": "no-cache",

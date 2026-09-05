@@ -40,6 +40,8 @@ IndexedDB，BYOK 密钥只在当前标签页的 `sessionStorage` 中保存加密
   标点、反馈与角色切换回归也已有自动化覆盖。
 - CI 将 `https://snow.xiaob.dev/public/v1/health/live` 作为定时生产存活检查；公网只暴露 live，ready/full
   健康与管理接口仍限制在本机或 SSH 隧道。
+  生产探测使用固定客户端标识，并区分 HTTP/边缘防护错误与 JSON 内容错误；网络故障、429 与 5xx 有限重试，
+  403、登录跳转和异常健康响应仍会使检查失败。
 - 应用镜像和 512 维 embedding 镜像拥有独立的夜间无缓存构建、运行检查与 Trivy `HIGH/CRITICAL`
   漏洞门禁；候选镜像检查不再和轻量生产健康检查混为一项。
 - 角色头像、贴纸和数据包采用独立版本、manifest、SHA-256 与来源许可的 fail-closed 发布；未确认许可的
