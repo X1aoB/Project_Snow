@@ -831,6 +831,15 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#announcements-dialog[open]").wait_for()
             self.assertEqual(page.locator("dialog[open]").count(), 1)
             self.assertEqual(page.locator("#announcement-updates article").count(), 1)
+            page.locator("#acknowledge-announcements").click()
+            page.locator("#open-info").click()
+            feed["updates"][0]["id"] = "update-while-reading-character-info"
+            feed["updates"][0]["published_at"] = "2026-09-05T14:10:00+08:00"
+            page.evaluate("Date.now = () => Date.parse('2026-09-05T06:10:00Z'); window.dispatchEvent(new Event('focus'));")
+            page.locator("#announcements-dialog[open]").wait_for()
+            page.keyboard.press("Escape")
+            page.locator("#announcements-dialog").wait_for(state="hidden")
+            self.assertIn("open", page.locator("#info-panel").get_attribute("class"))
             browser.close()
 
     def test_announcements_mobile_button_and_dialog_fit_both_surfaces(self):

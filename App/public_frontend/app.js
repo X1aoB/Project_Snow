@@ -4193,6 +4193,7 @@ $("settings-dialog").addEventListener("close", () => modelSetupController?.abort
 $("settings-dialog").addEventListener("cancel", () => modelSetupController?.abort());
 $("sticker-picker").addEventListener("close", () => $("toggle-sticker").setAttribute("aria-expanded", "false"));
 window.addEventListener("keydown", (event) => {
+  if (document.querySelector("dialog[open]")) return;
   if (trapDrawerFocus(event)) return;
   if (event.key.toLocaleLowerCase() === "h" && currentThread()?.channel === "in_person" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
     const hidden = $("in-person-surface").classList.toggle("ui-hidden");
