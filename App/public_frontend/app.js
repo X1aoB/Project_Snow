@@ -111,6 +111,7 @@ const errorMessages = {
   invalid_presence_request: "当前场景请求无效。",
   turnstile_required: "人机验证未完成，请稍后重试。",
   turnstile_expired: "人机验证已过期，请重新验证。",
+  turnstile_timeout: "人机验证超时，请再次点击按钮重试。",
   turnstile_unavailable: "人机验证组件加载失败，请刷新页面后重试。",
   chat_failed: "对话请求失败，请稍后重试。",
   request_failed: "请求失败，请稍后重试。",
@@ -1062,32 +1063,68 @@ function refreshCredentialStatus() {
   }
 }
 
-async function waitForTurnstile() {
+async function waitForTurnstile(signal) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (window.turnstile) return window.turnstile;
-    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    await abortableDelay(100, signal);
   }
   return null;
 }
-async function tokenFor(action) {
+async function tokenForModel(signal) {
   const sitekey = state.config?.turnstile_site_key;
   if (!sitekey) return "development-bypass";
-  const turnstile = await waitForTurnstile();
+  const verification = $("model-verification");
+  const container = $("model-turnstile");
+  verification.hidden = false;
+  $("model-verification-status").textContent = "正在加载人机验证…";
+  container.setAttribute("aria-busy", "true");
+  const turnstile = await waitForTurnstile(signal);
+  signal.throwIfAborted();
   if (!turnstile) throw new Error("turnstile_unavailable");
+  $("model-verification-status").textContent = "请在此完成验证，成功后会自动继续。";
   return new Promise((resolve, reject) => {
-    const container = document.createElement("div");
-    document.body.append(container);
-    let widget = "";
-    const cleanup = () => { if (widget !== "") turnstile.remove(widget); container.remove(); };
+    let widget = null;
+    let settled = false;
+    let timeout = 0;
+    const cleanup = () => {
+      if (widget !== null) {
+        try { turnstile.remove(widget); } catch { /* Still release the pending request. */ }
+        widget = null;
+      }
+      container.replaceChildren();
+      container.setAttribute("aria-busy", "false");
+    };
+    const settle = (error, token = "") => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      signal.removeEventListener("abort", cancel);
+      cleanup();
+      if (error) reject(error);
+      else resolve(token);
+    };
+    const cancel = () => settle(new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", cancel, { once: true });
+    timeout = window.setTimeout(() => settle(new Error("turnstile_timeout")), 120000);
     try {
+      // Native modal dialogs make body-level widgets inert and hide them behind
+      // the backdrop. Keep the interactive challenge inside the model form.
       widget = turnstile.render(container, {
-        sitekey, action, execution: "execute", appearance: "interaction-only",
-        callback: (token) => { cleanup(); resolve(token); },
-        "error-callback": () => { cleanup(); reject(new Error("turnstile_required")); },
-        "expired-callback": () => { cleanup(); reject(new Error("turnstile_required")); },
+        sitekey, action: "byok-session", execution: "execute", appearance: "interaction-only",
+        size: container.clientWidth < 300 ? "compact" : "normal",
+        retry: "never",
+        callback: (token) => settle(null, token),
+        "error-callback": () => settle(new Error("turnstile_required")),
+        "expired-callback": () => settle(new Error("turnstile_expired")),
+        "timeout-callback": () => settle(new Error("turnstile_timeout")),
       });
-      turnstile.execute(widget);
-    } catch { cleanup(); reject(new Error("turnstile_unavailable")); }
+      if (settled) cleanup();
+      else {
+        turnstile.execute(widget);
+        if (!settled) verification.scrollIntoView({ block: "nearest" });
+      }
+    } catch { settle(new Error("turnstile_unavailable")); }
   });
 }
 let feedbackTurnstileWidget = null;
@@ -1359,7 +1396,35 @@ async function loadStickers({ reset = false } = {}) {
   renderStickerPicker();
   return state.stickerLoadPromise;
 }
-async function issueCredential() {
+let modelSetupController = null;
+async function runModelSetup(action, task) {
+  if (modelSetupController) return;
+  const controller = new AbortController();
+  modelSetupController = controller;
+  const form = document.querySelector(".provider-form");
+  const controls = [...form.querySelectorAll("button, input, select")].map((control) => [control, control.disabled]);
+  const button = $(action);
+  const label = button.textContent;
+  controls.forEach(([control]) => { control.disabled = true; });
+  form.setAttribute("aria-busy", "true");
+  button.textContent = action === "discover-models" ? "正在获取模型列表…" : "正在保存模型会话…";
+  showError("setup-error", "");
+  try {
+    await task(controller.signal);
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      showError("setup-error", error?.message === "request_timeout" ? "模型配置请求超时，请再次点击按钮重试。" : error);
+    }
+  } finally {
+    controls.forEach(([control, disabled]) => { control.disabled = disabled; });
+    button.textContent = label;
+    form.setAttribute("aria-busy", "false");
+    $("model-verification").hidden = true;
+    $("model-turnstile").setAttribute("aria-busy", "false");
+    modelSetupController = null;
+  }
+}
+async function issueCredential(signal) {
   const provider = $("provider-select").value;
   if (!provider || !state.config?.providers?.some((item) => item.provider_id === provider)) {
     throw new Error("provider_not_enabled");
@@ -1370,17 +1435,24 @@ async function issueCredential() {
     await showExperienceNoticeIfNeeded();
     if (!experienceNoticeAccepted()) throw new Error("experience_notice_required");
   }
+  signal.throwIfAborted();
+  const token = await tokenForModel(signal);
+  signal.throwIfAborted();
+  $("model-verification-status").textContent = "验证完成，正在建立模型会话…";
   const payload = await api("/byok/session", {
     method: "POST",
+    signal,
+    timeoutMs: 30000,
     body: JSON.stringify({
       provider,
       api_key: apiKey,
-      turnstile_token: await tokenFor("byok-session"),
+      turnstile_token: token,
       accepted_transit_notice: true,
       accepted_cost_notice: true,
       accepted_local_history_notice: true,
     }),
   });
+  signal.throwIfAborted();
   state.credential = payload.credential;
   state.provider = provider;
   state.credentialExpiresAt = Date.parse(payload.expires_at);
@@ -1389,24 +1461,24 @@ async function issueCredential() {
   refreshCredentialStatus();
 }
 async function discoverModels() {
-  showError("setup-error", "");
-  try {
+  return runModelSetup("discover-models", async (signal) => {
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
-    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential();
-    const payload = await api("/byok/models", { method: "POST", body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
+    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential(signal);
+    const payload = await api("/byok/models", { method: "POST", signal, timeoutMs: 30000, body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
+    signal.throwIfAborted();
     saveCredential();
     const select = $("discovered-models");
     select.innerHTML = `<option value="">选择已发现模型</option>${payload.models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")}`;
     select.hidden = false;
-  } catch (error) { showError("setup-error", error); }
+  });
 }
 async function saveModelSession() {
-  showError("setup-error", "");
-  try {
+  return runModelSetup("save-model", async (signal) => {
     const model = $("discovered-models").value.trim() || $("model-id").value.trim();
     if (!model) throw new Error("请填写或选择模型 ID。");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
-    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential();
+    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential(signal);
+    signal.throwIfAborted();
     state.provider = $("provider-select").value;
     state.model = model;
     saveCredential();
@@ -1414,7 +1486,7 @@ async function saveModelSession() {
     updateComposerAvailability();
     $("settings-dialog").close();
     toast("模型会话已保存到当前标签页");
-  } catch (error) { showError("setup-error", error); }
+  });
 }
 
 function currentCharacter() { return state.characters.find((item) => item.character_id === state.selected) || null; }
@@ -3711,6 +3783,7 @@ function toggleContacts({ mobileOpen = false } = {}) {
   return expanded;
 }
 function openSettings(tab = "models") {
+  if (tab !== "models") modelSetupController?.abort();
   document.querySelectorAll("[data-settings-tab]").forEach((button) => button.classList.toggle("active", button.dataset.settingsTab === tab));
   document.querySelectorAll("[data-settings-panel]").forEach((panel) => { panel.hidden = panel.dataset.settingsPanel !== tab; });
   if (tab === "history") storageBytes().then((bytes) => { $("storage-usage").textContent = `当前浏览器记录约占 ${formatBytes(bytes)}。`; });
@@ -3920,6 +3993,8 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   button.onclick = () => $(button.dataset.closeDialog).close();
 });
 $("feedback-dialog").addEventListener("close", () => prepareFeedbackVerification({ cancelPending: true }));
+$("settings-dialog").addEventListener("close", () => modelSetupController?.abort());
+$("settings-dialog").addEventListener("cancel", () => modelSetupController?.abort());
 $("sticker-picker").addEventListener("close", () => $("toggle-sticker").setAttribute("aria-expanded", "false"));
 window.addEventListener("keydown", (event) => {
   if (trapDrawerFocus(event)) return;

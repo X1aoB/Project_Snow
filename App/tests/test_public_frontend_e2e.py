@@ -656,6 +656,50 @@ class PublicFrontendE2ETests(TestCase):
         page.locator("#save-model").click()
         page.locator("#settings-dialog").wait_for(state="hidden")
 
+    def _open_model_settings_with_interactive_verification(self, page, *, mobile=False) -> None:
+        PublicFrontendHandler.turnstile_site_key = "e2e-site-key"
+        page.route(
+            "https://challenges.cloudflare.com/**",
+            lambda route: route.fulfill(status=200, content_type="application/javascript", body=""),
+        )
+        page.add_init_script(
+            """(() => {
+                const widgets = new Map();
+                window.__modelTurnstileOptions = [];
+                window.__modelTurnstileOutcome = 'success';
+                window.turnstile = {
+                    render(container, options) {
+                        if (window.__modelTurnstileOutcome === 'unavailable') throw new Error('load failed');
+                        const widget = window.__modelTurnstileOptions.push(options);
+                        const challenge = document.createElement('button');
+                        challenge.type = 'button';
+                        challenge.dataset.modelChallenge = String(widget);
+                        challenge.textContent = '完成测试验证';
+                        challenge.style.width = options.size === 'compact' ? '150px' : '300px';
+                        challenge.style.height = options.size === 'compact' ? '140px' : '65px';
+                        challenge.onclick = () => {
+                            const outcome = window.__modelTurnstileOutcome;
+                            if (outcome === 'success') options.callback('model-e2e-token');
+                            else options[`${outcome}-callback`]?.();
+                        };
+                        widgets.set(widget, challenge);
+                        container.append(challenge);
+                        return widget;
+                    },
+                    execute() {},
+                    remove(widget) { widgets.get(widget)?.remove(); widgets.delete(widget); },
+                };
+            })();"""
+        )
+        page.goto(self.base_url, wait_until="networkidle")
+        page.locator("#accept-experience-notice").click()
+        if mobile:
+            page.locator("#open-contacts").click()
+            page.locator("#open-settings").click()
+        else:
+            page.locator("#header-config-model").click()
+        page.locator("#api-key").fill("sk-e2e-only-not-real")
+
     def _assert_no_horizontal_overflow(self, page) -> None:
         metrics = page.evaluate(
             """() => ({
@@ -713,6 +757,160 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.locator(".analyst-portrait img").count(), 0)
             self.assertIsNotNone(page.locator("#toggle-action").get_attribute("hidden"))
             self.assertIsNone(page.locator("#toggle-sticker").get_attribute("hidden"))
+            browser.close()
+
+    def test_model_setup_verification_is_actionable_inside_desktop_and_mobile_dialogs(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            for action, width, height in (("discover-models", 1280, 800), ("save-model", 390, 844)):
+                with self.subTest(action=action):
+                    page = browser.new_page(viewport={"width": width, "height": height})
+                    errors = []
+                    sessions = []
+                    page.on("pageerror", lambda error: errors.append(str(error)))
+                    page.on("request", lambda request: sessions.append(request.post_data_json)
+                            if urlparse(request.url).path == "/public/v1/byok/session" else None)
+                    self._open_model_settings_with_interactive_verification(page, mobile=width < 820)
+                    if action == "save-model":
+                        page.locator("#toggle-advanced-model").click()
+                        page.locator("#model-id").fill("gpt-e2e")
+                    page.locator(f"#{action}").click()
+                    challenge = page.locator("[data-model-challenge]")
+                    challenge.wait_for(state="attached", timeout=3000)
+                    self.assertTrue(challenge.evaluate("element => Boolean(element.closest('#settings-dialog[open]'))"))
+                    self.assertFalse(page.locator("#discover-models").is_enabled())
+                    self.assertFalse(page.locator("#save-model").is_enabled())
+                    self.assertEqual(sessions, [])
+                    self.assertEqual(page.locator(".provider-form").get_attribute("aria-busy"), "true")
+                    self._assert_no_horizontal_overflow(page)
+                    self.assertLessEqual(page.locator("#settings-dialog").evaluate(
+                        "element => element.scrollWidth - element.clientWidth"
+                    ), 1)
+                    # A real click checks top-layer hit testing, not just display/visibility.
+                    challenge.click()
+                    if action == "discover-models":
+                        page.locator("#discovered-models").wait_for(state="visible")
+                        page.locator("#discovered-models").select_option("gpt-e2e")
+                        page.locator("#save-model").click()
+                    page.locator("#settings-dialog").wait_for(state="hidden")
+                    self.assertEqual(len(sessions), 1)
+                    self.assertEqual(sessions[0]["turnstile_token"], "model-e2e-token")
+                    self.assertEqual(sessions[0]["provider"], "openai")
+                    self.assertEqual(page.locator("#api-key").input_value(), "")
+                    self.assertEqual(page.locator("[data-model-challenge]").count(), 0)
+                    self.assertEqual(page.evaluate("() => window.__modelTurnstileOptions[0].action"), "byok-session")
+                    self.assertEqual(errors, [])
+                    self._assert_no_horizontal_overflow(page)
+                    page.close()
+            browser.close()
+
+    def test_model_setup_verification_errors_preserve_inputs_and_allow_retry(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            self._open_model_settings_with_interactive_verification(page)
+            page.locator("#toggle-advanced-model").click()
+            page.locator("#model-id").fill("gpt-e2e")
+            for outcome, message in (("error", "人机验证未完成"), ("expired", "人机验证已过期"),
+                                     ("timeout", "人机验证超时"), ("unavailable", "验证组件加载失败")):
+                with self.subTest(outcome=outcome):
+                    page.evaluate("value => { window.__modelTurnstileOutcome = value; }", outcome)
+                    page.locator("#save-model").click()
+                    if outcome != "unavailable":
+                        page.locator("[data-model-challenge]").click()
+                    page.locator("#setup-error").get_by_text(message).wait_for(state="visible")
+                    self.assertTrue(page.locator("#save-model").is_enabled())
+                    self.assertTrue(page.locator("#discover-models").is_enabled())
+                    self.assertEqual(page.locator("#api-key").input_value(), "sk-e2e-only-not-real")
+                    self.assertEqual(page.locator("#model-id").input_value(), "gpt-e2e")
+                    self.assertEqual(page.locator("[data-model-challenge]").count(), 0)
+                    self.assertNotIn("/public/v1/byok/session", PublicFrontendHandler.request_paths)
+            page.evaluate("() => { window.__modelTurnstileOutcome = 'success'; }")
+            page.locator("#save-model").click()
+            page.locator("[data-model-challenge]").click()
+            page.locator("#settings-dialog").wait_for(state="hidden")
+            self.assertEqual(PublicFrontendHandler.request_paths.count("/public/v1/byok/session"), 1)
+            browser.close()
+
+    def test_model_setup_cancel_discards_late_verification_and_prevents_duplicate_submissions(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            errors = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            self._open_model_settings_with_interactive_verification(page)
+            for dismissal in ("close", "escape", "tab"):
+                with self.subTest(dismissal=dismissal):
+                    page.locator("#discover-models").click()
+                    page.locator("[data-model-challenge]").wait_for(state="visible")
+                    # The guard must also reject queued/reentrant handlers, beyond disabled controls.
+                    widget_count = page.evaluate("""() => {
+                        document.querySelector('#discover-models').onclick();
+                        document.querySelector('#save-model').onclick();
+                        return window.__modelTurnstileOptions.length;
+                    }""")
+                    self.assertEqual(widget_count, ("close", "escape", "tab").index(dismissal) + 1)
+                    if dismissal == "close":
+                        page.locator('[data-close-dialog="settings-dialog"]').click()
+                    elif dismissal == "escape":
+                        page.keyboard.press("Escape")
+                    else:
+                        page.locator('[data-settings-tab="history"]').click()
+                    page.wait_for_function("() => !document.querySelector('#discover-models').disabled")
+                    page.evaluate("() => window.__modelTurnstileOptions.at(-1).callback('late-e2e-token')")
+                    if dismissal == "tab":
+                        page.locator('[data-settings-tab="models"]').click()
+                    else:
+                        page.locator("#header-config-model").click()
+                    self.assertEqual(page.locator("[data-model-challenge]").count(), 0)
+                    self.assertEqual(page.locator("#setup-error").inner_text(), "")
+                    self.assertEqual(page.locator("#api-key").input_value(), "sk-e2e-only-not-real")
+                    self.assertNotIn("/public/v1/byok/session", PublicFrontendHandler.request_paths)
+            page.locator("#provider-select").select_option("anthropic")
+            page.locator("#discover-models").click()
+            page.locator("[data-model-challenge]").click()
+            page.locator("#discovered-models").wait_for(state="visible")
+            self.assertEqual(PublicFrontendHandler.request_paths.count("/public/v1/byok/session"), 1)
+            self.assertEqual(errors, [])
+            browser.close()
+
+    def test_model_setup_missing_verification_callback_times_out_and_can_retry(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            self._open_model_settings_with_interactive_verification(page)
+            page.clock.install()
+            page.locator("#discover-models").click()
+            page.locator("[data-model-challenge]").wait_for(state="visible")
+            page.clock.fast_forward(120001)
+            page.locator("#setup-error").get_by_text("人机验证超时").wait_for(state="visible")
+            self.assertTrue(page.locator("#discover-models").is_enabled())
+            self.assertEqual(page.locator("[data-model-challenge]").count(), 0)
+            self.assertNotIn("/public/v1/byok/session", PublicFrontendHandler.request_paths)
+            page.locator("#discover-models").click()
+            page.locator("[data-model-challenge]").click()
+            page.locator("#discovered-models").wait_for(state="visible")
+            self.assertEqual(PublicFrontendHandler.request_paths.count("/public/v1/byok/session"), 1)
+            browser.close()
+
+    def test_model_setup_can_cancel_while_verification_script_is_loading(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            self._open_model_settings_with_interactive_verification(page)
+            page.evaluate("() => { window.__savedTurnstile = window.turnstile; delete window.turnstile; }")
+            page.locator("#discover-models").click()
+            page.locator("#model-verification-status").get_by_text("正在加载人机验证").wait_for(state="visible")
+            page.locator('[data-close-dialog="settings-dialog"]').click()
+            page.locator("#header-config-model").click()
+            page.wait_for_function("() => !document.querySelector('#discover-models').disabled", timeout=1500)
+            page.evaluate("() => { window.turnstile = window.__savedTurnstile; }")
+            self.assertEqual(page.locator("[data-model-challenge]").count(), 0)
+            self.assertNotIn("/public/v1/byok/session", PublicFrontendHandler.request_paths)
+            page.locator("#discover-models").click()
+            page.locator("[data-model-challenge]").click()
+            page.locator("#discovered-models").wait_for(state="visible")
+            self.assertEqual(PublicFrontendHandler.request_paths.count("/public/v1/byok/session"), 1)
             browser.close()
 
     def test_mia_expression_classifier_and_assets_cover_all_approved_states(self) -> None:

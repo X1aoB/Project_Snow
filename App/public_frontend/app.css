@@ -240,6 +240,10 @@ textarea { resize: none; }
 .form-error { min-height: 18px; color: var(--snow-danger); font-size: .66rem; }
 .form-hint { padding: 8px 10px; border-radius: 8px; color: #426b57; background: #e9f4ed; font-size: .64rem; }
 .provider-form { display: grid; gap: 12px; }
+.model-verification { display: grid; gap: 8px; min-width: 0; padding: 10px 11px; border: 1px solid var(--snow-line-soft); border-radius: 10px; color: var(--snow-muted); background: #fff; }
+.model-verification p { margin: 0; font-size: var(--ui-body-size); line-height: 1.5; }
+.model-turnstile { width: 100%; min-width: 0; }
+.model-turnstile[aria-busy="true"] { min-height: 65px; }
 .provider-options-mobile { display: none; }
 .provider-options-mobile button { min-height: 44px; padding: 9px 12px; border: 1px solid var(--snow-line); border-radius: 10px; color: #41677d; background: #fff; text-align: left; }
 .provider-options-mobile button[aria-checked="true"] { color: #fff; border-color: var(--snow-blue); background: var(--snow-blue); box-shadow: 0 7px 16px rgba(60,96,117,.18); }
