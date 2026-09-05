@@ -343,14 +343,9 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Check the deployed public liveness endpoint
-        shell: bash
-        run: |
-          curl --fail --silent --show-error \
-            --retry 3 --retry-delay 2 \
-            --connect-timeout 10 --max-time 20 \
-            https://snow.xiaob.dev/public/v1/health/live \
-            | python3 -c 'import json, sys; payload = json.load(sys.stdin); assert payload.get("status") == "ok"; assert payload.get("version")'
+        run: python3 App/scripts/check_production_health.py
 
   full-validation:
     if: >-

@@ -2936,7 +2936,7 @@ require_runner_controller_binding
 
         self.assertIn("Nightly application health and regression checks", workflow)
         self.assertIn("production-health:\n", workflow)
-        self.assertIn("https://snow.xiaob.dev/public/v1/health/live", workflow)
+        self.assertIn("python3 App/scripts/check_production_health.py", workflow)
         self.assertIn("      - production-health\n", workflow)
 
         self.assertIn("name: nightly-image-security", nightly)
