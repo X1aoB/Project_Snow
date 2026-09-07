@@ -21,7 +21,6 @@ import stat
 import subprocess
 import tarfile
 import time
-import urllib.request
 import uuid
 import zipfile
 
@@ -36,6 +35,25 @@ CODE_SHA256 = "439f3846ffa050ddaa7790d39b572fedd420d39d258499762cf0deea690e6189"
 ANCHOR = "srv/project-snow/releases/anchors/baseline-502ec99-0.9.6-20260907/current-manifest.json"
 LIMITS = {"postgres": (512, .5), "api": (1024, .75), "embedding": (768, .5), "qdrant": (512, .5), "neo4j": (1024, .75)}
 LABEL = "io.project-snow.restore-drill"
+HEALTH_PROBE = """import json, sys, urllib.error, urllib.request
+endpoint = sys.argv[1]
+if endpoint not in {'ready', 'full'}:
+    raise SystemExit(2)
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+try:
+    response = opener.open('http://127.0.0.1:8000/public/v1/health/' + endpoint, timeout=15)
+except urllib.error.HTTPError as error:
+    response = error
+with response:
+    payload = response.read(131073)
+if len(payload) > 131072:
+    raise SystemExit(2)
+document = json.loads(payload)
+result = {key: document.get(key) for key in ('status', 'database', 'data', 'media', 'stickers') if isinstance(document.get(key), str)}
+if endpoint == 'full':
+    result['dependencies'] = {key: document.get('dependencies', {}).get(key) for key in ('embedding', 'qdrant', 'neo4j')}
+print(json.dumps(result, sort_keys=True))
+"""
 REBUILD = """import os, runpy, sys, time
 import httpx
 from neo4j import GraphDatabase
@@ -273,7 +291,7 @@ class Sandbox:
             raise MaintenanceError("Drill network is not the intended isolated network")
 
     def create(self, role: str, image: str, environment: Path, *, mounts: list[str] = (), arguments: list[str] = (),
-               entrypoint: str | None = None, public: bool = False) -> str:
+               entrypoint: str | None = None) -> str:
         if role not in LIMITS or not DIGEST.fullmatch(image) or not self.network:
             raise MaintenanceError("Invalid isolated container specification")
         if environment.is_symlink() or not environment.resolve().is_relative_to(self.work.resolve()):
@@ -290,10 +308,6 @@ class Sandbox:
                 "--env-file", str(environment)]
         if role == "api":
             args += ["--read-only", "--user", "0:0", "--cap-drop=ALL", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m"]
-        if public:
-            if role != "api":
-                raise MaintenanceError("Only the drill API may publish a loopback port")
-            args += ["--publish", "127.0.0.1::8000"]
         if role in {"postgres", "qdrant", "neo4j"}:
             volume = self.identity + "-" + role
             self.planned_volumes.add(volume)
@@ -416,17 +430,16 @@ SELECT json_build_object('counts',(SELECT json_object_agg(name,row_count) FROM d
 
 
 def health(sandbox: Sandbox, api: str, *, full: bool) -> dict:
-    info = json.loads(sandbox.execute(["docker", "inspect", api]))[0]
-    port = info["NetworkSettings"]["Ports"]["8000/tcp"][0]
-    if port["HostIp"] != "127.0.0.1" or not str(port["HostPort"]).isdigit():
-        raise MaintenanceError("Drill API is not restricted to a loopback port")
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    url = "http://127.0.0.1:" + port["HostPort"] + "/public/v1/health/ready"
+    if api not in sandbox.containers or sandbox.roles.get(api) != "api":
+        raise MaintenanceError("Health probes require an API container created by this isolated drill")
+    # Docker internal networks need not expose published ports on the host.
+    # Exec a bounded stdlib probe in this exact container instead: no host port,
+    # no external route, no production credentials, only two fixed GET paths.
+    prefix = ["docker", "exec", api, "python", "-c", HEALTH_PROBE]
     deadline = time.monotonic() + 180
     while True:
         try:
-            with opener.open(url, timeout=15) as response:
-                ready = json.loads(response.read(131073))
+            ready = json.loads(sandbox.execute([*prefix, "ready"], timeout=20))
             if ready.get("status") == "ok":
                 break
         except Exception:
@@ -436,8 +449,7 @@ def health(sandbox: Sandbox, api: str, *, full: bool) -> dict:
         time.sleep(2)
     result = {"readiness": "ok", "database": ready.get("database"), "data": ready.get("data"), "media": ready.get("media"), "stickers": ready.get("stickers")}
     if full:
-        with opener.open(url.replace("/ready", "/full"), timeout=30) as response:
-            report = json.loads(response.read(131073))
+        report = json.loads(sandbox.execute([*prefix, "full"], timeout=20))
         if report.get("status") != "ok" or any(report.get("dependencies", {}).get(name) != "ok" for name in ("embedding", "qdrant", "neo4j")):
             raise MaintenanceError("Restored retrieval dependencies did not pass full health")
         result["retrieval"] = "ok"
@@ -501,7 +513,7 @@ def drill(paths: Paths, *, snapshot: str, metadata_snapshot: str, full: bool = F
             if status.get("Running") or status.get("ExitCode") != 0:
                 raise MaintenanceError("Isolated retrieval rebuild did not succeed")
         receipt["phase"] = "api-health"
-        api = sandbox.create("api", images["PUBLIC_API_IMAGE"], environments["api"], mounts=mounts, entrypoint="python", public=True,
+        api = sandbox.create("api", images["PUBLIC_API_IMAGE"], environments["api"], mounts=mounts, entrypoint="python",
                              arguments=["-m", "uvicorn", "backend.snow_app.public_main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"])
         sandbox.start(api)
         receipt["api"] = health(sandbox, api, full=full)

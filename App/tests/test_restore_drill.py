@@ -107,7 +107,7 @@ def test_generated_credentials_are_new_and_provider_mail_paths_are_disabled(tmp_
     assert "secret-trap" not in environment["api"].read_text()
 
 
-def test_sandbox_caps_resources_uses_internal_network_and_only_deletes_owned_ids(tmp_path):
+def test_sandbox_caps_resources_uses_internal_network_without_published_ports_and_only_deletes_owned_ids(tmp_path):
     calls = []
     sandbox = None
     counter = 0
@@ -132,15 +132,14 @@ def test_sandbox_caps_resources_uses_internal_network_and_only_deletes_owned_ids
     sandbox.open()
     image = "example/test@sha256:" + "a" * 64
     for role in restore_drill.LIMITS:
-        sandbox.create(role, image, environment, public=role == "api")
+        sandbox.create(role, image, environment)
     assert sum(memory for memory, cpu in restore_drill.LIMITS.values()) <= 4096
     assert sum(cpu for memory, cpu in restore_drill.LIMITS.values()) <= 3
     for call in (call for call in calls if call[1] == "create"):
         assert call[call.index("--network") + 1] == "f" * 64
         assert "--memory" in call and "--memory-swap" in call and "--cpus" in call
         assert "--pull=never" in call and "--env-file" in call
-        if "--publish" in call:
-            assert call[call.index("--publish") + 1] == "127.0.0.1::8000"
+        assert "--publish" not in call and "-p" not in call
     assert "--internal" in calls[0]
     assert sandbox.close() == []
     removed = [call[-1] for call in calls if call[1] == "rm"]
@@ -245,3 +244,31 @@ def test_timeout_discovery_refuses_foreign_ownership_without_deleting_it(tmp_pat
     sandbox.container_names.add("planned")
     assert sandbox.close() == ["discovery:" + sandbox.identity]
     assert not any("rm" in call for call in calls)
+
+
+def test_health_with_null_internal_network_ports_uses_only_owned_container_loopback(tmp_path):
+    identifier = "d" * 64
+    calls = []
+    def execute(args, **kwargs):
+        calls.append(args)
+        if args[1] == "inspect":
+            # Actual Docker internal network state observed during the first
+            # drill; health must not depend on a host port being assigned.
+            return json.dumps([{"NetworkSettings": {"Ports": {"8000/tcp": None}}}])
+        assert args[:4] == ["docker", "exec", identifier, "python"]
+        assert kwargs["timeout"] == 20 and args[-1] in {"ready", "full"}
+        return json.dumps({"status": "ok", "database": "ok", "data": "ok", "media": "ok", "stickers": "ok",
+                           "dependencies": {"embedding": "ok", "qdrant": "ok", "neo4j": "ok"}})
+    sandbox = restore_drill.Sandbox(tmp_path, execute)
+    sandbox.containers.append(identifier)
+    sandbox.roles[identifier] = "api"
+    assert restore_drill.health(sandbox, identifier, full=True)["retrieval"] == "ok"
+    assert [args[-1] for args in calls] == ["ready", "full"]
+    assert "127.0.0.1:8000/public/v1/health/" in restore_drill.HEALTH_PROBE
+    assert "ProxyHandler({})" in restore_drill.HEALTH_PROBE
+
+
+def test_health_rejects_production_container_before_exec(tmp_path):
+    sandbox = restore_drill.Sandbox(tmp_path, lambda *args, **kwargs: pytest.fail("No production exec is allowed"))
+    with pytest.raises(maintenance.MaintenanceError, match="created by this isolated drill"):
+        restore_drill.health(sandbox, "project-snow-public-api-blue-1", full=False)

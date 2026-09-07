@@ -78,7 +78,7 @@ Qdrant/Neo4j 是由不可变 data release 重建的派生索引；它们不通�
 
 1. 在隔离目录从选定 snapshot 恢复，核对 recovery JSON、dump checksum、源码、配置、数据/媒体与 image archive 清单。只在隔离 Docker 环境加载测试镜像和数据库。
 2. 验证同版 `pg_restore --list`，恢复并执行只读行数/schema 校验、内部 API、检索和媒体 smoke；确认不知道生产模型密钥的测试不会发起付费模型请求。
-3. 使用 `python3 App/ops/restore_drill.py` 恢复固定基线到全新随机私有目录和专用 `--internal` Docker 网络；先校验 dump/配置/源码及数据媒体 hash，再向独立 PostgreSQL 写入，核对 dump TOC、schema、约束、migration head 并生成实际行数 receipt，启动只绑定 loopback 的基线 API 读取 readiness。`--full` 另启动隔离 embedding/Qdrant/Neo4j 并重建检索索引。所有容器总限额为 3.75 GiB RAM / 3 CPU，前后容量门要求至少 10 GiB 空闲。
+3. 使用 `python3 App/ops/restore_drill.py` 恢复固定基线到全新随机私有目录和专用 `--internal` Docker 网络；先校验 dump/配置/源码及数据媒体 hash，再向独立 PostgreSQL 写入，核对 dump TOC、schema、约束、migration head 并生成实际行数 receipt。基线 API 不发布任何宿主端口，检查仅通过本次容器 ID 执行固定的内部 loopback readiness/full GET。`--full` 另启动隔离 embedding/Qdrant/Neo4j 并重建检索索引。所有容器总限额为 3.75 GiB RAM / 3 CPU，前后容量门要求至少 10 GiB 空闲。
 4. 原 `maintenance.py restore-postgres` 和包装脚本保留明确拒绝路径，**不会覆盖生产数据库，即使 writers 已停止**。灾难恢复须先在独立目标验证，单独审阅上线后新增反馈/数据如何保留与合并，再决定切换。演练只回收自己创建的容器 ID、volume 和网络，不执行生产切换。
 
 含新版 request lease 的备份必须在独立恢复目标选择匹配的受信新版 image/anchor；不能用旧镜像强制消除新 lease 或删除不确定请求。基线未捕获历史行数，因此演练只能核对 dump/schema 自洽并记录恢复结果，不能声称已经比对历史行数。
@@ -100,3 +100,5 @@ monitor timer 每分钟读取公网 live 及活动 API localhost full 健康（D
 独立 Docker 实测通过：旧 SSE 的 40 段跨 reload 完整返回、新连接切到 green、Caddy restart 后仍读取持久 green 上游（7.37 秒）。实际运行的 Caddy 二进制也只读校验了新配置语法。后端 8 个 PostgreSQL 场景已实跑，其中新 worker 崩溃到旧版显式 lease 恢复场景通过。
 
 永久基线镜像 snapshot 回读核对 10 个镜像、159 个 blobs、1,296,395,349 字节归档内容；源码 zip、配置 tar 和 PG dump 均与记录 hash 一致。这些证据证明备份可读取、文件和镜像材料完整，尚不代表完成 Docker load 或整台主机的灾难恢复演练。
+
+首次隔离演练实际恢复了 8 张 PostgreSQL 表，migration head 为 `20260819_0004`，无未验证约束；data 11、avatar 47、sticker 1090 个文件全部通过 hash 校验。该次 API 检查因 internal 网络没有宿主端口而失败，所有临时资源成功清理；已改为容器内部 loopback 检查，完整 API/检索恢复仍须重跑后记录，不能把这次结果标成通过。
