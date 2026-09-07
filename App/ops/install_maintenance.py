@@ -11,12 +11,13 @@ import shutil
 import stat
 import subprocess
 import tempfile
+from typing import Callable
 
 
-def controlled(path: Path, *, directory: bool = False) -> None:
+def controlled(path: Path, *, directory: bool = False, link: bool = False) -> None:
     info = path.lstat()
-    kind = stat.S_ISDIR if directory else stat.S_ISREG
-    if not kind(info.st_mode) or info.st_uid or info.st_gid or info.st_mode & 0o022 or (not directory and info.st_nlink != 1):
+    kind = stat.S_ISLNK if link else stat.S_ISDIR if directory else stat.S_ISREG
+    if not kind(info.st_mode) or info.st_uid or info.st_gid or (not link and info.st_mode & 0o022) or (not directory and info.st_nlink != 1):
         raise SystemExit("Installation requires reviewed root-controlled source and destination paths.")
 
 
@@ -43,7 +44,58 @@ def sync(path: Path) -> None:
         os.close(descriptor)
 
 
-def install(source: Path, destination: Path, unit_root: Path) -> dict:
+def ensure_directory(path: Path, mode: int = 0o755) -> None:
+    # Validate ancestors before mkdir so a linked or writable parent cannot
+    # redirect even the preparatory writes.
+    for parent in reversed((path, *path.parents)):
+        if parent.exists() or parent.is_symlink():
+            controlled(parent, directory=True)
+        else:
+            parent.mkdir(mode=mode if parent == path else 0o755)
+            controlled(parent, directory=True)
+
+
+def atomic_link(path: Path, target: str) -> None:
+    descriptor, name = tempfile.mkstemp(prefix=".install-link-", dir=path.parent)
+    os.close(descriptor)
+    temporary = Path(name)
+    temporary.unlink()
+    try:
+        temporary.symlink_to(target, target_is_directory=path.name == "current")
+        os.replace(temporary, path)
+        sync(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def snapshot_target(path: Path, destination: Path, *, allow_link: bool = False) -> dict:
+    if not path.exists() and not path.is_symlink():
+        return {"path": str(path), "kind": "absent"}
+    if path.is_symlink() and allow_link:
+        controlled(path, link=True)
+        resolved = path.resolve(strict=True)
+        if not resolved.is_relative_to(destination):
+            raise SystemExit("Installed helper link leaves the controlled installation directory.")
+        for parent in (resolved.parent, *resolved.parent.parents):
+            controlled(parent, directory=True)
+        controlled(resolved, directory=resolved.is_dir())
+        return {"path": str(path), "kind": "link", "target": os.readlink(path)}
+    controlled(path)
+    return {"path": str(path), "kind": "file", "mode": stat.S_IMODE(path.stat().st_mode), "data": path.read_bytes()}
+
+
+def restore_target(snapshot: dict) -> None:
+    path = Path(snapshot["path"])
+    if snapshot["kind"] == "absent":
+        path.unlink(missing_ok=True)
+        sync(path.parent)
+    elif snapshot["kind"] == "link":
+        atomic_link(path, snapshot["target"])
+    else:
+        atomic_bytes(path, snapshot["data"], snapshot["mode"])
+
+
+def install(source: Path, destination: Path, unit_root: Path, *, reload_units: Callable[[], None] | None = None) -> dict:
     for parent in (source, *source.parents):
         controlled(parent, directory=True)
     files = {name: source / name for name in ("maintenance.py", "release_state.py", "recovery_backup.py", "auto_stage.py", "routing.py", "monitor.py")}
@@ -62,11 +114,18 @@ def install(source: Path, destination: Path, unit_root: Path) -> dict:
             units[name] = (source / name).read_bytes()
     identity = hashlib.sha256(json.dumps({name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()}, sort_keys=True).encode()).hexdigest()
     for directory in (destination, destination / "versions"):
-        directory.mkdir(mode=0o755, parents=True, exist_ok=True)
-        controlled(directory, directory=True)
-    controlled(unit_root, directory=True)
-    for parent in destination.parents:
+        ensure_directory(directory)
+    for parent in (unit_root, *unit_root.parents):
         controlled(parent, directory=True)
+    current = destination / "current"
+    if current.exists() and not current.is_symlink():
+        raise SystemExit("Unexpected non-symlink helper current pointer.")
+    # Every mutable destination is validated and captured before publication.
+    # In particular, a masked/unsafe late unit must not switch current first.
+    snapshots = [snapshot_target(destination / name, destination, allow_link=True) for name in payloads]
+    snapshots.extend(snapshot_target(unit_root / name, destination) for name in units)
+    snapshots.append(snapshot_target(current, destination, allow_link=True))
+    previous = os.readlink(current) if current.is_symlink() else None
     version = destination / "versions" / identity
     if not version.exists() and not version.is_symlink():
         temporary = Path(tempfile.mkdtemp(prefix=".install-", dir=version.parent))
@@ -85,38 +144,66 @@ def install(source: Path, destination: Path, unit_root: Path) -> dict:
         controlled(version / name)
         if (version / name).read_bytes() != data:
             raise SystemExit("Installed immutable helper generation differs from reviewed source.")
-    current = destination / "current"
-    previous = os.readlink(current) if current.is_symlink() else None
-    if current.exists() and not current.is_symlink():
-        raise SystemExit("Unexpected non-symlink helper current pointer.")
-    legacy = destination / "maintenance.py"
-    if legacy.exists() and not legacy.is_symlink():
-        controlled(legacy)
-        saved = destination / ("legacy-maintenance-" + hashlib.sha256(legacy.read_bytes()).hexdigest() + ".py")
-        if not saved.exists():
-            atomic_bytes(saved, legacy.read_bytes(), 0o444)
-        previous = str(saved)
-    # One pointer selects all imports. Python resolves the entry script's
-    # symlink before initializing sys.path, so a running generation is stable.
-    link = destination / (".current-" + identity)
-    link.unlink(missing_ok=True)
-    link.symlink_to("versions/" + identity)
-    os.replace(link, current)
-    for name in payloads:
-        link = destination / (".link-" + name)
-        link.unlink(missing_ok=True)
-        link.symlink_to("current/" + name)
-        os.replace(link, destination / name)
-    sync(destination)
-    for name, data in units.items():
-        existing = unit_root / name
-        if existing.exists() or existing.is_symlink():
-            controlled(existing)
-            saved = destination / ("previous-" + name + "-" + hashlib.sha256(existing.read_bytes()).hexdigest())
-            if not saved.exists():
-                atomic_bytes(saved, existing.read_bytes(), 0o444)
-        atomic_bytes(existing, data, 0o644)
-    return {"installed_version": identity, "previous_helper": previous, "runner_changed": False, "timers_enabled": False}
+    receipts = destination / "install-receipts"
+    ensure_directory(receipts, 0o700)
+    if receipts.stat().st_mode & 0o077:
+        raise SystemExit("Installation recovery receipts require a root-only directory.")
+    receipt = Path(tempfile.mkdtemp(prefix="transaction-", dir=receipts))
+    receipt.chmod(0o700)
+    controlled(receipt, directory=True)
+    record = {"schema_version": "project-snow-helper-install-1", "status": "prepared",
+              "installed_version": identity, "destination": str(destination), "unit_root": str(unit_root), "targets": []}
+    for index, snapshot in enumerate(snapshots):
+        entry = {key: value for key, value in snapshot.items() if key != "data"}
+        if snapshot["kind"] == "file":
+            saved = receipt / f"original-{index}.bin"
+            atomic_bytes(saved, snapshot["data"], 0o400)
+            entry.update(backup=saved.name, sha256=hashlib.sha256(snapshot["data"]).hexdigest())
+            if Path(snapshot["path"]) == destination / "maintenance.py":
+                previous = str(saved)
+        record["targets"].append(entry)
+    receipt_path = receipt / "receipt.json"
+
+    def record_status(status: str, errors: list[str] | None = None) -> None:
+        record["status"] = status
+        if errors:
+            record["rollback_errors"] = errors
+        atomic_bytes(receipt_path, (json.dumps(record, sort_keys=True, indent=2) + "\n").encode(), 0o400)
+
+    record_status("prepared")
+    sync(receipts)
+    try:
+        for name in payloads:
+            atomic_link(destination / name, "current/" + name)
+        for name, data in units.items():
+            atomic_bytes(unit_root / name, data, 0o644)
+        # A running Python process retains the resolved generation in sys.path.
+        # Publish current only after every module entry and unit is installed.
+        atomic_link(current, "versions/" + identity)
+        if reload_units is not None:
+            reload_units()
+        record_status("committed")
+    except BaseException as error:
+        failures = []
+        for snapshot in reversed(snapshots):
+            try:
+                restore_target(snapshot)
+            except BaseException as rollback_error:
+                failures.append(f"{snapshot['path']}: {type(rollback_error).__name__}: {rollback_error}")
+        if reload_units is not None:
+            try:
+                reload_units()
+            except BaseException as rollback_error:
+                failures.append(f"systemd reload: {type(rollback_error).__name__}: {rollback_error}")
+        try:
+            record_status("rollback_failed" if failures else "rolled_back", failures)
+        except BaseException as receipt_error:
+            failures.append(f"recovery receipt: {type(receipt_error).__name__}: {receipt_error}")
+        if failures:
+            raise RuntimeError(f"Helper installation failed and rollback is incomplete. Recovery receipt: {receipt_path}. " + "; ".join(failures)) from error
+        raise RuntimeError(f"Helper installation failed; prior files and units were restored. Recovery receipt: {receipt_path}") from error
+    return {"installed_version": identity, "previous_helper": previous, "recovery_receipt": str(receipt_path),
+            "runner_changed": False, "timers_enabled": False}
 
 
 def main() -> None:
@@ -135,8 +222,8 @@ def main() -> None:
         controlled(runner)
         if runner.read_bytes() != (source / "project-snow-release").read_bytes():
             raise SystemExit("Review and install the matching proof-enforcing runner before enabling automatic stage.")
-    result = install(source, Path("/usr/local/libexec/project-snow"), Path("/etc/systemd/system"))
-    subprocess.run(["systemctl", "daemon-reload"], check=True)
+    result = install(source, Path("/usr/local/libexec/project-snow"), Path("/etc/systemd/system"),
+                     reload_units=lambda: subprocess.run(["systemctl", "daemon-reload"], check=True))
     if args.enable_timers:
         subprocess.run(["systemctl", "enable", "--now", "project-snow-cleanup.timer"], check=True)
         subprocess.run(["systemctl", "enable", "--now", "project-snow-monitor.timer"], check=True)
