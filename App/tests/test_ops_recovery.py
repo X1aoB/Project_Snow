@@ -51,6 +51,7 @@ def test_unknown_baseline_anchor_disables_gc_but_is_preserved_for_backup(state):
 def backup_environment(state, monkeypatch):
     monkeypatch.setattr(recovery_backup, "postgres_container", lambda *args: "a" * 64)
     monkeypatch.setattr(recovery_backup, "require_private_staging", lambda *args: None)
+    monkeypatch.setattr(recovery_backup, "host_recovery_sources", lambda: [])
     monkeypatch.setattr(recovery_backup.shutil, "disk_usage", lambda *args: SimpleNamespace(free=20 * maintenance.GIB))
     (state.root / "repo").mkdir()
     state.secrets.parent.mkdir(exist_ok=True)
@@ -100,40 +101,18 @@ def test_failed_integrity_check_never_retires_previous_snapshots(backup_environm
     assert not any(command[0:2] == ["restic", "forget"] for command in calls)
 
 
-def test_restore_refuses_wrong_checksum_and_running_writers_before_mutation(state, monkeypatch):
+@pytest.mark.parametrize("valid_checksum", [False, True])
+def test_production_restore_is_refused_before_any_database_or_file_mutation(state, monkeypatch, valid_checksum):
     dump = state.root / "restore.dump"
     dump.write_bytes(b"PGDMP")
-    monkeypatch.setattr(recovery_backup, "require_regular", lambda *args, **kwargs: None)
     consumers = []
-    with pytest.raises(maintenance.MaintenanceError, match="checksum"):
-        recovery_backup.restore_postgres(state, dump, "f" * 64, lambda command: pytest.fail(str(command)),
-                                         lambda *args: consumers.append(args))
-    def execute(command):
-        if command[1] == "ps":
-            return "a" * 64
-        return json.dumps([{"Config": {"Labels": {"com.docker.compose.service": "public-api-blue"}}}])
-    with pytest.raises(maintenance.MaintenanceError, match="Stop both API"):
-        recovery_backup.restore_postgres(state, dump, recovery_backup.hash_file(dump), execute,
+    monkeypatch.setattr(recovery_backup, "postgres_container", lambda *args: pytest.fail("Production DB must not be located"))
+    checksum = recovery_backup.hash_file(dump) if valid_checksum else "f" * 64
+    with pytest.raises(maintenance.MaintenanceError, match="In-place production restore is disabled"):
+        recovery_backup.restore_postgres(state, dump, checksum, lambda command: pytest.fail(str(command)),
                                          lambda *args: consumers.append(args))
     assert not consumers
-
-
-def test_restore_is_atomic_rechecks_writers_and_leaves_them_stopped(state, monkeypatch):
-    dump = state.root / "restore.dump"
-    dump.write_bytes(b"PGDMP")
-    monkeypatch.setattr(recovery_backup, "require_regular", lambda *args, **kwargs: None)
-    monkeypatch.setattr(recovery_backup, "postgres_container", lambda *args: "a" * 64)
-    writer_checks, consumers = [], []
-    monkeypatch.setattr(recovery_backup, "require_stopped_writers", lambda *args: writer_checks.append(True))
-    monkeypatch.setattr(recovery_backup, "cleanup", lambda *args, **kwargs: {"checked": not kwargs["require_running_api"]})
-    monkeypatch.setattr(recovery_backup, "recover_requests", lambda *args, **kwargs: {"recovered": 1})
-    result = recovery_backup.restore_postgres(state, dump, recovery_backup.hash_file(dump), lambda command: "",
-                                              lambda command, path: consumers.append(command))
-    assert len(writer_checks) == 2
-    assert "--list" in consumers[0]
-    assert "--single-transaction" in consumers[1] and "--exit-on-error" in consumers[1]
-    assert result["retention"] == {"checked": True}
-    assert result["writers"].startswith("remain stopped")
+    assert dump.read_bytes() == b"PGDMP"
 
 
 @pytest.fixture

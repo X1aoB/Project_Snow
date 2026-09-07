@@ -1,4 +1,4 @@
-"""Encrypted recovery snapshots and an explicit, stopped-writer restore path."""
+"""Encrypted recovery snapshots; production database restore is disabled."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -12,12 +12,19 @@ import subprocess
 import tempfile
 from typing import Any, Callable
 
-from maintenance import (GIB, OBJECT_ID, PROJECT, MaintenanceError, Paths, active_release,
-                         cleanup, docker_json, read_environment, recover_requests, require_regular, run)
+from maintenance import (OBJECT_ID, PROJECT, MaintenanceError, Paths, active_release,
+                         docker_json, read_environment, run)
 from release_state import archive_colours, atomic_write, protected_image_references
 
 BACKUP_TAG = "project-snow-production"
 WRITERS = {"public-api-blue", "public-api-green", "feedback-mailer", "admin"}
+
+
+def host_recovery_sources() -> list[Path]:
+    return [Path("/usr/local/libexec/project-snow"), Path("/usr/local/sbin/project-snow-release"),
+            Path("/etc/sudoers.d/project-snow-release"),
+            *sorted(Path("/etc/systemd/system").glob("project-snow-*.service")),
+            *sorted(Path("/etc/systemd/system").glob("project-snow-*.timer"))]
 
 
 def hash_file(path: Path) -> str:
@@ -91,10 +98,7 @@ def backup(paths: Paths, execute: Callable[[list[str]], str] = run,
         # Immutable packages are read directly instead of copying large data or
         # media archives onto the shared host. The release lock fixes metadata.
         sources = [work, paths.root / "releases", paths.root / "runtime", paths.root / "repo", paths.secrets.parent,
-                   Path("/usr/local/libexec/project-snow"), Path("/usr/local/sbin/project-snow-release"),
-                   Path("/etc/sudoers.d/project-snow-release")]
-        sources.extend(sorted(Path("/etc/systemd/system").glob("project-snow-*.service")))
-        sources.extend(sorted(Path("/etc/systemd/system").glob("project-snow-*.timer")))
+                   *host_recovery_sources()]
         for required in sources[1:5]:
             if not required.exists() or required.is_symlink():
                 raise MaintenanceError("A required recovery source is missing or linked")
@@ -147,21 +151,7 @@ def require_stopped_writers(execute: Callable[[list[str]], str] = run) -> None:
 
 def restore_postgres(paths: Paths, dump: Path, expected_sha256: str, execute: Callable[[list[str]], str] = run,
                      dump_consumer: Callable[[list[str], Path], None] = consume_dump) -> dict[str, Any]:
-    import re
-
-    require_regular(dump, private=True)
-    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256) or hash_file(dump) != expected_sha256:
-        raise MaintenanceError("Database dump checksum differs from the verified recovery manifest")
-    active_release(paths)
-    require_stopped_writers(execute)
-    postgres = postgres_container(paths, execute)
-    dump_consumer(["docker", "exec", "-i", "--user", "postgres", postgres, "pg_restore", "--list"], dump)
-    # Recheck immediately before mutation. Restores are a deliberate maintenance
-    # action, never an implicit response to an application rollback.
-    require_stopped_writers(execute)
-    dump_consumer(["docker", "exec", "-i", "--user", "postgres", postgres, "pg_restore", "--exit-on-error",
-                   "--single-transaction", "--clean", "--if-exists", "-U", "project_snow", "-d", "project_snow"], dump)
-    requests = recover_requests(paths, execute)
-    retention = cleanup(paths, execute, require_running_api=False)
-    return {"status": "restored", "retention": retention, "requests": requests,
-            "writers": "remain stopped; verify before resuming traffic"}
+    # Keep the historical call signature so old automation fails clearly. Even
+    # stopping writers does not authorize overwriting feedback accepted since
+    # a backup. Restore into an independent target and review reconciliation.
+    raise MaintenanceError("In-place production restore is disabled. Use ops/restore_drill.py for an isolated target; reconcile newer feedback before any separately reviewed database switch.")

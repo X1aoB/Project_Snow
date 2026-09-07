@@ -78,10 +78,12 @@ Qdrant/Neo4j 是由不可变 data release 重建的派生索引；它们不通�
 
 1. 在隔离目录从选定 snapshot 恢复，核对 recovery JSON、dump checksum、源码、配置、数据/媒体与 image archive 清单。只在隔离 Docker 环境加载测试镜像和数据库。
 2. 验证同版 `pg_restore --list`，恢复并执行只读行数/schema 校验、内部 API、检索和媒体 smoke；确认不知道生产模型密钥的测试不会发起付费模型请求。
-3. 原机 DB 恢复是独立维护操作：停止两个 API colours、admin、mailer，选择匹配的配置/image，再运行 `maintenance.py restore-postgres --dump <private-regular-file> --sha256 <verified-checksum>`。
-4. helper 在写入前两次确认 writer 已停，以 `--single-transaction --exit-on-error --clean --if-exists` 恢复；恢复 request 终态并执行保留策略。任何错误都不自动启动 writers。验证后由维护者恢复精确 release 和流量。
+3. 使用 `python3 App/ops/restore_drill.py` 恢复固定基线到全新随机私有目录和专用 `--internal` Docker 网络；先校验 dump/配置/源码及数据媒体 hash，再向独立 PostgreSQL 写入，核对 dump TOC、schema、约束、migration head 并生成实际行数 receipt，启动只绑定 loopback 的基线 API 读取 readiness。`--full` 另启动隔离 embedding/Qdrant/Neo4j 并重建检索索引。所有容器总限额为 3.75 GiB RAM / 3 CPU，前后容量门要求至少 10 GiB 空闲。
+4. 原 `maintenance.py restore-postgres` 和包装脚本保留明确拒绝路径，**不会覆盖生产数据库，即使 writers 已停止**。灾难恢复须先在独立目标验证，单独审阅上线后新增反馈/数据如何保留与合并，再决定切换。演练只回收自己创建的容器 ID、volume 和网络，不执行生产切换。
 
-含新版 request lease 的备份必须先选择匹配的受信新版 image/anchor。旧基线 image 缺少恢复接口时，helper 会拒绝继续，不能用旧镜像强制消除新 lease 或删除不确定请求。
+含新版 request lease 的备份必须在独立恢复目标选择匹配的受信新版 image/anchor；不能用旧镜像强制消除新 lease 或删除不确定请求。基线未捕获历史行数，因此演练只能核对 dump/schema 自洽并记录恢复结果，不能声称已经比对历史行数。
+
+首次执行应将受审的 `restore_drill.py`、`maintenance.py`、`release_state.py` 一起复制到 root 控制目录，再通过 `systemd-run --wait --collect -p EnvironmentFile=/etc/project-snow/restic.env -p UMask=0077 -- /usr/bin/python3 /受控目录/restore_drill.py` 运行。receipt 位于 root-only `backups/restore-drills/`；日志只给出状态和路径。源码 zip 使用独立核验的固定 SHA-256，因为原 `sha256.json` 生成早于源码归档。Docker 创建超时也会按本次随机名称与 label 找回未返回 ID 的资源；归属不符时保留私有目录并报告失败，不能扩大清理范围。
 
 restic 环境由 root-only `/etc/project-snow/restic.env` 注入；手工任务可使用 `systemd-run --wait --collect -p EnvironmentFile=/etc/project-snow/restic.env -- /usr/bin/python3 /usr/local/libexec/project-snow/maintenance.py backup --pin`。不要将环境内容贴进日志或工单。
 
