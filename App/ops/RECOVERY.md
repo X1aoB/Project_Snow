@@ -85,6 +85,8 @@ Qdrant/Neo4j 是由不可变 data release 重建的派生索引；它们不通�
 
 首次执行应将受审的 `restore_drill.py`、`maintenance.py`、`release_state.py` 一起复制到 root 控制目录，再通过 `systemd-run --wait --collect -p EnvironmentFile=/etc/project-snow/restic.env -p UMask=0077 -- /usr/bin/python3 /受控目录/restore_drill.py` 运行。receipt 位于 root-only `backups/restore-drills/`；日志只给出状态和路径。源码 zip 使用独立核验的固定 SHA-256，因为原 `sha256.json` 生成早于源码归档。Docker 创建超时也会按本次随机名称与 label 找回未返回 ID 的资源；归属不符时保留私有目录并报告失败，不能扩大清理范围。
 
+PostgreSQL 就绪和恢复连接都固定使用容器内 TCP `127.0.0.1`，避免初始化阶段的临时 Unix socket server 被误判为最终服务。失败 receipt 只记录固定 phase/命令名称；原始 stderr 位于同次 `run-*.diagnostics/` 的 root-only 文件中，每种命令最多保留最新 1 MiB，不输出参数或日志正文。诊断可能含私有数据，只能由 root 在受控环境排障；成功演练删除临时诊断。
+
 restic 环境由 root-only `/etc/project-snow/restic.env` 注入；手工任务可使用 `systemd-run --wait --collect -p EnvironmentFile=/etc/project-snow/restic.env -- /usr/bin/python3 /usr/local/libexec/project-snow/maintenance.py backup --pin`。不要将环境内容贴进日志或工单。
 
 ## 最小监控

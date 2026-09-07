@@ -75,16 +75,68 @@ runpy.run_module('backend.snow_app.data_loader', run_name='__main__')
 """
 
 
+def command_identity(arguments: list[str]) -> str:
+    program = Path(arguments[0]).name if arguments else "unknown"
+    if program not in {"docker", "restic"}:
+        return "unknown"
+    verbs = {"docker": {"exec", "start", "create", "inspect", "image", "network", "volume", "container", "ps", "rm"},
+             "restic": {"restore", "snapshots"}}
+    verb = arguments[1] if len(arguments) > 1 and arguments[1] in verbs[program] else "unknown"
+    result = program + "/" + verb
+    if program == "docker" and verb == "exec":
+        for child in ("pg_isready", "pg_restore", "psql", "python"):
+            if child in arguments:
+                result += "/" + child
+                if child == "pg_restore":
+                    result += "/list" if "--list" in arguments else "/restore"
+                break
+    elif program == "docker" and verb in {"image", "network", "volume", "container"}:
+        if len(arguments) > 2 and arguments[2] in {"create", "inspect", "ls", "rm"}:
+            result += "/" + arguments[2]
+    return result
+
+
+class DrillCommandError(MaintenanceError):
+    def __init__(self, arguments: list[str], outcome: str, stderr: bytes | str | None):
+        super().__init__("Isolated drill command failed (" + command_identity(arguments) + ", " + outcome + ")")
+        self.stderr = (stderr.encode() if isinstance(stderr, str) else stderr or b"")[:1024 * 1024]
+
+
 def command(arguments: list[str], *, stdin: Path | None = None, timeout: int = 900) -> str:
-    with stdin.open("rb") if stdin else open(os.devnull, "rb") as source:
-        result = subprocess.run(arguments, stdin=source, capture_output=True, check=False, timeout=timeout)
+    try:
+        with stdin.open("rb") if stdin else open(os.devnull, "rb") as source:
+            result = subprocess.run(arguments, stdin=source, capture_output=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        raise DrillCommandError(arguments, "timeout", error.stderr) from None
     if result.returncode:
         # Database errors, archive paths and container logs can contain private
         # material. The receipt records the failed phase, never raw stderr.
-        raise MaintenanceError(f"Isolated drill command failed ({arguments[0]}, exit {result.returncode})")
+        raise DrillCommandError(arguments, f"exit {result.returncode}", result.stderr)
     if len(result.stdout) > 16 * 1024 * 1024:
         raise MaintenanceError("Drill command exceeded its bounded metadata output")
     return result.stdout.decode("utf-8").strip()
+
+
+def diagnostic_executor(execute, receipt: dict, directory: Path):
+    def tracked(arguments, **kwargs):
+        identity = command_identity(arguments)
+        receipt["last_command"] = identity
+        try:
+            return execute(arguments, **kwargs)
+        except DrillCommandError as error:
+            directory.mkdir(mode=0o700, exist_ok=True)
+            phase = receipt["phase"]
+            if not re.fullmatch("[a-z-]+", phase):
+                raise MaintenanceError("Invalid diagnostic phase") from None
+            destination = directory / (phase + "-" + identity.replace("/", "-") + ".stderr")
+            atomic_write(destination, error.stderr or b"[command returned no stderr]\n")
+            # Keep only the latest bounded stderr for each fixed operation;
+            # failed warm-up probes cannot create an unbounded set of files.
+            entries = receipt.setdefault("diagnostics", [])
+            if str(destination) not in entries:
+                entries.append(str(destination))
+            raise
+    return tracked
 
 
 def file_hash(path: Path) -> str:
@@ -254,7 +306,8 @@ def generated_environments(work: Path, manifest: dict) -> dict[str, Path]:
            "EMBEDDING_URL": "http://embedding:8000", "NEO4J_URI": "bolt://neo4j:7687", "NEO4J_USER": "neo4j", "NEO4J_PASSWORD": neo_password,
            "PUBLIC_FEEDBACK_SMTP_HOST": "", "PUBLIC_FEEDBACK_SMTP_PASSWORD": "", "CHAT_ENABLED": "false", "MVP_CHAT_ENABLED": "false",
            "HTTP_PROXY": "", "HTTPS_PROXY": "", "ALL_PROXY": "", "NO_PROXY": "*", "PYTHONDONTWRITEBYTECODE": "1"}
-    environments = {"api": api, "postgres": {"POSTGRES_USER": "project_snow", "POSTGRES_DB": "project_snow", "POSTGRES_PASSWORD": password},
+    environments = {"api": api, "postgres": {"POSTGRES_USER": "project_snow", "POSTGRES_DB": "project_snow", "POSTGRES_PASSWORD": password,
+                                               "PGPASSWORD": password},
                     "qdrant": {"QDRANT__SERVICE__API_KEY": qdrant_key},
                     "embedding": {"EMBEDDING_MODEL": "/models/bge-small-zh-v1.5", "EMBEDDING_DIMENSION": "512", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"},
                     "neo4j": {"NEO4J_AUTH": "neo4j/" + neo_password, "NEO4J_server_memory_heap_initial__size": "256M",
@@ -396,7 +449,7 @@ def restore_database(sandbox: Sandbox, postgres: str, dump: Path) -> dict:
     deadline = time.monotonic() + 120
     while True:
         try:
-            execute(["docker", "exec", "--user", "postgres", postgres, "pg_isready", "-U", "project_snow", "-d", "project_snow"])
+            execute(["docker", "exec", "--user", "postgres", postgres, "pg_isready", "-h", "127.0.0.1", "-U", "project_snow", "-d", "project_snow"])
             break
         except MaintenanceError:
             if time.monotonic() >= deadline:
@@ -408,7 +461,7 @@ def restore_database(sandbox: Sandbox, postgres: str, dump: Path) -> dict:
     if not expected_tables:
         raise MaintenanceError("Baseline dump contains no public table definitions")
     execute([*prefix, "pg_restore", "--exit-on-error", "--single-transaction", "--no-owner", "--no-privileges", "--clean", "--if-exists",
-             "-U", "project_snow", "-d", "project_snow"], stdin=dump)
+             "-h", "127.0.0.1", "-U", "project_snow", "-d", "project_snow"], stdin=dump)
     sql = """CREATE TEMP TABLE drill_counts(name text, row_count bigint);
 DO $$DECLARE entry record; BEGIN FOR entry IN SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename LOOP
 EXECUTE format('INSERT INTO drill_counts SELECT %L, count(*) FROM public.%I',entry.tablename,entry.tablename); END LOOP; END$$;
@@ -420,7 +473,7 @@ SELECT json_build_object('counts',(SELECT json_object_agg(name,row_count) FROM d
 """
     payload = sandbox.work / "count-receipt.sql"
     atomic_write(payload, sql.encode())
-    response = execute([*prefix, "psql", "-U", "project_snow", "-d", "project_snow", "-qAt", "-v", "ON_ERROR_STOP=1"], stdin=payload)
+    response = execute([*prefix, "psql", "-h", "127.0.0.1", "-U", "project_snow", "-d", "project_snow", "-qAt", "-v", "ON_ERROR_STOP=1"], stdin=payload)
     document = json.loads(response)
     if sorted(document["counts"]) != expected_tables or document["unvalidated_constraints"] != 0:
         raise MaintenanceError("Restored schema or constraints differ from dump definitions")
@@ -479,10 +532,12 @@ def drill(paths: Paths, *, snapshot: str, metadata_snapshot: str, full: bool = F
     work.mkdir(mode=0o700)
     restored = work / "restored"
     restored.mkdir(mode=0o700)
-    sandbox = Sandbox(work, execute)
     receipt = {"schema_version": "project-snow-restore-drill-1", "started_at": datetime.now(timezone.utc).isoformat(),
                "snapshot": snapshot, "metadata_snapshot": metadata_snapshot, "baseline_sha": BASELINE_SHA,
                "scope": "database, assets, API" + (", isolated retrieval rebuild" if full else ""), "phase": "restore-material"}
+    diagnostics = parent / (work.name + ".diagnostics")
+    execute = diagnostic_executor(execute, receipt, diagnostics)
+    sandbox = Sandbox(work, execute)
     try:
         execute(["restic", "restore", snapshot, "--target", str(restored), "--verify"], timeout=1800)
         execute(["restic", "restore", metadata_snapshot, "--target", str(restored), "--verify", "--include", "/" + BASE + "/**"], timeout=900)
@@ -523,9 +578,11 @@ def drill(paths: Paths, *, snapshot: str, metadata_snapshot: str, full: bool = F
         receipt["status"] = "failed"
         receipt["error_type"] = type(error).__name__
         receipt["error_reason"] = str(error) if isinstance(error, MaintenanceError) else type(error).__name__
+        receipt["failed_command"] = receipt.get("last_command")
     finally:
         failures = sandbox.close()
         receipt["cleanup_failures"] = failures
+        receipt.pop("last_command", None)
         receipt["elapsed_seconds"] = round(time.monotonic() - started, 2)
         receipt["not_exercised"] = ["production traffic promotion", "mail or provider calls", "whole-host recovery", "historical row-count equality"]
         if failures:
@@ -535,6 +592,11 @@ def drill(paths: Paths, *, snapshot: str, metadata_snapshot: str, full: bool = F
             if work.parent != parent or work.is_symlink() or not work.resolve().is_relative_to(parent.resolve()):
                 raise MaintenanceError("Refusing cleanup outside the owned drill directory")
             shutil.rmtree(work)
+        if receipt["status"] == "passed" and diagnostics.exists():
+            if diagnostics.is_symlink() or diagnostics.parent != parent:
+                raise MaintenanceError("Refusing cleanup outside the owned diagnostic directory")
+            shutil.rmtree(diagnostics)
+            receipt.pop("diagnostics", None)
         destination = parent / (work.name + ".json")
         atomic_write(destination, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode())
     return {"status": receipt["status"], "receipt": str(destination), "phase": receipt["phase"], "elapsed_seconds": receipt["elapsed_seconds"]}

@@ -105,6 +105,9 @@ def test_generated_credentials_are_new_and_provider_mail_paths_are_disabled(tmp_
     assert api["PUBLIC_ENABLED_PROVIDERS"] == "" and api["PUBLIC_FEEDBACK_SMTP_HOST"] == ""
     assert all(api[field] == "" for field in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"))
     assert "secret-trap" not in environment["api"].read_text()
+    postgres = dict(line.split("=", 1) for line in environment["postgres"].read_text().splitlines())
+    assert postgres["PGPASSWORD"] == postgres["POSTGRES_PASSWORD"]
+    assert postgres["PGPASSWORD"] in api["PUBLIC_DATABASE_URL"]
 
 
 def test_sandbox_caps_resources_uses_internal_network_without_published_ports_and_only_deletes_owned_ids(tmp_path):
@@ -179,6 +182,11 @@ def test_database_restore_targets_only_created_id_and_reports_real_counts_not_hi
     assert receipt["historical_count_comparison"].startswith("unavailable")
     restores = [args for args in calls if "pg_restore" in args and "--list" not in args]
     assert len(restores) == 1 and "--single-transaction" in restores[0] and "--no-privileges" in restores[0]
+    # Docker's temporary initialization server accepts Unix sockets before the
+    # final database exists. Every real connection waits for final TCP startup.
+    for args in calls:
+        if any(child in args for child in ("pg_isready", "psql")) or args in restores:
+            assert args[args.index("-h") + 1] == "127.0.0.1"
 
 
 def test_database_restore_rejects_a_production_or_unregistered_container_before_any_command(tmp_path):
@@ -272,3 +280,34 @@ def test_health_rejects_production_container_before_exec(tmp_path):
     sandbox = restore_drill.Sandbox(tmp_path, lambda *args, **kwargs: pytest.fail("No production exec is allowed"))
     with pytest.raises(maintenance.MaintenanceError, match="created by this isolated drill"):
         restore_drill.health(sandbox, "project-snow-public-api-blue-1", full=False)
+
+
+def test_command_failure_identity_excludes_arguments_and_preserves_bounded_private_stderr(tmp_path, monkeypatch):
+    args = ["docker", "exec", "-i", "a" * 64, "pg_restore", "--clean", "-U", "sensitive-user-fixture"]
+    raw_stderr = b"sensitive-stderr-fixture" + b"x" * (2 * 1024 * 1024)
+    monkeypatch.setattr(restore_drill.subprocess, "run", lambda *args, **kwargs:
+                        subprocess.CompletedProcess(args, 1, stdout=b"", stderr=raw_stderr))
+    receipt = {"phase": "restore-database"}
+    private = tmp_path / "diagnostics"
+    execute = restore_drill.diagnostic_executor(restore_drill.command, receipt, private)
+    for _ in range(3):
+        with pytest.raises(restore_drill.DrillCommandError) as caught:
+            execute(args)
+        assert str(caught.value) == "Isolated drill command failed (docker/exec/pg_restore/restore, exit 1)"
+    assert receipt["last_command"] == "docker/exec/pg_restore/restore"
+    assert len(receipt["diagnostics"]) == 1
+    artifact = Path(receipt["diagnostics"][0])
+    assert artifact.parent == private and len(artifact.read_bytes()) == 1024 * 1024
+    assert artifact.read_bytes().startswith(b"sensitive-stderr-fixture")
+    assert "sensitive" not in json.dumps(receipt)
+
+
+def test_command_timeout_is_redacted_and_keeps_stderr_for_private_diagnostics(monkeypatch):
+    args = ["docker", "exec", "container", "python", "-c", "sensitive-script-fixture"]
+    def timeout(*a, **kw):
+        raise subprocess.TimeoutExpired(args, 2, stderr=b"sensitive-timeout-fixture")
+    monkeypatch.setattr(restore_drill.subprocess, "run", timeout)
+    with pytest.raises(restore_drill.DrillCommandError) as caught:
+        restore_drill.command(args)
+    assert str(caught.value) == "Isolated drill command failed (docker/exec/python, timeout)"
+    assert caught.value.stderr == b"sensitive-timeout-fixture"
