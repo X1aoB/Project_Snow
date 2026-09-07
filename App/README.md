@@ -1,4 +1,6 @@
-# Project Snow Application
+# 小吉终端 Application
+
+Public branding is 小吉终端. Project Snow remains the stable repository and deployment identity. See [implementation evidence](docs/overhaul_progress.md) for verified changes and outstanding acceptance work.
 
 ## Public immersive surface
 

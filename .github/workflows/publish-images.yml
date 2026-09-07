@@ -45,6 +45,9 @@ jobs:
           tags: ${{ steps.images.outputs.public }}:${{ github.sha }}
           provenance: mode=max
           sbom: true
+          build-args: |
+            APP_REVISION=${{ github.sha }}
+            APP_BUILD_TIME=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha,scope=public-api
           cache-to: type=gha,mode=max,scope=public-api
       - name: Scan published application image
@@ -72,7 +75,7 @@ jobs:
           sbom: true
           cache-from: type=gha,scope=embedding
           cache-to: type=gha,mode=max,scope=embedding
-      - name: Reuse previous verified embedding digest
+      - name: Resolve previous embedding digest for fresh verification
         if: ${{ !inputs.embedding_changed }}
         id: embedding-reuse
         shell: bash
@@ -92,7 +95,7 @@ jobs:
             fi
           done
           test -n "$digest"
-          echo "Reusing verified embedding digest from main ancestor $source_sha."
+          echo "Selected embedding digest from main ancestor $source_sha for fresh scanning."
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Select embedding digest
         id: embedding
@@ -113,8 +116,7 @@ jobs:
         run: |
           docker buildx imagetools create --tag "$IMAGE:$GITHUB_SHA" "$IMAGE@$DIGEST"
           docker buildx imagetools inspect "$IMAGE:$GITHUB_SHA" >/dev/null
-      - name: Scan embedding image when rebuilt
-        if: inputs.embedding_changed
+      - name: Scan exact embedding digest including reused images
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.images.outputs.embedding }}@${{ steps.embedding.outputs.digest }}
@@ -124,8 +126,7 @@ jobs:
           scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-      - name: Enforce rebuilt embedding vulnerability gate
-        if: inputs.embedding_changed
+      - name: Enforce embedding vulnerability gate
         run: python App/scripts/report_trivy_findings.py trivy-embedding.json
       - name: Generate immutable release manifest
         run: >-
@@ -138,7 +139,7 @@ jobs:
           --output release-manifest.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: project-snow-release-${{ github.sha }}
+          name: project-snow-release-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: release-manifest.json
           if-no-files-found: error
           retention-days: 30

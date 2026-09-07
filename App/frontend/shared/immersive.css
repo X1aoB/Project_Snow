@@ -154,3 +154,5 @@ input, textarea, select { min-height: 44px; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   .scene-transition-layer { transition: none; }
 }
+/* Shared product identity, also used by the local preview and privacy page. */
+img.brand-mark { display: block; object-fit: contain; border: 0; border-radius: 50%; background: transparent; padding: 0; }

@@ -1,0 +1,74 @@
+name: release-proof
+
+on:
+  workflow_run:
+    workflows: [required-checks]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+  attestations: write
+
+jobs:
+  attest:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.sha == github.event.workflow_run.head_sha
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          name: project-snow-release-${{ github.event.workflow_run.head_sha }}-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: verified-release
+      - name: Bind completed main CI and every artifact digest
+        run: >-
+          python App/scripts/create_release_proof.py
+          --manifest verified-release/release-manifest.json
+          --event "$GITHUB_EVENT_PATH"
+          --output verified-release/release-proof.json
+      - uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: verified-release/release-proof.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: project-snow-verified-release-${{ github.event.workflow_run.head_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: verified-release/*.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish immutable candidate metadata for anonymous host verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          tag="candidate-$CANDIDATE_SHA"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            mkdir existing-candidate
+            gh release download "$tag" --pattern 'release-*.json' --dir existing-candidate
+            python App/scripts/verify_release_proof.py \
+              --manifest existing-candidate/release-manifest.json \
+              --proof existing-candidate/release-proof.json --expected-sha "$CANDIDATE_SHA"
+            echo 'Existing signed candidate retained; rebuild with changed artifacts requires a new commit.'
+          else
+            gh release create "$tag" --target "$CANDIDATE_SHA" --prerelease \
+              --title "小吉终端候选 ${CANDIDATE_SHA:0:7}" \
+              --notes "仅提供通过完整 CI 和签名验证的候选元数据。此操作不晋级线上应用；生产晋级需匹配候选验收回执。" \
+              verified-release/release-manifest.json verified-release/release-proof.json
+          fi

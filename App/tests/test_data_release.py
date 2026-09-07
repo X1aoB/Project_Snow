@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import math
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from uuid import uuid4
+
+import pytest
 
 from backend.snow_app.data_loader import (
     _neo4j_edge,
     _neo4j_node,
+    load_neo4j,
     load_qdrant,
     qdrant_point_id,
     versioned_collection_name,
@@ -15,6 +21,57 @@ from backend.snow_app.data_loader import (
 from backend.snow_app.data_release import DataReleaseError, verify_data_release
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from scripts.build_data_release import PUBLIC_CONTENT_LICENSE, build_release
+
+
+@pytest.mark.skipif(not os.getenv("TEST_NEO4J_URI"), reason="Explicit isolated Neo4j required")
+@pytest.mark.parametrize("corruption", ["node", "edge", "endpoint", "ghost_label"])
+def test_real_neo4j_reuse_rejects_same_count_corruption(tmp_path, corruption):
+    from neo4j import GraphDatabase
+
+    uri = os.environ["TEST_NEO4J_URI"]
+    assert uri.startswith(("bolt://127.0.0.1:", "bolt://localhost:")), "Use an isolated loopback database"
+    version = "ci-" + uuid4().hex
+    release = _build_fixture(tmp_path, version)
+    driver = GraphDatabase.driver(uri, auth=("neo4j", os.environ["TEST_NEO4J_PASSWORD"]))
+    try:
+        first = load_neo4j(release, version, uri, "neo4j", "unused", driver=driver)
+        assert first["nodes"] == 2 and not first["reused"]
+        assert load_neo4j(release, version, uri, "neo4j", "unused", driver=driver)["reused"]
+        with driver.session() as session:
+            if corruption == "node":
+                query = "MATCH (n:SnowEntity {dataset_version:$version}) SET n.name='tampered'"
+            elif corruption == "edge":
+                query = (
+                    "MATCH ()-[e:SNOW_RELATION {dataset_version:$version}]->() SET e.relation_type='tampered'"
+                )
+            else:
+                # Same edge count and properties; deliberately change only the
+                # endpoint identity or attach a same-key node outside the label.
+                query = (
+                    "MATCH (a:SnowEntity)-[e:SNOW_RELATION {dataset_version:$version}]->(b:SnowEntity) "
+                    "CREATE (ghost:SnowTestGhost {dataset_version:$version}) "
+                    "SET ghost.dataset_key = "
+                    + ("a.dataset_key " if corruption == "ghost_label" else "'wrong' ")
+                    + "CREATE (ghost)-[replacement:SNOW_RELATION]->(b) "
+                    "SET replacement = properties(e) DELETE e"
+                )
+            session.run(query, version=version).consume()
+        with pytest.raises(DataReleaseError, match="differs"):
+            load_neo4j(release, version, uri, "neo4j", "unused", driver=driver)
+        with driver.session() as session:
+            assert (
+                session.run(
+                    "MATCH (n:SnowEntity {dataset_version:$version}) RETURN count(n) AS count",
+                    version=version,
+                ).single()["count"]
+                == 2
+            )
+    finally:
+        with driver.session() as session:
+            session.run(
+                "MATCH (n) WHERE n.dataset_version=$version DETACH DELETE n", version=version
+            ).consume()
+        driver.close()
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -149,6 +206,8 @@ class FakeQdrantClient:
         self.collections = {self.alias_target: 2, f"{alias}__stale": 1}
         self.alias_actions: list[dict] = []
         self.deleted: list[str] = []
+        self.points = {}
+        self.dimension = 2
 
     def get(self, path: str) -> FakeResponse:
         if path == "/healthz":
@@ -168,7 +227,14 @@ class FakeQdrantClient:
             name = path.rsplit("/", 1)[-1]
             if name not in self.collections:
                 return FakeResponse(404)
-            return FakeResponse(payload={"result": {"points_count": self.collections[name]}})
+            return FakeResponse(
+                payload={
+                    "result": {
+                        "points_count": self.collections[name],
+                        "config": {"params": {"vectors": {"size": self.dimension, "distance": "Cosine"}}},
+                    }
+                }
+            )
         raise AssertionError(path)
 
     def put(self, path: str, *, json: dict, params: dict | None = None) -> FakeResponse:
@@ -176,11 +242,18 @@ class FakeQdrantClient:
         name = parts[2]
         if path.endswith("/points"):
             self.collections[name] += len(json["points"])
+            for point in json["points"]:
+                norm = math.sqrt(sum(value**2 for value in point["vector"]))
+                self.points[point["id"]] = {**point, "vector": [value / norm for value in point["vector"]]}
         else:
             self.collections[name] = 0
         return FakeResponse()
 
     def post(self, path: str, *, json: dict) -> FakeResponse:
+        if path.endswith("/points"):
+            return FakeResponse(
+                payload={"result": [self.points[key] for key in json["ids"] if key in self.points]}
+            )
         self.alias_actions = list(json["actions"])
         for action in self.alias_actions:
             if "delete_alias" in action:
@@ -199,6 +272,33 @@ class FakeQdrantClient:
 
 
 class DataReleaseTests(TestCase):
+    def test_reused_qdrant_rejects_same_count_payload_vector_and_dimension_corruption(self):
+        with TemporaryDirectory() as directory:
+            version = "2026.08.14.1"
+            release = _build_fixture(Path(directory), version)
+            for corruption in ("payload", "vector", "dimension"):
+                with self.subTest(corruption=corruption):
+                    client = FakeQdrantClient("project_snow_documents")
+                    load_qdrant(release, version, "http://qdrant", client.alias, "test", client=client)
+                    if corruption == "payload":
+                        client.points[qdrant_point_id("doc_a")]["payload"]["title"] = "tampered"
+                    elif corruption == "vector":
+                        client.points[qdrant_point_id("doc_a")]["vector"] = [1.0, 0.0]
+                    else:
+                        client.dimension = 3
+                    with self.assertRaisesRegex(DataReleaseError, "differs"):
+                        load_qdrant(
+                            release,
+                            version,
+                            "http://qdrant",
+                            client.alias,
+                            "test",
+                            client=client,
+                            activate=True,
+                        )
+                    self.assertEqual(client.deleted, [])
+                    self.assertEqual(client.alias_target, client.alias + "__previous")
+
     def test_builds_exact_serving_layout_and_verified_licence(self) -> None:
         with TemporaryDirectory() as directory:
             release = _build_fixture(Path(directory))
@@ -259,9 +359,7 @@ class DataReleaseTests(TestCase):
             )
             self.assertEqual(result["points"], 2)
             self.assertFalse(result["activated"])
-            self.assertEqual(
-                client.alias_target, "project_snow_documents__previous"
-            )
+            self.assertEqual(client.alias_target, "project_snow_documents__previous")
             self.assertNotIn("project_snow_documents__stale", client.deleted)
             self.assertIn("project_snow_documents__previous", client.collections)
             activated = load_qdrant(
@@ -276,7 +374,22 @@ class DataReleaseTests(TestCase):
             self.assertTrue(activated["reused"])
             self.assertTrue(activated["activated"])
             self.assertEqual(client.alias_target, activated["collection"])
-            self.assertIn("project_snow_documents__stale", client.deleted)
+            self.assertEqual(client.deleted, [])
+            self.assertIn("project_snow_documents__stale", client.collections)
+
+    def test_corrupt_inactive_release_is_not_deleted_or_overwritten(self) -> None:
+        with TemporaryDirectory() as directory:
+            version = "2026.08.14.1"
+            release = _build_fixture(Path(directory), version)
+            client = FakeQdrantClient("project_snow_documents")
+            collection = versioned_collection_name("project_snow_documents", version)
+            client.collections[collection] = 1
+            with self.assertRaisesRegex(RuntimeError, "restore it explicitly"):
+                load_qdrant(
+                    release, version, "http://qdrant", "project_snow_documents", "test-key", client=client
+                )
+            self.assertEqual(client.deleted, [])
+            self.assertEqual(client.collections[collection], 1)
 
     def test_versioned_ids_and_neo4j_rows_are_stable(self) -> None:
         self.assertEqual(qdrant_point_id("doc_a"), qdrant_point_id("doc_a"))
