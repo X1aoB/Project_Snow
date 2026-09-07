@@ -47,6 +47,8 @@ class PublicRuntimeRepository(RuntimeRepository):
         self._circuit_until: dict[str, float] = {}
         self._neo4j_driver = None
         self._neo4j_lock = threading.RLock()
+        self._health_probe_lock = threading.Lock()
+        self._health_probe_future = None
 
     def _collector(self) -> dict[str, Any] | None:
         return self._request_context.get()
@@ -385,6 +387,22 @@ class PublicRuntimeRepository(RuntimeRepository):
             self._record_timing("neo4j", started_at)
 
     def dependency_health(self) -> dict[str, str]:
+        # Diagnostic polling must not enqueue unlimited work while a dependency
+        # is stuck. A single unfinished probe is shared by concurrent polls.
+        with self._health_probe_lock:
+            future = self._health_probe_future
+            if future is None or future.done():
+                future = self._submit(self._dependency_health_sync)
+                self._health_probe_future = future
+        fallback = {"embedding": "degraded", "qdrant": "degraded", "neo4j": "degraded"}
+        if future is None:
+            return fallback
+        try:
+            return future.result(timeout=12)
+        except FutureTimeout:
+            return fallback
+
+    def _dependency_health_sync(self) -> dict[str, str]:
         health: dict[str, str] = {}
         for service, url in (
             ("embedding", f"{self.public_settings.embedding_url}/health"),
@@ -397,7 +415,7 @@ class PublicRuntimeRepository(RuntimeRepository):
                 response = self._http_client.get(
                     url,
                     headers={"api-key": self.public_settings.qdrant_api_key} if service == "qdrant" else None,
-                    timeout=5,
+                    timeout=3,
                     follow_redirects=False,
                 )
                 response.raise_for_status()
@@ -410,20 +428,24 @@ class PublicRuntimeRepository(RuntimeRepository):
                 health[service] = "degraded"
         if self.public_settings.neo4j_password:
             try:
-                from neo4j import GraphDatabase
+                from neo4j import GraphDatabase, Query
 
                 with self._neo4j_lock:
                     if self._neo4j_driver is None:
                         self._neo4j_driver = GraphDatabase.driver(
                             self.public_settings.neo4j_uri,
                             auth=(self.public_settings.neo4j_user, self.public_settings.neo4j_password),
-                            connection_timeout=5,
+                            connection_timeout=1,
+                            connection_acquisition_timeout=1,
                         )
                     driver = self._neo4j_driver
                 with driver.session() as session:
                     active = session.run(
-                        "MATCH (node:SnowEntity {dataset_version: $data_version}) "
-                        "RETURN count(node) AS nodes",
+                        Query(
+                            "MATCH (node:SnowEntity {dataset_version: $data_version}) "
+                            "RETURN count(node) AS nodes",
+                            timeout=3,
+                        ),
                         data_version=self.public_settings.data_version,
                     ).single()
                 health["neo4j"] = "ok" if active and int(active["nodes"]) > 0 else "degraded"

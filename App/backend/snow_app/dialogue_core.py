@@ -129,6 +129,8 @@ class GenerationBusy(RuntimeError):
 
 class GenerationGate:
     def __init__(self, active: int = 4, queued: int = 8, queue_timeout: float = 30):
+        self.active_limit = active
+        self._active = 0
         self.semaphore = asyncio.Semaphore(active)
         self.queued_limit = queued
         self.queue_timeout = queue_timeout
@@ -147,6 +149,7 @@ class GenerationGate:
         try:
             try:
                 await asyncio.wait_for(self.semaphore.acquire(), timeout=self.queue_timeout)
+                self._active += 1
             except TimeoutError as exc:
                 raise GenerationBusy("generation_queue_timeout") from exc
         finally:
@@ -154,7 +157,17 @@ class GenerationGate:
                 self._waiting = max(0, self._waiting - 1)
 
     def release(self) -> None:
+        self._active = max(0, self._active - 1)
         self.semaphore.release()
+
+    def snapshot(self) -> dict[str, int]:
+        """Event-loop-local operational counts; no subject or request identifiers."""
+        return {
+            "active": self._active,
+            "queued": self._waiting,
+            "active_limit": self.active_limit,
+            "queue_limit": self.queued_limit,
+        }
 
     async def run(self, callback):
         await self.acquire()

@@ -94,6 +94,14 @@ class PublicAPITests(TestCase):
         self.assertEqual(response.json()["state_schema"], "public-state-2")
         self.assertEqual(response.json()["generation_limits"]["max_provider_calls"], 2)
 
+    def test_full_health_exposes_only_aggregate_generation_counts(self) -> None:
+        with patch.object(self.app.state.chat_service.repository, "dependency_health", return_value={}):
+            response = self.client.get("/public/v1/health/full")
+        self.assertEqual(response.json()["generation_queue"], {
+            "active": 0, "queued": 0, "active_limit": 4, "queue_limit": 8,
+        })
+        self.assertFalse(response.json()["draining"])
+
     def test_summary_disconnect_releases_subject_and_replays_terminal_without_another_call(self) -> None:
         service = self.app.state.chat_service
         endpoint = next(route.endpoint for route in self.app.routes if route.path == "/public/v1/chat/summarize")
@@ -146,6 +154,54 @@ class PublicAPITests(TestCase):
         self.assertEqual(response.headers["Retry-After"], "5")
         summary.assert_not_called()
 
+    def test_foreground_chat_preempts_summary_before_disconnect_arrives(self) -> None:
+        service = self.app.state.chat_service
+        routes = {route.path: route.endpoint for route in self.app.routes if hasattr(route, "endpoint")}
+        shared = {
+            "provider": "openai", "credential": "synthetic-credential-value", "model": "synthetic",
+            "character_id": MVP_CHARACTERS[0].character_id,
+        }
+        summary_payload = SummarizeRequest(
+            request_id=uuid4(), **shared,
+            turns=[{"role": role, "content_blocks": [{"type": "message", "text": "hello"}]} for role in ("user", "assistant")],
+        )
+        chat_payload = ChatRequest(
+            request_id=uuid4(), **shared, communication_channel="text",
+            content_blocks=[{"type": "message", "text": "hello"}],
+        )
+        async def exercise():
+            started, canceled = asyncio.Event(), asyncio.Event()
+            async def hold_summary(*_args):
+                async def hold():
+                    started.set()
+                    try:
+                        await asyncio.Event().wait()
+                    finally:
+                        canceled.set()
+                return await service.gate.run(hold)
+            async def still_connected():
+                await asyncio.Event().wait()
+            request = Request({"type": "http", "state": {"anonymous_id": "synthetic", "subject_hash": "subject"}}, still_connected)
+            answer = {"answer": "hello", "content_blocks": [{"type": "message", "text": "hello"}]}
+            with patch("backend.snow_app.public_main.open_byok_credential", return_value={"api_key": "synthetic"}), patch.object(service, "summarize", side_effect=hold_summary), patch.object(service, "chat", return_value=answer) as chat:
+                old_summary = asyncio.create_task(routes["/public/v1/chat/summarize"](request, summary_payload))
+                try:
+                    await asyncio.wait_for(started.wait(), timeout=2)
+                    response = await asyncio.wait_for(routes["/public/v1/chat/stream"](request, chat_payload), timeout=2)
+                    chunks = [chunk async for chunk in response.body_iterator]
+                    self.assertIn("event: done", "".join(chunks))
+                    with self.assertRaises(HTTPException) as interrupted:
+                        await old_summary
+                    self.assertEqual(interrupted.exception.detail["code"], "generation_interrupted")
+                finally:
+                    old_summary.cancel()
+                    await asyncio.gather(old_summary, return_exceptions=True)
+                chat.assert_called_once()
+            self.assertTrue(canceled.is_set())
+            self.assertEqual(service.gate.semaphore._value, 4)
+            self.assertEqual(self.app.state.active_subject_requests, {})
+        asyncio.run(exercise())
+
     def test_public_mvp_state_is_ephemeral_and_outside_read_only_runtime(self) -> None:
         path = self.app.state.chat_service.mvp.user_fact_store.database_path
         self.assertFalse(path.is_relative_to(self.internal_settings.runtime_root))
@@ -174,6 +230,7 @@ class PublicAPITests(TestCase):
             "renewal": "none",
         })
         self.assertEqual(payload["state_schedule"]["scope"], "subject_daily")
+        self.assertEqual(payload["stage_release"], {"enabled": False, "manifest_url": None, "sha256": None})
         self.assertEqual(payload["privacy_policy"]["url"], "/privacy/")
         self.assertEqual(payload["attribution_url"], "/public/v1/attributions")
         self.assertEqual(payload["max_provider_calls_per_action"], 2)

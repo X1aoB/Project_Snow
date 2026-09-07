@@ -1,0 +1,2780 @@
+{
+  "schema": "dialogue-quality-1",
+  "evidence": "synthetic deterministic contracts; no lore or model-quality score",
+  "characters": [
+    {
+      "character_id": "78aa7ab99154",
+      "name": "伊切尔"
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "name": "克罗瑞娜"
+    },
+    {
+      "character_id": "25b23cb64398",
+      "name": "凯茜娅"
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "name": "卜卜"
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "name": "奈莉德"
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "name": "妮塔"
+    },
+    {
+      "character_id": "9f5804761c56",
+      "name": "安卡希雅"
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "name": "恩雅"
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "name": "晴"
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "name": "猫汐尔"
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "name": "琴诺"
+    },
+    {
+      "character_id": "85b205f6f623",
+      "name": "瑟瑞斯"
+    },
+    {
+      "character_id": "702f4375675b",
+      "name": "米娅"
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "name": "肴"
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "name": "胧嫣"
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "name": "芙提雅"
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "name": "芬妮"
+    },
+    {
+      "character_id": "673ba6851b05",
+      "name": "苔丝"
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "name": "茉莉安"
+    },
+    {
+      "character_id": "5157b8972632",
+      "name": "薇蒂雅"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "name": "辰星"
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "name": "里芙"
+    }
+  ],
+  "cases": [
+    {
+      "character_id": "78aa7ab99154",
+      "character_name": "伊切尔",
+      "id": "78aa7ab99154:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "伊切尔，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "78aa7ab99154",
+      "character_name": "伊切尔",
+      "id": "78aa7ab99154:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "伊切尔抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（伊切尔抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "78aa7ab99154",
+      "character_name": "伊切尔",
+      "id": "78aa7ab99154:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "伊切尔，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "78aa7ab99154",
+      "character_name": "伊切尔",
+      "id": "78aa7ab99154:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "伊切尔，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "78aa7ab99154",
+      "character_name": "伊切尔",
+      "id": "78aa7ab99154:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "伊切尔，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "78aa7ab99154",
+      "character_name": "伊切尔",
+      "id": "78aa7ab99154:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "伊切尔，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "伊切尔看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "78aa7ab99154",
+      "character_name": "伊切尔",
+      "id": "78aa7ab99154:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"伊切尔在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "伊切尔在这里。"
+    },
+    {
+      "character_id": "78aa7ab99154",
+      "character_name": "伊切尔",
+      "id": "78aa7ab99154:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "78aa7ab99154-approved",
+      "rejected_document_id": "78aa7ab99154-outside-view"
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "character_name": "克罗瑞娜",
+      "id": "d5ecfceba959:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "克罗瑞娜，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "character_name": "克罗瑞娜",
+      "id": "d5ecfceba959:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "克罗瑞娜抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（克罗瑞娜抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "character_name": "克罗瑞娜",
+      "id": "d5ecfceba959:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "克罗瑞娜，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "character_name": "克罗瑞娜",
+      "id": "d5ecfceba959:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "克罗瑞娜，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "character_name": "克罗瑞娜",
+      "id": "d5ecfceba959:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "克罗瑞娜，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "character_name": "克罗瑞娜",
+      "id": "d5ecfceba959:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "克罗瑞娜，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "克罗瑞娜看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "character_name": "克罗瑞娜",
+      "id": "d5ecfceba959:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"克罗瑞娜在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "克罗瑞娜在这里。"
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "character_name": "克罗瑞娜",
+      "id": "d5ecfceba959:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "d5ecfceba959-approved",
+      "rejected_document_id": "d5ecfceba959-outside-view"
+    },
+    {
+      "character_id": "25b23cb64398",
+      "character_name": "凯茜娅",
+      "id": "25b23cb64398:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "凯茜娅，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "25b23cb64398",
+      "character_name": "凯茜娅",
+      "id": "25b23cb64398:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "凯西娅抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（凯茜娅抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "25b23cb64398",
+      "character_name": "凯茜娅",
+      "id": "25b23cb64398:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "凯茜娅，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "25b23cb64398",
+      "character_name": "凯茜娅",
+      "id": "25b23cb64398:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "凯茜娅，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "25b23cb64398",
+      "character_name": "凯茜娅",
+      "id": "25b23cb64398:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "凯茜娅，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "25b23cb64398",
+      "character_name": "凯茜娅",
+      "id": "25b23cb64398:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "凯茜娅，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "凯茜娅看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "25b23cb64398",
+      "character_name": "凯茜娅",
+      "id": "25b23cb64398:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"凯茜娅在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "凯茜娅在这里。"
+    },
+    {
+      "character_id": "25b23cb64398",
+      "character_name": "凯茜娅",
+      "id": "25b23cb64398:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "25b23cb64398-approved",
+      "rejected_document_id": "25b23cb64398-outside-view"
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "character_name": "卜卜",
+      "id": "6455a5dcff6a:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "卜卜，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "character_name": "卜卜",
+      "id": "6455a5dcff6a:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "卜卜抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（卜卜抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "character_name": "卜卜",
+      "id": "6455a5dcff6a:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "卜卜，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "character_name": "卜卜",
+      "id": "6455a5dcff6a:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "卜卜，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "character_name": "卜卜",
+      "id": "6455a5dcff6a:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "卜卜，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "character_name": "卜卜",
+      "id": "6455a5dcff6a:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "卜卜，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "卜卜看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "character_name": "卜卜",
+      "id": "6455a5dcff6a:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"卜卜在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "卜卜在这里。"
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "character_name": "卜卜",
+      "id": "6455a5dcff6a:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "6455a5dcff6a-approved",
+      "rejected_document_id": "6455a5dcff6a-outside-view"
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "character_name": "奈莉德",
+      "id": "41b7444e39cc:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "奈莉德，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "character_name": "奈莉德",
+      "id": "41b7444e39cc:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "奈莉德抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（奈莉德抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "character_name": "奈莉德",
+      "id": "41b7444e39cc:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "奈莉德，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "character_name": "奈莉德",
+      "id": "41b7444e39cc:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "奈莉德，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "character_name": "奈莉德",
+      "id": "41b7444e39cc:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "奈莉德，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "character_name": "奈莉德",
+      "id": "41b7444e39cc:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "奈莉德，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "奈莉德看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "character_name": "奈莉德",
+      "id": "41b7444e39cc:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"奈莉德在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "奈莉德在这里。"
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "character_name": "奈莉德",
+      "id": "41b7444e39cc:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "41b7444e39cc-approved",
+      "rejected_document_id": "41b7444e39cc-outside-view"
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "character_name": "妮塔",
+      "id": "4370a74d6fda:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "妮塔，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "character_name": "妮塔",
+      "id": "4370a74d6fda:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "妮塔抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（妮塔抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "character_name": "妮塔",
+      "id": "4370a74d6fda:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "妮塔，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "character_name": "妮塔",
+      "id": "4370a74d6fda:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "妮塔，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "character_name": "妮塔",
+      "id": "4370a74d6fda:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "妮塔，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "character_name": "妮塔",
+      "id": "4370a74d6fda:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "妮塔，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "妮塔看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "character_name": "妮塔",
+      "id": "4370a74d6fda:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"妮塔在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "妮塔在这里。"
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "character_name": "妮塔",
+      "id": "4370a74d6fda:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "4370a74d6fda-approved",
+      "rejected_document_id": "4370a74d6fda-outside-view"
+    },
+    {
+      "character_id": "9f5804761c56",
+      "character_name": "安卡希雅",
+      "id": "9f5804761c56:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "安卡希雅，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "9f5804761c56",
+      "character_name": "安卡希雅",
+      "id": "9f5804761c56:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "安卡希雅抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（安卡希雅抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "9f5804761c56",
+      "character_name": "安卡希雅",
+      "id": "9f5804761c56:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "安卡希雅，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "9f5804761c56",
+      "character_name": "安卡希雅",
+      "id": "9f5804761c56:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "安卡希雅，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "9f5804761c56",
+      "character_name": "安卡希雅",
+      "id": "9f5804761c56:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "安卡希雅，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "9f5804761c56",
+      "character_name": "安卡希雅",
+      "id": "9f5804761c56:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "安卡希雅，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "安卡希雅看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "9f5804761c56",
+      "character_name": "安卡希雅",
+      "id": "9f5804761c56:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"安卡希雅在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "安卡希雅在这里。"
+    },
+    {
+      "character_id": "9f5804761c56",
+      "character_name": "安卡希雅",
+      "id": "9f5804761c56:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "9f5804761c56-approved",
+      "rejected_document_id": "9f5804761c56-outside-view"
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "character_name": "恩雅",
+      "id": "43f05917bfa1:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "恩雅，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "character_name": "恩雅",
+      "id": "43f05917bfa1:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "恩雅抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（恩雅抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "character_name": "恩雅",
+      "id": "43f05917bfa1:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "恩雅，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "character_name": "恩雅",
+      "id": "43f05917bfa1:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "恩雅，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "character_name": "恩雅",
+      "id": "43f05917bfa1:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "恩雅，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "character_name": "恩雅",
+      "id": "43f05917bfa1:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "恩雅，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "恩雅看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "character_name": "恩雅",
+      "id": "43f05917bfa1:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"恩雅在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "恩雅在这里。"
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "character_name": "恩雅",
+      "id": "43f05917bfa1:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "43f05917bfa1-approved",
+      "rejected_document_id": "43f05917bfa1-outside-view"
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "character_name": "晴",
+      "id": "921f9ef0cc4e:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "晴，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "character_name": "晴",
+      "id": "921f9ef0cc4e:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "鸣濑晴抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（晴抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "character_name": "晴",
+      "id": "921f9ef0cc4e:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "晴，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "character_name": "晴",
+      "id": "921f9ef0cc4e:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "晴，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "character_name": "晴",
+      "id": "921f9ef0cc4e:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "晴，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "character_name": "晴",
+      "id": "921f9ef0cc4e:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "晴，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "晴看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "character_name": "晴",
+      "id": "921f9ef0cc4e:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"晴在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "晴在这里。"
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "character_name": "晴",
+      "id": "921f9ef0cc4e:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "921f9ef0cc4e-approved",
+      "rejected_document_id": "921f9ef0cc4e-outside-view"
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "character_name": "猫汐尔",
+      "id": "6862c43d2ac9:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "猫汐尔，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "character_name": "猫汐尔",
+      "id": "6862c43d2ac9:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "猫汐尔抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（猫汐尔抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "character_name": "猫汐尔",
+      "id": "6862c43d2ac9:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "猫汐尔，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "character_name": "猫汐尔",
+      "id": "6862c43d2ac9:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "猫汐尔，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "character_name": "猫汐尔",
+      "id": "6862c43d2ac9:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "猫汐尔，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "character_name": "猫汐尔",
+      "id": "6862c43d2ac9:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "猫汐尔，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "猫汐尔看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "character_name": "猫汐尔",
+      "id": "6862c43d2ac9:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"猫汐尔在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "猫汐尔在这里。"
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "character_name": "猫汐尔",
+      "id": "6862c43d2ac9:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "6862c43d2ac9-approved",
+      "rejected_document_id": "6862c43d2ac9-outside-view"
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "character_name": "琴诺",
+      "id": "8d5b5c3912bb:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "琴诺，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "character_name": "琴诺",
+      "id": "8d5b5c3912bb:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "琴诺抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（琴诺抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "character_name": "琴诺",
+      "id": "8d5b5c3912bb:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "琴诺，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "character_name": "琴诺",
+      "id": "8d5b5c3912bb:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "琴诺，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "character_name": "琴诺",
+      "id": "8d5b5c3912bb:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "琴诺，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "character_name": "琴诺",
+      "id": "8d5b5c3912bb:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "琴诺，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "琴诺看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "character_name": "琴诺",
+      "id": "8d5b5c3912bb:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"琴诺在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "琴诺在这里。"
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "character_name": "琴诺",
+      "id": "8d5b5c3912bb:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "8d5b5c3912bb-approved",
+      "rejected_document_id": "8d5b5c3912bb-outside-view"
+    },
+    {
+      "character_id": "85b205f6f623",
+      "character_name": "瑟瑞斯",
+      "id": "85b205f6f623:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "瑟瑞斯，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "85b205f6f623",
+      "character_name": "瑟瑞斯",
+      "id": "85b205f6f623:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "瑟瑞斯抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（瑟瑞斯抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "85b205f6f623",
+      "character_name": "瑟瑞斯",
+      "id": "85b205f6f623:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "瑟瑞斯，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "85b205f6f623",
+      "character_name": "瑟瑞斯",
+      "id": "85b205f6f623:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "瑟瑞斯，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "85b205f6f623",
+      "character_name": "瑟瑞斯",
+      "id": "85b205f6f623:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "瑟瑞斯，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "85b205f6f623",
+      "character_name": "瑟瑞斯",
+      "id": "85b205f6f623:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "瑟瑞斯，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "瑟瑞斯看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "85b205f6f623",
+      "character_name": "瑟瑞斯",
+      "id": "85b205f6f623:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"瑟瑞斯在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "瑟瑞斯在这里。"
+    },
+    {
+      "character_id": "85b205f6f623",
+      "character_name": "瑟瑞斯",
+      "id": "85b205f6f623:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "85b205f6f623-approved",
+      "rejected_document_id": "85b205f6f623-outside-view"
+    },
+    {
+      "character_id": "702f4375675b",
+      "character_name": "米娅",
+      "id": "702f4375675b:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "米娅，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "702f4375675b",
+      "character_name": "米娅",
+      "id": "702f4375675b:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "米娅抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（米娅抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "702f4375675b",
+      "character_name": "米娅",
+      "id": "702f4375675b:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "米娅，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "702f4375675b",
+      "character_name": "米娅",
+      "id": "702f4375675b:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "米娅，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "702f4375675b",
+      "character_name": "米娅",
+      "id": "702f4375675b:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "米娅，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "702f4375675b",
+      "character_name": "米娅",
+      "id": "702f4375675b:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "米娅，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "米娅看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "702f4375675b",
+      "character_name": "米娅",
+      "id": "702f4375675b:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"米娅在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "米娅在这里。"
+    },
+    {
+      "character_id": "702f4375675b",
+      "character_name": "米娅",
+      "id": "702f4375675b:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "702f4375675b-approved",
+      "rejected_document_id": "702f4375675b-outside-view"
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "character_name": "肴",
+      "id": "cf0569ac6de9:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "肴，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "character_name": "肴",
+      "id": "cf0569ac6de9:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "肴抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（肴抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "character_name": "肴",
+      "id": "cf0569ac6de9:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "肴，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "character_name": "肴",
+      "id": "cf0569ac6de9:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "肴，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "character_name": "肴",
+      "id": "cf0569ac6de9:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "肴，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "character_name": "肴",
+      "id": "cf0569ac6de9:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "肴，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "肴看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "character_name": "肴",
+      "id": "cf0569ac6de9:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"肴在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "肴在这里。"
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "character_name": "肴",
+      "id": "cf0569ac6de9:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "cf0569ac6de9-approved",
+      "rejected_document_id": "cf0569ac6de9-outside-view"
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "character_name": "胧嫣",
+      "id": "447ed3c401c9:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "胧嫣，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "character_name": "胧嫣",
+      "id": "447ed3c401c9:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "胧嫣抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（胧嫣抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "character_name": "胧嫣",
+      "id": "447ed3c401c9:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "胧嫣，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "character_name": "胧嫣",
+      "id": "447ed3c401c9:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "胧嫣，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "character_name": "胧嫣",
+      "id": "447ed3c401c9:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "胧嫣，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "character_name": "胧嫣",
+      "id": "447ed3c401c9:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "胧嫣，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "胧嫣看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "character_name": "胧嫣",
+      "id": "447ed3c401c9:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"胧嫣在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "胧嫣在这里。"
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "character_name": "胧嫣",
+      "id": "447ed3c401c9:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "447ed3c401c9-approved",
+      "rejected_document_id": "447ed3c401c9-outside-view"
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "character_name": "芙提雅",
+      "id": "a2ffc5b44d7f:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "芙提雅，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "character_name": "芙提雅",
+      "id": "a2ffc5b44d7f:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "芙提雅抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（芙提雅抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "character_name": "芙提雅",
+      "id": "a2ffc5b44d7f:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "芙提雅，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "character_name": "芙提雅",
+      "id": "a2ffc5b44d7f:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "芙提雅，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "character_name": "芙提雅",
+      "id": "a2ffc5b44d7f:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "芙提雅，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "character_name": "芙提雅",
+      "id": "a2ffc5b44d7f:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "芙提雅，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "芙提雅看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "character_name": "芙提雅",
+      "id": "a2ffc5b44d7f:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"芙提雅在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "芙提雅在这里。"
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "character_name": "芙提雅",
+      "id": "a2ffc5b44d7f:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "a2ffc5b44d7f-approved",
+      "rejected_document_id": "a2ffc5b44d7f-outside-view"
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "character_name": "芬妮",
+      "id": "1b0a6b35719a:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "芬妮，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "character_name": "芬妮",
+      "id": "1b0a6b35719a:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "芬妮戈尔登抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（芬妮抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "character_name": "芬妮",
+      "id": "1b0a6b35719a:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "芬妮，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "character_name": "芬妮",
+      "id": "1b0a6b35719a:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "芬妮，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "character_name": "芬妮",
+      "id": "1b0a6b35719a:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "芬妮，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "character_name": "芬妮",
+      "id": "1b0a6b35719a:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "芬妮，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "芬妮看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "character_name": "芬妮",
+      "id": "1b0a6b35719a:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"芬妮在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "芬妮在这里。"
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "character_name": "芬妮",
+      "id": "1b0a6b35719a:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "1b0a6b35719a-approved",
+      "rejected_document_id": "1b0a6b35719a-outside-view"
+    },
+    {
+      "character_id": "673ba6851b05",
+      "character_name": "苔丝",
+      "id": "673ba6851b05:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "苔丝，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "673ba6851b05",
+      "character_name": "苔丝",
+      "id": "673ba6851b05:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "苔丝·科特金抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（苔丝抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "673ba6851b05",
+      "character_name": "苔丝",
+      "id": "673ba6851b05:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "苔丝，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "673ba6851b05",
+      "character_name": "苔丝",
+      "id": "673ba6851b05:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "苔丝，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "673ba6851b05",
+      "character_name": "苔丝",
+      "id": "673ba6851b05:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "苔丝，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "673ba6851b05",
+      "character_name": "苔丝",
+      "id": "673ba6851b05:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "苔丝，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "苔丝看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "673ba6851b05",
+      "character_name": "苔丝",
+      "id": "673ba6851b05:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"苔丝在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "苔丝在这里。"
+    },
+    {
+      "character_id": "673ba6851b05",
+      "character_name": "苔丝",
+      "id": "673ba6851b05:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "673ba6851b05-approved",
+      "rejected_document_id": "673ba6851b05-outside-view"
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "character_name": "茉莉安",
+      "id": "daab0f4cceb4:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "茉莉安，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "character_name": "茉莉安",
+      "id": "daab0f4cceb4:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "茉莉安·安德烈奥蒂抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（茉莉安抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "character_name": "茉莉安",
+      "id": "daab0f4cceb4:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "茉莉安，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "character_name": "茉莉安",
+      "id": "daab0f4cceb4:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "茉莉安，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "character_name": "茉莉安",
+      "id": "daab0f4cceb4:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "茉莉安，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "character_name": "茉莉安",
+      "id": "daab0f4cceb4:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "茉莉安，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "茉莉安看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "character_name": "茉莉安",
+      "id": "daab0f4cceb4:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"茉莉安在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "茉莉安在这里。"
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "character_name": "茉莉安",
+      "id": "daab0f4cceb4:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "daab0f4cceb4-approved",
+      "rejected_document_id": "daab0f4cceb4-outside-view"
+    },
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "id": "5157b8972632:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "薇蒂雅，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "id": "5157b8972632:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "薇蒂雅抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（薇蒂雅抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "id": "5157b8972632:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "薇蒂雅，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "id": "5157b8972632:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "薇蒂雅，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "id": "5157b8972632:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "薇蒂雅，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "id": "5157b8972632:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "薇蒂雅，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "薇蒂雅看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "id": "5157b8972632:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"薇蒂雅在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "薇蒂雅在这里。"
+    },
+    {
+      "character_id": "5157b8972632",
+      "character_name": "薇蒂雅",
+      "id": "5157b8972632:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "5157b8972632-approved",
+      "rejected_document_id": "5157b8972632-outside-view"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "id": "98322bd505f4:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "辰星，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "id": "98322bd505f4:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "姬辰星抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（辰星抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "id": "98322bd505f4:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "辰星，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "id": "98322bd505f4:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "辰星，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "id": "98322bd505f4:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "辰星，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "id": "98322bd505f4:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "辰星，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "辰星看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "id": "98322bd505f4:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"辰星在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "辰星在这里。"
+    },
+    {
+      "character_id": "98322bd505f4",
+      "character_name": "辰星",
+      "id": "98322bd505f4:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "98322bd505f4-approved",
+      "rejected_document_id": "98322bd505f4-outside-view"
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "character_name": "里芙",
+      "id": "ca0144ccd81b:legal_text",
+      "kind": "legal_text",
+      "channel": "text",
+      "message": "里芙，晚上好。",
+      "answer": "晚上好，我在听。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "晚上好，我在听。"
+        }
+      ],
+      "expected_render": "晚上好，我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "character_name": "里芙",
+      "id": "ca0144ccd81b:legal_action",
+      "kind": "legal_action",
+      "channel": "in_person",
+      "message": "我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "里芙抬眼看向你。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_render": "（里芙抬眼看向你。）\n我在听。",
+      "expected_violations": []
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "character_name": "里芙",
+      "id": "ca0144ccd81b:unseen_visual",
+      "kind": "unseen_visual",
+      "channel": "text",
+      "message": "里芙，晚上好。",
+      "answer": "看见你脸红，我有点担心。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "看见你脸红，我有点担心。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_visual:"
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "character_name": "里芙",
+      "id": "ca0144ccd81b:unseen_audio",
+      "kind": "unseen_audio",
+      "channel": "text",
+      "message": "里芙，晚上好。",
+      "answer": "听到你的声音，我就放心了。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "听到你的声音，我就放心了。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_unseen_audio:"
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "character_name": "里芙",
+      "id": "ca0144ccd81b:physical_claim",
+      "kind": "physical_claim",
+      "channel": "text",
+      "message": "里芙，晚上好。",
+      "answer": "我握住你的手。",
+      "blocks": [
+        {
+          "type": "message",
+          "text": "我握住你的手。"
+        }
+      ],
+      "expected_violation_prefix": "text_channel_physical_action"
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "character_name": "里芙",
+      "id": "ca0144ccd81b:analyst_reaction",
+      "kind": "analyst_reaction",
+      "channel": "in_person",
+      "message": "里芙，我来了。",
+      "answer": "我在听。",
+      "blocks": [
+        {
+          "type": "action",
+          "text": "里芙看见你露出满意的笑容。"
+        },
+        {
+          "type": "speech",
+          "text": "我在听。"
+        }
+      ],
+      "expected_violation_prefix": "in_person_action_invents_analyst_reaction:"
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "character_name": "里芙",
+      "id": "ca0144ccd81b:model_envelope",
+      "kind": "model_envelope",
+      "raw": "{\"answer\": \"里芙在这里。\", \"confidence\": \"medium\", \"used_document_ids\": [\"synthetic-internal-document\"], \"used_relation_candidate_ids\": []}",
+      "expected_clean": "里芙在这里。"
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "character_name": "里芙",
+      "id": "ca0144ccd81b:retrieval_scope",
+      "kind": "retrieval_scope",
+      "allowed_document_id": "ca0144ccd81b-approved",
+      "rejected_document_id": "ca0144ccd81b-outside-view"
+    }
+  ]
+}

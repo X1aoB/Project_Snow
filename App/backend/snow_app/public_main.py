@@ -398,6 +398,7 @@ def create_app(
     app.state.draining = False
     chat_jobs: dict[str, asyncio.Task[dict[str, Any]]] = {}
     active_subject_requests: dict[str, str] = {}
+    background_summaries: dict[str, dict[str, Any]] = {}
     active_subject_lock = asyncio.Lock()
     app.state.chat_jobs = chat_jobs
     app.state.active_subject_requests = active_subject_requests
@@ -410,11 +411,19 @@ def create_app(
         async with active_subject_lock:
             owner = active_subject_requests.get(subject)
             if owner and owner != operation_id:
-                raise HTTPException(
-                    status_code=429,
-                    detail={"code": "subject_generation_busy"},
-                    headers={"Retry-After": "2"},
-                )
+                summary = background_summaries.get(subject)
+                if summary and summary["operation_id"] == owner and not operation_id.startswith("chat-summary:"):
+                    # Foreground actions take priority even if the old browser
+                    # disconnect has not yet reached the summary route.
+                    summary["cancel"].set()
+                    if summary["task"] is not None:
+                        summary["task"].cancel()
+                else:
+                    raise HTTPException(
+                        status_code=429,
+                        detail={"code": "subject_generation_busy"},
+                        headers={"Retry-After": "2"},
+                    )
             if owner == operation_id:
                 return False
             active_subject_requests[subject] = operation_id
@@ -604,6 +613,9 @@ def create_app(
                 "renewal": "none",
             },
             "movement_catalog": chat_service.movement_catalog(),
+            # The generalized stage adapter stays off until an approved,
+            # immutable 22-character release is supplied.
+            "stage_release": {"enabled": False, "manifest_url": None, "sha256": None},
             "feature_flags": {
                 "joint_movement": True,
                 "rendezvous_actions": True,
@@ -1324,6 +1336,10 @@ def create_app(
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
+        summary_control = None
+        if owns_subject:
+            summary_control = {"operation_id": cache_id, "cancel": asyncio.Event(), "task": None}
+            background_summaries[subject] = summary_control
         try:
             claim_status, cached = await async_store.call("claim_request",
                 cache_id,
@@ -1344,10 +1360,16 @@ def create_app(
             # hourly 50-round bucket.
             await async_store.call("consume_limits", subject, [("chat_day", "day", 200)])
             generation = asyncio.create_task(chat_service.summarize(payload, spec, str(claims["api_key"])))
+            if summary_control is not None:
+                summary_control["task"] = generation
             started = time.monotonic()
             try:
                 while not generation.done():
-                    if await request.is_disconnected() or time.monotonic() - started >= 60:
+                    if (
+                        (summary_control is not None and summary_control["cancel"].is_set())
+                        or await request.is_disconnected()
+                        or time.monotonic() - started >= 60
+                    ):
                         generation.cancel()
                         await asyncio.gather(generation, return_exceptions=True)
                         request_claimed = False
@@ -1355,12 +1377,14 @@ def create_app(
                         raise _error("generation_interrupted", 409)
                     await asyncio.wait({generation}, timeout=0.25)
                 result = await generation
-            except BaseException:
+            except BaseException as exc:
                 generation.cancel()
                 await asyncio.gather(generation, return_exceptions=True)
                 if request_claimed:
                     request_claimed = False
                     await async_store.call("complete_request", cache_id, {"terminal_error": "generation_interrupted"})
+                if isinstance(exc, asyncio.CancelledError) and not asyncio.current_task().cancelling():
+                    raise _error("generation_interrupted", 409) from exc
                 raise
             request_claimed = False
             await async_store.call("complete_request", cache_id, result)
@@ -1374,6 +1398,8 @@ def create_app(
                 await async_store.call("release_request", cache_id)
             raise
         finally:
+            if summary_control is not None and background_summaries.get(subject) is summary_control:
+                background_summaries.pop(subject, None)
             if owns_subject:
                 await release_subject_generation(subject, cache_id)
 
@@ -1552,6 +1578,8 @@ def create_app(
             "sticker_version": public_settings.sticker_version,
             "stickers": stickers_status,
             "feedback_email": await async_store.call("feedback_email_status") if database_ok else {},
+            "generation_queue": chat_service.gate.snapshot(),
+            "draining": app.state.draining,
         }
 
     @app.exception_handler(PublicSecurityError)

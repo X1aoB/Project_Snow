@@ -20,6 +20,7 @@ from backend.snow_app.dialogue_core import (
     DialogueEngine,
     GenerationBudget,
     GenerationBudgetExceeded,
+    GenerationGate,
     ScopedStateMap,
     active_generation_budget,
 )
@@ -113,6 +114,18 @@ class LeaseTests(TestCase):
 
 
 class AsyncStoreTests(IsolatedAsyncioTestCase):
+    async def test_generation_queue_snapshot_tracks_waiting_and_cancellation(self):
+        gate = GenerationGate(active=1, queued=1)
+        await gate.acquire()
+        waiting = asyncio.create_task(gate.acquire())
+        await asyncio.sleep(0.01)
+        self.assertEqual(gate.snapshot(), {"active": 1, "queued": 1, "active_limit": 1, "queue_limit": 1})
+        waiting.cancel()
+        await asyncio.gather(waiting, return_exceptions=True)
+        gate.release()
+        self.assertEqual(gate.snapshot()["active"], 0)
+        self.assertEqual(gate.snapshot()["queued"], 0)
+
     async def test_canceled_caller_does_not_free_running_transaction_capacity(self):
         store = PublicStore("sqlite+pysqlite:///:memory:")
         started, release = Event(), Event()
