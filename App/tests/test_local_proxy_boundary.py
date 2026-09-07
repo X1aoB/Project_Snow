@@ -51,3 +51,15 @@ def test_proxy_bounds_incomplete_and_ambiguous_uploads(proxy, header, status):
         connection.sendall(f"POST /api/v1/upload HTTP/1.0\r\nHost: localhost\r\n{header}\r\n\r\n".encode())
         response = connection.recv(2048)
         assert response.startswith(f"HTTP/1.0 {status} ".encode())
+
+
+def test_local_compose_keeps_api_and_research_ports_on_loopback():
+    from pathlib import Path
+
+    import yaml
+
+    app_root = Path(__file__).resolve().parents[1]
+    model = yaml.safe_load((app_root / "compose.yml").read_text(encoding="utf-8"))
+    published = [port for service in model["services"].values() for port in service.get("ports", [])]
+    assert published
+    assert all(isinstance(port, str) and port.startswith("127.0.0.1:") for port in published)
