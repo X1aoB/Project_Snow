@@ -3,29 +3,26 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
-from datetime import datetime, timedelta
-from hashlib import sha256
 import hmac
 import json
 import os
 import re
-from pathlib import Path
 import secrets
-import threading
 import tempfile
 import time
+from contextlib import contextmanager
+from datetime import datetime, timedelta
+from hashlib import sha256
+from pathlib import Path
 from typing import Any, Iterator
 from zoneinfo import ZoneInfo
 
 from .config import PublicSettings, Settings
+from .dialogue_core import DialogueContext, DialogueEngine, GenerationBudget, GenerationGate, WorldState
+from .dialogue_core import GenerationBusy as GenerationBusy
 from .mvp_policy import MVP_CHARACTERS, scene_visual_key
 from .mvp_service import (
     MVPService,
-    _SESSION_LOCK,
-    _SESSION_STATES,
-    _WORLD_STATE_LOCK,
-    _WORLD_STATES,
     _normalize_stage_motion,
 )
 from .provider_registry import ProviderRegistry
@@ -42,7 +39,6 @@ from .public_contracts import (
     SummarizeRequest,
 )
 from .public_media import PublicMediaCatalog
-from .public_stickers import PublicStickerCatalog
 from .public_providers import ProviderHTTPPool, ProviderSpec, simple_completion
 from .public_repository import PublicRuntimeRepository
 from .public_security import (
@@ -52,6 +48,7 @@ from .public_security import (
     sign_state,
     verify_state,
 )
+from .public_stickers import PublicStickerCatalog
 
 
 class StatelessConversationStore:
@@ -71,10 +68,6 @@ class StatelessConversationStore:
 
     def world_state(self, _world_session_id: str) -> None:
         return None
-
-
-class GenerationBusy(RuntimeError):
-    pass
 
 
 class CharacterUnavailable(RuntimeError):
@@ -111,7 +104,7 @@ _PUBLIC_NORMALIZATION_ADJUSTMENTS = frozenset({
 })
 
 
-def _public_immersive_thinking_decision(provider: ProviderSpec) -> dict[str, Any]:
+def _public_immersive_thinking_decision(provider: ProviderSpec, max_provider_calls: int = 2) -> dict[str, Any]:
     """Build the complete provider request contract for public dialogue."""
 
     return {
@@ -123,46 +116,9 @@ def _public_immersive_thinking_decision(provider: ProviderSpec) -> dict[str, Any
             provider.provider_id,
             "off",
         ),
-        "max_provider_http_calls": 2,
+        "max_provider_http_calls": max(1, min(2, max_provider_calls)),
         "disable_compatibility_retries": True,
     }
-
-
-class GenerationGate:
-    def __init__(self, active: int = 4, queued: int = 8, queue_timeout: float = 30):
-        self.semaphore = asyncio.Semaphore(active)
-        self.queued_limit = queued
-        self.queue_timeout = queue_timeout
-        self._lock = asyncio.Lock()
-        self._waiting = 0
-
-    @contextmanager
-    def _noop(self) -> Iterator[None]:
-        yield
-
-    async def acquire(self) -> None:
-        async with self._lock:
-            if self.semaphore.locked() and self._waiting >= self.queued_limit:
-                raise GenerationBusy("generation_queue_full")
-            self._waiting += 1
-        try:
-            try:
-                await asyncio.wait_for(self.semaphore.acquire(), timeout=self.queue_timeout)
-            except TimeoutError as exc:
-                raise GenerationBusy("generation_queue_timeout") from exc
-        finally:
-            async with self._lock:
-                self._waiting = max(0, self._waiting - 1)
-
-    def release(self) -> None:
-        self.semaphore.release()
-
-    async def run(self, callback):
-        await self.acquire()
-        try:
-            return await callback()
-        finally:
-            self.release()
 
 
 def _history_turns(history: list[HistoryTurn]) -> list[dict[str, Any]]:
@@ -639,7 +595,7 @@ class PublicChatService:
             conversation_store=StatelessConversationStore(),
         )
         self.gate = GenerationGate()
-        self._state_cleanup_lock = threading.RLock()
+        self.engine = DialogueEngine()
         self.media = PublicMediaCatalog(
             public_settings.media_root,
             public_settings.media_version,
@@ -1860,7 +1816,7 @@ class PublicChatService:
                         "model_name": request.model,
                         "reason": "public_presence_arrival",
                     },
-                    thinking_decision=_public_immersive_thinking_decision(provider),
+                    thinking_decision=_public_immersive_thinking_decision(provider, self.public_settings.max_provider_calls_per_action),
                     max_tokens_override=1600,
                     persist_exchange=False,
                     remember_session=False,
@@ -2044,20 +2000,10 @@ class PublicChatService:
             "analyst_location": state.get("analyst_location"),
             "presence": dict(state.get("presence") or {}),
         }
-        if not world_state["presence"]:
-            world_state = self.mvp._world_snapshot(world_id)
-        with _SESSION_LOCK:
-            _SESSION_STATES[session_id] = session_state
-        with _WORLD_STATE_LOCK:
-            _WORLD_STATES[world_id] = world_state
-        try:
+        with self.mvp.isolated_state(session_id, world_id, session_state, WorldState(world_state)):
+            if not world_state["presence"]:
+                self.mvp._world_snapshot(world_id)
             yield session_id, world_id, state
-        finally:
-            with self._state_cleanup_lock:
-                with _SESSION_LOCK:
-                    _SESSION_STATES.pop(session_id, None)
-                with _WORLD_STATE_LOCK:
-                    _WORLD_STATES.pop(world_id, None)
 
     async def chat(
         self,
@@ -2198,30 +2144,34 @@ class PublicChatService:
                         ),
                     })
             try:
-                result = self.mvp.chat(
-                    request.character_id,
-                    model_message,
-                    session_id=session_id,
-                    world_session_id=world_id,
-                    communication_channel=request.communication_channel,
-                    analyst_content_blocks=canonical_blocks,
-                    client_message_id=None,
-                    model_settings=(provider.base_url, api_key, request.model),
-                    model_info={
-                        "provider_id": provider.provider_id,
-                        "model_name": request.model,
-                        "reason": "public_byok",
-                    },
-                    thinking_decision=_public_immersive_thinking_decision(provider),
-                    max_tokens_override=1600,
-                    persist_exchange=False,
-                    remember_session=False,
-                    public_sticker_candidates=sticker_candidates,
-                    # Do not ask the model to invent movement. The catalog is
-                    # exposed only after the server has resolved an eligible
-                    # current invitation or bounded-history continuation.
-                    public_state_update_catalog=movement_catalog,
-                )
+                context = DialogueContext(request.character_id, model_message, request.communication_channel, WorldState(prior_state))
+                budget = GenerationBudget(self.public_settings.max_provider_calls_per_action)
+                def generate(dialogue: DialogueContext, budget: GenerationBudget) -> dict[str, Any]:
+                    return self.mvp.chat(
+                        dialogue.character_id,
+                        dialogue.message,
+                        session_id=session_id,
+                        world_session_id=world_id,
+                        communication_channel=request.communication_channel,
+                        analyst_content_blocks=canonical_blocks,
+                        client_message_id=None,
+                        model_settings=(provider.base_url, api_key, request.model),
+                        model_info={
+                            "provider_id": provider.provider_id,
+                            "model_name": request.model,
+                            "reason": "public_byok",
+                        },
+                        thinking_decision=_public_immersive_thinking_decision(provider, budget.max_provider_calls),
+                        max_tokens_override=1600,
+                        persist_exchange=False,
+                        remember_session=False,
+                        public_sticker_candidates=sticker_candidates,
+                        # Do not ask the model to invent movement. The catalog is
+                        # exposed only after the server has resolved an eligible
+                        # current invitation or bounded-history continuation.
+                        public_state_update_catalog=movement_catalog,
+                    )
+                result = self.engine.generate(context, budget, generate).payload
             except Exception as exc:
                 from .mvp_service import MVPProviderError
 

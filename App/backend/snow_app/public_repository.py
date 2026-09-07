@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from contextvars import ContextVar, copy_context
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -34,18 +35,16 @@ class PublicRuntimeRepository(RuntimeRepository):
                 settings.data_root.resolve() != expected_root
                 or settings.runtime_root.resolve() != expected_root
             ):
-                raise RuntimeError(
-                    "DATA_ROOT and APP_RUNTIME must match PUBLIC_DATA_ROOT"
-                )
-            self.data_manifest = verify_data_release(
-                expected_root, public_settings.data_version
-            )
+                raise RuntimeError("DATA_ROOT and APP_RUNTIME must match PUBLIC_DATA_ROOT")
+            self.data_manifest = verify_data_release(expected_root, public_settings.data_version)
         self._health_local = threading.local()
         self._request_context: ContextVar[dict[str, Any] | None] = ContextVar(
             f"project_snow_public_repository_{id(self)}", default=None
         )
         self._http_client = httpx.Client(follow_redirects=False)
         self._executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="snow-retrieval")
+        self._retrieval_capacity = threading.BoundedSemaphore(8)
+        self._circuit_until: dict[str, float] = {}
         self._neo4j_driver = None
         self._neo4j_lock = threading.RLock()
 
@@ -75,6 +74,8 @@ class PublicRuntimeRepository(RuntimeRepository):
         collector = self._collector()
         if collector is not None:
             with collector["lock"]:
+                if status == "ok" and time.monotonic() >= collector["deadline"]:
+                    status = "degraded"
                 collector["health"][service] = status
             return
         health = dict(getattr(self._health_local, "value", {}) or {})
@@ -91,8 +92,32 @@ class PublicRuntimeRepository(RuntimeRepository):
     def reset_request_health(self) -> None:
         self._health_local.value = {}
         self._request_context.set(
-            {"lock": threading.RLock(), "health": {}, "timings": {}}
+            {"lock": threading.RLock(), "health": {}, "timings": {}, "deadline": time.monotonic() + 3.0}
         )
+
+    def _remaining(self) -> float:
+        collector = self._collector()
+        return max(0.0, float(collector["deadline"]) - time.monotonic()) if collector else 3.0
+
+    def _available(self, service: str) -> bool:
+        with self._neo4j_lock:
+            return time.monotonic() >= self._circuit_until.get(service, 0) and self._remaining() > 0.05
+
+    def _degrade(self, service: str) -> None:
+        self._set_health(service, "degraded")
+        with self._neo4j_lock:
+            self._circuit_until[service] = time.monotonic() + 15
+
+    def _submit(self, callback, *args):
+        if not self._retrieval_capacity.acquire(blocking=False):
+            return None
+        try:
+            future = self._executor.submit(copy_context().run, callback, *args)
+        except BaseException:
+            self._retrieval_capacity.release()
+            raise
+        future.add_done_callback(lambda _future: self._retrieval_capacity.release())
+        return future
 
     def close(self) -> None:
         self._http_client.close()
@@ -109,9 +134,7 @@ class PublicRuntimeRepository(RuntimeRepository):
             {
                 "character_views": (runtime_root / "mvp" / "character_views.jsonl").is_file(),
                 "question_bank": (runtime_root / "mvp" / "question_bank.json").is_file(),
-                "dialogue_profiles": (
-                    runtime_root / "personas" / "dialogue_style_profiles.jsonl"
-                ).is_file(),
+                "dialogue_profiles": (runtime_root / "personas" / "dialogue_style_profiles.jsonl").is_file(),
             }
         )
         return status
@@ -132,16 +155,26 @@ class PublicRuntimeRepository(RuntimeRepository):
         """Run independent lexical/vector legs concurrently, then preserve RRF."""
 
         started_at = time.perf_counter()
-        lexical_context = copy_context()
-        vector_context = copy_context()
-        lexical_future = self._executor.submit(
-            lexical_context.run, self.lexical_search, query, 40
-        )
-        vector_future = self._executor.submit(
-            vector_context.run, self.vector_search, query, 40
-        )
-        lexical = lexical_future.result()
-        vectors = vector_future.result()
+        if self._collector() is None:
+            self.reset_request_health()
+        lexical_future = self._submit(self.lexical_search, query, 40)
+        vector_future = self._submit(self.vector_search, query, 40)
+        lexical, vectors = [], []
+        if lexical_future is not None:
+            try:
+                lexical = lexical_future.result(timeout=self._remaining())
+            except FutureTimeout:
+                lexical_future.cancel()
+                self._set_health("fts5", "degraded")
+        if vector_future is not None:
+            try:
+                vectors = vector_future.result(timeout=self._remaining())
+            except FutureTimeout:
+                vector_future.cancel()
+                self._degrade("embedding")
+                self._degrade("qdrant")
+        else:
+            self._set_health("qdrant", "degraded")
         combined: dict[str, dict[str, float | int | None]] = {}
         for document_id, rank in lexical:
             combined.setdefault(
@@ -163,9 +196,7 @@ class PublicRuntimeRepository(RuntimeRepository):
             document = documents.get(document_id)
             if document is None or not self._is_allowed_context(document, character_id):
                 continue
-            adjusted_score = float(ranking["score"]) * float(
-                document["metadata"].get("source_priority", 0.5)
-            )
+            adjusted_score = float(ranking["score"]) * float(document["metadata"].get("source_priority", 0.5))
             results.append(
                 {
                     "citation": {
@@ -189,12 +220,15 @@ class PublicRuntimeRepository(RuntimeRepository):
         return ("rrf" if vectors else "lexical_only"), bool(vectors), results[:limit]
 
     def _embed_query(self, query: str) -> list[float] | None:
+        if not self._available("embedding"):
+            self._set_health("embedding", "degraded")
+            return None
         started_at = time.perf_counter()
         try:
             response = self._http_client.post(
                 f"{self.public_settings.embedding_url}/embed",
                 json={"inputs": [query]},
-                timeout=15,
+                timeout=max(0.05, self._remaining()),
                 follow_redirects=False,
             )
             response.raise_for_status()
@@ -206,14 +240,20 @@ class PublicRuntimeRepository(RuntimeRepository):
             self._set_health("embedding", "ok")
             return [float(value) for value in vector]
         except Exception:
-            self._set_health("embedding", "degraded")
+            self._degrade("embedding")
             return None
         finally:
             self._record_timing("embedding", started_at)
 
     def vector_search(self, query: str, limit: int = 40) -> list[tuple[str, int]]:
+        if not self._available("qdrant"):
+            self._set_health("qdrant", "degraded")
+            return []
         query_vector = self._embed_query(query)
         if not query_vector:
+            self._set_health("qdrant", "degraded")
+            return []
+        if not self._available("qdrant"):
             self._set_health("qdrant", "degraded")
             return []
         started_at = time.perf_counter()
@@ -222,7 +262,7 @@ class PublicRuntimeRepository(RuntimeRepository):
                 f"{self.public_settings.qdrant_url}/collections/{self.qdrant_collection}/points/search",
                 json={"vector": query_vector, "limit": limit, "with_payload": True, "with_vector": False},
                 headers={"api-key": self.public_settings.qdrant_api_key},
-                timeout=15,
+                timeout=max(0.05, self._remaining()),
                 follow_redirects=False,
             )
             response.raise_for_status()
@@ -234,9 +274,11 @@ class PublicRuntimeRepository(RuntimeRepository):
                 if isinstance(record, dict)
             ]
             self._set_health("qdrant", "ok")
-            return [(document_id, rank) for rank, document_id in enumerate(document_ids, start=1) if document_id]
+            return [
+                (document_id, rank) for rank, document_id in enumerate(document_ids, start=1) if document_id
+            ]
         except Exception:
-            self._set_health("qdrant", "degraded")
+            self._degrade("qdrant")
             return []
         finally:
             self._record_timing("qdrant", started_at)
@@ -247,13 +289,36 @@ class PublicRuntimeRepository(RuntimeRepository):
         character_id: str | None,
         intents: tuple[str, ...],
     ) -> dict[str, Any]:
+        if self._collector() is None:
+            self.reset_request_health()
+        fallback = {"status": "degraded", "nodes": [], "edges": []}
+        if not self._available("neo4j"):
+            self._set_health("neo4j", "degraded")
+            return fallback
+        future = self._submit(self._serving_graph_context_sync, query, character_id, intents)
+        if future is None:
+            self._set_health("neo4j", "degraded")
+            return fallback
+        try:
+            return future.result(timeout=self._remaining())
+        except FutureTimeout:
+            future.cancel()
+            self._degrade("neo4j")
+            return fallback
+
+    def _serving_graph_context_sync(
+        self,
+        query: str,
+        character_id: str | None,
+        intents: tuple[str, ...],
+    ) -> dict[str, Any]:
         started_at = time.perf_counter()
-        if not self.public_settings.neo4j_password:
+        if not self.public_settings.neo4j_password or not self._available("neo4j"):
             self._set_health("neo4j", "degraded")
             self._record_timing("neo4j", started_at)
             return {"status": "degraded", "nodes": [], "edges": []}
         try:
-            from neo4j import GraphDatabase
+            from neo4j import GraphDatabase, Query
 
             names = [query]
             if character_id:
@@ -266,11 +331,13 @@ class PublicRuntimeRepository(RuntimeRepository):
                     self._neo4j_driver = GraphDatabase.driver(
                         self.public_settings.neo4j_uri,
                         auth=(self.public_settings.neo4j_user, self.public_settings.neo4j_password),
-                        connection_timeout=5,
+                        connection_timeout=1,
+                        connection_acquisition_timeout=1,
                     )
                 driver = self._neo4j_driver
             with driver.session() as session:
                 rows = session.run(
+                    Query(
                         """
                         MATCH (start:SnowEntity {dataset_version: $data_version})
                         WHERE (start.node_id = $character_node_id
@@ -280,10 +347,12 @@ class PublicRuntimeRepository(RuntimeRepository):
                         WHERE other.dataset_version = start.dataset_version
                         RETURN start, other, relationships(path) AS rels LIMIT 16
                         """,
-                        character_node_id=f"character:{character_id}" if character_id else "",
-                        terms=terms,
-                        data_version=self.public_settings.data_version,
-                    )
+                        timeout=max(0.05, self._remaining()),
+                    ),
+                    character_node_id=f"character:{character_id}" if character_id else "",
+                    terms=terms,
+                    data_version=self.public_settings.data_version,
+                )
                 nodes: dict[str, dict[str, Any]] = {}
                 edges: dict[str, dict[str, Any]] = {}
                 for row in rows:
@@ -310,7 +379,7 @@ class PublicRuntimeRepository(RuntimeRepository):
             self._set_health("neo4j", "ok")
             return {"status": "ok", "nodes": list(nodes.values())[:12], "edges": list(edges.values())[:16]}
         except Exception:
-            self._set_health("neo4j", "degraded")
+            self._degrade("neo4j")
             return {"status": "degraded", "nodes": [], "edges": []}
         finally:
             self._record_timing("neo4j", started_at)

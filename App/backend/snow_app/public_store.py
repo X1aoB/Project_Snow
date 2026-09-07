@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import secrets
 import unicodedata
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from typing import Any, Iterator
 
 from sqlalchemy import create_engine, text
@@ -116,11 +116,8 @@ CREATE INDEX IF NOT EXISTS public_feedback_dedupe_ip_idx
 
 """
 
-# This table is deliberately kept out of ``SCHEMA_SQL``.  The initial
-# Alembic revision imports that constant; putting a later revision's table in
-# it would make a fresh database create the outbox in 0001 and then fail when
-# 0003 attempted to create it again.  Local auto-create still installs the
-# current table by executing this additive fragment after the base schema.
+# Historical Alembic revisions own frozen DDL. Local auto-create installs
+# the current schema by executing each additive fragment after the base schema.
 OUTBOX_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS public_feedback_email_outbox (
     outbox_id VARCHAR(36) PRIMARY KEY,
@@ -136,6 +133,16 @@ CREATE TABLE IF NOT EXISTS public_feedback_email_outbox (
 );
 CREATE INDEX IF NOT EXISTS public_feedback_email_outbox_due_idx
     ON public_feedback_email_outbox (status, next_attempt_at);
+"""
+
+
+LEASE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS public_request_leases (
+    request_id VARCHAR(128) PRIMARY KEY REFERENCES public_request_cache(request_id) ON DELETE CASCADE,
+    owner_token VARCHAR(64) NOT NULL,
+    lease_expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE INDEX IF NOT EXISTS public_request_lease_expiry_idx ON public_request_leases (lease_expires_at);
 """
 
 
@@ -155,7 +162,17 @@ class PublicStore:
                 poolclass=StaticPool,
             )
         else:
-            self.engine = create_engine(database_url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+            self.engine = create_engine(
+                database_url,
+                pool_pre_ping=True,
+                pool_size=5,
+                max_overflow=0,
+                pool_timeout=2,
+                connect_args={
+                    "connect_timeout": 3,
+                    "options": "-c statement_timeout=5000 -c lock_timeout=2000",
+                },
+            )
 
     @contextmanager
     def begin(self) -> Iterator[Connection]:
@@ -171,7 +188,7 @@ class PublicStore:
 
     def create_schema(self) -> None:
         with self.begin() as connection:
-            for statement in (SCHEMA_SQL + OUTBOX_SCHEMA_SQL).split(";"):
+            for statement in (SCHEMA_SQL + OUTBOX_SCHEMA_SQL + LEASE_SCHEMA_SQL).split(";"):
                 if statement.strip():
                     connection.execute(text(statement))
 
@@ -179,6 +196,14 @@ class PublicStore:
         try:
             with self.begin() as connection:
                 return connection.execute(text("SELECT 1")).scalar_one() == 1
+        except PublicStoreUnavailable:
+            return False
+
+    def schema_ready(self) -> bool:
+        try:
+            with self.begin() as connection:
+                connection.execute(text("SELECT request_id FROM public_request_leases LIMIT 0"))
+                return True
         except PublicStoreUnavailable:
             return False
 
@@ -230,10 +255,19 @@ class PublicStore:
                 counts[scope] = int(count)
         return counts
 
-    def claim_request(self, request_id: str, subject_hash: str, request_hash: str) -> tuple[str, dict | None]:
+    def claim_request(
+        self, request_id: str, subject_hash: str, request_hash: str, *, owner_token: str | None = None
+    ) -> tuple[str, dict | None]:
         now = _utcnow()
-        expires_at = now + timedelta(minutes=10)
+        expires_at = now + (timedelta(days=1) if owner_token else timedelta(minutes=10))
         with self.begin() as connection:
+            self._recover_expired(connection, now)
+            connection.execute(
+                text(
+                    "DELETE FROM public_request_leases WHERE request_id IN (SELECT request_id FROM public_request_cache WHERE expires_at <= :now)"
+                ),
+                {"now": now},
+            )
             connection.execute(
                 text("DELETE FROM public_request_cache WHERE expires_at <= :now"), {"now": now}
             )
@@ -256,41 +290,121 @@ class PublicStore:
                 },
             ).first()
             if inserted:
+                if owner_token:
+                    connection.execute(
+                        text(
+                            "INSERT INTO public_request_leases (request_id, owner_token, lease_expires_at) VALUES (:request_id, :owner, :expires)"
+                        ),
+                        {
+                            "request_id": request_id,
+                            "owner": owner_token,
+                            "expires": now + timedelta(seconds=45),
+                        },
+                    )
                 return "claimed", None
-            existing = connection.execute(
-                text(
-                    """
+            existing = (
+                connection.execute(
+                    text(
+                        """
                     SELECT subject_hash, request_hash, status, response_json
                     FROM public_request_cache WHERE request_id = :request_id
                     """
-                ),
-                {"request_id": request_id},
-            ).mappings().one()
+                    ),
+                    {"request_id": request_id},
+                )
+                .mappings()
+                .one()
+            )
             if existing["subject_hash"] != subject_hash or existing["request_hash"] != request_hash:
                 return "conflict", None
             if existing["status"] == "completed" and existing["response_json"]:
                 return "completed", json.loads(existing["response_json"])
             return "processing", None
 
-    def complete_request(self, request_id: str, response: dict[str, Any]) -> None:
-        with self.begin() as connection:
-            connection.execute(
-                text(
-                    """
-                    UPDATE public_request_cache
-                    SET status = 'completed', response_json = :response_json
-                    WHERE request_id = :request_id
-                    """
+    @staticmethod
+    def _recover_expired(connection: Connection, now: datetime) -> int:
+        # Preserve uncertain attempts as terminal results, never automatically
+        # make another paid call for the same request after worker loss.
+        result = connection.execute(
+            text("""
+            UPDATE public_request_cache SET status = 'completed', response_json = :response
+            WHERE status = 'processing' AND EXISTS (
+                SELECT 1 FROM public_request_leases AS lease
+                WHERE lease.request_id = public_request_cache.request_id
+                  AND lease.lease_expires_at <= :now)
+        """),
+            {
+                "now": now,
+                "response": _json(
+                    {"terminal_error": "generation_interrupted", "answer": "", "content_blocks": []}
                 ),
-                {"request_id": request_id, "response_json": _json(response)},
-            )
+            },
+        )
+        connection.execute(
+            text("DELETE FROM public_request_leases WHERE lease_expires_at <= :now"), {"now": now}
+        )
+        return int(result.rowcount)
 
-    def release_request(self, request_id: str) -> None:
+    def renew_leases(self, owner_token: str) -> int:
+        now = _utcnow()
+        with self.begin() as connection:
+            self._recover_expired(connection, now)
+            result = connection.execute(
+                text(
+                    "UPDATE public_request_leases SET lease_expires_at = :expires WHERE owner_token = :owner"
+                ),
+                {"owner": owner_token, "expires": now + timedelta(seconds=45)},
+            )
+            return int(result.rowcount)
+
+    def interrupt_owned_requests(self, owner_token: str) -> int:
         with self.begin() as connection:
             connection.execute(
-                text("DELETE FROM public_request_cache WHERE request_id = :request_id AND status = 'processing'"),
+                text("UPDATE public_request_leases SET lease_expires_at = :now WHERE owner_token = :owner"),
+                {"now": _utcnow(), "owner": owner_token},
+            )
+            return self._recover_expired(connection, _utcnow())
+
+    def complete_request(
+        self, request_id: str, response: dict[str, Any], *, owner_token: str | None = None
+    ) -> None:
+        with self.begin() as connection:
+            self._recover_expired(connection, _utcnow())
+            result = connection.execute(
+                text("""
+                UPDATE public_request_cache SET status = 'completed', response_json = :response_json, expires_at = :expires
+                WHERE request_id = :request_id AND status = 'processing'
+                  AND (CAST(:owner AS VARCHAR(64)) IS NULL OR EXISTS (SELECT 1 FROM public_request_leases AS lease
+                       WHERE lease.request_id = public_request_cache.request_id AND lease.owner_token = :owner))
+            """),
+                {
+                    "request_id": request_id,
+                    "response_json": _json(response),
+                    "owner": owner_token,
+                    "expires": _utcnow() + timedelta(minutes=10),
+                },
+            )
+            if result.rowcount != 1:
+                raise PublicStoreUnavailable("request ownership was lost before completion")
+            connection.execute(
+                text("DELETE FROM public_request_leases WHERE request_id = :request_id"),
                 {"request_id": request_id},
             )
+
+    def release_request(self, request_id: str, *, owner_token: str | None = None) -> None:
+        with self.begin() as connection:
+            # Only pre-generation failures may release a claim. Unknown provider
+            # outcomes must instead be completed with generation_interrupted.
+            condition = "request_id = :request_id AND status = 'processing' AND (CAST(:owner AS VARCHAR(64)) IS NULL OR EXISTS (SELECT 1 FROM public_request_leases AS lease WHERE lease.request_id = public_request_cache.request_id AND lease.owner_token = :owner))"
+            removed = connection.execute(
+                text("DELETE FROM public_request_cache WHERE " + condition),
+                {"request_id": request_id, "owner": owner_token},
+            )
+            if removed.rowcount:
+                connection.execute(
+                    text("DELETE FROM public_request_leases WHERE request_id = :request_id"),
+                    {"request_id": request_id},
+                )
 
     def request_result(self, request_id: str, subject_hash: str) -> dict[str, Any] | None:
         """Return a still-live terminal result owned by this anonymous subject."""
@@ -299,18 +413,22 @@ class PublicStore:
             return None
         now = _utcnow()
         with self.begin() as connection:
-            row = connection.execute(
-                text(
-                    """
+            row = (
+                connection.execute(
+                    text(
+                        """
                     SELECT response_json FROM public_request_cache
                     WHERE request_id = :request_id
                       AND subject_hash = :subject_hash
                       AND status = 'completed'
                       AND expires_at > :now
                     """
-                ),
-                {"request_id": request_id, "subject_hash": subject_hash, "now": now},
-            ).mappings().first()
+                    ),
+                    {"request_id": request_id, "subject_hash": subject_hash, "now": now},
+                )
+                .mappings()
+                .first()
+            )
         if not row or not row["response_json"]:
             return None
         try:
@@ -333,7 +451,9 @@ class PublicStore:
             ).first()
         return value is None
 
-    def mark_verified(self, subject_hash: str, purpose: str, lifetime: timedelta = timedelta(days=30)) -> None:
+    def mark_verified(
+        self, subject_hash: str, purpose: str, lifetime: timedelta = timedelta(days=30)
+    ) -> None:
         now = _utcnow()
         with self.begin() as connection:
             connection.execute(
@@ -518,9 +638,10 @@ class PublicStore:
         now = _utcnow()
         locked_until = now + timedelta(minutes=10)
         with self.begin() as connection:
-            rows = connection.execute(
-                text(
-                    """
+            rows = (
+                connection.execute(
+                    text(
+                        """
                     SELECT o.outbox_id, o.feedback_id, o.attempt_count,
                            f.public_code, f.created_at
                     FROM public_feedback_email_outbox o
@@ -533,9 +654,12 @@ class PublicStore:
                     ORDER BY o.next_attempt_at ASC
                     LIMIT :limit
                     """
-                ),
-                {"now": now, "limit": max(1, min(int(limit), 50))},
-            ).mappings().all()
+                    ),
+                    {"now": now, "limit": max(1, min(int(limit), 50))},
+                )
+                .mappings()
+                .all()
+            )
             claimed: list[dict[str, Any]] = []
             for row in rows:
                 updated = connection.execute(
@@ -602,22 +726,30 @@ class PublicStore:
 
     def feedback_email_status(self) -> dict[str, int]:
         with self.begin() as connection:
-            rows = connection.execute(
-                text("SELECT status, count(*) AS count FROM public_feedback_email_outbox GROUP BY status")
-            ).mappings().all()
+            rows = (
+                connection.execute(
+                    text("SELECT status, count(*) AS count FROM public_feedback_email_outbox GROUP BY status")
+                )
+                .mappings()
+                .all()
+            )
         return {str(row["status"]): int(row["count"] or 0) for row in rows}
 
     def feedback_rows(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.begin() as connection:
-            rows = connection.execute(
-                text(
-                    """
+            rows = (
+                connection.execute(
+                    text(
+                        """
                     SELECT feedback_id, public_code, body_text, context_json, qq_cipher, created_at, expires_at
                     FROM public_feedback ORDER BY created_at DESC LIMIT :limit
                     """
-                ),
-                {"limit": max(1, min(limit, 500))},
-            ).mappings().all()
+                    ),
+                    {"limit": max(1, min(limit, 500))},
+                )
+                .mappings()
+                .all()
+            )
         return [
             {
                 **dict(row),
@@ -633,6 +765,12 @@ class PublicStore:
         now = _utcnow()
         deleted: dict[str, int] = {}
         with self.begin() as connection:
+            connection.execute(
+                text(
+                    "DELETE FROM public_request_leases WHERE request_id IN (SELECT request_id FROM public_request_cache WHERE expires_at <= :now)"
+                ),
+                {"now": now},
+            )
             for table, column in (
                 ("public_feedback", "expires_at"),
                 ("public_request_cache", "expires_at"),

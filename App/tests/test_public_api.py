@@ -2,29 +2,30 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from dataclasses import replace
 import json
+import time
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import time
 from unittest import TestCase
 from unittest.mock import patch
 from uuid import uuid4
 
+from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from backend.snow_app.config import PublicSettings, Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
-from backend.snow_app.public_contracts import ChatRequest, HistoryTurn
+from backend.snow_app.public_contracts import ChatRequest, HistoryTurn, SummarizeRequest
 from backend.snow_app.public_main import create_app
 from backend.snow_app.public_providers import PROVIDERS
+from backend.snow_app.public_security import sign_state, verify_state
 from backend.snow_app.public_service import (
     GenerationBusy,
     PublicChatService,
     _public_immersive_thinking_decision,
 )
-from backend.snow_app.public_security import sign_state, verify_state
 from backend.snow_app.public_store import PublicStore
 
 
@@ -84,6 +85,67 @@ class PublicAPITests(TestCase):
         self.app.state.chat_service.close()
         self._views_directory.cleanup()
 
+    def test_build_info_is_additive_and_preserves_v1_schemas(self) -> None:
+        with patch.dict("os.environ", {"APP_REVISION": "a" * 40, "APP_BUILD_TIME": "2026-09-07T00:00:00Z"}):
+            response = self.client.get("/public/v1/build-info")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["revision"], "a" * 40)
+        self.assertEqual(response.json()["api_schema"], "public-v1")
+        self.assertEqual(response.json()["state_schema"], "public-state-2")
+        self.assertEqual(response.json()["generation_limits"]["max_provider_calls"], 2)
+
+    def test_summary_disconnect_releases_subject_and_replays_terminal_without_another_call(self) -> None:
+        service = self.app.state.chat_service
+        endpoint = next(route.endpoint for route in self.app.routes if route.path == "/public/v1/chat/summarize")
+        payload = SummarizeRequest(
+            request_id=uuid4(), provider="openai", credential="synthetic-credential-value",
+            model="synthetic", character_id=MVP_CHARACTERS[0].character_id,
+            turns=[
+                {"role": "user", "content_blocks": [{"type": "message", "text": "hello"}]},
+                {"role": "assistant", "content_blocks": [{"type": "message", "text": "hi"}]},
+            ],
+        )
+        async def exercise():
+            started, canceled = asyncio.Event(), asyncio.Event()
+            async def generate(*_args):
+                async def hold():
+                    started.set()
+                    try:
+                        await asyncio.Event().wait()
+                    finally:
+                        canceled.set()
+                return await service.gate.run(hold)
+            async def receive():
+                await started.wait()
+                return {"type": "http.disconnect"}
+            request = Request({"type": "http", "state": {"anonymous_id": "synthetic", "subject_hash": "subject"}}, receive)
+            with patch("backend.snow_app.public_main.open_byok_credential", return_value={"api_key": "synthetic"}), patch.object(service, "summarize", side_effect=generate) as summary:
+                for _attempt in range(2):
+                    with self.assertRaises(HTTPException) as error:
+                        await asyncio.wait_for(endpoint(request, payload), timeout=2)
+                    self.assertEqual(error.exception.detail["code"], "generation_interrupted")
+                self.assertEqual(summary.call_count, 1)
+            self.assertTrue(canceled.is_set())
+            self.assertEqual(self.app.state.active_subject_requests, {})
+            self.assertEqual(service.gate.semaphore._value, 4)
+            result = await self.app.state.async_store.call("request_result", "chat-summary:" + str(payload.request_id), "subject")
+            self.assertEqual(result["terminal_error"], "generation_interrupted")
+        asyncio.run(exercise())
+
+    def test_draining_rejects_new_summary_before_claim_or_model_call(self) -> None:
+        credential, _ = self._byok()
+        self.app.state.draining = True
+        with patch.object(self.app.state.chat_service, "summarize") as summary:
+            response = self.client.post("/public/v1/chat/summarize", headers={"Origin": "http://testserver"}, json={
+                "request_id": str(uuid4()), "provider": "openai", "credential": credential,
+                "model": "synthetic", "character_id": MVP_CHARACTERS[0].character_id,
+                "turns": [{"role": role, "content_blocks": [{"type": "message", "text": "hello"}]} for role in ("user", "assistant")],
+            })
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"]["code"], "service_draining")
+        self.assertEqual(response.headers["Retry-After"], "5")
+        summary.assert_not_called()
+
     def test_public_mvp_state_is_ephemeral_and_outside_read_only_runtime(self) -> None:
         path = self.app.state.chat_service.mvp.user_fact_store.database_path
         self.assertFalse(path.is_relative_to(self.internal_settings.runtime_root))
@@ -122,7 +184,7 @@ class PublicAPITests(TestCase):
         self.assertTrue(payload["feature_flags"]["indexeddb_v4"])
         self.assertTrue(payload["providers"][0]["documentation_url"].startswith("https://"))
         self.assertTrue(payload["providers"][0]["privacy_url"].startswith("https://"))
-        self.assertIn("Project Snow", self.client.get("/").text)
+        self.assertIn("小吉终端", self.client.get("/").text)
 
     def test_public_webp_assets_have_an_explicit_image_media_type(self) -> None:
         response = self.client.get(
