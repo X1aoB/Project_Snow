@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from .agent_runtime import AgentRuntime
 from .agent_store import AgentStore
@@ -63,6 +63,7 @@ from .mvp_service import (
 from .provider_registry import ProviderRegistry
 from .repository import MACHINE_REVIEW_FILTERS, REVIEW_RISK_LEVELS, REVIEW_TIERS, RuntimeRepository
 from .review_automation import ReviewAutomationService
+from .review_lock import ReviewConflict
 
 settings = Settings.from_environment()
 repository = RuntimeRepository(settings)
@@ -107,6 +108,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-Filename"],
 )
+
+
+@app.exception_handler(ReviewConflict)
+async def review_state_conflict(_request: Request, exc: ReviewConflict) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc), "code": "review_state_conflict"})
 
 
 def get_repository() -> RuntimeRepository:

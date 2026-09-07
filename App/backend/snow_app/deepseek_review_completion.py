@@ -33,6 +33,7 @@ from pipelines.review_relation_candidates import _build_review_input
 from .agent_store import AgentStore
 from .config import Settings
 from .graph_metadata import narrative_scope
+from .review_lock import review_lock, review_locked
 from .provider_registry import ProviderRegistry
 from .repository import (
     _ACTOR_NODE_TYPES,
@@ -615,6 +616,7 @@ class DeepSeekReviewCompletionService:
         return report, {"kind": kind, "candidate_id": identifier, "input_hash": report["input_hash"], "payload": payload}
 
     @staticmethod
+    @review_locked(lambda path, rows, key_name="candidate_id": path)
     def _merge_artifacts(path: Path, rows: list[dict[str, Any]], key_name: str = "candidate_id") -> None:
         index = {(str(row.get("kind") or ""), str(row.get(key_name) or row.get("entity_candidate_id") or "")): row for row in _read_jsonl(path)}
         for row in rows:
@@ -846,7 +848,7 @@ class DeepSeekReviewCompletionService:
         request_index = {(str(row.get("kind")), str(row.get("candidate_id") or "")): row for row in requests}
         if len(report_index) < int(manifest["request_count"]) * MINIMUM_FINAL_COVERAGE:
             raise ValueError("DeepSeek reports do not meet the required final-decision coverage.")
-        with _REVIEW_WRITE_LOCK:
+        with _REVIEW_WRITE_LOCK, review_lock(self.repository.review_candidates_path):
             relation_candidates = _read_jsonl(self.repository.review_candidates_path)
             entity_candidates = _read_jsonl(self.repository.entity_candidates_path)
             relation_index = {str(row.get("candidate_id") or ""): row for row in relation_candidates}
@@ -1077,7 +1079,7 @@ class DeepSeekReviewCompletionService:
         manifest = self._load_manifest(run_id)
         if manifest.get("status") != "admitted":
             raise ValueError("Only an admitted DeepSeek completion run can be rolled back.")
-        with _REVIEW_WRITE_LOCK:
+        with _REVIEW_WRITE_LOCK, review_lock(self.repository.review_candidates_path):
             events = [row for row in _read_jsonl(self.decision_events_path) if row.get("run_id") == run_id]
             relations = _read_jsonl(self.repository.review_candidates_path)
             entities = _read_jsonl(self.repository.entity_candidates_path)

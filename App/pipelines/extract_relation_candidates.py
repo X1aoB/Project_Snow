@@ -18,6 +18,8 @@ from typing import Any, Callable, MutableMapping
 import httpx
 
 from .common import RUNTIME_ROOT, load_runtime_jsonl, stable_id, utc_now, write_json, write_jsonl
+from .review_state import checkpoint_extraction
+from backend.snow_app.review_lock import review_locked
 
 
 SYSTEM_PROMPT = """你是叙事知识标注助手。只根据给出的证据提取明确表达的关系，不推测。
@@ -421,6 +423,7 @@ def _call_provider(
     return (parsed, payload.get("usage") or {}) if include_usage else parsed
 
 
+@review_locked(lambda *args, **kwargs: RUNTIME_ROOT / "locks" / "relation-extraction" / "worker")
 def extract(
     limit: int | None = None, job_ids: set[str] | None = None, include_failed: bool = True
 ) -> dict[str, Any]:
@@ -452,13 +455,22 @@ def extract(
     retry_count = 0
     failed_jobs: list[dict[str, Any]] = []
     filtered_relation_counts: dict[str, int] = {}
-    for job in jobs:
+    for scheduled_job in jobs:
+        # A human may resolve a later job while the previous provider call is
+        # running. Re-read before spending; the checkpoint still checks again.
+        job = next(
+            (row for row in _read_jsonl(jobs_path) if row.get("job_id") == scheduled_job.get("job_id")), None
+        )
+        if job is None:
+            continue
         if job_ids is not None and job.get("job_id") not in job_ids:
             continue
         if not include_failed and job.get("status") != "queued":
             continue
         if job.get("status") in {"completed", "completed_no_relation", "superseded"}:
             continue
+        original_job = dict(job)
+        new_candidates = []
         attempted += 1
         job["last_attempt_at"] = utc_now()
         try:
@@ -472,8 +484,7 @@ def extract(
             job["last_error"] = str(error)
             job["last_failed_at"] = utc_now()
             failed_jobs.append({"job_id": job["job_id"], "source_type": job["source_type"], "error": str(error)})
-            write_jsonl(candidates_path, existing)
-            write_jsonl(jobs_path, jobs)
+            checkpoint_extraction(jobs_path, candidates_path, original_job, job, [])
             if limit and attempted >= limit:
                 break
             continue
@@ -494,7 +505,7 @@ def extract(
                 prefix="relation_candidate_",
             )
             if candidate_id not in existing_candidate_ids:
-                existing.append(
+                new_candidates.append(
                     {
                         "candidate_id": candidate_id,
                         "job_id": job["job_id"],
@@ -514,8 +525,8 @@ def extract(
         job.pop("last_error", None)
         job.pop("last_failed_at", None)
         processed += 1
-        write_jsonl(candidates_path, existing)
-        write_jsonl(jobs_path, jobs)
+        checkpoint_extraction(jobs_path, candidates_path, original_job, job, new_candidates)
+        existing.extend(new_candidates)
         if limit and attempted >= limit:
             break
     report = {
@@ -536,6 +547,7 @@ def extract(
     return report
 
 
+@review_locked(lambda *args, **kwargs: RUNTIME_ROOT / "review" / "narrative_relation_jobs.jsonl")
 def resolve_no_eligible_relation(job_id: str, reviewer: str, note: str) -> dict[str, Any]:
     """Record a human-reviewed no-relation outcome without fabricating a graph edge."""
     jobs_path = RUNTIME_ROOT / "review" / "narrative_relation_jobs.jsonl"
@@ -583,6 +595,7 @@ def resolve_no_eligible_relation(job_id: str, reviewer: str, note: str) -> dict[
     return report
 
 
+@review_locked(lambda: RUNTIME_ROOT / "review" / "narrative_relation_candidates.jsonl")
 def revalidate_existing_candidates() -> dict[str, Any]:
     """Apply the current local policy to pending candidates while preserving an audit trail."""
     candidates_path = RUNTIME_ROOT / "review" / "narrative_relation_candidates.jsonl"

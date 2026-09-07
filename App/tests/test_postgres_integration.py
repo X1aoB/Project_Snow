@@ -95,7 +95,7 @@ def test_upgrade_preserves_feedback_and_old_cache_schema(database):
     assert len(store.feedback_rows(10)) == 1
 
 
-def test_real_old_store_remains_usable_after_additive_migration(database):
+def old_store_module():
     reference = os.getenv("TEST_OLD_APP_REF")
     if not reference:
         pytest.skip("TEST_OLD_APP_REF required for actual old-code compatibility")
@@ -109,12 +109,39 @@ def test_real_old_store_remains_usable_after_additive_migration(database):
     ).stdout
     old = ModuleType("old_snow_public_store")
     exec(compile(source, "old_public_store.py", "exec"), old.__dict__)
+    return old
+
+
+def test_real_old_store_remains_usable_after_additive_migration(database):
+    old = old_store_module()
     migrate(database)
     store = old.PublicStore("", engine=database)
     assert store.claim_request("old", "subject", "hash")[0] == "claimed"
     store.complete_request("old", {"answer": "old binary"})
     assert store.request_result("old", "subject")["answer"] == "old binary"
     assert store.consume_limits("subject", [("old_write", "hour", 2)])["old_write"] == 1
+
+
+def test_new_worker_crash_then_old_app_reads_reconciled_terminal_result(database):
+    old = old_store_module()
+    migrate(database)
+    new_store = PublicStore("", engine=database)
+    old_store = old.PublicStore("", engine=database)
+    now = datetime(2026, 9, 7, tzinfo=UTC)
+    with patch("backend.snow_app.public_store._utcnow", return_value=now):
+        assert new_store.claim_request("crashed", "subject", "hash", owner_token="dead")[0] == "claimed"
+    later = now + timedelta(minutes=11)
+    with patch.object(old, "_utcnow", return_value=later), patch("backend.snow_app.public_store._utcnow", return_value=later):
+        # The actual baseline cannot reconcile a new worker's abandoned lease.
+        assert old_store.claim_request("crashed", "subject", "hash")[0] == "processing"
+        assert new_store.recover_expired_requests() == 1
+        assert new_store.recover_expired_requests() == 0
+        status, result = old_store.claim_request("crashed", "subject", "hash")
+        assert status == "completed"
+        assert result["terminal_error"] == "generation_interrupted"
+        # Ordinary old-code requests remain writable after rollback.
+        assert old_store.claim_request("old-after-rollback", "subject", "hash")[0] == "claimed"
+        old_store.complete_request("old-after-rollback", {"answer": "old works"})
 
 
 def test_parallel_claim_and_limits_are_atomic(database):

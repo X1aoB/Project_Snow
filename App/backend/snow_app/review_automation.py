@@ -33,6 +33,7 @@ from pipelines.review_relation_candidates import (
 
 from .config import Settings
 from .graph_metadata import narrative_scope
+from .review_lock import review_lock, review_locked
 from .repository import (
     _ACTOR_NODE_TYPES,
     _REVIEW_WRITE_LOCK,
@@ -1110,6 +1111,7 @@ class ReviewAutomationService:
             "audit_eligible": verdict == "recommend_approve" and not validation_flags,
         }
 
+    @review_locked(lambda self, path, reports: path)
     def _append_reports(self, path: Path, reports: list[dict[str, Any]]) -> None:
         existing = _read_jsonl(path)
         by_key = {str(row.get("report_key") or row.get("report_id")): row for row in existing}
@@ -1448,6 +1450,7 @@ class ReviewAutomationService:
             return "reject"
         return "needs_human_review"
 
+    @review_locked(lambda self, manifest: self.calibration_samples_path)
     def _create_calibration_samples(self, manifest: dict[str, Any]) -> None:
         run_id = str(manifest["run_id"])
         relation_reports, entity_reports = self._run_report_maps(run_id)
@@ -1603,7 +1606,7 @@ class ReviewAutomationService:
         }
 
     def label_calibration(self, sample_id: str, label: dict[str, Any]) -> dict[str, Any]:
-        with _REVIEW_WRITE_LOCK:
+        with _REVIEW_WRITE_LOCK, review_lock(self.repository.review_candidates_path):
             samples = _read_jsonl(self.calibration_samples_path)
             sample = next((row for row in samples if row.get("sample_id") == sample_id), None)
             if sample is None:
@@ -1744,7 +1747,7 @@ class ReviewAutomationService:
         documents = self._documents()
         relation_ids = set(str(value) for value in manifest.get("relation_candidate_ids", []))
         entity_ids = set(str(value) for value in manifest.get("entity_candidate_ids", []))
-        with _REVIEW_WRITE_LOCK:
+        with _REVIEW_WRITE_LOCK, review_lock(self.repository.review_candidates_path):
             relation_candidates = _read_jsonl(self.repository.review_candidates_path)
             entity_candidates = _read_jsonl(self.repository.entity_candidates_path)
             approved_nodes = _read_jsonl(self.repository.approved_entity_nodes_path)
@@ -1993,7 +1996,7 @@ class ReviewAutomationService:
         manifest = self._load_manifest(run_id)
         if manifest.get("status") != "admitted":
             raise ValueError("Only an admitted automation run can be rolled back.")
-        with _REVIEW_WRITE_LOCK:
+        with _REVIEW_WRITE_LOCK, review_lock(self.repository.review_candidates_path):
             admission_attempt_id = str(manifest.get("admission_attempt_id") or "")
             run_events = [
                 row for row in _read_jsonl(self.decision_events_path)

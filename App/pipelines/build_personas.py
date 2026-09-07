@@ -11,7 +11,8 @@ import collections
 import json
 from typing import Any
 
-from .common import dialogue_characters, RUNTIME_ROOT, ensure_runtime, load_runtime_jsonl, utc_now, write_json, write_jsonl
+from .common import dialogue_characters, RUNTIME_ROOT, ensure_runtime, load_runtime_jsonl, utc_now, write_json
+from .review_state import initialize_candidates, preserve_profile_reviews, preserve_review_jobs
 
 
 EVIDENCE_BUCKETS = {
@@ -104,15 +105,15 @@ def build_personas() -> dict[str, Any]:
             )
 
     output = ensure_runtime("personas")
-    write_jsonl(output / "persona_profiles.jsonl", profiles)
-    write_jsonl(output / "persona_extraction_jobs.jsonl", jobs)
-    write_jsonl(output / "persona_trait_candidates.jsonl", [])
+    profiles = preserve_profile_reviews(output / "persona_profiles.jsonl", profiles)
+    jobs = preserve_review_jobs(output / "persona_extraction_jobs.jsonl", jobs)
+    initialize_candidates(output / "persona_trait_candidates.jsonl")
     report = {
         "stage": "B",
         "job": "build_personas",
         "generated_at": utc_now(),
         "profiles": len(profiles),
-        "queued_annotation_jobs": len(jobs),
+        "queued_annotation_jobs": sum(row.get('status') == 'queued' for row in jobs),
         "policy": "No trait is active until evidence-backed human review completes.",
     }
     write_json(RUNTIME_ROOT / "reports" / "build_personas.json", report)

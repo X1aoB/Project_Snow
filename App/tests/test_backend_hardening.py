@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Event
+from types import ModuleType
 from unittest import IsolatedAsyncioTestCase, TestCase
 from unittest.mock import Mock, patch
 
@@ -111,6 +115,44 @@ class LeaseTests(TestCase):
         self.store.claim_request("old-client", "subject", "hash")
         self.store.complete_request("old-client", {"answer": "legacy"})
         self.assertEqual(self.store.claim_request("old-client", "subject", "hash")[0], "completed")
+
+    def test_explicit_recovery_is_idempotent_and_does_not_interrupt_live_owners(self):
+        now = datetime(2026, 9, 7, tzinfo=UTC)
+        with patch("backend.snow_app.public_store._utcnow", return_value=now):
+            self.store.claim_request("expired", "subject", "hash", owner_token="dead")
+        later = now + timedelta(seconds=46)
+        with patch("backend.snow_app.public_store._utcnow", return_value=later):
+            self.assertEqual(self.store.recover_expired_requests(), 1)
+            self.assertEqual(self.store.recover_expired_requests(), 0)
+            self.store.claim_request("live", "subject", "hash", owner_token="live")
+            self.assertEqual(self.store.recover_expired_requests(), 0)
+            self.assertEqual(self.store.request_result("expired", "subject")["terminal_error"], "generation_interrupted")
+            self.store.complete_request("live", {"answer": "uninterrupted"}, owner_token="live")
+
+    def test_actual_baseline_recovers_new_crashed_request_only_after_maintenance(self):
+        reference = os.getenv("TEST_OLD_APP_REF", "502ec99412bef843c37e4b31a53df8fa9faeb33c")
+        source = subprocess.run(
+            ["git", "show", f"{reference}:App/backend/snow_app/public_store.py"],
+            cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, encoding="utf-8",
+        )
+        if source.returncode:
+            self.skipTest("Baseline source is unavailable in this shallow checkout; real PG CI fetches it")
+        old = ModuleType("baseline_public_store")
+        exec(compile(source.stdout, "baseline_public_store.py", "exec"), old.__dict__)
+        legacy = old.PublicStore("", engine=self.store.engine)
+        now = datetime(2026, 9, 7, tzinfo=UTC)
+        with patch("backend.snow_app.public_store._utcnow", return_value=now):
+            self.store.claim_request("crashed", "subject", "hash", owner_token="dead")
+        later = now + timedelta(minutes=11)
+        with patch.object(old, "_utcnow", return_value=later), patch(
+            "backend.snow_app.public_store._utcnow", return_value=later
+        ):
+            self.assertEqual(legacy.claim_request("crashed", "subject", "hash")[0], "processing")
+            self.assertEqual(self.store.recover_expired_requests(), 1)
+            self.assertEqual(self.store.recover_expired_requests(), 0)
+            status, result = legacy.claim_request("crashed", "subject", "hash")
+            self.assertEqual(status, "completed")
+            self.assertEqual(result["terminal_error"], "generation_interrupted")
 
 
 class AsyncStoreTests(IsolatedAsyncioTestCase):

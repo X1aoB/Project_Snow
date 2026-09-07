@@ -21,6 +21,7 @@ from typing import Any
 
 from .config import Settings
 from .graph_metadata import hydrate_human_approved_edge, narrative_scope
+from .review_lock import review_lock, review_locked
 
 
 _REVIEW_WRITE_LOCK = threading.RLock()
@@ -82,6 +83,7 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+@review_locked(lambda path, rows: path)
 def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     """Atomically replace a local review artifact, tolerating short Windows locks."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -908,7 +910,7 @@ class RuntimeRepository:
     ) -> dict[str, Any]:
         # The local UI can issue overlapping requests. Serialize the complete
         # read-modify-write sequence so one human decision cannot erase another.
-        with _REVIEW_WRITE_LOCK:
+        with _REVIEW_WRITE_LOCK, review_lock(self.review_candidates_path):
             candidates = _read_jsonl(self.review_candidates_path)
             candidate = next((row for row in candidates if row.get("candidate_id") == candidate_id), None)
             if candidate is None:
@@ -1019,7 +1021,7 @@ class RuntimeRepository:
         self, entity_candidate_id: str, decision: str, reviewer_id: str, note: str
     ) -> dict[str, Any]:
         """Approve or reject one proposed location/event node without touching relations."""
-        with _REVIEW_WRITE_LOCK:
+        with _REVIEW_WRITE_LOCK, review_lock(self.entity_candidates_path):
             candidates = _read_jsonl(self.entity_candidates_path)
             candidate = next(
                 (row for row in candidates if row.get("entity_candidate_id") == entity_candidate_id), None

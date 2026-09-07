@@ -11,6 +11,7 @@ import html
 import json
 import os
 import re
+import tempfile
 import time
 import unicodedata
 from collections.abc import Iterable, Iterator
@@ -18,6 +19,8 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from backend.snow_app.review_lock import review_locked
 
 try:
     from bs4 import BeautifulSoup
@@ -204,16 +207,20 @@ def _atomic_replace(temporary_path: Path, path: Path, attempts: int = 50, delay_
             time.sleep(delay_seconds)
 
 
+@review_locked(lambda path, rows: path)
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary_path = Path(name)
     count = 0
     try:
-        with temporary_path.open("w", encoding="utf-8", newline="\n") as handle:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
             for row in rows:
                 handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True))
                 handle.write("\n")
                 count += 1
+            handle.flush()
+            os.fsync(handle.fileno())
         _atomic_replace(temporary_path, path)
     finally:
         temporary_path.unlink(missing_ok=True)

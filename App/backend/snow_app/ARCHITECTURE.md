@@ -19,3 +19,9 @@
 本地监听默认 loopback，写操作需要可信 Origin 与 GET 引导产生的 HttpOnly、SameSite=Strict cookie。Agent/Connector legacy 默认关闭，只有显式 `LOCAL_LEGACY_ENABLED=true` 才恢复。附件按实际接收字节数限制 100 MiB 和 15 秒读取期限，不信任 Content-Length。
 
 22 角色离线固定行为门禁在 `tests/test_dialogue_quality.py`。这些合成反例与正例保证通道、动作、文本清理和检索范围约束，不代表真人对人格、自然度、立绘或声音的批准。通用 stage_release 描述目前明确关闭，保持现有素材呈现。
+
+人工审核文件使用同一 runtime 的 `.review-state.lock`，在 Windows 和 POSIX 上均以操作系统锁协调进程；人工决定、admission/rollback、重建队列和实体发现的完整读取、修改、写入都在锁内。锁等待有 15 秒上限，进程退出由操作系统释放，锁文件不可删除或替换。普通 JSONL 原子替换只保证单文件完整性，多文件审核提交仍不是数据库事务，机器断电后的关联文件一致性须通过审计事件核对。
+
+模型调用不占用人工审核锁。关系提取另有独立 worker 锁，避免同时启动的提取进程重复计费；每次调用前重读当前 job，结果 checkpoint 重读最新候选并按 ID 合并。若 job 的证据或人工结论已改变，付费结果保存在 `review/extraction_conflicts.jsonl`，返回冲突并等待核对，不自动重新请求模型。机器审核报告在锁内追加或合并。直接用文本编辑器改 JSONL 不遵循协作锁，需先停止构建与审核进程；运行期间应使用审核 API，不能把原子重命名误当作编辑器的并发协议。
+
+回退旧版之前必须处理新版失去 owner 的请求。新版 `PublicStore.recover_expired_requests()` 是幂等维护接口，只将已过期 lease 对应的 processing 请求变成 `generation_interrupted` 终态，不删除 UUID，不中断仍有效的 owner。受信新版维护环境应在停止或排空新版 worker、等待最长 45 秒 lease 到期后执行并确认成功，随后完成旧版回退。旧版自身不理解 lease；跳过恢复会让崩溃中的新版请求在旧版缓存中停留 processing 长达一天。真实 baseline 源码的 old/new/old 请求回归与 PostgreSQL schema 回归分别覆盖行为和数据库兼容性。

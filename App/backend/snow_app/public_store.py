@@ -345,6 +345,16 @@ class PublicStore:
         )
         return int(result.rowcount)
 
+    def recover_expired_requests(self) -> int:
+        """Reconcile expired owners before rollback, without fencing live work.
+
+        Run from the trusted new application after draining/stopping its workers
+        and allowing the 45-second lease to expire. Old binaries can read the
+        terminal cache result but cannot themselves recover the new lease table.
+        """
+        with self.begin() as connection:
+            return self._recover_expired(connection, _utcnow())
+
     def renew_leases(self, owner_token: str) -> int:
         now = _utcnow()
         with self.begin() as connection:
