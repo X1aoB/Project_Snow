@@ -5,6 +5,7 @@ import html
 import json
 from pathlib import Path
 import re
+import shutil
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
@@ -12,6 +13,20 @@ from scripts.fingerprint_public_frontend import FINGERPRINT_LENGTH, fingerprint
 
 
 class StaticFingerprintTests(TestCase):
+    def test_real_frontend_manifest_fingerprints_modules_and_brand_icons(self):
+        source = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path in ["public_frontend", "frontend/shared", "frontend/assets/immersive/scenes"]:
+                shutil.copytree(source/path,root/path)
+            result = fingerprint(root)
+            for name in ["xiaoji-icon.png","xiaoji-icon-192.png","xiaoji-icon-32.png","xiaoji-icon.ico"]:
+                url = result["assets"][f"/shared/brand/{name}"]
+                self.assertTrue((root/"frontend"/url.lstrip("/")).is_file())
+            module_url = result["assets"]["/modules/runtime.js"]
+            self.assertIn(module_url,(root/"public_frontend/app.js").read_text(encoding="utf-8"))
+            self.assertEqual(result,fingerprint(root))
+
     def test_build_copies_content_addressed_assets_and_rewrites_only_html(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

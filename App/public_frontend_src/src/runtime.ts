@@ -1,4 +1,7 @@
 /** Browser primitives independent of the conversation and its wire format. */
+export { createHttpClient } from "./transport";
+export { STAGE_STATES, STAGE_MOTIONS, validateStageRelease, loadStageRelease, verifiedStageImage } from "./stage";
+export { writeDraftsDatabase, transactionDone, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, HISTORY_DATABASE_VERSION } from "./persistence";
 export interface SafeStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -86,3 +89,4 @@ export function validateHistoryBackup(value: unknown): HistoryBackup {
   if (data.appState.some((item) => !item || !["drafts", "preferences", "ui_preferences"].includes(String(item.key)))) throw new Error("backup_invalid");
   return portableCopy(data) as HistoryBackup;
 }
+export { MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin } from "./view";

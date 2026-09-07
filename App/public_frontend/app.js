@@ -1,8 +1,9 @@
-import { createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup } from "/modules/runtime.js";
+import { loadStageRelease, verifiedStageImage, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup } from "/modules/runtime.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
 const apiRoot = "/public/v1";
+const publicHttp = createHttpClient(apiRoot);
 const dbName = "project-snow-public";
 const dbVersion = 4;
 const SCENE_ASSET_URLS = Object.freeze(JSON.parse(document.querySelector('meta[name="snow-scene-assets"]')?.content || "{}"));
@@ -51,6 +52,7 @@ const state = {
   selectionSequence: 0,
   selectionController: null,
   stageArtRequestSequence: 0,
+  stageRelease: null,
   stageMotionRequestSequence: 0,
   stageMotionAnimation: null,
   stageMotionCharacterId: "",
@@ -67,6 +69,10 @@ const state = {
   draftTimer: 0,
   pinnedCharacters: new Set(),
   timelineVisibleLimit: 60,
+  timelineEndId: "",
+  transcriptVisibleLimit: 200,
+  transcriptEndId: "",
+  historyPageLoading: false,
   drawerReturnFocus: null,
   contactReturnFocus: null,
   onboardingStep: 0,
@@ -644,36 +650,7 @@ function localDayKey(timestamp = Date.now()) {
 function newConversationSegment() { return id(); }
 
 async function api(path, options = {}) {
-  const { timeoutMs = 20000, signal: callerSignal, ...fetchOptions } = options;
-  const headers = { ...(fetchOptions.headers || {}) };
-  if (fetchOptions.method && fetchOptions.method !== "GET") headers["Content-Type"] = "application/json";
-  const controller = new AbortController();
-  let relayAbort = null;
-  if (callerSignal) {
-    relayAbort = () => controller.abort();
-    if (callerSignal.aborted) controller.abort();
-    else callerSignal.addEventListener("abort", relayAbort, { once: true });
-  }
-  const timeout = timeoutMs > 0 ? window.setTimeout(() => controller.abort(), timeoutMs) : 0;
-  try {
-    const response = await fetch(`${apiRoot}${path}`, {
-      credentials: "same-origin",
-      ...fetchOptions,
-      headers,
-      signal: controller.signal,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.detail?.code || "request_failed");
-    return payload;
-  } catch (error) {
-    if (error?.name === "AbortError" && timeoutMs > 0 && !callerSignal?.aborted) {
-      throw new Error("request_timeout");
-    }
-    throw error;
-  } finally {
-    if (timeout) window.clearTimeout(timeout);
-    if (callerSignal && relayAbort) callerSignal.removeEventListener("abort", relayAbort);
-  }
+  return publicHttp.request(path, options);
 }
 
 function openDB() {
@@ -1065,22 +1042,59 @@ async function dbPutThread(thread) {
   thread.messageCount = metadata.messageCount;
 }
 
-async function loadOlderMessages() {
-  const thread = currentThread();
-  if (!thread?.hasOlderMessages || !thread.messages.length) return;
-  const timeline = $("timeline");
-  const previousHeight = timeline.scrollHeight;
-  const previousTop = timeline.scrollTop;
-  const oldest = thread.messages.reduce((a, b) => compareMessageCursor(a, b) < 0 ? a : b);
-  const older = await loadMessagePage(thread.characterId, { before: oldest, limit: 40 });
-  const known = new Set(thread.messages.map((message) => message.id));
-  const additions = older.filter((message) => !known.has(message.id));
-  thread.messages = [...additions, ...thread.messages];
-  thread.hasOlderMessages = additions.length > 0 && thread.messages.length < Number(thread.messageCount || 0);
-  state.timelineVisibleLimit += additions.length;
-  renderTimeline({ preserveScroll: true });
-  timeline.scrollTop = previousTop + (timeline.scrollHeight - previousHeight);
+function surfaceHistory(surface = "timeline") {
+  const messages = currentThread()?.messages || [];
+  return surface === "timeline" ? messages.filter(message => message.communicationChannel === "text") : messages;
 }
+async function loadOlderMessages(surface = "timeline") {
+  const thread = currentThread();
+  if (!thread?.messages.length || state.historyPageLoading) return;
+  const root = $(surface === "timeline" ? "timeline" : "transcript-content");
+  const limitKey = `${surface}VisibleLimit`;
+  const endKey = `${surface}EndId`;
+  const previousMessages = surfaceHistory(surface);
+  const windowBefore = historyWindow(previousMessages, state[endKey], state[limitKey]);
+  const anchorNode = root.querySelector("[data-message-id]");
+  const anchorId = anchorNode?.dataset.messageId;
+  const anchorTop = anchorNode?.getBoundingClientRect().top;
+  if (windowBefore.start > 0) {
+    state[endKey] = previousMessages[Math.max(state[limitKey], windowBefore.end - 40) - 1]?.id || "";
+  } else if (thread.hasOlderMessages) {
+    state.historyPageLoading = true;
+    const loadButton = $(surface === "timeline" ? "load-older-messages" : "transcript-older");
+    if (loadButton) loadButton.disabled = true;
+    try {
+      const oldest = thread.messages.reduce((a, b) => compareMessageCursor(a, b) < 0 ? a : b);
+      const older = await loadMessagePage(thread.characterId, { before: oldest, limit: 40 });
+      if (thread !== currentThread()) return;
+      const known = new Set(thread.messages.map(message => message.id));
+      const additions = older.filter(message => !known.has(message.id));
+      thread.messages = [...additions, ...thread.messages];
+      thread.hasOlderMessages = additions.length > 0 && thread.messages.length < Number(thread.messageCount || 0);
+      const nextMessages = surfaceHistory(surface);
+      const addedCount = nextMessages.length - previousMessages.length;
+      state[limitKey] = Math.min(MAX_VISIBLE_MESSAGES, state[limitKey] + addedCount);
+      const nextEnd = Math.min(state[limitKey], windowBefore.end + addedCount);
+      state[endKey] = nextEnd < nextMessages.length ? nextMessages[nextEnd - 1]?.id || "" : "";
+    } finally {
+      state.historyPageLoading = false;
+      if (loadButton) loadButton.disabled = false;
+    }
+  } else return;
+  if (surface === "timeline") renderTimeline({ preserveScroll: true });
+  else renderTranscript();
+  const sameAnchor = [...root.querySelectorAll("[data-message-id]")].find(node => node.dataset.messageId === anchorId);
+  if (sameAnchor && anchorTop !== undefined) root.scrollTop += sameAnchor.getBoundingClientRect().top - anchorTop;
+}
+function loadNewerMessages(surface = "timeline", latest = false) {
+  const messages = surfaceHistory(surface);
+  const windowBefore = historyWindow(messages, state[`${surface}EndId`], state[`${surface}VisibleLimit`]);
+  const nextEnd = latest ? messages.length : Math.min(messages.length, windowBefore.end + 40);
+  state[`${surface}EndId`] = nextEnd === messages.length ? "" : messages[nextEnd - 1]?.id || "";
+  if (surface === "timeline") renderTimeline({ forceScroll: latest });
+  else renderTranscript();
+}
+
 function decodeStatePackage(token) {
   try {
     const encoded = token.split(".", 1)[0].replace(/-/g, "+").replace(/_/g, "/");
@@ -1160,6 +1174,14 @@ async function migrateBrowserState() {
   }
   const draftRecord = await storeGet("app_state", "drafts");
   state.drafts = new Map(Object.entries(draftRecord?.values || {}).map(([key, value]) => [key, plain(value)]));
+  const recovery = await storeGet("app_state", "drafts_recovery_v1");
+  if (recovery?.revision && draftRecord?.revision !== recovery.revision) {
+    let recovered = false;
+    for (const [key, value] of Object.entries(recovery.values || {})) {
+      if (plain(value) && !state.drafts.get(key)) { state.drafts.set(key, plain(value)); recovered = true; }
+    }
+    if (recovered) showBanner("已找回旧版本覆盖的未发送草稿。请检查内容后继续。");
+  }
   const saved = await storeGet("app_state", "world");
   if (saved?.statePackage) {
     state.worldPackage = saved.statePackage;
@@ -1212,34 +1234,11 @@ async function pruneExpiredMessages() {
       state.persistedMessages.delete(key);
     }
   }
-  const counts = new Map();
+  let counts = new Map();
   const db = await openDB();
   if (db) {
-    try {
-      await new Promise((resolve, reject) => {
-        const tx = db.transaction(["threads", "messages"], "readwrite");
-        const cursorRequest = tx.objectStore("messages").openCursor();
-        cursorRequest.onsuccess = () => {
-          const cursor = cursorRequest.result;
-          if (cursor) {
-            if (Number(cursor.value.createdAt || 0) < cutoff) cursor.delete();
-            else counts.set(cursor.value.characterId, (counts.get(cursor.value.characterId) || 0) + 1);
-            cursor.continue();
-          } else {
-            const threads = tx.objectStore("threads").openCursor();
-            threads.onsuccess = () => {
-              const item = threads.result;
-              if (!item) return;
-              item.update({ ...item.value, messageCount: counts.get(item.value.characterId) || 0 });
-              item.continue();
-            };
-          }
-        };
-        tx.oncomplete = resolve;
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error || new Error("indexeddb_write_aborted"));
-      });
-    } catch (error) {
+    try { counts = await pruneHistoryDatabase(db, cutoff); }
+    catch (error) {
       showBanner("自动清理未能保存，请导出备份后重试。现有记录不会静默删除。");
       throw error;
     }
@@ -1257,13 +1256,23 @@ async function pruneExpiredMessages() {
 function draftKey(characterId = state.selected, channel = currentThread()?.channel || "text", field = "message") {
   return `${plain(characterId)}:${channel === "in_person" ? "in_person" : "text"}:${field}`;
 }
+async function persistDrafts() {
+  if (state.writerReady && !state.writerOwned) return;
+  const values = Object.fromEntries(state.drafts);
+  const revision = id();
+  for (const key of ["drafts", "drafts_recovery_v1"]) state.memoryStores.app_state.set(key, { key, values: structuredClone(values), revision });
+  const db = await openDB();
+  if (!db) return;
+  try { await writeDraftsDatabase(db, values, revision); }
+  catch { useMemoryStorage(); }
+}
 async function saveDraftNow() {
   window.clearTimeout(state.draftTimer);
   if (!state.selected) return;
   const channel = currentThread()?.channel || "text";
   state.drafts.set(draftKey(state.selected, channel, "message"), $("message-input").value);
   state.drafts.set(draftKey(state.selected, channel, "action"), $("action-input").value);
-  await storePut("app_state", { key: "drafts", values: Object.fromEntries(state.drafts) });
+  await persistDrafts();
 }
 function scheduleDraftSave() {
   window.clearTimeout(state.draftTimer);
@@ -2365,7 +2374,10 @@ function preloadImage(src) {
 }
 async function updateStageCharacterArt(node, character, expressionState) {
   if (!node) return false;
-  if (character?.character_id !== MIA_CHARACTER_ID) {
+  const characterId = plain(character?.character_id);
+  const releaseCharacter = state.stageRelease?.characters.find(item => item.character_id === characterId);
+  const assets = releaseCharacter?.states || (characterId === MIA_CHARACTER_ID ? MIA_STAGE_EXPRESSION_ASSETS : null);
+  if (!assets) {
     state.stageArtRequestSequence += 1;
     node.hidden = true;
     node.removeAttribute("src");
@@ -2374,38 +2386,48 @@ async function updateStageCharacterArt(node, character, expressionState) {
     delete node.dataset.expressionState;
     return false;
   }
-  const requestedState = Object.hasOwn(MIA_STAGE_EXPRESSION_ASSETS, expressionState) ? expressionState : "neutral";
-  const stageArtKey = `${MIA_CHARACTER_ID}:${requestedState}`;
+  const requestedState = Object.hasOwn(assets, expressionState) ? expressionState : "neutral";
+  const stageArtKey = `${state.stageRelease?.version || "legacy"}:${characterId}:${requestedState}`;
   if (node.dataset.stageArtKey === stageArtKey && node.getAttribute("src") && !node.hidden) return true;
   if (node.dataset.stageArtFailedKey === stageArtKey) return false;
   const requestSequence = ++state.stageArtRequestSequence;
   const candidates = requestedState === "neutral" ? ["neutral"] : [requestedState, "neutral"];
   let loadedState = "";
+  let loadedUrl = "";
   for (const candidate of candidates) {
     try {
-      await preloadImage(MIA_STAGE_EXPRESSION_ASSETS[candidate]);
+      const asset = assets[candidate];
+      const source = typeof asset === "string" ? asset : await verifiedStageImage(asset);
+      await preloadImage(source);
       loadedState = candidate;
+      loadedUrl = source;
       break;
-    } catch {
-      // The neutral derivative is the final fallback below.
+    } catch { /* A missing or altered expression falls back to the approved neutral. */ }
+  }
+  if (requestSequence !== state.stageArtRequestSequence || currentCharacter()?.character_id !== characterId) return false;
+  if (!loadedState) {
+    // Keep the existing approved Mia pack available when a new release fails.
+    if (releaseCharacter && characterId === MIA_CHARACTER_ID) {
+      try { loadedUrl = await preloadImage(MIA_STAGE_EXPRESSION_ASSETS.neutral); loadedState = "neutral"; } catch { /* static stage remains available */ }
+      if (requestSequence !== state.stageArtRequestSequence || currentCharacter()?.character_id !== characterId) return false;
+    }
+    if (!loadedState) {
+      node.hidden = true;
+      node.removeAttribute("src");
+      node.dataset.stageArtFailedKey = stageArtKey;
+      delete node.dataset.stageArtKey;
+      delete node.dataset.expressionState;
+      return false;
     }
   }
-  if (requestSequence !== state.stageArtRequestSequence || currentCharacter()?.character_id !== MIA_CHARACTER_ID) return false;
-  if (!loadedState) {
-    node.hidden = true;
-    node.removeAttribute("src");
-    node.dataset.stageArtFailedKey = stageArtKey;
-    delete node.dataset.stageArtKey;
-    delete node.dataset.expressionState;
-    return false;
-  }
-  node.src = MIA_STAGE_EXPRESSION_ASSETS[loadedState];
+  node.src = loadedUrl;
   node.dataset.stageArtKey = stageArtKey;
   node.dataset.expressionState = loadedState;
   delete node.dataset.stageArtFailedKey;
   node.hidden = false;
   return true;
 }
+
 function cancelStageMotion(characterId = "") {
   if (characterId && state.stageMotionCharacterId && state.stageMotionCharacterId !== characterId) return false;
   state.stageMotionRequestSequence += 1;
@@ -2461,6 +2483,8 @@ function playStageMotion(node, message, presentation, requestSequence = state.st
   if (requestSequence !== state.stageMotionRequestSequence) return false;
   if (message?.id !== presentation.messageId || message?.id !== latestInPersonMessage("assistant")?.id) return false;
   if (message?.characterId !== state.selected || node.hidden || !node.getAttribute("src")) return false;
+  const releaseCharacter = state.stageRelease?.characters.find(item => item.character_id === message.characterId);
+  if (releaseCharacter && !releaseCharacter.motions.includes(stageMotion)) return false;
   const playKey = `${plain(message.id)}:${stageMotion}`;
   if (state.playedStageMotionKeys.has(playKey)) return false;
   state.playedStageMotionKeys.add(playKey);
@@ -2469,7 +2493,7 @@ function playStageMotion(node, message, presentation, requestSequence = state.st
   }
   node.dataset.stageMotionKey = playKey;
   node.dataset.stageMotion = reducedMotion() ? "suppressed" : stageMotion;
-  if (reducedMotion() || typeof node.animate !== "function") return false;
+  if (document.hidden || reducedMotion() || typeof node.animate !== "function") return false;
   const definition = stageMotionFrames(stageMotion);
   if (!definition) return false;
   state.stageMotionAnimation?.cancel();
@@ -2722,6 +2746,8 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
 
     state.selected = characterId;
     state.timelineVisibleLimit = 60;
+    state.timelineEndId = "";
+    state.transcriptEndId = "";
     state.selectedSticker = null;
     state.actionComposerOpen = false;
     if (state.stickerSection === "character") {
@@ -2900,23 +2926,27 @@ function bindTimelineActions() {
       await saveUiPreferences();
     };
   });
-  $("load-older-messages")?.addEventListener("click", () => { void loadOlderMessages(); });
+  if ($("load-older-messages")) $("load-older-messages").onclick = () => { void loadOlderMessages(); };
+  if ($("load-newer-messages")) $("load-newer-messages").onclick = () => loadNewerMessages();
 }
 function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   const thread = currentThread();
-  const messages = (thread?.messages || []).filter((message) => message.communicationChannel === "text");
+  const allMessages = surfaceHistory();
+  const window = historyWindow(allMessages, state.timelineEndId, state.timelineVisibleLimit);
+  const messages = window.messages;
   const timeline = $("timeline");
   const wasNearBottom = timelineNearBottom();
   const previousDistance = timeline.scrollHeight - timeline.scrollTop;
   const previousCount = Number(timeline.dataset.messageCount || 0);
-  const older = thread?.hasOlderMessages ? '<button id="load-older-messages" class="secondary-button load-older-messages" type="button">加载更早的 40 条</button>' : "";
+  const older = thread?.hasOlderMessages || window.start > 0 ? '<button id="load-older-messages" class="secondary-button load-older-messages" type="button">加载更早的 40 条</button>' : "";
+  const newer = window.hasNewer ? '<button id="load-newer-messages" class="secondary-button load-older-messages" type="button">查看较新的 40 条</button>' : "";
   if (!messages.length) {
-    timeline.innerHTML = `${older}${timelineTypingMarkup()}<div class="empty-conversation"><p>从一句问候开始吧。历史只保存在此浏览器。</p>${starterPromptsMarkup()}</div>`;
+    reconcileMarkup(timeline, `${older}${timelineTypingMarkup()}<div class="empty-conversation"><p>从一句问候开始吧。历史只保存在此浏览器。</p>${starterPromptsMarkup()}</div>`);
     timeline.dataset.messageCount = "0";
     bindTimelineActions();
     return;
   }
-  timeline.innerHTML = older + messages.map((message, index) => {
+  reconcileMarkup(timeline, older + messages.map((message, index) => {
     const failed = message.status === "failed";
     const presenting = message.role === "assistant" && presentationFor()?.messageId === message.id;
     const tools = failed
@@ -2925,15 +2955,17 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
     const blocks = message.role === "assistant" ? visibleBlocksFor(message) : message.contentBlocks;
-    return `${time ? `<div class="message-time" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div>${message.role === "assistant" ? rendezvousCardMarkup(message, presenting) : ""}<div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
-  }).join("") + timelineTypingMarkup();
+    return `${time ? `<div class="message-time" data-ui-key="time:${escapeHtml(message.id)}" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div>${message.role === "assistant" ? rendezvousCardMarkup(message, presenting) : ""}<div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
+  }).join("") + newer + (window.hasNewer ? "" : timelineTypingMarkup()));
   timeline.dataset.messageCount = String(messages.length);
   bindTimelineActions();
   bindAvatarImages(timeline);
-  const newMessages = messages.length > previousCount;
+  const newMessages = allMessages.length > previousCount;
+  timeline.dataset.messageCount = String(allMessages.length);
+  if (window.hasNewer) $("new-replies").hidden = false;
   if (!preserveScroll && (forceScroll || wasNearBottom || previousCount === 0)) {
     timeline.scrollTop = timeline.scrollHeight;
-    $("new-replies").hidden = true;
+    $("new-replies").hidden = !window.hasNewer;
   } else if (!preserveScroll) {
     timeline.scrollTop = Math.max(0, timeline.scrollHeight - previousDistance);
     if (newMessages && messages[messages.length - 1]?.role === "assistant") $("new-replies").hidden = false;
@@ -3129,12 +3161,19 @@ function renderStage() {
   $("stage-open-feedback").dataset.messageId = assistantMessage?.id || "";
 }
 function renderTranscript() {
-  const messages = currentThread()?.messages || [];
-  $("transcript-content").innerHTML = messages.length ? messages.map((message) => {
+  if (!$("transcript-panel").classList.contains("open")) return;
+  const messages = surfaceHistory("transcript");
+  const window = historyWindow(messages, state.transcriptEndId, state.transcriptVisibleLimit);
+  const older = currentThread()?.hasOlderMessages || window.start > 0 ? '<button id="transcript-older" class="secondary-button load-older-messages" type="button">加载更早的 40 条</button>' : "";
+  const newer = window.hasNewer ? '<button id="transcript-newer" class="secondary-button load-older-messages" type="button">查看较新的 40 条</button>' : "";
+  reconcileMarkup($("transcript-content"), older + (window.messages.length ? window.messages.map((message) => {
     const blocks = message.role === "assistant" && message.displayBlocks?.length ? message.displayBlocks : message.contentBlocks;
-    return `<article class="transcript-entry"><strong>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")} · ${message.communicationChannel === "text" ? "文字通讯" : "面对面"} · ${escapeHtml(new Date(message.createdAt || Date.now()).toLocaleString())}</strong><p>${blocks.map((block) => block.type === "sticker" ? `〔表情〕${escapeHtml(block.caption || "表情")}` : `${block.type === "action" ? "〔动作〕" : ""}${escapeHtml(block.text)}`).join("\n\n")}</p></article>`;
-  }).join("") : "<p>当前角色还没有本地记录。</p>";
+    return `<article class="transcript-entry" data-message-id="${escapeHtml(message.id)}"><strong>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")} · ${message.communicationChannel === "text" ? "文字通讯" : "面对面"} · ${escapeHtml(new Date(message.createdAt || Date.now()).toLocaleString())}</strong><p>${blocks.map((block) => block.type === "sticker" ? `〔表情〕${escapeHtml(block.caption || "表情")}` : `${block.type === "action" ? "〔动作〕" : ""}${escapeHtml(block.text)}`).join("\n\n")}</p></article>`;
+  }).join("") : "<p>当前角色还没有本地记录。</p>") + newer);
+  if ($("transcript-older")) $("transcript-older").onclick = () => { void loadOlderMessages("transcript"); };
+  if ($("transcript-newer")) $("transcript-newer").onclick = () => loadNewerMessages("transcript");
 }
+
 function renderInfo() {
   const character = currentCharacter();
   const scene = state.scene || {};
@@ -3229,6 +3268,7 @@ function updateComposerAvailability() {
   const selected = Boolean(state.selected);
   const inPerson = currentThread()?.channel === "in_person";
   const requestPending = globalRequestBusy() || !state.writerOwned;
+  $("apply-build-update").disabled = globalRequestBusy();
   $("message-input").disabled = !selected || !state.writerOwned;
   $("send-message").disabled = !selected || requestPending;
   $("go-in-person").disabled = !selected || requestPending;
@@ -3705,6 +3745,7 @@ async function submitUserBlocks(blocks, { clearComposer = false, onAccepted = nu
   const userMessage = normalizeMessage({ id: id(), characterId: thread.characterId, role: "user", contentBlocks: blocks, communicationChannel: thread.channel, createdAt: Date.now(), status: "pending", conversationSegmentId: thread.conversationSegmentId, movementLocationId });
   thread.messages.push(userMessage);
   thread.messageCount = Number(thread.messageCount || 0) + 1;
+  finishOnboarding();
   onAccepted?.();
   await runChat(thread, userMessage);
   if (clearComposer && userMessage.status === "sent") {
@@ -3714,7 +3755,7 @@ async function submitUserBlocks(blocks, { clearComposer = false, onAccepted = nu
     if (!$("action-input").value) state.actionComposerOpen = false;
     state.drafts.set(draftKey(thread.characterId, thread.channel, "message"), $("message-input").value);
     state.drafts.set(draftKey(thread.characterId, thread.channel, "action"), $("action-input").value);
-    void storePut("app_state", { key: "drafts", values: Object.fromEntries(state.drafts) });
+    void persistDrafts();
     $("toggle-sticker").setAttribute("aria-expanded", "false");
     updateInputCount();
     updateComposerAvailability();
@@ -3785,12 +3826,14 @@ function scheduleAutoSummary(thread, chatUsage = null) {
   void dbPutThread(thread).then(() => runAutoSummary(thread));
 }
 function cancelBackgroundSummaries() {
-  for (const [characterId, controller] of state.summaryControllers) {
-    controller.abort();
-    const thread = state.threads.get(characterId);
+  for (const controller of state.summaryControllers.values()) controller.abort();
+  for (const thread of state.threads.values()) {
     // A provider may have accepted an interrupted request. A later summary
     // gets a new ID and checkpoint instead of replaying a possibly charged call.
-    if (thread) thread.summaryRequestId = "";
+    if (thread.summaryRequestId) {
+      thread.summaryRequestId = "";
+      void dbPutThread(thread);
+    }
   }
   state.summaryControllers.clear();
   state.summaryInFlight.clear();
@@ -3829,10 +3872,11 @@ async function runAutoSummary(thread) {
     }
   } catch (error) {
     if (controller.signal.aborted || epoch !== state.historyEpoch) return;
-    // Summary failure never blocks or rewrites the conversation.  Keep the
-    // request UUID so the next suitable turn retries idempotently.
+    // Only a future successful user turn may schedule another summary. Its
+    // turns/checkpoint differ, so it must never reuse this paid-request UUID.
     if (thread.characterId === state.selected) setRequestStatus(thread.characterId, "对话已完成；连续性整理稍后重试。");
-    if (["generation_interrupted", "request_timeout"].includes(error?.message)) thread.summaryRequestId = "";
+    thread.summaryRequestId = "";
+    await dbPutThread(thread);
     if (error?.message === "credential_invalid") clearCredential();
   } finally {
     if (state.summaryControllers.get(thread.characterId) === controller) {
@@ -4003,14 +4047,7 @@ function trapDrawerFocus(event) {
     closeDrawers();
     return true;
   }
-  if (event.key !== "Tab") return false;
-  const controls = [...panel.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter((item) => !item.hidden);
-  if (!controls.length) return false;
-  const first = controls[0];
-  const last = controls[controls.length - 1];
-  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-  return false;
+  return focusWithin(event, panel);
 }
 function contactsExpanded() {
   const panel = $("contact-panel");
@@ -4067,7 +4104,12 @@ function toggleContacts({ mobileOpen = false } = {}) {
 }
 function openSettings(tab = "models") {
   if (tab !== "models") modelSetupController?.abort();
-  document.querySelectorAll("[data-settings-tab]").forEach((button) => button.classList.toggle("active", button.dataset.settingsTab === tab));
+  document.querySelectorAll("[data-settings-tab]").forEach((button) => {
+    const selected = button.dataset.settingsTab === tab;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
   document.querySelectorAll("[data-settings-panel]").forEach((panel) => { panel.hidden = panel.dataset.settingsPanel !== tab; });
   if (tab === "history") storageBytes().then((bytes) => { $("storage-usage").textContent = `当前浏览器记录约占 ${formatBytes(bytes)}。`; });
   const activeThread = currentThread();
@@ -4184,11 +4226,12 @@ $("stop-waiting").onclick = () => {
   request.controller.abort();
 };
 $("new-replies").onclick = () => {
+  loadNewerMessages("timeline", true);
   $("timeline").scrollTop = $("timeline").scrollHeight;
   $("new-replies").hidden = true;
 };
 $("timeline").addEventListener("scroll", () => {
-  if (timelineNearBottom()) $("new-replies").hidden = true;
+  if (timelineNearBottom() && !state.timelineEndId) $("new-replies").hidden = true;
 }, { passive: true });
 $("feedback-include-context").onchange = renderFeedbackContextPreview;
 $("feedback-retry-verification").onclick = () => $("feedback-form").requestSubmit();
@@ -4292,7 +4335,18 @@ $("history-retention").onchange = async () => {
     toast(state.historyRetentionDays ? `将自动清理超过 ${state.historyRetentionDays} 天的本地消息` : "已关闭自动清理");
   } catch { /* prune displays the actionable failure without pretending success */ }
 };
-document.querySelectorAll("[data-settings-tab]").forEach((button) => { button.onclick = () => openSettings(button.dataset.settingsTab); });
+document.querySelectorAll("[data-settings-tab]").forEach((button) => {
+  button.onclick = () => openSettings(button.dataset.settingsTab);
+  button.onkeydown = (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const tabs = [...document.querySelectorAll("[data-settings-tab]")];
+    const current = tabs.indexOf(button);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    openSettings(tabs[next].dataset.settingsTab);
+    tabs[next].focus();
+  };
+});
 document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   if (!button.getAttribute("aria-label")) button.setAttribute("aria-label", "关闭对话框");
   button.onclick = () => {
@@ -4309,6 +4363,10 @@ $("sticker-picker").addEventListener("close", () => $("toggle-sticker").setAttri
 window.addEventListener("keydown", (event) => {
   if (document.querySelector("dialog[open]")) return;
   if (trapDrawerFocus(event)) return;
+  if (window.matchMedia("(max-width: 820px)").matches && $("contact-panel").classList.contains("open")) {
+    if (event.key === "Escape") { event.preventDefault(); toggleContacts(); return; }
+    if (focusWithin(event, $("contact-panel"))) return;
+  }
   if (event.key.toLocaleLowerCase() === "h" && currentThread()?.channel === "in_person" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {
     const hidden = $("in-person-surface").classList.toggle("ui-hidden");
     $("restore-stage-ui").hidden = !hidden;
@@ -4330,8 +4388,9 @@ $("character-search").addEventListener("keydown", (event) => {
   if (first) { event.preventDefault(); first.focus(); }
 });
 window.matchMedia("(max-width: 820px)").addEventListener("change", syncResponsiveLayout);
+window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", event => { if (event.matches) { cancelStageMotion(); renderStage(); } });
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { void saveDraftNow(); cancelBackgroundSummaries(); }
+  if (document.hidden) { void saveDraftNow(); cancelBackgroundSummaries(); cancelStageMotion(); }
 });
 
 const WRITER_LOCK_NAME = "project-snow-public:writer:v1";
@@ -4470,7 +4529,7 @@ async function deleteCharacterHistory() {
   await deleteMessagesForCharacter(characterId);
   await storeDelete("threads", characterId);
   for (const key of state.drafts.keys()) if (key.startsWith(`${characterId}:`)) state.drafts.delete(key);
-  await storePut("app_state", { key: "drafts", values: Object.fromEntries(state.drafts) });
+  await persistDrafts();
   if (characterId === state.selected) { await dbGetThread(characterId); restoreDraft(); renderAll(); }
   broadcastHistoryChange();
   openSettings("history");
@@ -4478,17 +4537,12 @@ async function deleteCharacterHistory() {
 }
 async function clearAllHistory() {
   if (!state.writerOwned || globalRequestBusy()) return;
-  if (!window.confirm("确定清空全部 Project Snow 本地历史与世界状态吗？")) return;
+  if (!window.confirm("确定清空全部 小吉终端 本地历史与世界状态吗？")) return;
   cancelBackgroundSummaries();
   state.historyEpoch += 1;
   const db = await openDB();
-  if (db) await new Promise((resolve, reject) => {
-    const tx = db.transaction(["threads", "messages", "app_state"], "readwrite");
-    for (const name of ["threads", "messages", "app_state"]) tx.objectStore(name).clear();
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
+  if (db) await clearHistoryDatabase(db, !navigator.locks?.request
+    ? { key: "writer_lease", owner: state.writerId, expiresAt: Date.now() + 15000 } : undefined);
   for (const store of Object.values(state.memoryStores)) store.clear();
   state.threads.clear(); state.persistedMessages.clear(); state.worldPackage = "";
   state.drafts.clear(); state.pinnedCharacters.clear(); state.favoriteStickerIds.clear();
@@ -4521,35 +4575,7 @@ async function importHistory(backup) {
   await saveDraftNow();
   const db = await openDB();
   if (!db) throw new Error("history_storage_required");
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction(["threads", "messages", "app_state"], "readwrite");
-    const threads = tx.objectStore("threads");
-    const messages = tx.objectStore("messages");
-    const appState = tx.objectStore("app_state");
-    for (const raw of backup.threads) {
-      const existing = threads.get(raw.characterId);
-      existing.onsuccess = () => { if (!existing.result) threads.put(raw); };
-    }
-    for (const raw of backup.messages) {
-      const message = normalizeMessage(raw);
-      // Imported authorization state cannot be reused on another anonymous
-      // subject. Keep the original ID as context, never silently replay it.
-      message.requestSnapshot = null;
-      if (message.status === "pending") { message.status = "failed"; message.errorCode = "stream_disconnected"; }
-      const existing = messages.get(message.id);
-      existing.onsuccess = () => { if (!existing.result) messages.put(message); };
-    }
-    for (const entry of backup.appState) {
-      const existing = appState.get(entry.key);
-      existing.onsuccess = () => {
-        if (entry.key === "drafts") appState.put({ key: "drafts", values: { ...(entry.values || {}), ...(existing.result?.values || {}) } });
-        else if (!existing.result) appState.put(entry);
-      };
-    }
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error);
-  });
+  await mergeHistoryDatabase(db, backup, normalizeMessage);
   await refreshStoredHistory();
   broadcastHistoryChange();
 }
@@ -4618,6 +4644,10 @@ async function boot() {
   await loadConfig();
   await showExperienceNoticeIfNeeded();
   await loadCharacters();
+  void loadStageRelease(state.config?.stage_release, state.characters.map(item => item.character_id)).then(release => {
+    state.stageRelease = release;
+    if (release && currentThread()?.channel === "in_person") renderStage();
+  }).catch(() => { state.stageRelease = null; });
   $("connection-status").textContent = "服务已连接";
   const contactsOpen = contactsExpanded();
   syncContactToggleState(contactsOpen);

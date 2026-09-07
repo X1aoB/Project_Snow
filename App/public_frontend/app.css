@@ -356,7 +356,7 @@ textarea { resize: none; }
 .continuity-modal { width: min(500px, calc(100vw - 28px)); }
 .presence-dialog-scene { margin: 18px; padding: 14px; border: 1px solid var(--snow-line); border-radius: 12px; background: #edf5f8; }
 .presence-dialog-scene p { margin: 5px 0 0; color: var(--snow-muted); font-size: .7rem; }
-.toast { position: fixed; z-index: 100; left: 50%; bottom: 24px; translate: -50% 0; max-width: calc(100vw - 32px); padding: 10px 14px; border: 1px solid #a9bdc9; border-radius: 11px; color: #36596e; background: rgba(251,253,254,.98); box-shadow: var(--snow-shadow); font-size: .68rem; }
+.toast { position: fixed; z-index: 100; left: 50%; bottom: calc(110px + env(safe-area-inset-bottom, 0px)); translate: -50% 0; max-width: calc(100vw - 32px); padding: 10px 14px; border: 1px solid #a9bdc9; border-radius: 11px; color: #36596e; background: rgba(251,253,254,.98); box-shadow: var(--snow-shadow); font-size: .75rem; pointer-events: none; }
 
 html.privacy-root { height: auto; min-height: 100%; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: auto; touch-action: pan-y; }
 html.privacy-root body.privacy-page { height: auto; min-height: 100%; overflow: visible; overscroll-behavior-y: auto; touch-action: pan-y; }
