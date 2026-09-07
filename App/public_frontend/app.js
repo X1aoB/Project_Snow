@@ -1,6 +1,11 @@
+import { createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup } from "/modules/runtime.js";
+
+const localPreferences = createSafeStorage(() => window.localStorage);
+const tabPreferences = createSafeStorage(() => window.sessionStorage);
 const apiRoot = "/public/v1";
 const dbName = "project-snow-public";
 const dbVersion = 4;
+const SCENE_ASSET_URLS = Object.freeze(JSON.parse(document.querySelector('meta[name="snow-scene-assets"]')?.content || "{}"));
 const SCENE_KEYS = new Set(["generic", "quarters", "lounge", "training", "archive", "canteen", "observation", "medical", "corridor"]);
 const state = {
   config: null,
@@ -52,6 +57,9 @@ const state = {
   playedStageMotionKeys: new Set(),
   typewriter: { key: "", timer: 0, fullText: "", displayedText: "" },
   summaryInFlight: new Set(),
+  summaryControllers: new Map(),
+  persistedMessages: new Map(),
+  historyEpoch: 0,
   continuityPrompt: null,
   storageAvailable: true,
   memoryStores: { threads: new Map(), messages: new Map(), app_state: new Map() },
@@ -63,6 +71,12 @@ const state = {
   contactReturnFocus: null,
   onboardingStep: 0,
   historyRetentionDays: 0,
+  writerReady: false,
+  writerOwned: true,
+  writerId: "",
+  writerRelease: null,
+  writerChannel: null,
+  writerRenewTimer: 0,
 };
 
 // A request may outlive the character currently visible in the UI.  Keeping
@@ -96,14 +110,14 @@ function announcementUpdateKey(update) {
 }
 function readAnnouncementHistory() {
   try {
-    const stored = JSON.parse(localStorage.getItem(ANNOUNCEMENT_READ_KEY) || "[]");
+    const stored = JSON.parse(localPreferences.getItem(ANNOUNCEMENT_READ_KEY) || "[]");
     if (Array.isArray(stored)) stored.filter((key) => typeof key === "string" && key.length < 256).forEach((key) => announcements.read.add(key));
   } catch { /* The in-memory receipt still prevents repeat prompts this visit. */ }
 }
 function acknowledgeAnnouncements() {
   announcements.visibleKeys.forEach((key) => announcements.read.add(key));
   announcements.visibleKeys.clear();
-  try { localStorage.setItem(ANNOUNCEMENT_READ_KEY, JSON.stringify([...announcements.read].slice(-200))); } catch { /* Retain receipts in memory when storage is unavailable. */ }
+  try { localPreferences.setItem(ANNOUNCEMENT_READ_KEY, JSON.stringify([...announcements.read].slice(-200))); } catch { /* Retain receipts in memory when storage is unavailable. */ }
   renderAnnouncementBadges();
 }
 function normalizeAnnouncementFeed(payload) {
@@ -630,7 +644,7 @@ function localDayKey(timestamp = Date.now()) {
 function newConversationSegment() { return id(); }
 
 async function api(path, options = {}) {
-  const { timeoutMs = 0, signal: callerSignal, ...fetchOptions } = options;
+  const { timeoutMs = 20000, signal: callerSignal, ...fetchOptions } = options;
   const headers = { ...(fetchOptions.headers || {}) };
   if (fetchOptions.method && fetchOptions.method !== "GET") headers["Content-Type"] = "application/json";
   const controller = new AbortController();
@@ -757,6 +771,7 @@ async function storeAll(storeName) {
   }
 }
 async function storePut(storeName, value) {
+  if (state.writerReady && !state.writerOwned) return;
   const key = storeName === "messages" ? value.id : storeName === "app_state" ? value.key : value.characterId;
   state.memoryStores[storeName]?.set(key, structuredClone(value));
   const db = await openDB();
@@ -774,6 +789,7 @@ async function storePut(storeName, value) {
   }
 }
 async function storeDelete(storeName, key) {
+  if (state.writerReady && !state.writerOwned) return;
   state.memoryStores[storeName]?.delete(key);
   const db = await openDB();
   if (!db) return;
@@ -790,6 +806,7 @@ async function storeDelete(storeName, key) {
   }
 }
 async function storeClear(storeName) {
+  if (state.writerReady && !state.writerOwned) return;
   state.memoryStores[storeName]?.clear();
   const db = await openDB();
   if (!db) return;
@@ -824,42 +841,42 @@ async function messageCount(characterId) {
   }
 }
 
+function rememberStoredMessage(message) {
+  const normalized = normalizeMessage(message);
+  state.persistedMessages.set(normalized.id, JSON.stringify(normalized));
+  state.memoryStores.messages.set(normalized.id, structuredClone(normalized));
+  return normalized;
+}
 async function loadMessagePage(characterId, { before = Number.MAX_SAFE_INTEGER, limit = 60 } = {}) {
+  const memoryPage = () => [...state.memoryStores.messages.values()]
+    .filter((message) => message.characterId === characterId && beforeMessageCursor(message, before))
+    .sort((a, b) => compareMessageCursor(b, a)).slice(0, limit).reverse().map(normalizeMessage);
   const db = await openDB();
-  if (!db) {
-    return [...state.memoryStores.messages.values()]
-      .filter((message) => message.characterId === characterId && Number(message.createdAt || 0) < before)
-      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
-      .slice(0, limit)
-      .reverse()
-      .map(normalizeMessage);
-  }
+  if (!db) return memoryPage();
   try {
     return await new Promise((resolve, reject) => {
     const values = [];
     const index = db.transaction("messages", "readonly").objectStore("messages").index("by_character_created");
-    const upper = before >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : Math.max(0, before);
-    const range = IDBKeyRange.bound([characterId, 0], [characterId, upper], false, before < Number.MAX_SAFE_INTEGER);
+    const timestamp = typeof before === "number" ? before : before.createdAt;
+    const upper = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, timestamp));
+    // Include a composite cursor's timestamp: the primary key breaks ties
+    // without changing the v4 database or requiring a destructive migration.
+    const range = IDBKeyRange.bound([characterId, 0], [characterId, upper], false, typeof before === "number" && timestamp < Number.MAX_SAFE_INTEGER);
     const request = index.openCursor(range, "prev");
     request.onsuccess = () => {
       const cursor = request.result;
       if (!cursor || values.length >= limit) {
-        resolve(values.reverse().map(normalizeMessage));
+        resolve(values.reverse().map(rememberStoredMessage));
         return;
       }
-      values.push(cursor.value);
+      if (beforeMessageCursor(cursor.value, before)) values.push(cursor.value);
       cursor.continue();
     };
     request.onerror = () => reject(request.error);
     });
   } catch {
     useMemoryStorage();
-    return [...state.memoryStores.messages.values()]
-      .filter((message) => message.characterId === characterId && Number(message.createdAt || 0) < before)
-      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
-      .slice(0, limit)
-      .reverse()
-      .map(normalizeMessage);
+    return memoryPage();
   }
 }
 
@@ -960,6 +977,7 @@ function normalizeThread(record, characterId) {
   }));
   return {
     characterId,
+    historyEpoch: state.historyEpoch,
     messages: normalizedMessages,
     summary: plain(record?.summary),
     channel: record?.channel === "in_person" ? "in_person" : "text",
@@ -999,6 +1017,9 @@ async function dbGetThread(characterId, initialLimit = 60) {
   return thread;
 }
 async function dbPutThread(thread) {
+  if (state.writerReady && !state.writerOwned) return;
+  if (thread.historyEpoch !== state.historyEpoch) return;
+  const epoch = state.historyEpoch;
   state.threads.set(thread.characterId, thread);
   const metadata = {
     characterId: thread.characterId,
@@ -1018,19 +1039,20 @@ async function dbPutThread(thread) {
     messageCount: Math.max(Number(thread.messageCount || 0), thread.messages.length),
   };
   state.memoryStores.threads.set(thread.characterId, structuredClone(metadata));
-  for (const message of thread.messages) {
-    state.memoryStores.messages.set(message.id, structuredClone(message));
-  }
+  const changes = thread.messages.map((message) => ({ message, signature: JSON.stringify(message) }))
+    .filter(({ message, signature }) => state.persistedMessages.get(message.id) !== signature);
+  for (const { message } of changes) state.memoryStores.messages.set(message.id, structuredClone(message));
   const db = await openDB();
+  if (epoch !== state.historyEpoch || thread.historyEpoch !== epoch) return;
   if (!db) {
     await storePut("threads", metadata);
-    await Promise.all(thread.messages.map((message) => storePut("messages", message)));
+    await Promise.all(changes.map(({ message }) => storePut("messages", message)));
   } else {
     try {
       await new Promise((resolve, reject) => {
         const tx = db.transaction(["threads", "messages"], "readwrite");
         tx.objectStore("threads").put(metadata);
-        for (const message of thread.messages) tx.objectStore("messages").put(message);
+        for (const { message } of changes) tx.objectStore("messages").put(message);
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error || new Error("indexeddb_write_aborted"));
@@ -1039,6 +1061,7 @@ async function dbPutThread(thread) {
       useMemoryStorage();
     }
   }
+  if (epoch === state.historyEpoch) for (const { message, signature } of changes) state.persistedMessages.set(message.id, signature);
   thread.messageCount = metadata.messageCount;
 }
 
@@ -1048,12 +1071,13 @@ async function loadOlderMessages() {
   const timeline = $("timeline");
   const previousHeight = timeline.scrollHeight;
   const previousTop = timeline.scrollTop;
-  const oldest = Math.min(...thread.messages.map((message) => Number(message.createdAt || 0)));
+  const oldest = thread.messages.reduce((a, b) => compareMessageCursor(a, b) < 0 ? a : b);
   const older = await loadMessagePage(thread.characterId, { before: oldest, limit: 40 });
   const known = new Set(thread.messages.map((message) => message.id));
   const additions = older.filter((message) => !known.has(message.id));
   thread.messages = [...additions, ...thread.messages];
-  thread.hasOlderMessages = additions.length === 40 && thread.messages.length < Number(thread.messageCount || 0);
+  thread.hasOlderMessages = additions.length > 0 && thread.messages.length < Number(thread.messageCount || 0);
+  state.timelineVisibleLimit += additions.length;
   renderTimeline({ preserveScroll: true });
   timeline.scrollTop = previousTop + (timeline.scrollHeight - previousHeight);
 }
@@ -1152,6 +1176,10 @@ async function migrateBrowserState() {
   if (best.token) await saveWorldPackage(best.token);
 }
 async function storageBytes() {
+  try {
+    const estimate = await navigator.storage?.estimate?.();
+    if (Number.isFinite(estimate?.usage)) return estimate.usage;
+  } catch { /* storage estimate is optional */ }
   const payload = { threads: await storeAll("threads"), messages: await storeAll("messages"), appState: await storeAll("app_state") };
   return new Blob([JSON.stringify(payload)]).size;
 }
@@ -1169,16 +1197,61 @@ async function saveUiPreferences() {
 }
 
 async function pruneExpiredMessages() {
+  if (state.writerReady && !state.writerOwned) return;
   if (!state.historyRetentionDays) return;
   const cutoff = Date.now() - state.historyRetentionDays * 86400000;
-  const expired = (await storeAll("messages")).filter((message) => Number(message.createdAt || 0) < cutoff);
-  if (!expired.length) return;
-  await Promise.all(expired.map((message) => storeDelete("messages", message.id)));
-  const counts = new Map();
-  for (const message of await storeAll("messages")) counts.set(message.characterId, Number(counts.get(message.characterId) || 0) + 1);
-  for (const record of await storeAll("threads")) {
-    await storePut("threads", { ...record, messageCount: Number(counts.get(record.characterId) || 0) });
+  cancelBackgroundSummaries();
+  state.historyEpoch += 1;
+  for (const thread of state.threads.values()) {
+    thread.messages = thread.messages.filter((message) => Number(message.createdAt || 0) >= cutoff);
+    thread.historyEpoch = state.historyEpoch;
   }
+  for (const [key, message] of state.memoryStores.messages) {
+    if (Number(message.createdAt || 0) < cutoff) {
+      state.memoryStores.messages.delete(key);
+      state.persistedMessages.delete(key);
+    }
+  }
+  const counts = new Map();
+  const db = await openDB();
+  if (db) {
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(["threads", "messages"], "readwrite");
+        const cursorRequest = tx.objectStore("messages").openCursor();
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result;
+          if (cursor) {
+            if (Number(cursor.value.createdAt || 0) < cutoff) cursor.delete();
+            else counts.set(cursor.value.characterId, (counts.get(cursor.value.characterId) || 0) + 1);
+            cursor.continue();
+          } else {
+            const threads = tx.objectStore("threads").openCursor();
+            threads.onsuccess = () => {
+              const item = threads.result;
+              if (!item) return;
+              item.update({ ...item.value, messageCount: counts.get(item.value.characterId) || 0 });
+              item.continue();
+            };
+          }
+        };
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error("indexeddb_write_aborted"));
+      });
+    } catch (error) {
+      showBanner("自动清理未能保存，请导出备份后重试。现有记录不会静默删除。");
+      throw error;
+    }
+  } else {
+    for (const message of state.memoryStores.messages.values()) counts.set(message.characterId, (counts.get(message.characterId) || 0) + 1);
+  }
+  for (const [key, record] of state.memoryStores.threads) state.memoryStores.threads.set(key, { ...record, messageCount: counts.get(key) || 0 });
+  for (const thread of state.threads.values()) {
+    thread.messageCount = counts.get(thread.characterId) || 0;
+    thread.hasOlderMessages = thread.messages.length < thread.messageCount;
+  }
+  if (state.selected) renderAll();
 }
 
 function draftKey(characterId = state.selected, channel = currentThread()?.channel || "text", field = "message") {
@@ -1207,10 +1280,10 @@ function restoreDraft() {
 function sessionKey() { return "project-snow-public:byok"; }
 function saveCredential() {
   if (!state.credential || !state.credentialExpiresAt) return;
-  sessionStorage.setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, expiresAt: state.credentialExpiresAt }));
+  tabPreferences.setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, expiresAt: state.credentialExpiresAt }));
 }
 function clearCredential() {
-  sessionStorage.removeItem(sessionKey());
+  tabPreferences.removeItem(sessionKey());
   state.credential = "";
   state.credentialExpiresAt = 0;
   state.model = "";
@@ -1377,7 +1450,7 @@ function attachTurnstile() {
 function experienceNoticeKey() {
   return `project-snow-public:notice:${state.config?.experience_notice_version || "0.9.2"}`;
 }
-function experienceNoticeAccepted() { return localStorage.getItem(experienceNoticeKey()) === "accepted"; }
+function experienceNoticeAccepted() { return localPreferences.getItem(experienceNoticeKey()) === "accepted"; }
 async function showExperienceNoticeIfNeeded() {
   if (experienceNoticeAccepted()) return;
   const dialog = $("experience-notice-dialog");
@@ -1387,7 +1460,7 @@ async function showExperienceNoticeIfNeeded() {
       if (settled) return;
       settled = true;
       if (accepted) {
-        localStorage.setItem(experienceNoticeKey(), "accepted");
+        localPreferences.setItem(experienceNoticeKey(), "accepted");
         state.autoSummaryEnabled = $("notice-auto-summary").checked;
         await storePut("app_state", { key: "preferences", autoSummaryEnabled: state.autoSummaryEnabled });
       }
@@ -1476,7 +1549,7 @@ async function loadConfig() {
   $("save-model").disabled = !state.config.providers.length;
   if (!state.config.providers.length) showError("setup-error", "当前暂未开放可用的模型厂商。");
   attachTurnstile();
-  const stored = sessionStorage.getItem(sessionKey());
+  const stored = tabPreferences.getItem(sessionKey());
   if (stored) {
     try {
       const saved = JSON.parse(stored);
@@ -1735,8 +1808,7 @@ function globalRequestBusy() {
     || state.typingByCharacter.size
     || state.arrivalPending
     || state.modeTransitionPending
-    || state.presenceResolvePending
-    || state.summaryInFlight.size,
+    || state.presenceResolvePending,
   );
 }
 function presentationFor(characterId = state.selected) {
@@ -2192,11 +2264,11 @@ const ONBOARDING_STEPS = [
   { title: "从一句自然的话开始", copy: "输入消息或选择安全的开场建议。建议只会填入输入框，不会自动发送。" },
 ];
 function finishOnboarding() {
-  localStorage.setItem("project-snow-public:onboarding", "complete");
+  localPreferences.setItem("project-snow-public:onboarding", "complete");
   $("onboarding-guide").hidden = true;
 }
 function renderOnboarding() {
-  if (localStorage.getItem("project-snow-public:onboarding") === "complete") return;
+  if (localPreferences.getItem("project-snow-public:onboarding") === "complete") return;
   const step = Math.min(state.onboardingStep, ONBOARDING_STEPS.length - 1);
   const item = ONBOARDING_STEPS[step];
   $("onboarding-guide").hidden = false;
@@ -2597,6 +2669,7 @@ function cancelModeTransition() {
 }
 async function selectCharacter(characterId, { closeContacts = true } = {}) {
   if (!characterId || characterId === state.selected && !state.selectionController) return;
+  cancelBackgroundSummaries();
   if (state.selected) await saveDraftNow();
   const sequence = ++state.selectionSequence;
   state.selectionController?.abort();
@@ -2618,7 +2691,9 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     let preparedScene = state.sceneByCharacter.get(characterId) || cachedSceneForCharacter(characterId) || null;
     let preparedPackage = "";
     let recoveredState = false;
-    if (globalRequestBusy()) {
+    if (!state.writerOwned) {
+      preparedScene = cachedSceneForCharacter(characterId);
+    } else if (globalRequestBusy()) {
       state.deferredPresenceCharacter = characterId;
     } else {
       state.presenceResolvePending += 1;
@@ -2646,6 +2721,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     if (sequence !== state.selectionSequence || controller.signal.aborted) return;
 
     state.selected = characterId;
+    state.timelineVisibleLimit = 60;
     state.selectedSticker = null;
     state.actionComposerOpen = false;
     if (state.stickerSection === "character") {
@@ -3068,7 +3144,7 @@ function renderScene() {
   const scene = state.scene || {};
   const visualKey = SCENE_KEYS.has(scene.visual_key) ? scene.visual_key : "generic";
   $("in-person-surface").dataset.scene = visualKey;
-  $("scene-backdrop").src = `/assets/immersive/scenes/${visualKey}.svg`;
+  $("scene-backdrop").src = SCENE_ASSET_URLS[visualKey] || `/assets/immersive/scenes/${visualKey}.svg`;
   const preload = new Image();
   preload.src = $("scene-backdrop").src;
   $("stage-location").textContent = scene.character_location || "场景尚未建立";
@@ -3152,8 +3228,8 @@ function renderAll() { renderTimeline(); renderStage(); renderTranscript(); rend
 function updateComposerAvailability() {
   const selected = Boolean(state.selected);
   const inPerson = currentThread()?.channel === "in_person";
-  const requestPending = globalRequestBusy();
-  $("message-input").disabled = !selected;
+  const requestPending = globalRequestBusy() || !state.writerOwned;
+  $("message-input").disabled = !selected || !state.writerOwned;
   $("send-message").disabled = !selected || requestPending;
   $("go-in-person").disabled = !selected || requestPending;
   $("open-communicator").disabled = !selected || requestPending;
@@ -3178,7 +3254,9 @@ async function setChannel(channel, persist = true, targetThread = null) {
   const thread = targetThread || currentThread();
   const restoreCollapsedSidebarFocus = channel !== "in_person"
     && $("chat-app").classList.contains("sidebar-collapsed");
-  if (thread && thread.characterId === state.selected) await saveDraftNow();
+  // Selection already saved the previous owner's composer. Its stale DOM
+  // must not overwrite the newly selected character's persisted draft.
+  if (persist && thread && thread.characterId === state.selected) await saveDraftNow();
   if (thread && thread.channel !== (channel === "in_person" ? "in_person" : "text")) {
     cancelPresentationQueue(thread.characterId);
   }
@@ -3604,7 +3682,8 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   }
 }
 async function submitUserBlocks(blocks, { clearComposer = false, onAccepted = null, movementLocationId = "" } = {}) {
-  if (!state.selected || globalRequestBusy()) return false;
+  if (!state.selected || !state.writerOwned || globalRequestBusy()) return false;
+  cancelBackgroundSummaries();
   const total = renderBlocksText(blocks).length;
   if (!blocks.length) return false;
   if (total > 2000) {
@@ -3705,11 +3784,25 @@ function scheduleAutoSummary(thread, chatUsage = null) {
   if (state.summaryInFlight.has(thread.characterId)) return;
   void dbPutThread(thread).then(() => runAutoSummary(thread));
 }
+function cancelBackgroundSummaries() {
+  for (const [characterId, controller] of state.summaryControllers) {
+    controller.abort();
+    const thread = state.threads.get(characterId);
+    // A provider may have accepted an interrupted request. A later summary
+    // gets a new ID and checkpoint instead of replaying a possibly charged call.
+    if (thread) thread.summaryRequestId = "";
+  }
+  state.summaryControllers.clear();
+  state.summaryInFlight.clear();
+}
 async function runAutoSummary(thread) {
   if (!thread.summaryRequestId || !state.autoSummaryEnabled || !configured() || state.summaryInFlight.has(thread.characterId) || globalRequestBusy()) return;
   state.summaryInFlight.add(thread.characterId);
+  const controller = new AbortController();
+  state.summaryControllers.set(thread.characterId, controller);
   updateComposerAvailability();
   const requestId = thread.summaryRequestId;
+  const epoch = state.historyEpoch;
   try {
     const turns = thread.messages.filter((message) => message.status === "sent").slice(-24).map((message) => ({
       role: message.role,
@@ -3720,7 +3813,8 @@ async function runAutoSummary(thread) {
       { request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, character_id: thread.characterId, turns, previous_summary: thread.summary || "" },
       { arrays: [{ key: "turns", minimum: 2 }], texts: ["previous_summary"] },
     );
-    const payload = await api("/chat/summarize", { method: "POST", body: JSON.stringify(requestPayload) });
+    const payload = await api("/chat/summarize", { method: "POST", signal: controller.signal, timeoutMs: 20000, body: JSON.stringify(requestPayload) });
+    if (controller.signal.aborted || epoch !== state.historyEpoch || thread.summaryRequestId !== requestId) return;
     thread.summary = payload.summary || thread.summary;
     thread.pendingTopics = Array.isArray(payload.pending_topics)
       ? payload.pending_topics.map(plain).filter(Boolean).slice(0, 12)
@@ -3734,18 +3828,24 @@ async function runAutoSummary(thread) {
       $("summary-last-updated").textContent = `最近更新：${new Date(thread.summaryUpdatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}`;
     }
   } catch (error) {
+    if (controller.signal.aborted || epoch !== state.historyEpoch) return;
     // Summary failure never blocks or rewrites the conversation.  Keep the
     // request UUID so the next suitable turn retries idempotently.
     if (thread.characterId === state.selected) setRequestStatus(thread.characterId, "对话已完成；连续性整理稍后重试。");
+    if (["generation_interrupted", "request_timeout"].includes(error?.message)) thread.summaryRequestId = "";
     if (error?.message === "credential_invalid") clearCredential();
   } finally {
-    state.summaryInFlight.delete(thread.characterId);
+    if (state.summaryControllers.get(thread.characterId) === controller) {
+      state.summaryControllers.delete(thread.characterId);
+      state.summaryInFlight.delete(thread.characterId);
+    }
     updateComposerAvailability();
     void flushDeferredPresenceRefresh();
   }
 }
 
 async function transitionPresence(targetChannel, characterId = state.selected, targetThread = null, signal = undefined) {
+  cancelBackgroundSummaries();
   const thread = targetThread || state.threads.get(characterId) || currentThread();
   const result = await api("/presence/transition", { method: "POST", signal, body: JSON.stringify({ request_id: id(), character_id: characterId, target_channel: targetChannel, action: targetChannel === "in_person" ? "join_character" : "open_communicator", state_package: state.worldPackage || "" }) });
   await saveWorldPackage(result.state_package);
@@ -3765,7 +3865,9 @@ function arrivalReactionUnavailableMessage(code = "") {
   return "位置切换已完成；她暂时没有作出到场回应，你可以直接开始对话。";
 }
 async function arriveInPerson() {
+  cancelBackgroundSummaries();
   if (!state.selected || globalRequestBusy()) return;
+  await saveDraftNow();
   state.arrivalPending = true;
   const started = performance.now();
   const characterId = state.selected;
@@ -3925,6 +4027,17 @@ function syncContactToggleState(expanded = contactsExpanded()) {
   $("open-contacts")?.setAttribute("aria-label", expanded ? "角色列表已打开" : "打开角色列表");
   $("open-stage-contacts")?.setAttribute("aria-label", expanded ? "收起角色通讯栏" : "展开角色通讯栏");
   return Boolean(expanded);
+}
+function syncResponsiveLayout() {
+  const panel = $("contact-panel");
+  const expanded = contactsExpanded();
+  const drawerOpen = [$("info-panel"), $("transcript-panel")].some((item) => item.classList.contains("open"));
+  panel.inert = !expanded || drawerOpen;
+  panel.setAttribute("aria-hidden", String(!expanded));
+  syncContactToggleState(expanded);
+  if (!expanded && panel.contains(document.activeElement)) {
+    (currentThread()?.channel === "in_person" ? $("open-stage-contacts") : $("open-contacts"))?.focus();
+  }
 }
 function toggleContacts({ mobileOpen = false } = {}) {
   const panel = $("contact-panel");
@@ -4167,18 +4280,19 @@ $("toggle-advanced-model").onclick = () => {
 $("provider-select").onchange = () => chooseProvider($("provider-select").value);
 $("auto-summary-enabled").onchange = async () => {
   state.autoSummaryEnabled = $("auto-summary-enabled").checked;
+  if (!state.autoSummaryEnabled) cancelBackgroundSummaries();
   await storePut("app_state", { key: "preferences", autoSummaryEnabled: state.autoSummaryEnabled });
   if (state.autoSummaryEnabled) toast("将在下一轮仍有模型调用余量时整理连续性摘要");
 };
 $("history-retention").onchange = async () => {
   state.historyRetentionDays = [30, 90].includes(Number($("history-retention").value)) ? Number($("history-retention").value) : 0;
   await saveUiPreferences();
-  await pruneExpiredMessages();
-  toast(state.historyRetentionDays ? `将自动清理超过 ${state.historyRetentionDays} 天的本地消息` : "已关闭自动清理");
+  try {
+    await pruneExpiredMessages();
+    toast(state.historyRetentionDays ? `将自动清理超过 ${state.historyRetentionDays} 天的本地消息` : "已关闭自动清理");
+  } catch { /* prune displays the actionable failure without pretending success */ }
 };
 document.querySelectorAll("[data-settings-tab]").forEach((button) => { button.onclick = () => openSettings(button.dataset.settingsTab); });
-$("delete-character-history").onclick = async () => { if (globalRequestBusy()) return; const characterId = $("history-character").value; await deleteMessagesForCharacter(characterId); await storeDelete("threads", characterId); state.threads.delete(characterId); if (characterId === state.selected) { await dbGetThread(characterId); renderAll(); } openSettings("history"); toast("该角色本地历史已删除"); };
-$("clear-all-history").onclick = async () => { if (globalRequestBusy()) return; if (!window.confirm("确定清空全部 Project Snow 本地历史与世界状态吗？")) return; await storeClear("threads"); await storeClear("messages"); await storeClear("app_state"); state.threads.clear(); state.worldPackage = ""; state.drafts.clear(); state.pinnedCharacters.clear(); state.favoriteStickerIds.clear(); state.favoriteStickers.clear(); state.recentStickerIds = []; state.rendezvousDismissals.clear(); if (state.selected) { await dbGetThread(state.selected); await resolvePresence(); } renderAll(); openSettings("history"); toast("全部本地历史已清空"); };
 document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   if (!button.getAttribute("aria-label")) button.setAttribute("aria-label", "关闭对话框");
   button.onclick = () => {
@@ -4215,8 +4329,289 @@ $("character-search").addEventListener("keydown", (event) => {
   const first = $("character-list").querySelector("[data-character]");
   if (first) { event.preventDefault(); first.focus(); }
 });
+window.matchMedia("(max-width: 820px)").addEventListener("change", syncResponsiveLayout);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { void saveDraftNow(); cancelBackgroundSummaries(); }
+});
+
+const WRITER_LOCK_NAME = "project-snow-public:writer:v1";
+async function tryWriterLease() {
+  const db = await openDB();
+  if (!db) return true;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("app_state", "readwrite");
+    const store = tx.objectStore("app_state");
+    let owned = false;
+    const read = store.get("writer_lease");
+    read.onsuccess = () => {
+      const lease = read.result;
+      if (!lease || lease.owner === state.writerId || lease.expiresAt <= Date.now()) {
+        store.put({ key: "writer_lease", owner: state.writerId, expiresAt: Date.now() + 15000 });
+        owned = true;
+      }
+    };
+    tx.oncomplete = () => resolve(owned);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+async function acquireWriter() {
+  // Without a persistent database there is no shared history to coordinate.
+  if (!(await openDB())) {
+    state.writerOwned = true;
+    state.writerReady = true;
+    $("tab-session-banner").hidden = true;
+    updateComposerAvailability();
+    return true;
+  }
+  if (navigator.locks?.request) {
+    const owned = await new Promise((resolve) => {
+      void navigator.locks.request(WRITER_LOCK_NAME, { ifAvailable: true }, async (lock) => {
+        if (!lock) { resolve(false); return; }
+        await new Promise((release) => { state.writerRelease = release; resolve(true); });
+      }).catch(() => resolve(false));
+    });
+    state.writerOwned = owned;
+  } else {
+    state.writerOwned = await tryWriterLease().catch(() => false);
+    if (state.writerOwned && !state.writerRenewTimer) state.writerRenewTimer = window.setInterval(async () => {
+      if (!(await tryWriterLease().catch(() => false))) await releaseWriter();
+    }, 5000);
+  }
+  state.writerReady = true;
+  $("tab-session-banner").hidden = state.writerOwned;
+  updateComposerAvailability();
+  return state.writerOwned;
+}
+async function releaseWriter() {
+  cancelBackgroundSummaries();
+  for (const request of state.chatRequestByCharacter.values()) request.controller.abort();
+  await saveDraftNow();
+  // Persist pending request IDs before another tab may resume them.
+  await Promise.all([...state.threads.values()].map(dbPutThread));
+  state.writerOwned = false;
+  state.historyEpoch += 1;
+  state.writerRelease?.();
+  state.writerRelease = null;
+  window.clearInterval(state.writerRenewTimer);
+  state.writerRenewTimer = 0;
+  if (!navigator.locks?.request) {
+    const db = await openDB();
+    if (db) await new Promise((resolve) => {
+      const tx = db.transaction("app_state", "readwrite");
+      const store = tx.objectStore("app_state");
+      const request = store.get("writer_lease");
+      request.onsuccess = () => { if (request.result?.owner === state.writerId) store.delete("writer_lease"); };
+      tx.oncomplete = tx.onerror = tx.onabort = resolve;
+    });
+  }
+  $("tab-session-banner").hidden = false;
+  updateComposerAvailability();
+  state.writerChannel?.postMessage({ type: "released", sender: state.writerId });
+}
+async function refreshStoredHistory() {
+  state.historyEpoch += 1;
+  state.threads.clear();
+  state.persistedMessages.clear();
+  for (const store of Object.values(state.memoryStores)) store.clear();
+  state.worldPackage = "";
+  await migrateBrowserState();
+  const selected = state.selected;
+  state.selected = "";
+  await loadCharacters();
+  if (selected && selected !== state.selected) await selectCharacter(selected, { closeContacts: false });
+  restoreDraft();
+  renderAll();
+}
+function broadcastHistoryChange() {
+  state.writerChannel?.postMessage({ type: "history-changed", sender: state.writerId });
+}
+async function startTabCoordination() {
+  state.writerId = id();
+  if (typeof BroadcastChannel === "function") {
+    try { state.writerChannel = new BroadcastChannel(WRITER_LOCK_NAME); } catch { /* locks still prevent concurrent writes */ }
+  }
+  if (state.writerChannel) {
+    state.writerChannel.onmessage = async ({ data }) => {
+      if (!data || data.sender === state.writerId) return;
+      if (data.type === "take-over" && state.writerOwned) await releaseWriter();
+      if (data.type === "released" && $("take-over-session").disabled) {
+        if (await acquireWriter()) await refreshStoredHistory();
+        $("take-over-session").disabled = false;
+      }
+      if (data.type === "history-changed" && !state.writerOwned) await refreshStoredHistory();
+    };
+  }
+  await acquireWriter();
+}
+$("take-over-session").onclick = async () => {
+  $("take-over-session").disabled = true;
+  if (await acquireWriter()) {
+    await refreshStoredHistory();
+    $("take-over-session").disabled = false;
+    return;
+  }
+  state.writerChannel?.postMessage({ type: "take-over", sender: state.writerId });
+  window.setTimeout(async () => {
+    if (!$("take-over-session").disabled) return;
+    if (await acquireWriter()) await refreshStoredHistory();
+    else toast("另一标签页尚未释放会话，请关闭该页后重试。");
+    $("take-over-session").disabled = false;
+  }, 1500);
+};
+
+async function deleteCharacterHistory() {
+  if (!state.writerOwned || globalRequestBusy()) return;
+  cancelBackgroundSummaries();
+  const characterId = $("history-character").value;
+  state.historyEpoch += 1;
+  for (const thread of state.threads.values()) if (thread.characterId !== characterId) thread.historyEpoch = state.historyEpoch;
+  state.threads.delete(characterId);
+  await deleteMessagesForCharacter(characterId);
+  await storeDelete("threads", characterId);
+  for (const key of state.drafts.keys()) if (key.startsWith(`${characterId}:`)) state.drafts.delete(key);
+  await storePut("app_state", { key: "drafts", values: Object.fromEntries(state.drafts) });
+  if (characterId === state.selected) { await dbGetThread(characterId); restoreDraft(); renderAll(); }
+  broadcastHistoryChange();
+  openSettings("history");
+  toast("该角色本地历史已删除");
+}
+async function clearAllHistory() {
+  if (!state.writerOwned || globalRequestBusy()) return;
+  if (!window.confirm("确定清空全部 Project Snow 本地历史与世界状态吗？")) return;
+  cancelBackgroundSummaries();
+  state.historyEpoch += 1;
+  const db = await openDB();
+  if (db) await new Promise((resolve, reject) => {
+    const tx = db.transaction(["threads", "messages", "app_state"], "readwrite");
+    for (const name of ["threads", "messages", "app_state"]) tx.objectStore(name).clear();
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+  for (const store of Object.values(state.memoryStores)) store.clear();
+  state.threads.clear(); state.persistedMessages.clear(); state.worldPackage = "";
+  state.drafts.clear(); state.pinnedCharacters.clear(); state.favoriteStickerIds.clear();
+  state.favoriteStickers.clear(); state.recentStickerIds = []; state.rendezvousDismissals.clear();
+  if (state.selected) { await dbGetThread(state.selected); restoreDraft(); await resolvePresence(); }
+  broadcastHistoryChange();
+  renderAll(); openSettings("history"); toast("全部本地历史已清空");
+}
+$("delete-character-history").onclick = () => { void deleteCharacterHistory().catch(() => showBanner("删除未能保存，请导出备份后重试。")); };
+$("clear-all-history").onclick = () => { void clearAllHistory().catch(() => showBanner("清空未能保存，请导出备份后重试。")); };
+
+let pendingHistoryImport = null;
+async function exportHistory() {
+  await saveDraftNow();
+  const backup = portableCopy({
+    schema: "project-snow-history-1", databaseVersion: 4, exportedAt: new Date().toISOString(),
+    threads: await storeAll("threads"), messages: await storeAll("messages"),
+    appState: (await storeAll("app_state")).filter((entry) => ["drafts", "preferences", "ui_preferences"].includes(entry.key)),
+  });
+  const url = URL.createObjectURL(new Blob([JSON.stringify(backup)], { type: "application/json" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `project-snow-history-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.append(anchor); anchor.click(); anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function importHistory(backup) {
+  if (!state.writerOwned || globalRequestBusy()) throw new Error("history_busy");
+  cancelBackgroundSummaries();
+  await saveDraftNow();
+  const db = await openDB();
+  if (!db) throw new Error("history_storage_required");
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(["threads", "messages", "app_state"], "readwrite");
+    const threads = tx.objectStore("threads");
+    const messages = tx.objectStore("messages");
+    const appState = tx.objectStore("app_state");
+    for (const raw of backup.threads) {
+      const existing = threads.get(raw.characterId);
+      existing.onsuccess = () => { if (!existing.result) threads.put(raw); };
+    }
+    for (const raw of backup.messages) {
+      const message = normalizeMessage(raw);
+      // Imported authorization state cannot be reused on another anonymous
+      // subject. Keep the original ID as context, never silently replay it.
+      message.requestSnapshot = null;
+      if (message.status === "pending") { message.status = "failed"; message.errorCode = "stream_disconnected"; }
+      const existing = messages.get(message.id);
+      existing.onsuccess = () => { if (!existing.result) messages.put(message); };
+    }
+    for (const entry of backup.appState) {
+      const existing = appState.get(entry.key);
+      existing.onsuccess = () => {
+        if (entry.key === "drafts") appState.put({ key: "drafts", values: { ...(entry.values || {}), ...(existing.result?.values || {}) } });
+        else if (!existing.result) appState.put(entry);
+      };
+    }
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+  await refreshStoredHistory();
+  broadcastHistoryChange();
+}
+$("export-history").onclick = () => { void exportHistory().catch(() => showBanner("无法导出备份，请重试。")); };
+$("import-history").onclick = () => $("history-import-file").click();
+$("history-import-file").onchange = async () => {
+  const file = $("history-import-file").files?.[0];
+  $("history-import-file").value = "";
+  if (!file) return;
+  try {
+    if (file.size > 50 * 1024 * 1024) throw new Error("backup_too_large");
+    pendingHistoryImport = validateHistoryBackup(JSON.parse(await file.text()));
+    $("history-import-preview").textContent = `备份包含 ${pendingHistoryImport.threads.length} 位角色、${pendingHistoryImport.messages.length} 条消息。仅补充尚不存在的消息，不覆盖当前记录。`;
+    $("history-import-error").textContent = "";
+    $("history-import-dialog").showModal();
+  } catch { showBanner("无法导入：请选择有效的本地历史备份（最大 50 MB）。"); }
+};
+$("confirm-history-import").onclick = async () => {
+  if (!pendingHistoryImport) return;
+  $("confirm-history-import").disabled = true;
+  try {
+    await importHistory(pendingHistoryImport);
+    pendingHistoryImport = null;
+    $("history-import-dialog").close();
+    toast("备份已合并，原有消息和草稿已保留。");
+  } catch { $("history-import-error").textContent = "未能合并备份。请确认当前标签页拥有会话，且本地存储可用。"; }
+  finally { $("confirm-history-import").disabled = false; }
+};
+
+let initialBuild = null;
+let pendingBuild = null;
+async function checkBuildUpdate() {
+  if (document.hidden) return;
+  try {
+    const info = await api("/build-info", { timeoutMs: 8000, cache: "no-store" });
+    if (!info.app_version) return;
+    if (!initialBuild) { initialBuild = info; return; }
+    const changed = info.app_version !== initialBuild.app_version || (info.revision && initialBuild.revision && info.revision !== initialBuild.revision);
+    if (!changed || buildIdentity(info) === tabPreferences.getItem("project-snow-public:dismissed-build")) return;
+    pendingBuild = info;
+    $("build-update-copy").textContent = info.api_schema && info.api_schema !== "public-v1" || info.state_schema && info.state_schema !== "public-state-2"
+      ? "服务已有新版本，请先保存草稿并更新页面。" : "新版本已就绪，更新前会保存草稿。";
+    $("build-update-banner").hidden = false;
+    $("apply-build-update").disabled = globalRequestBusy();
+  } catch { /* Optional deployment metadata never blocks the conversation. */ }
+}
+$("dismiss-build-update").onclick = () => {
+  if (pendingBuild) tabPreferences.setItem("project-snow-public:dismissed-build", buildIdentity(pendingBuild));
+  $("build-update-banner").hidden = true;
+};
+$("apply-build-update").onclick = async () => {
+  if (globalRequestBusy()) { toast("当前回复完成后即可更新。"); return; }
+  cancelBackgroundSummaries();
+  await saveDraftNow();
+  await Promise.all([...state.threads.values()].map(dbPutThread));
+  window.location.reload();
+};
+window.addEventListener("focus", () => { void checkBuildUpdate(); });
+window.addEventListener("pagehide", () => { state.writerRelease?.(); state.writerChannel?.close(); });
 
 async function boot() {
+  await startTabCoordination();
   await openDB();
   await migrateBrowserState();
   await pruneExpiredMessages();
@@ -4236,6 +4631,8 @@ async function boot() {
   renderOnboarding();
   if (!state.storageAvailable) showBanner("浏览器未开放本地存储，本次聊天不会保存；仍可继续使用。 ");
   startAnnouncements();
+  void checkBuildUpdate();
+  window.setInterval(() => { void checkBuildUpdate(); }, 300000);
 }
 boot().catch((error) => {
   $("connection-status").textContent = "连接失败";

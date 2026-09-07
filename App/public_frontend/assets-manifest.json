@@ -1,0 +1,10 @@
+{
+  "schema_version": "project-snow-frontend-build-1",
+  "assets": [
+    { "source": "public_frontend/modules/runtime.js", "public_url": "/modules/runtime.js", "required_html": false },
+    { "source": "public_frontend/app.js", "public_url": "/app.js", "dependencies": ["/modules/runtime.js"] },
+    { "source": "public_frontend/app.css", "public_url": "/app.css" },
+    { "source": "public_frontend/privacy/privacy.js", "public_url": "/privacy/privacy.js" },
+    { "source": "frontend/shared/immersive.css", "public_url": "/shared/immersive.css" }
+  ]
+}

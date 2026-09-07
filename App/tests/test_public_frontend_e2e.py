@@ -168,6 +168,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 }
             )
             return
+        if path == "/public/v1/build-info":
+            self._json({"app_version": "e2e", "revision": "fixture", "api_schema": "public-v1", "state_schema": "public-state-2"})
+            return
         if path == "/public/v1/characters":
             self._json(
                 {
@@ -202,6 +205,10 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             )
             return
         assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
+        if path.startswith("/modules/") and path.endswith(".js"):
+            candidate = (PUBLIC_ROOT / path.lstrip("/")).resolve()
+            if candidate.is_relative_to(PUBLIC_ROOT.resolve()) and candidate.is_file():
+                assets[path] = candidate.relative_to(PUBLIC_ROOT.resolve()).as_posix()
         if path.startswith("/shared/"):
             candidate = SHARED_ROOT / path.removeprefix("/shared/")
             if candidate.is_file():

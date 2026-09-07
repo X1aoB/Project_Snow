@@ -471,3 +471,7 @@ html.privacy-root body.privacy-page { height: auto; min-height: 100%; overflow: 
   .sidebar-toggle-icon { transition: none; }
   .stage-speech.is-revealing::after { animation: none !important; }
 }
+.maintenance-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.maintenance-banner > span { flex: 1 1 200px; }
+#history-import-dialog { padding: 20px; }
+#history-import-dialog p { line-height: 1.7; overflow-wrap: anywhere; }
