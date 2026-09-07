@@ -536,11 +536,14 @@ printf '%s\n' "$checkout_status"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "0")
 
-    def test_manifest_validator_propagates_generation_and_normalization_failures(self) -> None:
+    def test_manifest_validator_retains_signed_digests_and_propagates_failures(self) -> None:
         runner = self.read("ops/project-snow-release")
         function_start = runner.index("validate_release_manifest() {")
         function_end = runner.index("\n}\n\ninstall_manifest_releases()", function_start) + 2
         validate_function = runner[function_start:function_end]
+        bindings_start = runner.index('  public_image="$expected_public_image@$(jq -r')
+        bindings_end = runner.index('\n  stage_attempt_nonce=', bindings_start)
+        image_bindings = runner[bindings_start:bindings_end]
         for guarded_command in (
             'public_digest="$(jq -r \'.application.digest\' "$manifest_path")" || return 1',
             'embedding_digest="$(jq -r \'.embedding.digest\' "$manifest_path")" || return 1',
@@ -608,8 +611,9 @@ python3() {
   [ "$failure" != generator ]
 }
 docker() {
+  printf '%s\n' "$*" >> "$test_root/forbidden-tag-lookups"
   printf '%s\n' 'Digest: """
-            + digest
+            + "sha256:" + "d" * 64
             + """'
 }
 """
@@ -620,6 +624,13 @@ validate_release_manifest "$manifest" """
             + target_sha
             + """ || validation_status=$?
 printf '%s\n' "$validation_status"
+if [ "$validation_status" = 0 ]; then
+  manifest_copy="$manifest"
+"""
+            + image_bindings
+            + """
+  printf '%s\n' "$public_image" "$embedding_image"
+fi
 """
         )
         for failure in (
@@ -643,8 +654,11 @@ printf '%s\n' "$validation_status"
             result = self.run_posix_shell(
                 harness, Path(temporary_root).as_posix(), "success"
             )
+            self.assertFalse((Path(temporary_root) / "forbidden-tag-lookups").exists())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "0")
+        self.assertEqual(result.stdout.splitlines(), [
+            "0", f"registry.invalid/public@{digest}", f"registry.invalid/embedding@{digest}",
+        ])
 
     def test_public_environment_builder_propagates_write_and_chmod_failures(self) -> None:
         deploy = self.read("ops/deploy.sh")
@@ -1847,7 +1861,8 @@ exit 99
         self.assertIn("merge-base --is-ancestor", runner)
         self.assertIn("core.hooksPath=/dev/null", runner)
         self.assertIn("release_manifest.py", runner)
-        self.assertIn("docker buildx imagetools inspect", runner)
+        self.assertNotIn("docker buildx imagetools inspect", runner)
+        self.assertIn("verify_inbox_release_proof", runner)
         self.assertIn("runuser -u deploy -- docker info", runner)
         self.assertIn("ufw status", runner)
         self.assertIn("systemctl is-active --quiet fail2ban", runner)

@@ -679,18 +679,9 @@ validate_release_manifest() {
     return 1
   }
 
-  public_tag_digest="$(docker buildx imagetools inspect \
-    "$expected_public_image:$commit_sha" 2>/dev/null | awk '/^Digest:/ {print $2; exit}')"
-  embedding_tag_digest="$(docker buildx imagetools inspect \
-    "$expected_embedding_image:$commit_sha" 2>/dev/null | awk '/^Digest:/ {print $2; exit}')"
-  [ "$public_tag_digest" = "$public_digest" ] || {
-    echo 'The public image digest is not the digest tagged for this main SHA.' >&2
-    return 1
-  }
-  [ "$embedding_tag_digest" = "$embedding_digest" ] || {
-    echo 'The embedding image digest is not the digest tagged for this main SHA.' >&2
-    return 1
-  }
+  # run_stage has already verified the independently signed manifest bytes.
+  # A successful CI rerun may move a SHA tag; only these signed digests identify
+  # the candidate. deploy.sh binds its Compose images to these exact references.
 }
 
 verify_inbox_release_proof() {

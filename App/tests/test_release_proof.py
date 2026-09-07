@@ -102,3 +102,28 @@ def test_failed_or_running_later_attempt_revokes_old_candidate(tmp_path, status,
 
     with pytest.raises(ValueError, match="not successful"):
         verify(m, p, SHA, fetch=fetch, execute=never_execute)
+
+
+def test_successful_later_attempt_retains_original_signed_manifest(tmp_path):
+    manifest, proof, run = fixture()
+    m, p = tmp_path / "manifest.json", tmp_path / "proof.json"
+    m.write_bytes(manifest)
+    p.write_text(json.dumps(proof))
+    fetched = []
+
+    def fetch(path):
+        fetched.append(path)
+        if "/attempts/" in path:
+            return run
+        if "/actions/runs/" in path:
+            return {**run, "run_attempt": 2}
+        return {"attestations": [{"bundle": {}}]}
+
+    def execute(command, **options):
+        assert str(p) in command
+        return SimpleNamespace(stdout='[{"verified":true}]')
+
+    assert verify(m, p, SHA, fetch=fetch, execute=execute)["status"] == "verified"
+    assert any("/attempts/1" in path for path in fetched)
+    assert any(path.endswith("/actions/runs/123") for path in fetched)
+    assert m.read_bytes() == manifest
