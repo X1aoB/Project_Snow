@@ -1,0 +1,12 @@
+[Unit]
+Description=Prepare the latest signed Project Snow main candidate for manual review
+After=network-online.target docker.service
+Wants=network-online.target
+ConditionPathExists=/srv/project-snow/releases/current
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/libexec/project-snow/maintenance.py auto-stage
+TimeoutStartSec=45min
+UMask=0077
+Nice=10

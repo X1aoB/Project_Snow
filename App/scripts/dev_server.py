@@ -10,9 +10,9 @@ import argparse
 import http.client
 import http.server
 import os
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
-
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 
@@ -20,9 +20,26 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 class WorkspaceHandler(http.server.SimpleHTTPRequestHandler):
     api_host = os.getenv("LOCAL_API_HOST", "127.0.0.1")
     api_port = int(os.getenv("LOCAL_API_PORT", "8000"))
+    maximum_body = 32 * 1024 * 1024
+    body_timeout = 15
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(APP_ROOT / "frontend"), **kwargs)
+
+    def parse_request(self) -> bool:
+        if not super().parse_request():
+            return False
+        host = self.headers.get("Host", "")
+        try:
+            parsed = urlsplit("http://" + host)
+            valid = parsed.hostname in {"localhost", "127.0.0.1", "::1"} and parsed.username is None
+            valid = valid and not parsed.path and not parsed.query and not parsed.fragment
+        except ValueError:
+            valid = False
+        if not valid:
+            self.send_error(403, "Local host required")
+            return False
+        return True
 
     def end_headers(self) -> None:  # noqa: D401
         """Prevent stale HTML/JS/CSS pairs during local development."""
@@ -39,10 +56,51 @@ class WorkspaceHandler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
     def _proxy(self) -> None:
-        split = urlsplit(self.path)
-        body_length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(body_length) if body_length else None
-        headers = {key: value for key, value in self.headers.items() if key.lower() not in {"host", "connection"}}
+        # Bound reads before forwarding: API middleware cannot protect a proxy
+        # that is still buffering an unbounded or unfinished upload.
+        lengths = self.headers.get_all("Content-Length", [])
+        if len(lengths) > 1 or self.headers.get("Transfer-Encoding"):
+            self.send_error(400, "Ambiguous request framing")
+            self.close_connection = True
+            return
+        try:
+            body_length = int(lengths[0]) if lengths else 0
+            if body_length < 0:
+                raise ValueError()
+        except ValueError:
+            self.send_error(400, "Invalid request length")
+            self.close_connection = True
+            return
+        if body_length > self.maximum_body:
+            self.send_error(413, "Request body exceeds local proxy limit")
+            self.close_connection = True
+            return
+        deadline = time.monotonic() + self.body_timeout
+        try:
+            parts = []
+            remaining = body_length
+            while remaining:
+                seconds = deadline - time.monotonic()
+                if seconds <= 0:
+                    raise TimeoutError()
+                self.connection.settimeout(seconds)
+                part = self.rfile.read1(min(remaining, 65536))
+                if not part:
+                    break
+                parts.append(part)
+                remaining -= len(part)
+            body = b"".join(parts) if body_length else None
+        except TimeoutError:
+            self.send_error(408, "Request body deadline exceeded")
+            self.close_connection = True
+            return
+        if body is not None and len(body) != body_length:
+            self.send_error(400, "Incomplete request body")
+            self.close_connection = True
+            return
+        headers = {
+            key: value for key, value in self.headers.items() if key.lower() not in {"host", "connection"}
+        }
         connection = http.client.HTTPConnection(self.api_host, self.api_port, timeout=120)
         try:
             connection.request(self.command, self.path, body=body, headers=headers)

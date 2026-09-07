@@ -2,57 +2,57 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
-from contextlib import asynccontextmanager
 import json
-from pathlib import Path
+import os
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
-import httpx
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
-from .config import Settings
-from .contracts import (
-    ConversationIdentity,
-    ConnectorConfigRequest,
-    ConnectorOAuthCallbackRequest,
-    ConnectorOAuthStartRequest,
-    AttachmentTranscriptionRequest,
-    AgentApprovalRequest,
-    AgentRunRequest,
-    EntityNodeReviewDecision,
-    GraphNeighborhood,
-    MVPChatRequest,
-    MVPFeedbackRequest,
-    MVPFeedbackIssueStatusRequest,
-    MVPFeedbackTriageRequest,
-    MVPPresenceResolveRequest,
-    MVPPresenceArrivalRequest,
-    MVPPresenceTransitionRequest,
-    ModelDefaultsRequest,
-    ProviderConfigRequest,
-    ProviderProbeRequest,
-    ReviewAutomationAction,
-    ReviewAutomationCalibrationLabel,
-    ReviewAutomationRunRequest,
-    DeepSeekReviewCompletionAction,
-    DeepSeekReviewCompletionRunRequest,
-    VoicePreviewRequest,
-    RelationReviewDecision,
-    RetrievalRequest,
-    RetrievalResponse,
-    StageLockResponse,
-)
 from .agent_runtime import AgentRuntime
 from .agent_store import AgentStore
 from .attachment_manager import AttachmentError, AttachmentManager
+from .config import Settings
 from .connectors import ConnectorError, ConnectorManager
-from .provider_registry import ProviderRegistry
-from .repository import MACHINE_REVIEW_FILTERS, REVIEW_RISK_LEVELS, REVIEW_TIERS, RuntimeRepository
-from .review_automation import ReviewAutomationService
+from .contracts import (
+    AgentApprovalRequest,
+    AgentRunRequest,
+    AttachmentTranscriptionRequest,
+    ConnectorConfigRequest,
+    ConnectorOAuthCallbackRequest,
+    ConnectorOAuthStartRequest,
+    ConversationIdentity,
+    DeepSeekReviewCompletionAction,
+    DeepSeekReviewCompletionRunRequest,
+    EntityNodeReviewDecision,
+    GraphNeighborhood,
+    ModelDefaultsRequest,
+    MVPChatRequest,
+    MVPFeedbackIssueStatusRequest,
+    MVPFeedbackRequest,
+    MVPFeedbackTriageRequest,
+    MVPPresenceArrivalRequest,
+    MVPPresenceResolveRequest,
+    MVPPresenceTransitionRequest,
+    ProviderConfigRequest,
+    ProviderProbeRequest,
+    RelationReviewDecision,
+    RetrievalRequest,
+    RetrievalResponse,
+    ReviewAutomationAction,
+    ReviewAutomationCalibrationLabel,
+    ReviewAutomationRunRequest,
+    StageLockResponse,
+    VoicePreviewRequest,
+)
 from .deepseek_review_completion import DeepSeekReviewCompletionService
+from .local_boundary import bounded_body, install_local_boundary
 from .mvp_service import (
     MVPChatDisabled,
     MVPCommunicationConflict,
@@ -60,7 +60,10 @@ from .mvp_service import (
     MVPRequestInProgress,
     MVPService,
 )
-
+from .provider_registry import ProviderRegistry
+from .repository import MACHINE_REVIEW_FILTERS, REVIEW_RISK_LEVELS, REVIEW_TIERS, RuntimeRepository
+from .review_automation import ReviewAutomationService
+from .review_lock import ReviewConflict
 
 settings = Settings.from_environment()
 repository = RuntimeRepository(settings)
@@ -70,7 +73,8 @@ mvp_service = MVPService(settings, repository)
 agent_store = AgentStore(settings.runtime_root / "chat" / "agent.sqlite3")
 provider_registry = ProviderRegistry(agent_store)
 attachment_manager = AttachmentManager(settings.runtime_root, agent_store)
-connector_manager = ConnectorManager(agent_store, provider_registry.vault)
+legacy_enabled = os.getenv("LOCAL_LEGACY_ENABLED", "false").casefold() == "true"
+connector_manager = ConnectorManager(agent_store, provider_registry.vault) if legacy_enabled else None
 agent_runtime = AgentRuntime(
     agent_store,
     provider_registry,
@@ -80,26 +84,35 @@ agent_runtime = AgentRuntime(
     persona_context_provider=lambda character_id: MVPService._dialogue_profile_prompt_context(
         mvp_service._dialogue_profiles().get(character_id)
     ) or {},
-)
+) if legacy_enabled else None
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     attachment_manager.cleanup_expired()
-    agent_runtime.recover()
+    if agent_runtime is not None:
+        agent_runtime.recover()
     try:
         yield
     finally:
-        agent_runtime.shutdown()
+        if agent_runtime is not None:
+            agent_runtime.shutdown()
+        mvp_service.close()
 
 
 app = FastAPI(title="Project Snow Application API", version="0.5.0", lifespan=lifespan)
+install_local_boundary(app, settings.allowed_origins, legacy_enabled=legacy_enabled)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-Filename"],
 )
+
+
+@app.exception_handler(ReviewConflict)
+async def review_state_conflict(_request: Request, exc: ReviewConflict) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc), "code": "review_state_conflict"})
 
 
 def get_repository() -> RuntimeRepository:
@@ -233,7 +246,8 @@ def _synthesize_agent_voice(character_id: str, text_value: str) -> dict:
     return {**result, "spoken_text": "summary" if summary_only else "full", "spoken_characters": len(spoken)}
 
 
-agent_runtime.voice_synthesizer = _synthesize_agent_voice
+if agent_runtime is not None:
+    agent_runtime.voice_synthesizer = _synthesize_agent_voice
 
 
 @app.post("/api/v1/voices/preview")
@@ -397,6 +411,7 @@ async def upload_attachment(request: Request) -> dict:
     """Accept multipart, JSON base64, or raw binary without logging content."""
 
     try:
+        await bounded_body(request, 100 * 1024 * 1024)
         content_type = request.headers.get("content-type", "")
         try:
             announced_size = int(request.headers.get("content-length", "0") or 0)
@@ -427,7 +442,7 @@ async def upload_attachment(request: Request) -> dict:
             filename = request.headers.get("x-filename", "attachment")
             mime = content_type or "application/octet-stream"
             data = await request.body()
-        return attachment_manager.save_bytes(filename, data, mime)
+        return await asyncio.to_thread(attachment_manager.save_bytes, filename, data, mime)
     except AttachmentError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
 
@@ -707,7 +722,7 @@ def mvp_tools() -> dict:
     return {
         "mode": "assistant",
         "tools": mvp_service._assistant_tool_definitions(),
-        "agent_tools": agent_runtime.tool_manifest(),
+        "agent_tools": agent_runtime.tool_manifest() if agent_runtime is not None else [],
         "policy": {
             "legacy_chat_tools_read_only": True,
             "agent_scoped_writes": True,
@@ -809,6 +824,8 @@ def mvp_presence_arrival(request: MVPPresenceArrivalRequest) -> dict:
 def mvp_chat(request: MVPChatRequest) -> dict:
     try:
         if request.agent_mode:
+            if agent_runtime is None:
+                raise HTTPException(status_code=404, detail="legacy_disabled")
             agent_attachment_bytes = 0
             for attachment_id in request.attachment_ids:
                 agent_attachment = agent_store.get_attachment(attachment_id)
@@ -909,6 +926,7 @@ def mvp_chat(request: MVPChatRequest) -> dict:
                     required_capabilities.add("vision")
                 if mime == "image/gif" and attachment_id in current_attachment_ids:
                     from io import BytesIO
+
                     from PIL import Image
                     buffer = BytesIO()
                     with Image.open(Path(str(record["storage_path"]))) as image:
@@ -1496,6 +1514,7 @@ def chat_stage_lock() -> StageLockResponse:
 
 if __name__ == "__main__":
     import os
+
     import uvicorn
 
-    uvicorn.run("backend.snow_app.main:app", host=os.getenv("API_HOST", "0.0.0.0"), port=int(os.getenv("API_PORT", "8000")))
+    uvicorn.run("backend.snow_app.main:app", host=os.getenv("API_HOST", "127.0.0.1"), port=int(os.getenv("API_PORT", "8000")))

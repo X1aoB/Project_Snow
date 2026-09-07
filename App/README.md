@@ -1,4 +1,6 @@
-# Project Snow Application
+# 小吉终端 Application
+
+Public branding is 小吉终端. Project Snow remains the stable repository and deployment identity. See [implementation evidence](docs/overhaul_progress.md) for verified changes and outstanding acceptance work.
 
 ## Public immersive surface
 
@@ -41,7 +43,7 @@ App/
 ## 前置条件与安装
 
 - Python 3.11 或更高版本。
-- 可选：Node.js 20 或更高版本（仅桌面客户端）。
+- Node.js 22 或更高版本，用于公网前端类型检查、构建与桌面预览。
 - 可选：一个 OpenAI-compatible 模型 API。没有模型密钥时，页面和证据工作台仍可启动，
   但不能生成真实聊天回复。
 
@@ -53,15 +55,22 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m pip install --require-hashes -r requirements-test.txt
 python -m playwright install chromium
+npm ci --prefix public_frontend_src
 Copy-Item .env.example .env
 ```
 
 `requirements.txt` 是本地运行的完整 Python 依赖清单：FastAPI/HTTP 客户端、
-dotenv 配置加载、资料/头像处理，以及检索与可选图谱组件。测试使用 Python 标准库
-`unittest`，无需单独安装 pytest。文档/媒体依赖同时包括 PyPDF、PyMuPDF、python-docx、openpyxl、
+dotenv 配置加载、资料/头像处理，以及检索与可选图谱组件。测试统一由 pytest 执行；
+`requirements-test.txt` 锁定测试工具和传递依赖的哈希。文档/媒体依赖同时包括 PyPDF、PyMuPDF、python-docx、openpyxl、
 python-pptx、Pillow、Mutagen 和 ReportLab；浏览器任务使用 Playwright Chromium，凭据通过 keyring
 写入 Windows Credential Manager。
+
+统一验证入口为 `scripts/validate_all.ps1`：默认运行可移植 Python 测试、前端类型检查、Node 测试和构建一致性；有 Docker CLI 时仅检查 Compose 模型。
+添加 `-Browser` 跑隔离浏览器回归，`-Desktop` 跑已安装 Electron 的品牌 smoke，`-RuntimeData` 验证显式安装的私有数据包。
+验证命令不导出或重建审核数据。可用 `-Python <解释器路径>` 复用隔离工作树之外的虚拟环境。
+真实 PostgreSQL 测试需显式提供 `TEST_POSTGRES_URL`；真实 Neo4j 和 Caddy 测试也各自要求隔离环境，不能借用生产数据库。
 
 ## 模型配置（不要提交密钥）
 
@@ -206,8 +215,8 @@ npm run package:win
 
 ```powershell
 cd C:\Users\25685\Desktop\Myprojects\Project_Snow\App
-python -m unittest discover -s tests -p "test_*.py"
-python scripts/validate_architecture.py
+.\scripts\validate_all.ps1
+.\scripts\validate_all.ps1 -Browser
 ```
 
 若页面无法连接，请先确认 API 终端仍在运行，然后访问 `/health`。模型请求失败时，检查

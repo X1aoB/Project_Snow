@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import threading
 from datetime import UTC, datetime, timedelta
@@ -168,6 +169,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 }
             )
             return
+        if path == "/public/v1/build-info":
+            self._json({"app_version": "e2e", "revision": "fixture", "api_schema": "public-v1", "state_schema": "public-state-2"})
+            return
         if path == "/public/v1/characters":
             self._json(
                 {
@@ -202,12 +206,16 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             )
             return
         assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
+        if path.startswith("/modules/") and path.endswith(".js"):
+            candidate = (PUBLIC_ROOT / path.lstrip("/")).resolve()
+            if candidate.is_relative_to(PUBLIC_ROOT.resolve()) and candidate.is_file():
+                assets[path] = candidate.relative_to(PUBLIC_ROOT.resolve()).as_posix()
         if path.startswith("/shared/"):
             candidate = SHARED_ROOT / path.removeprefix("/shared/")
             if candidate.is_file():
                 body = candidate.read_bytes()
                 self.send_response(200)
-                self.send_header("Content-Type", "text/css; charset=utf-8" if candidate.suffix == ".css" else "application/json")
+                self.send_header("Content-Type", mimetypes.guess_type(candidate.name)[0] or "application/octet-stream")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)

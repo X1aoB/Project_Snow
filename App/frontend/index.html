@@ -4,16 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <title>Project Snow v0.5.0</title>
+    <title>小吉终端 v0.5.0</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/shared/brand/xiaoji-icon-32.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/shared/brand/xiaoji-icon-192.png" />
     <link rel="stylesheet" href="/shared/immersive.css?v=0.9.2" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body data-surface="landing">
     <main id="landing-view" class="landing-view">
       <header class="landing-header">
-        <a class="brand-lockup" href="/" aria-label="Project Snow 首页">
-          <span class="brand-mark" aria-hidden="true">S</span>
-          <span><strong>Project Snow</strong><small>v0.5.0 · 本地测试版</small></span>
+        <a class="brand-lockup" href="/" aria-label="小吉终端 首页">
+          <img class="brand-mark" src="/shared/brand/xiaoji-icon.png" alt="" aria-hidden="true" />
+          <span><strong>小吉终端</strong><small>v0.5.0 · 本地测试版</small></span>
         </a>
         <div class="landing-actions">
           <span id="landing-status" class="connection-pill">正在连接本地服务</span>
@@ -51,8 +53,8 @@
       <aside id="contact-panel" class="contact-panel" aria-label="角色会话">
         <header class="product-header">
           <a class="brand-lockup compact" href="/">
-            <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="surface-label">沉浸式陪伴</small></span>
+            <img class="brand-mark" src="/shared/brand/xiaoji-icon.png" alt="" aria-hidden="true" />
+            <span><strong>小吉终端</strong><small id="surface-label">沉浸式陪伴</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表"><i data-lucide="x"></i></button>
         </header>
@@ -134,7 +136,7 @@
               <span id="stage-portrait-avatar" class="stage-portrait-avatar">?</span>
             </div>
             <div class="stage-dialogue-copy">
-              <div class="stage-speaker-line"><strong id="stage-speaker">Project Snow</strong><span id="stage-channel-state">面对面</span></div>
+              <div class="stage-speaker-line"><strong id="stage-speaker">小吉终端</strong><span id="stage-channel-state">面对面</span></div>
               <div id="stage-speech" class="stage-speech"><p>选择一位角色，开始一段面对面的对话。</p></div>
               <div class="stage-dialogue-hint"><span>视觉小说模式</span><span>Space 快速显示 · H 隐藏界面</span></div>
             </div>
@@ -217,7 +219,7 @@
 
     <dialog id="settings-dialog" class="modal settings-modal">
       <form method="dialog">
-        <header><div><span class="panel-kicker">PROJECT SNOW v0.5.0</span><h2>本地设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog" aria-label="关闭设置"><i data-lucide="x"></i></button></header>
+        <header><div><span class="panel-kicker">小吉终端 v0.5.0</span><h2>本地设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog" aria-label="关闭设置"><i data-lucide="x"></i></button></header>
         <nav class="settings-tabs" aria-label="设置类别"><button type="button" class="active" data-settings-tab="models">模型厂商</button><button type="button" data-settings-tab="conversation">会话与存储</button><button type="button" data-settings-tab="about">关于</button></nav>
         <section class="settings-section" data-settings-panel="models">
           <strong>选择模型厂商</strong><p>内置厂商只需填写 API Key，客户端会从官方接口读取当前账户可用的模型。Key 只会提交给本地后端并写入 Windows 凭据库，不会保存在聊天数据库中。</p>
@@ -249,7 +251,7 @@
           </div>
         </section>
         <section class="settings-section" data-settings-panel="conversation" hidden><strong>会话与存储</strong><p>只清理本机聊天，不会修改角色资料、反馈或知识图谱。</p><div class="settings-actions"><button id="clear-current-mode" type="button" class="secondary-button">清空当前入口记录</button><button id="clear-character" type="button" class="danger-button">清空该角色全部对话</button></div></section>
-        <section class="settings-section attribution" data-settings-panel="about" hidden><strong>关于本测试版</strong><p>角色暂时使用文字肖像。未来生成的角色图片将通过独立清单接入，不会写入 Data/。</p><p>Project Snow v0.5.0 · 本地 Windows 单用户测试产品。</p></section>
+        <section class="settings-section attribution" data-settings-panel="about" hidden><strong>关于本测试版</strong><p>角色暂时使用文字肖像。未来生成的角色图片将通过独立清单接入，不会写入 Data/。</p><p>小吉终端 v0.5.0 · 本地 Windows 单用户测试产品。</p></section>
       </form>
     </dialog>
 

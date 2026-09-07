@@ -3,26 +3,29 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import logging
 import mimetypes
+import os
 import secrets
 import time
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
+from .async_store import AsyncPublicStore
 from .config import PublicSettings, Settings
+from .mvp_service import MVPProviderError, _normalize_stage_motion
 from .public_contracts import (
     ByokSessionRequest,
     ChatRequest,
@@ -48,13 +51,11 @@ from .public_security import (
     is_valid_anonymous_id,
     issue_byok_credential,
     new_anonymous_id,
-    normalized_text,
     open_byok_credential,
     redact_sensitive_text,
     subject_hash,
     verify_turnstile,
 )
-from .mvp_service import MVPProviderError, _normalize_stage_motion
 from .public_service import (
     CharacterUnavailable,
     GenerationBusy,
@@ -301,6 +302,7 @@ def create_app(
     internal_settings = internal_settings or Settings.from_environment()
     store = store or PublicStore(public_settings.database_url)
     provider_http = ProviderHTTPPool()
+    async_store = AsyncPublicStore(store)
     chat_service = chat_service or PublicChatService(
         internal_settings,
         public_settings,
@@ -340,13 +342,48 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         if store.engine is not None and public_settings.auto_create_schema:
-            store.create_schema()
-            store.cleanup()
+            await async_store.call("create_schema")
+            await async_store.call("cleanup")
+        async def renew_owned_leases() -> None:
+            while True:
+                await asyncio.sleep(10)
+                try:
+                    live_requests = tuple(
+                        request_id for request_id, task in active_request_leases.items() if not task.done()
+                    )
+                    await async_store.call("renew_leases", async_store.owner_token, live_requests)
+                except PublicStoreUnavailable:
+                    LOGGER.warning("public_lease_renewal_unavailable")
+        renewal = asyncio.create_task(renew_owned_leases(), name="public-request-leases")
         try:
             yield
         finally:
-            chat_service.close()
-            await provider_http.close()
+            app.state.draining = True
+            pending = [task for task in chat_jobs.values() if not task.done()]
+            if pending:
+                # Threads performing model calls cannot be canceled safely. Give
+                # accepted jobs time to durably record a result before closing.
+                _, unfinished = await asyncio.wait(pending, timeout=300)
+                if unfinished:
+                    LOGGER.warning("public_shutdown_unfinished", extra={"count": len(unfinished)})
+                    try:
+                        await async_store.call("interrupt_owned_requests", async_store.owner_token)
+                    except PublicStoreUnavailable:
+                        # Expiring ownership also fences these jobs after a DB
+                        # outage; cleanup must still proceed while it is down.
+                        LOGGER.warning("public_shutdown_store_unavailable")
+                    for task in unfinished:
+                        task.cancel()
+                    await asyncio.gather(*unfinished, return_exceptions=True)
+            renewal.cancel()
+            await asyncio.gather(renewal, return_exceptions=True)
+            try:
+                await asyncio.to_thread(chat_service.close)
+            finally:
+                try:
+                    await provider_http.close()
+                finally:
+                    await async_store.close()
 
     app = FastAPI(
         title="Project Snow Public Immersive API",
@@ -360,32 +397,111 @@ def create_app(
     app.state.public_store = store
     app.state.chat_service = chat_service
     app.state.provider_http = provider_http
+    app.state.async_store = async_store
+    app.state.draining = False
     chat_jobs: dict[str, asyncio.Task[dict[str, Any]]] = {}
+    active_request_leases: dict[str, asyncio.Task[Any]] = {}
     active_subject_requests: dict[str, str] = {}
+    active_subject_tasks: dict[str, asyncio.Task[Any]] = {}
+    background_summaries: dict[str, dict[str, Any]] = {}
     active_subject_lock = asyncio.Lock()
     app.state.chat_jobs = chat_jobs
+    app.state.active_request_leases = active_request_leases
     app.state.active_subject_requests = active_subject_requests
+
+    async def claim_owned_request(request_id: str, subject: str, request_hash: str):
+        result = await async_store.call("claim_request", request_id, subject, request_hash)
+        if result[0] == "claimed":
+            task = asyncio.current_task()
+            assert task is not None
+            active_request_leases[request_id] = task
+            if active_subject_requests.get(subject) == request_id:
+                # A pre-generation release may finish in the DB before its
+                # old coroutine resumes. A same-UUID reclaim owns a new task.
+                active_subject_tasks[subject] = task
+
+            def forget_lease(completed):
+                if active_request_leases.get(request_id) is completed:
+                    active_request_leases.pop(request_id, None)
+                if (
+                    active_subject_requests.get(subject) == request_id
+                    and active_subject_tasks.get(subject) is completed
+                ):
+                    active_subject_requests.pop(subject, None)
+                    active_subject_tasks.pop(subject, None)
+
+            # Covers cancellation between admission steps as well as ordinary
+            # completion. Chat transfers ownership to its detached durable job.
+            task.add_done_callback(forget_lease)
+        return result
+
+    async def complete_owned_request(request_id: str, result: dict[str, Any]) -> None:
+        task = asyncio.current_task()
+        try:
+            await async_store.call("complete_request", request_id, result)
+        finally:
+            # A failed/canceled write has an uncertain outcome. Do not keep its
+            # lease alive after the task stops; recovery will fence it safely.
+            if active_request_leases.get(request_id) is task:
+                active_request_leases.pop(request_id, None)
+
+    async def release_owned_request(request_id: str) -> None:
+        task = asyncio.current_task()
+        try:
+            await async_store.call("release_request", request_id)
+        finally:
+            if active_request_leases.get(request_id) is task:
+                active_request_leases.pop(request_id, None)
 
     async def acquire_subject_generation(subject: str, operation_id: str) -> bool:
         """Reserve the subject unless this is a reconnect to the same operation."""
 
+        if app.state.draining:
+            raise HTTPException(status_code=503, detail={"code": "service_draining"}, headers={"Retry-After": "5"})
         async with active_subject_lock:
             owner = active_subject_requests.get(subject)
             if owner and owner != operation_id:
-                raise HTTPException(
-                    status_code=429,
-                    detail={"code": "subject_generation_busy"},
-                    headers={"Retry-After": "2"},
-                )
+                summary = background_summaries.get(subject)
+                if summary and summary["operation_id"] == owner and not operation_id.startswith("chat-summary:"):
+                    # Foreground actions take priority even if the old browser
+                    # disconnect has not yet reached the summary route.
+                    summary["cancel"].set()
+                    if summary["task"] is not None:
+                        summary["task"].cancel()
+                else:
+                    raise HTTPException(
+                        status_code=429,
+                        detail={"code": "subject_generation_busy"},
+                        headers={"Retry-After": "2"},
+                    )
             if owner == operation_id:
                 return False
             active_subject_requests[subject] = operation_id
+            task = asyncio.current_task()
+            assert task is not None
+            active_subject_tasks[subject] = task
+
+            def forget_subject(completed):
+                if (
+                    active_subject_requests.get(subject) == operation_id
+                    and active_subject_tasks.get(subject) is completed
+                ):
+                    active_subject_requests.pop(subject, None)
+                    active_subject_tasks.pop(subject, None)
+
+            # Admission can be canceled while a shielded DB claim is still
+            # finishing. The later lease expires, but the subject must unlock.
+            task.add_done_callback(forget_subject)
             return True
 
     async def release_subject_generation(subject: str, operation_id: str) -> None:
         async with active_subject_lock:
-            if active_subject_requests.get(subject) == operation_id:
+            if (
+                active_subject_requests.get(subject) == operation_id
+                and active_subject_tasks.get(subject) is asyncio.current_task()
+            ):
                 active_subject_requests.pop(subject, None)
+                active_subject_tasks.pop(subject, None)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(public_settings.allowed_origins),
@@ -450,7 +566,9 @@ def create_app(
             else:
                 ip_limits = [("write_ip_hour", "hour", 240), ("write_ip_day", "day", 1000)]
             try:
-                store.consume_limits(ip_subject, ip_limits)
+                await async_store.call("consume_limits", ip_subject, ip_limits)
+            except PublicStoreUnavailable:
+                return JSONResponse(status_code=503, content={"detail": {"code": "public_database_unavailable"}})
             except RateLimitExceeded as exc:
                 return JSONResponse(
                     status_code=429,
@@ -490,6 +608,25 @@ def create_app(
             status_code=503,
             content={"detail": {"code": "public_database_unavailable"}},
         )
+
+    @app.get("/public/v1/build-info")
+    def build_info() -> dict[str, Any]:
+        revision = os.getenv("APP_REVISION", os.getenv("GIT_SHA", "")).strip()
+        build_time = os.getenv("APP_BUILD_TIME", "").strip()
+        try:
+            if len(build_time) > 64 or datetime.fromisoformat(build_time.replace("Z", "+00:00")).tzinfo is None:
+                build_time = ""
+        except ValueError:
+            build_time = ""
+        return {
+            "app_version": public_settings.app_version,
+            "data_version": public_settings.data_version,
+            "revision": revision if 7 <= len(revision) <= 64 and all(c in "0123456789abcdef" for c in revision.lower()) else None,
+            "build_time": build_time or None,
+            "api_schema": "public-v1",
+            "state_schema": "public-state-2",
+            "generation_limits": {"active": 4, "queued": 8, "max_provider_calls": public_settings.max_provider_calls_per_action},
+        }
 
     @app.get("/public/v1/config")
     def config() -> dict[str, Any]:
@@ -545,6 +682,9 @@ def create_app(
                 "renewal": "none",
             },
             "movement_catalog": chat_service.movement_catalog(),
+            # The generalized stage adapter stays off until an approved,
+            # immutable 22-character release is supplied.
+            "stage_release": {"enabled": False, "manifest_url": None, "sha256": None},
             "feature_flags": {
                 "joint_movement": True,
                 "rendezvous_actions": True,
@@ -657,11 +797,11 @@ def create_app(
         ):
             raise _error("byok_notices_required", 422)
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
-        store.consume_limits(
+        await async_store.call("consume_limits",
             request.state.subject_hash,
             [("byok_session_hour", "hour", 10), ("byok_session_day", "day", 30)],
         )
-        verification_required = store.verification_required(request.state.subject_hash, "byok")
+        verification_required = await async_store.call("verification_required", request.state.subject_hash, "byok")
         if verification_required:
             verified = await verify_turnstile(
                 public_settings,
@@ -671,7 +811,7 @@ def create_app(
             )
             if not verified:
                 raise _error("turnstile_required", 403)
-            store.mark_verified(request.state.subject_hash, "byok")
+            await async_store.call("mark_verified", request.state.subject_hash, "byok")
         credential, expires_at = issue_byok_credential(
             public_settings,
             anonymous_id=request.state.anonymous_id,
@@ -695,7 +835,7 @@ def create_app(
             token=payload.credential,
             expected_provider=spec.provider_id,
         )
-        store.consume_limits(request.state.subject_hash, [("model_discovery_hour", "hour", 20)])
+        await async_store.call("consume_limits", request.state.subject_hash, [("model_discovery_hour", "hour", 20)])
         try:
             discovered = await discover_models(
                 spec,
@@ -720,12 +860,13 @@ def create_app(
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
         try:
-            claim_status, cached = store.claim_request(
+            claim_status, cached = await claim_owned_request(
                 cache_id,
                 subject,
                 _request_hash(request_body),
             )
             request_claimed = claim_status == "claimed"
+            owns_subject = owns_subject or request_claimed
             if claim_status == "conflict":
                 raise _error("request_id_conflict", 409)
             if claim_status == "processing":
@@ -733,19 +874,19 @@ def create_app(
             if claim_status == "completed" and cached is not None:
                 return {**cached, "idempotent_replay": True}
             result = chat_service.transition_presence(payload, subject)
-            store.complete_request(cache_id, result)
+            await complete_owned_request(cache_id, result)
             return result
         except PublicSecurityError:
             if request_claimed:
-                store.release_request(cache_id)
+                await release_owned_request(cache_id)
             raise
         except ValueError as exc:
             if request_claimed:
-                store.release_request(cache_id)
+                await release_owned_request(cache_id)
             raise _error("invalid_presence_transition", 422) from exc
         except Exception:
             if request_claimed:
-                store.release_request(cache_id)
+                await release_owned_request(cache_id)
             raise
         finally:
             if owns_subject:
@@ -765,13 +906,16 @@ def create_app(
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
+        generation_started = False
+        prepared: dict[str, Any] = {}
         try:
-            claim_status, cached = store.claim_request(
+            claim_status, cached = await claim_owned_request(
                 cache_id,
                 subject,
                 _request_hash(request_body),
             )
             request_claimed = claim_status == "claimed"
+            owns_subject = owns_subject or request_claimed
             if claim_status == "conflict":
                 raise _error("request_id_conflict", 409)
             if claim_status == "processing":
@@ -786,7 +930,7 @@ def create_app(
                 result = {key: value for key, value in prepared.items() if key != "state"}
             else:
                 try:
-                    store.consume_limits(
+                    await async_store.call("consume_limits",
                         request.state.subject_hash,
                         [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
                     )
@@ -800,26 +944,40 @@ def create_app(
                     # Let GenerationBusy reach the shared 429 handler while
                     # no response body has started, so every model-backed
                     # endpoint carries the same Retry-After contract.
-                    result = await chat_service.finish_presence_arrival(
-                        prepared,
-                        payload,
-                        subject,
-                        spec,
-                        str(claims["api_key"]),
-                    )
-            store.complete_request(cache_id, result)
+                    generation_started = True
+                    try:
+                        result = await chat_service.finish_presence_arrival(
+                            prepared,
+                            payload,
+                            subject,
+                            spec,
+                            str(claims["api_key"]),
+                        )
+                    except GenerationBusy:
+                        # The gate rejects before starting the provider thread.
+                        generation_started = False
+                        raise
+            await complete_owned_request(cache_id, result)
             return result
-        except PublicSecurityError:
+        except (Exception, asyncio.CancelledError) as exc:
             if request_claimed:
-                store.release_request(cache_id)
-            raise
-        except ValueError as exc:
-            if request_claimed:
-                store.release_request(cache_id)
-            raise _error("invalid_presence_request", 422) from exc
-        except Exception:
-            if request_claimed:
-                store.release_request(cache_id)
+                if generation_started:
+                    # Provider work may already have been charged, including
+                    # when response validation or the final cache write fails.
+                    # Never delete this claim and permit the same UUID to pay
+                    # again. If this terminal write also fails, stop renewing
+                    # and let the existing lease expire into an interruption.
+                    interrupted = PublicChatService.failed_presence_arrival(
+                        prepared, "generation_interrupted", model_called=True,
+                    )
+                    try:
+                        await complete_owned_request(cache_id, interrupted)
+                    except PublicStoreUnavailable:
+                        LOGGER.warning("public_arrival_terminal_write_unavailable")
+                else:
+                    await release_owned_request(cache_id)
+            if isinstance(exc, ValueError) and not isinstance(exc, PublicSecurityError):
+                raise _error("invalid_presence_request", 422) from exc
             raise
         finally:
             if owns_subject:
@@ -858,7 +1016,7 @@ def create_app(
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, request_id)
         try:
-            claim_status, cached = store.claim_request(
+            claim_status, cached = await claim_owned_request(
                 request_id,
                 subject,
                 _request_hash(request_body),
@@ -867,6 +1025,7 @@ def create_app(
             if owns_subject:
                 await release_subject_generation(subject, request_id)
             raise
+        owns_subject = owns_subject or claim_status == "claimed"
         if claim_status == "conflict":
             if owns_subject:
                 await release_subject_generation(subject, request_id)
@@ -890,12 +1049,12 @@ def create_app(
                 raise _error("request_in_progress", 409)
         else:
             try:
-                store.consume_limits(
+                await async_store.call("consume_limits",
                     request.state.subject_hash,
                     [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
                 )
             except Exception:
-                store.release_request(request_id)
+                await release_owned_request(request_id)
                 await release_subject_generation(subject, request_id)
                 raise
 
@@ -910,7 +1069,7 @@ def create_app(
                     # queue saturation can carry an HTTP Retry-After header.
                     # A client disconnect while waiting must also release the
                     # durable claim and per-subject owner.
-                    store.release_request(request_id)
+                    await release_owned_request(request_id)
                     await release_subject_generation(subject, request_id)
                     raise
 
@@ -996,7 +1155,7 @@ def create_app(
                         "diagnostics": {"error_stage": "generation"},
                     }
                 try:
-                    store.complete_request(request_id, generated)
+                    await complete_owned_request(request_id, generated)
                 except PublicStoreUnavailable as exc:
                     exception_type = type(exc).__name__
                     terminal_stage = "idempotency_store"
@@ -1061,15 +1220,23 @@ def create_app(
             except Exception:
                 if generation_reserved:
                     chat_service.gate.release()
-                store.release_request(request_id)
+                await release_owned_request(request_id)
                 await release_subject_generation(subject, request_id)
                 raise
             chat_jobs[request_id] = job
+            active_request_leases[request_id] = job
+            active_subject_tasks[subject] = job
 
             def forget_job(completed: asyncio.Task[dict[str, Any]]) -> None:
                 chat_jobs.pop(request_id, None)
-                if active_subject_requests.get(subject) == request_id:
+                if active_request_leases.get(request_id) is completed:
+                    active_request_leases.pop(request_id, None)
+                if (
+                    active_subject_requests.get(subject) == request_id
+                    and active_subject_tasks.get(subject) is completed
+                ):
                     active_subject_requests.pop(subject, None)
+                    active_subject_tasks.pop(subject, None)
                 # Retrieve a possible storage failure so a disconnected SSE
                 # client cannot leave an unobserved task exception behind.
                 if not completed.cancelled():
@@ -1106,7 +1273,7 @@ def create_app(
                     "error",
                     {
                         "code": terminal_error,
-                        "retryable": True,
+                        "retryable": terminal_error != "generation_interrupted",
                         "idempotent_replay": idempotent_replay,
                         **(
                             {"retry_after_seconds": 2}
@@ -1204,7 +1371,7 @@ def create_app(
                 else 0
             )
             safe_usage["provider_calls"] = (
-                min(public_settings.max_provider_calls_per_action, provider_calls)
+                provider_calls
                 if isinstance(provider_calls, int)
                 and not isinstance(provider_calls, bool)
                 and provider_calls >= 0
@@ -1265,35 +1432,71 @@ def create_app(
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
+        summary_control = None
+        if owns_subject:
+            summary_control = {"operation_id": cache_id, "cancel": asyncio.Event(), "task": None}
+            background_summaries[subject] = summary_control
         try:
-            claim_status, cached = store.claim_request(
+            claim_status, cached = await claim_owned_request(
                 cache_id,
                 subject,
                 _request_hash(request_body),
             )
             request_claimed = claim_status == "claimed"
+            owns_subject = owns_subject or request_claimed
             if claim_status == "conflict":
                 raise _error("request_id_conflict", 409)
             if claim_status == "processing":
                 raise _error("request_in_progress", 409)
             if claim_status == "completed" and cached is not None:
+                if cached.get("terminal_error"):
+                    raise _error(str(cached["terminal_error"]), 409)
                 return {**cached, "idempotent_replay": True}
             # Summaries are extra model calls and therefore consume the same
             # daily 200-call budget as chat, but deliberately do not touch the
             # hourly 50-round bucket.
-            store.consume_limits(subject, [("chat_day", "day", 200)])
-            result = await chat_service.summarize(payload, spec, str(claims["api_key"]))
-            store.complete_request(cache_id, result)
+            await async_store.call("consume_limits", subject, [("chat_day", "day", 200)])
+            generation = asyncio.create_task(chat_service.summarize(payload, spec, str(claims["api_key"])))
+            if summary_control is not None:
+                summary_control["task"] = generation
+            started = time.monotonic()
+            try:
+                while not generation.done():
+                    if (
+                        (summary_control is not None and summary_control["cancel"].is_set())
+                        or await request.is_disconnected()
+                        or time.monotonic() - started >= 60
+                    ):
+                        generation.cancel()
+                        await asyncio.gather(generation, return_exceptions=True)
+                        request_claimed = False
+                        await complete_owned_request(cache_id, {"terminal_error": "generation_interrupted"})
+                        raise _error("generation_interrupted", 409)
+                    await asyncio.wait({generation}, timeout=0.25)
+                result = await generation
+            except BaseException as exc:
+                generation.cancel()
+                await asyncio.gather(generation, return_exceptions=True)
+                if request_claimed:
+                    request_claimed = False
+                    await complete_owned_request(cache_id, {"terminal_error": "generation_interrupted"})
+                if isinstance(exc, asyncio.CancelledError) and not asyncio.current_task().cancelling():
+                    raise _error("generation_interrupted", 409) from exc
+                raise
+            request_claimed = False
+            await complete_owned_request(cache_id, result)
             return {**result, "idempotent_replay": False}
         except ProviderRequestError as exc:
             if request_claimed:
-                store.release_request(cache_id)
+                await release_owned_request(cache_id)
             raise _error(exc.code, exc.status_code) from exc
         except Exception:
             if request_claimed:
-                store.release_request(cache_id)
+                await release_owned_request(cache_id)
             raise
         finally:
+            if summary_control is not None and background_summaries.get(subject) is summary_control:
+                background_summaries.pop(subject, None)
             if owns_subject:
                 await release_subject_generation(subject, cache_id)
 
@@ -1303,9 +1506,9 @@ def create_app(
         if not body:
             raise _error("feedback_empty", 422)
         ip_fingerprint = daily_ip_fingerprint(public_settings, _client_ip(request))
-        risk = store.record_feedback_attempt(request.state.subject_hash, ip_fingerprint)
+        risk = await async_store.call("record_feedback_attempt", request.state.subject_hash, ip_fingerprint)
         needs_turnstile = (
-            store.verification_required(request.state.subject_hash, "feedback")
+            await async_store.call("verification_required", request.state.subject_hash, "feedback")
             or risk["subject_attempts"] > 3
             or risk["ip_identities"] > 3
         )
@@ -1318,8 +1521,8 @@ def create_app(
             )
             if not verified:
                 raise _error("turnstile_required", 403)
-            store.mark_verified(request.state.subject_hash, "feedback")
-        store.consume_limits(
+            await async_store.call("mark_verified", request.state.subject_hash, "feedback")
+        await async_store.call("consume_limits",
             request.state.subject_hash,
             [("feedback_hour", "hour", 10), ("feedback_day", "day", 30)],
         )
@@ -1361,7 +1564,7 @@ def create_app(
             "ui_surface": redact_sensitive_text(payload.ui_surface, 80),
         }
         if payload.chat_request_id:
-            chat_result = store.request_result(
+            chat_result = await async_store.call("request_result",
                 str(payload.chat_request_id), request.state.subject_hash
             )
             context["chat_request_id"] = str(payload.chat_request_id)
@@ -1371,7 +1574,7 @@ def create_app(
                 context["response_adjustments"] = chat_result.get("response_adjustments") or []
                 context["chat_error_code"] = chat_result.get("terminal_error") or ""
         try:
-            public_code = store.insert_feedback(
+            public_code = await async_store.call("insert_feedback",
                 subject_hash=request.state.subject_hash,
                 ip_fingerprint=ip_fingerprint,
                 body_text=body,
@@ -1394,9 +1597,9 @@ def create_app(
         return {"status": "ok", "version": public_settings.app_version}
 
     @app.get("/public/v1/health/ready")
-    def ready(response: Response) -> dict[str, Any]:
+    async def ready(response: Response) -> dict[str, Any]:
         missing = public_settings.missing_production_secrets()
-        database_ok = store.health()
+        database_ok = await async_store.call("schema_ready")
         data_status = chat_service.repository.status()
         manifest_version = ""
         try:
@@ -1426,6 +1629,7 @@ def create_app(
         knowledge_ok = knowledge_review is not None
         ready_ok = (
             database_ok
+            and not app.state.draining
             and data_ok
             and media_ok
             and stickers_ok
@@ -1448,9 +1652,9 @@ def create_app(
         }
 
     @app.get("/public/v1/health/full")
-    def full(response: Response) -> dict[str, Any]:
-        dependencies = chat_service.repository.dependency_health()
-        database_ok = store.health()
+    async def full(response: Response) -> dict[str, Any]:
+        dependencies = await asyncio.to_thread(chat_service.repository.dependency_health)
+        database_ok = await async_store.call("health")
         media = chat_service.media.verify()
         stickers_status = chat_service.stickers.verify()
         degraded = sorted(service for service, service_status in dependencies.items() if service_status != "ok")
@@ -1470,7 +1674,9 @@ def create_app(
             "media": media,
             "sticker_version": public_settings.sticker_version,
             "stickers": stickers_status,
-            "feedback_email": store.feedback_email_status() if database_ok else {},
+            "feedback_email": await async_store.call("feedback_email_status") if database_ok else {},
+            "generation_queue": chat_service.gate.snapshot(),
+            "draining": app.state.draining,
         }
 
     @app.exception_handler(PublicSecurityError)
@@ -1558,6 +1764,7 @@ app = create_app()
 
 if __name__ == "__main__":
     import os
+
     import uvicorn
 
     uvicorn.run(

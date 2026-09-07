@@ -31,7 +31,8 @@ import httpx
 
 from backend.snow_app.repository import _review_group_id
 
-from .common import RUNTIME_ROOT, load_runtime_jsonl, stable_id, utc_now, write_json, write_jsonl
+from .common import RUNTIME_ROOT, load_runtime_jsonl, stable_id, utc_now, write_json
+from .review_state import append_review_reports
 from .extract_relation_candidates import (
     ProviderCallFailure,
     _compact_text,
@@ -778,7 +779,7 @@ def review(
     def checkpoint(result: dict[str, Any]) -> None:
         nonlocal processed, failed, retry_count
         reports.append(result)
-        write_jsonl(reports_path, reports)
+        append_review_reports(reports_path, [result])
         processed += 1
         verdict_counts[str(result.get("verdict") or "unknown")] += 1
         retry_count += int(result.get("retry_count") or 0)

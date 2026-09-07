@@ -1,10 +1,11 @@
 param(
     [Parameter(Mandatory = $true)][string]$ManifestPath,
+    [Parameter(Mandatory = $true)][string]$ProofPath,
     [ValidateSet('blue','green')][string]$Colour = 'green',
     [string]$DataReleasePath = '',
     [string]$AvatarReleasePath = '',
     [string]$StickerReleasePath = '',
-    [Parameter(Mandatory = $true)][string]$OriginPrivateKeyPath,
+    [string]$OriginPrivateKeyPath = '',
     [string]$HostName = 'project-snow-prod',
     [int]$Port = 43556,
     [string]$IdentityFile = "$env:USERPROFILE\.ssh\project_snow_prod_ed25519",
@@ -22,6 +23,16 @@ $resolvedManifest = (Resolve-Path -LiteralPath $ManifestPath).Path
 $manifest = Get-Content -Raw -LiteralPath $resolvedManifest | ConvertFrom-Json
 if ($manifest.schema_version -ne 'project-snow-release-1') { throw 'Unsupported release manifest schema.' }
 $Sha = [string]$manifest.commit_sha
+$resolvedProof = (Resolve-Path -LiteralPath $ProofPath).Path
+$proofItem = Get-Item -Force -LiteralPath $resolvedProof
+if ($proofItem.PSIsContainer -or -not [string]::IsNullOrEmpty([string]$proofItem.LinkType) -or $proofItem.Length -gt 131072) {
+    throw 'Release proof must be a bounded regular JSON file.'
+}
+$proof = Get-Content -Raw -LiteralPath $resolvedProof | ConvertFrom-Json
+$manifestHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedManifest).Hash.ToLowerInvariant()
+if ($proof.schema_version -ne 'project-snow-release-proof-1' -or [string]$proof.commit_sha -ne $Sha -or [string]$proof.manifest_sha256 -ne $manifestHash) {
+    throw 'Release proof does not bind this exact manifest and SHA.'
+}
 $AppDigest = [string]$manifest.application.digest
 $EmbeddingDigest = [string]$manifest.embedding.digest
 $MediaVersion = [string]$manifest.media_version
@@ -76,17 +87,21 @@ foreach ($tlsHashName in @('bundle_sha256', 'origin_certificate_sha256', 'aop_ca
         throw "Release manifest has an invalid direct-origin TLS hash: $tlsHashName."
     }
 }
-$resolvedOriginPrivateKey = (Resolve-Path -LiteralPath $OriginPrivateKeyPath).Path
-$originPrivateKeyItem = Get-Item -Force -LiteralPath $resolvedOriginPrivateKey
-if ($originPrivateKeyItem.PSIsContainer -or -not [string]::IsNullOrEmpty([string]$originPrivateKeyItem.LinkType)) {
-    throw 'Origin private key must be one local regular file, not a directory or link.'
-}
-if ($originPrivateKeyItem.Length -lt 80 -or $originPrivateKeyItem.Length -gt 65536) {
-    throw 'Origin private key size is outside the accepted range.'
-}
-$originPrivateKeySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedOriginPrivateKey).Hash.ToLowerInvariant()
-if ($originPrivateKeySha256 -notmatch '^[0-9a-f]{64}$') {
-    throw 'Origin private key has no valid exact SHA256.'
+$resolvedOriginPrivateKey = ''
+$originPrivateKeySha256 = ''
+if ($OriginPrivateKeyPath) {
+    $resolvedOriginPrivateKey = (Resolve-Path -LiteralPath $OriginPrivateKeyPath).Path
+    $originPrivateKeyItem = Get-Item -Force -LiteralPath $resolvedOriginPrivateKey
+    if ($originPrivateKeyItem.PSIsContainer -or -not [string]::IsNullOrEmpty([string]$originPrivateKeyItem.LinkType)) {
+        throw 'Origin private key must be one local regular file, not a directory or link.'
+    }
+    if ($originPrivateKeyItem.Length -lt 80 -or $originPrivateKeyItem.Length -gt 65536) {
+        throw 'Origin private key size is outside the accepted range.'
+    }
+    $originPrivateKeySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedOriginPrivateKey).Hash.ToLowerInvariant()
+    if ($originPrivateKeySha256 -notmatch '^[0-9a-f]{64}$') {
+        throw 'Origin private key has no valid exact SHA256.'
+    }
 }
 $statusArgs = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName", 'sudo -n /usr/local/sbin/project-snow-release status')
 $statusOutput = & ssh @statusArgs
@@ -169,16 +184,25 @@ foreach ($releaseSpec in $releaseSpecs) {
 }
 $originPrivateKeyRemotePath = "/srv/project-snow/inbox/origin-key-$Sha-$originPrivateKeySha256.pem"
 $originKeySshBase = @('-F', $configPath, '-i', $resolvedIdentity, '-p', [string]$Port, "deploy@$HostName")
-$originKeyScpArgs = @('-q', '-F', $configPath, '-i', $resolvedIdentity, '-P', [string]$Port, $resolvedOriginPrivateKey, "deploy@${HostName}:$originPrivateKeyRemotePath")
-$originKeyCleanupRequired = $true
+$originKeyCleanupRequired = $false
 try {
-    & ssh @originKeySshBase "rm -f -- '$originPrivateKeyRemotePath'"
-    if ($LASTEXITCODE -ne 0) { throw 'Could not clear the fixed origin-key inbox coordinate.' }
-    & scp @originKeyScpArgs
-    if ($LASTEXITCODE -ne 0) { throw 'Origin private key upload failed.' }
-    & ssh @originKeySshBase "chmod 0600 -- '$originPrivateKeyRemotePath'"
-    if ($LASTEXITCODE -ne 0) { throw 'Origin private key inbox mode could not be restricted.' }
+    if ($resolvedOriginPrivateKey) {
+        $originKeyCleanupRequired = $true
+        $originKeyScpArgs = @('-q', '-F', $configPath, '-i', $resolvedIdentity, '-P', [string]$Port, $resolvedOriginPrivateKey, "deploy@${HostName}:$originPrivateKeyRemotePath")
+        & ssh @originKeySshBase "rm -f -- '$originPrivateKeyRemotePath'"
+        if ($LASTEXITCODE -ne 0) { throw 'Could not clear the fixed origin-key inbox coordinate.' }
+        & scp @originKeyScpArgs
+        if ($LASTEXITCODE -ne 0) { throw 'Origin private key upload failed.' }
+        & ssh @originKeySshBase "chmod 0600 -- '$originPrivateKeyRemotePath'"
+        if ($LASTEXITCODE -ne 0) { throw 'Origin private key inbox mode could not be restricted.' }
+    } else {
+        Write-Host 'Reusing the verified installed TLS bundle; a new bundle requires the separate key-provisioning input.'
+    }
 
+    $proofRemotePath = "/srv/project-snow/inbox/release-$Sha.proof.json"
+    $proofScpArgs = @('-q', '-F', $configPath, '-i', $resolvedIdentity, '-P', [string]$Port, $resolvedProof, "deploy@${HostName}:$proofRemotePath")
+    & scp @proofScpArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Release proof upload failed.' }
     $manifestRemotePath = "/srv/project-snow/inbox/release-$Sha.json"
     $scpArgs = @('-q', '-F', $configPath, '-i', $resolvedIdentity, '-P', [string]$Port, $resolvedManifest, "deploy@${HostName}:$manifestRemotePath")
     & scp @scpArgs

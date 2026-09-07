@@ -16,6 +16,7 @@ x-logging: &bounded-logging
 x-api: &api
   image: ${PUBLIC_API_IMAGE:?Set immutable PUBLIC_API_IMAGE digest}
   restart: unless-stopped
+  stop_grace_period: 6m
   env_file: ${PUBLIC_ENV_FILE:-/etc/project-snow/public.env}
   environment:
     # Every colour is pinned to one verified immutable data release. Never
@@ -99,6 +100,8 @@ services:
       - /run/project-snow-secrets:rw,noexec,nosuid,size=1m,mode=0700
     security_opt: ["no-new-privileges:true"]
     pids_limit: 64
+    cpus: 0.5
+    mem_limit: 384m
     logging: *bounded-logging
     ports:
       - "127.0.0.1:19090:19090"
@@ -131,6 +134,8 @@ services:
       - /run/project-snow-secrets:rw,noexec,nosuid,size=1m,mode=0700
     security_opt: ["no-new-privileges:true"]
     pids_limit: 64
+    cpus: 0.5
+    mem_limit: 256m
     logging: *bounded-logging
     depends_on:
       postgres:
@@ -140,10 +145,9 @@ services:
   caddy:
     image: ${CADDY_IMAGE:?Set immutable CADDY_IMAGE digest}
     restart: unless-stopped
-    environment:
-      SNOW_UPSTREAM: ${SNOW_UPSTREAM:-public-api-blue:8000}
     volumes:
       - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /srv/project-snow/runtime/routing:/etc/project-snow-routing:ro
     expose: ["8080"]
     cpus: 0.5
     mem_limit: 256m

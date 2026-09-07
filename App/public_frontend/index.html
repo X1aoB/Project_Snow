@@ -5,17 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="same-origin" />
     <meta name="color-scheme" content="light" />
-    <title>Project Snow · 沉浸式体验</title>
+    <title>小吉终端 · 沉浸式体验</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/shared/brand/xiaoji-icon-32.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/shared/brand/xiaoji-icon-192.png" />
     <link rel="stylesheet" href="/shared/immersive.css?v=0.9.2" />
-    <link rel="stylesheet" href="/app.css?v=0.9.6" />
+    <link rel="stylesheet" href="/app.css?v=0.10.0-rc.1" />
   </head>
   <body>
     <div id="chat-app" class="app-shell" data-channel="text">
       <aside id="contact-panel" class="contact-panel" aria-label="角色会话">
         <header class="product-header">
           <a class="brand-lockup" href="https://xiaob.dev/projects/project-snow/" rel="noreferrer">
-            <span class="brand-mark" aria-hidden="true">S</span>
-            <span><strong>Project Snow</strong><small id="version-badge">0.9.6</small></span>
+            <img class="brand-mark" src="/shared/brand/xiaoji-icon.png" alt="" aria-hidden="true" />
+            <span><strong>小吉终端</strong><small id="version-badge">0.10.0-rc.1</small></span>
           </a>
           <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
         </header>
@@ -95,13 +97,15 @@
           </div>
           <section id="stage-dialogue" class="stage-dialogue" aria-label="角色对白">
             <div class="stage-dialogue-copy">
-              <div class="stage-speaker-line"><strong id="stage-speaker">Project Snow</strong><span>面对面</span></div>
+              <div class="stage-speaker-line"><strong id="stage-speaker">小吉终端</strong><span>面对面</span></div>
               <div id="stage-speech" class="stage-speech"><p>选择一位角色，开始一段面对面的对话。</p></div>
               <div id="stage-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
             </div>
           </section>
         </section>
 
+        <div id="tab-session-banner" class="system-banner maintenance-banner" role="status" hidden><span>此页面仅供浏览，另一个标签页正在保存对话。</span><button id="take-over-session" class="secondary-button" type="button">在此标签页继续</button></div>
+        <div id="build-update-banner" class="system-banner maintenance-banner" role="status" hidden><span id="build-update-copy">新版本已就绪，草稿会在更新前保存。</span><button id="apply-build-update" class="secondary-button" type="button">保存并更新</button><button id="dismiss-build-update" class="icon-button" type="button" aria-label="稍后更新">×</button></div>
         <div id="system-banner" class="system-banner" role="status" hidden></div>
         <form id="composer" class="composer" autocomplete="off">
           <div class="request-status-row" hidden>
@@ -145,7 +149,7 @@
     </div>
 
     <dialog id="announcements-dialog" class="modal announcements-modal" aria-labelledby="announcements-title" aria-describedby="announcements-date">
-      <header class="announcements-header"><div><span class="panel-kicker">PROJECT SNOW · 消息</span><h2 id="announcements-title">公告与生日</h2><p id="announcements-date" class="announcements-date"></p></div><button class="icon-button" type="button" data-close-dialog="announcements-dialog" aria-label="关闭公告">×</button></header>
+      <header class="announcements-header"><div><span class="panel-kicker">小吉终端 · 消息</span><h2 id="announcements-title">公告与生日</h2><p id="announcements-date" class="announcements-date"></p></div><button class="icon-button" type="button" data-close-dialog="announcements-dialog" aria-label="关闭公告">×</button></header>
       <div class="announcement-tabs" role="tablist" aria-label="公告分类">
         <button id="announcement-tab-updates" type="button" role="tab" aria-selected="true" aria-controls="announcement-panel-updates" data-announcement-tab="updates">更新公告<span id="announcement-update-badge" class="announcement-tab-badge" hidden>新</span></button>
         <button id="announcement-tab-birthdays" type="button" role="tab" aria-selected="false" aria-controls="announcement-panel-birthdays" tabindex="-1" data-announcement-tab="birthdays">生日提醒<span id="announcement-birthday-badge" class="announcement-tab-badge" hidden></span></button>
@@ -223,8 +227,8 @@
     </dialog>
 
     <dialog id="settings-dialog" class="modal settings-modal">
-      <form method="dialog"><header><div><span class="panel-kicker">Project Snow</span><h2>体验设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog">×</button></header><nav class="settings-tabs"><button type="button" class="active" data-settings-tab="models">模型</button><button type="button" data-settings-tab="history">记录</button><button type="button" data-settings-tab="about">关于</button></nav>
-        <section class="settings-section" data-settings-panel="models">
+      <form method="dialog"><header><div><span class="panel-kicker">小吉终端</span><h2>体验设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog">×</button></header><nav class="settings-tabs" role="tablist" aria-label="设置分类"><button type="button" class="active" data-settings-tab="models" role="tab" id="settings-tab-models" aria-controls="settings-panel-models" aria-selected="true" tabindex="0">模型</button><button type="button" data-settings-tab="history" role="tab" id="settings-tab-history" aria-controls="settings-panel-history" aria-selected="false" tabindex="-1">记录</button><button type="button" data-settings-tab="about" role="tab" id="settings-tab-about" aria-controls="settings-panel-about" aria-selected="false" tabindex="-1">关于</button></nav>
+        <section class="settings-section" data-settings-panel="models" role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models">
           <div id="provider-doc-links" class="provider-doc-links" aria-label="模型厂商官方文档"></div>
           <p>选择你已有的模型服务。加密凭证只保存在当前标签页，最长有效 12 小时；获取模型列表后不会清除凭证。</p>
           <div class="provider-form" aria-busy="false">
@@ -243,12 +247,13 @@
             <div class="settings-actions"><button id="save-model" class="primary-button" type="button">保存本次模型会话</button><button id="clear-credential" class="danger-button" type="button">清除模型会话</button></div>
           </div>
         </section>
-        <section class="settings-section" data-settings-panel="history" hidden><p>完整历史只在当前浏览器保存。共享电脑请及时清理。</p><label>自动清理本地历史<select id="history-retention"><option value="0">永不（默认）</option><option value="30">保留 30 天</option><option value="90">保留 90 天</option></select></label><label class="setting-toggle"><span><strong>自动整理连续性</strong><small id="summary-last-updated">尚未生成摘要</small></span><input id="auto-summary-enabled" type="checkbox" checked /></label><p id="storage-usage">正在计算占用空间……</p><label>选择角色<select id="history-character"></select></label><div class="settings-actions"><button id="delete-character-history" class="secondary-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部历史</button></div></section>
-        <section class="settings-section attribution" data-settings-panel="about" hidden><p>体验说明、反馈保留规则与头像来源统一放在“隐私与素材”页面。</p><div class="source-links"><a href="/privacy/">隐私与素材</a><a id="github-link" href="https://github.com/X1aoB/Project_Snow" rel="noreferrer">Project Snow 源码</a><a id="website-github-link" href="https://github.com/X1aoB/MyWebsite" rel="noreferrer">MyWebsite 源码</a><a id="releases-link" href="https://github.com/X1aoB/Project_Snow/releases" rel="noreferrer">版本发布</a></div></section>
+        <section class="settings-section" data-settings-panel="history" role="tabpanel" id="settings-panel-history" aria-labelledby="settings-tab-history" hidden><p>完整历史只在当前浏览器保存。共享电脑请及时清理。</p><label>自动清理本地历史<select id="history-retention"><option value="0">永不（默认）</option><option value="30">保留 30 天</option><option value="90">保留 90 天</option></select></label><label class="setting-toggle"><span><strong>自动整理连续性</strong><small id="summary-last-updated">尚未生成摘要</small></span><input id="auto-summary-enabled" type="checkbox" checked /></label><p id="storage-usage">正在计算占用空间……</p><div class="settings-actions"><button id="export-history" class="secondary-button" type="button">导出本地备份</button><button id="import-history" class="secondary-button" type="button">导入并合并备份</button><input id="history-import-file" type="file" accept="application/json,.json" hidden /></div><p class="form-hint">备份包含聊天和草稿，请妥善保存；不会包含模型凭证。</p><label>选择角色<select id="history-character"></select></label><div class="settings-actions"><button id="delete-character-history" class="secondary-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部历史</button></div></section>
+        <section class="settings-section attribution" data-settings-panel="about" role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about" hidden><p>体验说明、反馈保留规则与头像来源统一放在“隐私与素材”页面。</p><div class="source-links"><a href="/privacy/">隐私与素材</a><a id="github-link" href="https://github.com/X1aoB/Project_Snow" rel="noreferrer">小吉终端 源码</a><a id="website-github-link" href="https://github.com/X1aoB/MyWebsite" rel="noreferrer">MyWebsite 源码</a><a id="releases-link" href="https://github.com/X1aoB/Project_Snow/releases" rel="noreferrer">版本发布</a></div></section>
       </form>
     </dialog>
 
+    <dialog id="history-import-dialog" class="modal" aria-labelledby="history-import-title"><header><h2 id="history-import-title">合并本地备份</h2><button class="icon-button" type="button" data-close-dialog="history-import-dialog" aria-label="取消导入">×</button></header><p id="history-import-preview"></p><p>现有消息和草稿优先保留。模型凭证与世界状态不会导入；未完成的请求需由你明确重试。</p><p id="history-import-error" role="alert"></p><div class="settings-actions"><button id="confirm-history-import" class="primary-button" type="button">确认合并</button></div></dialog>
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=0.9.6"></script>
+    <script type="module" src="/app.js?v=0.10.0-rc.1"></script>
   </body>
 </html>

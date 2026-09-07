@@ -7,17 +7,25 @@ $ErrorActionPreference = 'Stop'
 $appRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $compose = Join-Path $appRoot 'compose.yml'
 
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+if ($Action -ne 'Validate' -and -not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw 'Docker CLI is unavailable. Install/start Docker Desktop with the WSL2 backend first.'
 }
 
-switch ($Action) {
-    'Start' { docker compose -f $compose --profile dev up -d --build }
-    'Stop' { docker compose -f $compose --profile dev --profile test --profile data-lab down }
-    'ResetTest' {
-        docker compose -f $compose --profile test down -v
-        docker compose -f $compose --profile test up -d --build
+function Invoke-LocalCompose {
+    param([string[]]$ComposeArguments)
+    & docker compose -f $compose @ComposeArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Docker Compose failed with exit code $LASTEXITCODE."
     }
-    'DataLab' { docker compose -f $compose --profile data-lab up -d }
+}
+
+switch ($Action) {
+    'Start' { Invoke-LocalCompose @('--profile', 'dev', 'up', '-d', '--build') }
+    'Stop' { Invoke-LocalCompose @('--profile', 'dev', '--profile', 'test', '--profile', 'data-lab', 'down') }
+    'ResetTest' {
+        Invoke-LocalCompose @('--profile', 'test', 'down', '-v')
+        Invoke-LocalCompose @('--profile', 'test', 'up', '-d', '--build')
+    }
+    'DataLab' { Invoke-LocalCompose @('--profile', 'data-lab', 'up', '-d') }
     'Validate' { & (Join-Path $PSScriptRoot 'validate_all.ps1') }
 }

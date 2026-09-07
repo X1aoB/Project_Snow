@@ -416,6 +416,13 @@ if [ -n "$expected_sha" ] && [ "$expected_sha" != "$marker_sha" ]; then
   echo "Staged SHA $marker_sha does not match requested SHA $expected_sha." >&2
   exit 68
 fi
+# A successful stage is not a human acceptance decision. Forward promotion
+# requires an exact, unexpired receipt and current-release CAS under FD9.
+# Emergency rollback continues to use its retained local recovery identities.
+if [ "$rollback_mode" = 0 ]; then
+  python3 "$script_dir/candidate_acceptance.py" verify --lock-held \
+    --colour "$colour" --sha "$marker_sha" || exit 78
+fi
 manifest_sha="$(jq -r '.commit_sha // empty' "$colour_manifest")"
 manifest_app_version="$(jq -r '.app_version // empty' "$colour_manifest")"
 manifest_app_ref="$(jq -r '(.application.image // "") + "@" + (.application.digest // "")' "$colour_manifest")"
@@ -1930,9 +1937,30 @@ switch_edge() {
     return 1
   }
   set -- "$@" egress-proxy
-  SNOW_UPSTREAM="public-api-$edge_colour:8000" \
-    docker compose --env-file "$edge_env" -f "$edge_config_root/compose.prod.yml" --profile "$edge_colour" \
-    up -d --no-deps --force-recreate "$@" || return 1
+  edge_managed_services="$*"
+  edge_persistent_routing=0
+  if grep -F 'import /etc/project-snow-routing/upstream.caddy' "$edge_config_root/infra/Caddyfile" >/dev/null 2>&1; then
+    edge_persistent_routing=1
+    edge_route_plan="$(python3 "$(dirname "$0")/routing.py" prepare \
+      --environment "$edge_env" --configuration "$edge_config_root" --colour "$edge_colour" \
+      --services "$@")" || return 1
+    edge_recreate_services="$(printf '%s\n' "$edge_route_plan" | jq -r '.recreate[]')" || return 1
+    set -- $edge_recreate_services
+  elif [ -e "$runtime_root/routing/upstream.caddy" ] || [ -L "$runtime_root/routing/upstream.caddy" ]; then
+    python3 "$(dirname "$0")/routing.py" legacy \
+      --environment "$edge_env" --configuration "$edge_config_root" --colour "$edge_colour" \
+      --services "$@" >/dev/null || return 1
+  fi
+  if [ "$#" -gt 0 ]; then
+    SNOW_UPSTREAM="public-api-$edge_colour:8000" \
+      docker compose --env-file "$edge_env" -f "$edge_config_root/compose.prod.yml" --profile "$edge_colour" \
+      up -d --no-deps --force-recreate "$@" || return 1
+  fi
+  if [ "$edge_persistent_routing" -eq 1 ]; then
+    python3 "$(dirname "$0")/routing.py" record \
+      --environment "$edge_env" --configuration "$edge_config_root" --colour "$edge_colour" \
+      --services $edge_managed_services >/dev/null || return 1
+  fi
   edge_running_origin_ids="$(docker ps \
     --filter label=com.docker.compose.project=project-snow-public \
     --filter label=com.docker.compose.service=origin-edge \
@@ -2353,6 +2381,18 @@ if ! previous_compose stop "$previous_service"; then
   exit 73
 fi
 
+# A historical worker cannot expire the new request leases itself. After the
+# newer worker drains/stops, preserve uncertain paid attempts as terminal
+# interrupted results before completing a rollback to lease-unaware code.
+if [ "$rollback_mode" = 1 ] &&
+   [ "$(jq -r '.runtime_capabilities.request_leases // false' "$colour_manifest")" != true ]; then
+  if ! python3 "$(dirname "$0")/maintenance.py" recover-requests --lock-held; then
+    echo 'Request lease recovery failed; restoring the previous release runtime.' >&2
+    restore_previous_runtime || exit 74
+    exit 73
+  fi
+fi
+
 restore_promoted_file() {
   promoted_file_backup="$1"
   promoted_file_destination="$2"
@@ -2462,6 +2502,12 @@ if ! commit_promoted_state; then
   echo 'Promotion state publication failed; restoring the previous runtime.' >&2
   restore_previous_runtime || exit 74
   exit 73
+fi
+
+# Durable promotion remains authoritative if this convenience index cannot be
+# cleared; the automatic stager also recognizes an already-active candidate.
+if ! python3 "$(dirname "$0")/maintenance.py" candidate-complete --lock-held --sha "$marker_sha"; then
+  echo 'Promotion is durable; pending-candidate metadata requires reconciliation.' >&2
 fi
 
 printf '%s\n' "Promoted $colour $marker_sha. Cloudflare Access and MyWebsite settings were not changed."

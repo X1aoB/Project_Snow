@@ -1,0 +1,3 @@
+# Lightweight CI test dependencies; browser tests install Playwright separately.
+pytest==9.1.1
+PyYAML==6.0.3

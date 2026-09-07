@@ -1,0 +1,10 @@
+[Unit]
+Description=Probe Project Snow every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=project-snow-monitor.service
+
+[Install]
+WantedBy=timers.target

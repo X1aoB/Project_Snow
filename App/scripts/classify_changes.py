@@ -7,13 +7,12 @@ before installing the application environment.
 from __future__ import annotations
 
 import argparse
-from fnmatch import fnmatch
 import json
 import os
-from pathlib import Path
 import subprocess
-from typing import Iterable
-
+from collections.abc import Iterable
+from fnmatch import fnmatch
+from pathlib import Path
 
 CATEGORIES = ("ui", "api", "data", "embedding", "deploy")
 
@@ -28,8 +27,12 @@ DOC_PATTERNS = (
 UI_PATTERNS = (
     "App/public_frontend/**",
     "App/frontend/**",
+    "App/public_frontend_src/**",
+    "App/client/**",
+    "App/package*.json",
+    "App/tsconfig*.json",
     "App/tests/test_ui_*.py",
-    "App/tests/test_public_frontend_e2e.py",
+    "App/tests/test_public_frontend*.py",
 )
 
 API_PATTERNS = (
@@ -47,8 +50,9 @@ API_PATTERNS = (
 
 DATA_PATTERNS = (
     "Data/**",
+    "App/pipelines/**",
     "App/config/public_knowledge/data_release.json",
-    "App/config/character_relationships.v1.json",
+    "App/config/public_knowledge/character_relationships.v1.json",
     "App/scripts/build_data_release.py",
     "App/scripts/export_publishable_graph.py",
     "App/scripts/validate_architecture.py",
@@ -113,7 +117,8 @@ def _matches(path: str, patterns: Iterable[str]) -> bool:
 
 
 def classify(paths: Iterable[str], *, force_full: bool = False) -> dict[str, bool]:
-    normalized = sorted({str(path).replace("\\", "/").lstrip("./") for path in paths if path})
+    # Strip only an actual relative prefix, not the leading dot in .github.
+    normalized = sorted({str(path).replace("\\", "/").removeprefix("./") for path in paths if path})
     result = {category: False for category in CATEGORIES}
     result.update({"docs_only": False, "app_image": False, "full": force_full})
     if not normalized:
@@ -146,6 +151,7 @@ def classify(paths: Iterable[str], *, force_full: bool = False) -> dict[str, boo
             # application-image tier instead of silently skipping coverage.
             result["api"] = True
             result["app_image"] = True
+            result["full"] = True
 
     if force_full:
         result.update({category: True for category in CATEGORIES if category != "embedding"})
@@ -155,13 +161,15 @@ def classify(paths: Iterable[str], *, force_full: bool = False) -> dict[str, boo
 
 def changed_files(base: str, head: str, repository: Path) -> list[str]:
     completed = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=ACMR", base, head, "--"],
+        # A rename is an old-path deletion plus a new-path addition: both risk
+        # tiers must run. NUL separation preserves whitespace and non-ASCII names.
+        ["git", "diff", "--name-only", "--no-renames", "-z", base, head, "--"],
         cwd=repository,
         check=True,
         capture_output=True,
         text=True,
     )
-    return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    return [path for path in completed.stdout.split("\0") if path]
 
 
 def _write_github_output(values: dict[str, bool], output_path: str) -> None:

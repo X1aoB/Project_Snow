@@ -1,0 +1,42 @@
+{
+  "schema": "project-snow-public-rollback-1",
+  "baseline_commit": "502ec99412bef843c37e4b31a53df8fa9faeb33c",
+  "compatible_commit": "4265b5ed1b604afeffd8dff3dc2669301f2a1ae9",
+  "patch_file": "public-0.9.6.patch",
+  "patch_sha256": "351c868c4b047f1775664ac964f6abb624caeba5df7b720c4af1641a66887d2d",
+  "public_api": "public-v1",
+  "state_schema": "public-state-2",
+  "indexeddb_version": 4,
+  "files": [
+    {
+      "path": "App/public_frontend/app.js",
+      "baseline_sha256": "078d5270abdaa1f7e3031098affca615db5f7fab183b6a39541ed8385ab9fa5f",
+      "compatible_sha256": "58bcbf3190ef97ab42f1f0d67b7ab980c5095af2541ee968c3d8ae350ba611cf"
+    },
+    {
+      "path": "App/public_frontend/index.html",
+      "baseline_sha256": "88741c092a2b3782db2e44d75f22ef9927dfcb7f08b32885ec946e24ed8633b5",
+      "compatible_sha256": "365bb39e6fc5cd7d628a26f0684c839d560dd08879fe1bfa86970dbcf7f9222b"
+    },
+    {
+      "path": "App/public_frontend/app.css",
+      "baseline_sha256": "940b50d5e0940fed4a6438a63c6f2b4ea091a004abe5edf18db617cf7b7a6016",
+      "compatible_sha256": "9ed2ab42e037bd54f7f399d1c5afaa464bfca308c8f95bdf922bde77e1b42cf1"
+    },
+    {
+      "path": "App/public_frontend/modules/runtime.js",
+      "baseline_sha256": null,
+      "compatible_sha256": "7c23c2e681c7f87d0763fa37438dfdceea3506dd7f92d934cebe5c509b714226"
+    },
+    {
+      "path": "App/public_frontend/assets-manifest.json",
+      "baseline_sha256": null,
+      "compatible_sha256": "0dbd4e44ee509a8e6ae004b48571eb0f3ac1a83b15ee7862f06b9cc2caa50d86"
+    },
+    {
+      "path": "App/scripts/fingerprint_public_frontend.py",
+      "baseline_sha256": "491206d70ce07a8b00242bc7e7a6d0b8e49a7ef8d09ab563823654b5e5023d6a",
+      "compatible_sha256": "18ca1c8757b36f3e8ea59708c0f3333ff272a122b8897ceab774e38381b08fbd"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 # Project Snow complete local Python dependency set.
-# Requires Python >= 3.11. Tests use the standard-library unittest package.
+# Requires Python >= 3.11. Tests use pytest and standard-library unittest.
 
 # HTTP API, typed settings and OpenAI-compatible model calls.
 fastapi>=0.115,<1
@@ -27,6 +27,7 @@ reportlab>=4.2,<5
 mutagen>=1.47,<2
 playwright>=1.49,<2
 pytest>=8.3,<10
+PyYAML==6.0.3
 
 # Lakehouse, hybrid retrieval and optional graph/vector serving. These are
 # intentionally installed together so every command documented in README.md

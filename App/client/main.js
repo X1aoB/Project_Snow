@@ -1,6 +1,10 @@
 "use strict";
 
 const { app, BrowserWindow, session } = require("electron");
+const path = require("path");
+const fs = require("fs");
+const ICON_PATH = path.join(__dirname, "assets", process.platform === "win32" ? "xiaoji-icon.ico" : "xiaoji-icon.png");
+const ICON_DATA_URL = `data:image/png;base64,${fs.readFileSync(path.join(__dirname, "assets", "xiaoji-icon.png")).toString("base64")}`;
 
 const WEB_URL = "http://127.0.0.1:8080/";
 const API_HEALTH_URL = "http://127.0.0.1:8000/health";
@@ -27,9 +31,9 @@ async function endpointAvailable(url) {
 
 function offlinePage() {
   return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Project Snow v0.5.0</title>
-<style>:root{color-scheme:light}*{box-sizing:border-box}body{display:grid;place-items:center;min-height:100vh;margin:0;padding:32px;font-family:"Microsoft YaHei",system-ui,sans-serif;background:#eaf4ff;color:#08234a;line-height:1.7}main{width:min(720px,100%);border:1px solid #9dbef1;border-radius:18px;padding:32px;background:#fff;box-shadow:0 18px 58px rgba(6,43,115,.14)}.mark{display:grid;place-items:center;width:48px;height:48px;border-radius:13px;background:#0a5cff;color:#fff;font-size:1.25rem;font-weight:800}h1{margin:18px 0 4px;color:#062b73}.version{color:#0a5cff;font-weight:700}code{color:#0759d2;background:#edf5ff;padding:2px 5px;border-radius:4px}button{border:1px solid #0a5cff;border-radius:9px;background:#0a5cff;color:white;padding:11px 18px;font:inherit;font-weight:700;cursor:pointer}button:focus-visible{outline:3px solid #24c7ff;outline-offset:3px}</style>
-</head><body><main><div class="mark">S</div><h1>Project Snow 尚未连接</h1><p class="version">v0.5.0 · 本地测试版</p>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小吉终端 v0.5.0</title>
+<style>:root{color-scheme:light}*{box-sizing:border-box}body{display:grid;place-items:center;min-height:100vh;margin:0;padding:32px;font-family:"Microsoft YaHei",system-ui,sans-serif;background:#eaf4ff;color:#08234a;line-height:1.7}main{width:min(720px,100%);border:1px solid #9dbef1;border-radius:18px;padding:32px;background:#fff;box-shadow:0 18px 58px rgba(6,43,115,.14)}.mark{display:grid;place-items:center;width:48px;height:48px;border-radius:50%;background:transparent;color:#fff;font-size:1.25rem;font-weight:800}h1{margin:18px 0 4px;color:#062b73}.version{color:#0a5cff;font-weight:700}code{color:#0759d2;background:#edf5ff;padding:2px 5px;border-radius:4px}button{border:1px solid #0a5cff;border-radius:9px;background:#0a5cff;color:white;padding:11px 18px;font:inherit;font-weight:700;cursor:pointer}button:focus-visible{outline:3px solid #24c7ff;outline-offset:3px}</style>
+</head><body><main><img class="mark" src="${ICON_DATA_URL}" alt="" /><h1>小吉终端 尚未连接</h1><p class="version">v0.5.0 · 本地测试版</p>
 <p>桌面客户端连接的是现有本地服务。请在两个 PowerShell 窗口中启动：</p>
 <p><code>cd App</code><br><code>python -m backend.snow_app.main</code></p>
 <p><code>cd App</code><br><code>python scripts/dev_server.py</code></p>
@@ -57,6 +61,8 @@ function createWindow() {
     minWidth: 360,
     minHeight: 560,
     show: false,
+    title: "小吉终端 · 本地预览",
+    icon: ICON_PATH,
     backgroundColor: "#eaf4ff",
     webPreferences: {
       preload: require("path").join(__dirname, "preload.js"),
@@ -79,7 +85,11 @@ function createWindow() {
   openApplication();
 }
 
-app.whenReady().then(() => {
+function startApplication() {
+  // Public branding must never create a new Chromium profile for existing users.
+  app.setPath("userData", path.join(app.getPath("appData"), "project-snow-desktop"));
+  app.setName("小吉终端");
+  app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
     return permission === "media"
       && isLocalApplicationUrl(requestingOrigin)
@@ -92,8 +102,12 @@ app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-});
+  });
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
-});
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") app.quit();
+  });
+}
+
+module.exports = { offlinePage, isLocalApplicationUrl, ICON_PATH, startApplication };
+if (process.env.PROJECT_SNOW_DESKTOP_TEST !== "1") startApplication();

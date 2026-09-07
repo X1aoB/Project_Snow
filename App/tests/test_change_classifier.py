@@ -1,11 +1,67 @@
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from scripts.classify_changes import classify
+from scripts.classify_changes import changed_files, classify
 
 
 class ChangeClassifierTests(TestCase):
+    def test_browser_reliability_only_change_runs_browser_tier(self):
+        result = classify(["App/tests/test_public_frontend_reliability.py"])
+        self.assertTrue(result["ui"])
+
+    def test_dot_github_and_real_data_paths_are_classified(self):
+        self.assertTrue(classify([".github/workflows/ci.yml"])["deploy"])
+        for path in (
+            "App/pipelines/build_graph.py",
+            "App/config/public_knowledge/character_relationships.v1.json",
+        ):
+            self.assertTrue(classify([path])["data"])
+
+    def test_deleted_and_renamed_paths_keep_both_risk_tiers(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def git(*args):
+                return subprocess.run(
+                    [
+                        "git",
+                        "-c",
+                        "commit.gpgsign=false",
+                        "-c",
+                        "user.name=CI",
+                        "-c",
+                        "user.email=ci@example.test",
+                        *args,
+                    ],
+                    cwd=root,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+
+            git("init")
+            old = root / "App/infra/embedding_service.py"
+            old.parent.mkdir(parents=True)
+            old.write_text("example", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-m", "initial")
+            base = git("rev-parse", "HEAD")
+            new = root / "App/public_frontend/renamed file.js"
+            new.parent.mkdir(parents=True)
+            old.rename(new)
+            git("add", "-A")
+            git("commit", "-m", "rename")
+            paths = changed_files(base, "HEAD", root)
+            self.assertIn("App/infra/embedding_service.py", paths)
+            self.assertIn("App/public_frontend/renamed file.js", paths)
+            tiers = classify(paths)
+            self.assertTrue(tiers["embedding"])
+            self.assertTrue(tiers["ui"])
+
     def test_docs_only_does_not_build_runtime_images(self) -> None:
         result = classify(["README.md", "docs/deployment.md"])
         self.assertTrue(result["docs_only"])
@@ -19,10 +75,12 @@ class ChangeClassifierTests(TestCase):
         self.assertFalse(result["embedding"])
 
     def test_shared_immersive_assets_build_the_application_image(self) -> None:
-        result = classify([
-            "App/frontend/shared/immersive.css",
-            "App/frontend/assets/immersive/scenes/generic.svg",
-        ])
+        result = classify(
+            [
+                "App/frontend/shared/immersive.css",
+                "App/frontend/assets/immersive/scenes/generic.svg",
+            ]
+        )
         self.assertTrue(result["ui"])
         self.assertTrue(result["app_image"])
 

@@ -241,7 +241,7 @@ class DeploymentContractTests(TestCase):
             verify_data + 1,
         )
         dependency_probe = script.index("PROJECT_SNOW_DATA_DEPENDENCIES")
-        start_api = script.index('compose up -d "$service"')
+        start_api = script.index('compose up -d --no-deps "$service"')
         smoke = script.index("/app/public_smoke.py")
         acceptance_target = script.index("candidate_app_network=project-snow-public_app")
         acceptance_smoke = script.index('candidate_internal_endpoint=')
@@ -536,11 +536,14 @@ printf '%s\n' "$checkout_status"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "0")
 
-    def test_manifest_validator_propagates_generation_and_normalization_failures(self) -> None:
+    def test_manifest_validator_retains_signed_digests_and_propagates_failures(self) -> None:
         runner = self.read("ops/project-snow-release")
         function_start = runner.index("validate_release_manifest() {")
         function_end = runner.index("\n}\n\ninstall_manifest_releases()", function_start) + 2
         validate_function = runner[function_start:function_end]
+        bindings_start = runner.index('  public_image="$expected_public_image@$(jq -r')
+        bindings_end = runner.index('\n  stage_attempt_nonce=', bindings_start)
+        image_bindings = runner[bindings_start:bindings_end]
         for guarded_command in (
             'public_digest="$(jq -r \'.application.digest\' "$manifest_path")" || return 1',
             'embedding_digest="$(jq -r \'.embedding.digest\' "$manifest_path")" || return 1',
@@ -608,8 +611,9 @@ python3() {
   [ "$failure" != generator ]
 }
 docker() {
+  printf '%s\n' "$*" >> "$test_root/forbidden-tag-lookups"
   printf '%s\n' 'Digest: """
-            + digest
+            + "sha256:" + "d" * 64
             + """'
 }
 """
@@ -620,6 +624,13 @@ validate_release_manifest "$manifest" """
             + target_sha
             + """ || validation_status=$?
 printf '%s\n' "$validation_status"
+if [ "$validation_status" = 0 ]; then
+  manifest_copy="$manifest"
+"""
+            + image_bindings
+            + """
+  printf '%s\n' "$public_image" "$embedding_image"
+fi
 """
         )
         for failure in (
@@ -643,8 +654,11 @@ printf '%s\n' "$validation_status"
             result = self.run_posix_shell(
                 harness, Path(temporary_root).as_posix(), "success"
             )
+            self.assertFalse((Path(temporary_root) / "forbidden-tag-lookups").exists())
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "0")
+        self.assertEqual(result.stdout.splitlines(), [
+            "0", f"registry.invalid/public@{digest}", f"registry.invalid/embedding@{digest}",
+        ])
 
     def test_public_environment_builder_propagates_write_and_chmod_failures(self) -> None:
         deploy = self.read("ops/deploy.sh")
@@ -1694,10 +1708,12 @@ exit 99
 
     def test_maintenance_commands_use_last_promoted_environment(self) -> None:
         for relative in ("ops/backup.sh", "ops/restore-postgres.sh"):
-            self.assertIn("--env-file", self.read(relative), relative)
+            self.assertIn("/usr/local/libexec/project-snow/maintenance.py", self.read(relative), relative)
+            self.assertNotIn("docker compose", self.read(relative), relative)
         self.assertIn("promote.sh", self.read("ops/rollback.sh"))
         cleanup = self.read("ops/project-snow-cleanup.service")
-        self.assertIn("--env-file /srv/project-snow/runtime/compose.env", cleanup)
+        self.assertIn("/usr/local/libexec/project-snow/maintenance.py cleanup", cleanup)
+        self.assertNotIn("docker compose", cleanup)
 
     def test_prepare_script_installs_host_tuning_and_deploy_key(self) -> None:
         script = self.read("ops/prepare_debian.sh")
@@ -1845,7 +1861,8 @@ exit 99
         self.assertIn("merge-base --is-ancestor", runner)
         self.assertIn("core.hooksPath=/dev/null", runner)
         self.assertIn("release_manifest.py", runner)
-        self.assertIn("docker buildx imagetools inspect", runner)
+        self.assertNotIn("docker buildx imagetools inspect", runner)
+        self.assertIn("verify_inbox_release_proof", runner)
         self.assertIn("runuser -u deploy -- docker info", runner)
         self.assertIn("ufw status", runner)
         self.assertIn("systemctl is-active --quiet fail2ban", runner)
@@ -2845,7 +2862,7 @@ require_runner_controller_binding
         self.assertNotIn('cp "$public_env_source" "$candidate_public_env"', script)
         self.assertLess(
             script.index('build_candidate_public_env "$public_env_source"'),
-            script.index('compose up -d "$service"'),
+            script.index('compose up -d --no-deps "$service"'),
         )
 
     def test_sticker_promotion_requires_public_license_review_and_metadata(self) -> None:
@@ -2911,7 +2928,17 @@ require_runner_controller_binding
         self.assertIn("gate:\n", workflow)
         self.assertIn("All selected risk-tier jobs passed", workflow)
         self.assertIn("github.head_ref == 'codex/ci-risk-tiering'", workflow)
-        self.assertIn("Reuse previous verified embedding digest", release)
+        import yaml
+
+        jobs = yaml.safe_load(release)["jobs"]
+        steps = [step for job in jobs.values() for step in job.get("steps", [])]
+        scans = [step for step in steps if "trivy-action@" in step.get("uses", "")
+                 and "steps.embedding.outputs.digest" in step.get("with", {}).get("image-ref", "")]
+        self.assertEqual(len(scans), 1)
+        self.assertNotIn("if", scans[0], "Reused embedding digests must be freshly scanned too")
+        gates = [step for step in steps if "report_trivy_findings.py trivy-embedding.json" in step.get("run", "")]
+        self.assertEqual(len(gates), 1)
+        self.assertNotIn("if", gates[0], "The vulnerability gate must apply to built and reused images")
         self.assertIn("fetch-depth: 0", release)
         self.assertIn('git rev-list --first-parent "$PREVIOUS_SHA"', release)
         self.assertIn("Tag reused embedding digest for the current main SHA", release)
@@ -3354,12 +3381,12 @@ seal_configuration_snapshot "$seal_root"
         self.assertIn("COPY scripts/fingerprint_public_frontend.py", dockerfile)
         self.assertIn("python ./scripts/fingerprint_public_frontend.py --app-root /app", dockerfile)
         self.assertIn("pip install --no-cache-dir --require-hashes", dockerfile)
-        self.assertIn('href="/app.css?v=0.9.6"', public_html)
-        self.assertIn('src="/app.js?v=0.9.6"', public_html)
+        self.assertIn('href="/app.css?v=0.10.0-rc.1"', public_html)
+        self.assertIn('src="/app.js?v=0.10.0-rc.1"', public_html)
         self.assertIn('href="/shared/immersive.css?v=0.9.2"', public_html)
         self.assertIn('src="/privacy/privacy.js?v=0.9.2"', privacy_html)
         self.assertIn('experience_notice_version || "0.9.2"', public_javascript)
-        self.assertIn("PUBLIC_APP_VERSION=0.9.6", public_env)
+        self.assertIn("PUBLIC_APP_VERSION=0.10.0-rc.1", public_env)
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", public_env)
         self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=0.9.2", public_env)
         self.assertIn("PUBLIC_BYOK_LIFETIME_HOURS=12", public_env)

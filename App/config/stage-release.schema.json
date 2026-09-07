@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://project-snow.invalid/schemas/stage-release-1",
+  "title": "Reviewed 22-character stage release",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "characters"
+  ],
+  "properties": {
+    "schema": {
+      "const": "project-snow-stage-1"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "characters": {
+      "type": "array",
+      "minItems": 22,
+      "maxItems": 22,
+      "items": {
+        "type": "object",
+        "required": [
+          "character_id",
+          "states",
+          "motions"
+        ],
+        "properties": {
+          "character_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{12}$"
+          },
+          "states": {
+            "type": "object",
+            "required": [
+              "neutral"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "neutral": {
+                "$ref": "#/$defs/asset"
+              },
+              "gentle_smile": {
+                "$ref": "#/$defs/asset"
+              },
+              "happy": {
+                "$ref": "#/$defs/asset"
+              },
+              "amused": {
+                "$ref": "#/$defs/asset"
+              },
+              "teasing": {
+                "$ref": "#/$defs/asset"
+              },
+              "relieved": {
+                "$ref": "#/$defs/asset"
+              },
+              "serious": {
+                "$ref": "#/$defs/asset"
+              },
+              "focused": {
+                "$ref": "#/$defs/asset"
+              },
+              "thinking": {
+                "$ref": "#/$defs/asset"
+              },
+              "confused": {
+                "$ref": "#/$defs/asset"
+              },
+              "skeptical": {
+                "$ref": "#/$defs/asset"
+              },
+              "concerned": {
+                "$ref": "#/$defs/asset"
+              },
+              "surprised": {
+                "$ref": "#/$defs/asset"
+              },
+              "embarrassed": {
+                "$ref": "#/$defs/asset"
+              },
+              "sad": {
+                "$ref": "#/$defs/asset"
+              },
+              "disappointed": {
+                "$ref": "#/$defs/asset"
+              },
+              "annoyed": {
+                "$ref": "#/$defs/asset"
+              },
+              "angry": {
+                "$ref": "#/$defs/asset"
+              }
+            }
+          },
+          "motions": {
+            "type": "array",
+            "contains": {
+              "const": "none"
+            },
+            "items": {
+              "enum": [
+                "none",
+                "lean_in",
+                "tremble",
+                "recoil",
+                "startle"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "asset": {
+      "type": "object",
+      "required": [
+        "url",
+        "sha256",
+        "media_type",
+        "source",
+        "approval"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^/assets/stage/(?!.*\\.\\.)[a-zA-Z0-9_./-]+$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "media_type": {
+          "enum": [
+            "image/png",
+            "image/webp"
+          ]
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "kind",
+            "reference"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reference": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "approval": {
+          "type": "object",
+          "required": [
+            "status",
+            "approved_by",
+            "approved_at",
+            "evidence"
+          ],
+          "properties": {
+            "status": {
+              "const": "approved"
+            },
+            "approved_by": {
+              "type": "string",
+              "minLength": 1
+            },
+            "approved_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

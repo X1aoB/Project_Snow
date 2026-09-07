@@ -3,7 +3,7 @@
 The checked-in HTML keeps stable, version-query URLs so it remains convenient
 to run directly during development.  The production Docker build runs this
 script after copying the frontend and shared design files.  It creates
-content-addressed copies and rewrites only the copied HTML, allowing the edge
+content-addressed copies and rewrites only the copied HTML and declared module import URLs, allowing the edge
 to cache those immutable assets for a year while HTML remains ``no-store``.
 """
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import hashlib
+import html
 import json
 from pathlib import Path
 import re
@@ -25,6 +26,8 @@ FINGERPRINT_LENGTH = 16
 class Asset:
     source: str
     public_url: str
+    dependencies: tuple[str, ...] = ()
+    required_html: bool = True
 
 
 ASSETS = (
@@ -39,16 +42,6 @@ HTML_DOCUMENTS = (
     "public_frontend/privacy/index.html",
 )
 
-SCENE_ASSIGNMENT = re.compile(
-    r'(?m)^(?P<indent>[ \t]*)\$\("scene-backdrop"\)\.src\s*=\s*'
-    r'`/assets/immersive/scenes/\$\{visualKey\}\.svg`;[ \t]*$'
-)
-SCENE_MAP_DECLARATION = re.compile(
-    r"(?m)^const SCENE_ASSET_URLS = Object\.freeze\(.+\);[ \t]*$"
-)
-SCENE_KEYS_DECLARATION = re.compile(
-    r"(?m)^(const SCENE_KEYS\s*=\s*new Set\([^\n]+\);\r?\n)"
-)
 EXISTING_FINGERPRINT = re.compile(r"\.[0-9a-f]{12,64}$")
 
 
@@ -57,8 +50,8 @@ def _fingerprinted_path(source: Path, digest: str) -> Path:
 
 
 def _replace_reference(document: str, old_url: str, new_url: str) -> tuple[str, int]:
-    # Version queries are a development-only cache key.  Restrict matching to
-    # an HTML attribute value so unrelated text or JavaScript is untouched.
+    # Replace only a complete quoted URL in HTML or a declared module import.
+    # Scene loaders and JavaScript identifiers are never rewritten.
     pattern = re.compile(
         rf"(?P<quote>[\"']){re.escape(old_url)}(?:\?v=[^\"']+)?(?P=quote)"
     )
@@ -89,33 +82,36 @@ def _fingerprint_scenes(app_root: Path) -> tuple[dict[str, str], dict[str, str]]
     return scene_urls, scene_files
 
 
-def _rewrite_scene_loader(app_js: Path, scene_urls: dict[str, str]) -> None:
-    source = app_js.read_text(encoding="utf-8")
-    declaration = (
-        "const SCENE_ASSET_URLS = Object.freeze("
-        + json.dumps(scene_urls, ensure_ascii=True, separators=(",", ":"))
-        + ");"
-    )
-    if SCENE_MAP_DECLARATION.search(source):
-        source = SCENE_MAP_DECLARATION.sub(declaration, source, count=1)
-    else:
-        source, count = SCENE_KEYS_DECLARATION.subn(
-            lambda match: match.group(1) + declaration + "\n", source, count=1
-        )
-        if count != 1:
-            raise ValueError("app.js has no stable SCENE_KEYS declaration")
+def _build_assets(app_root: Path) -> tuple[Asset, ...]:
+    manifest_path = app_root / "public_frontend/assets-manifest.json"
+    if not manifest_path.is_file():
+        return ASSETS
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != "project-snow-frontend-build-1":
+        raise ValueError("unsupported frontend asset manifest")
+    assets = []
+    known_urls: set[str] = set()
+    for item in manifest.get("assets", []):
+        source = str(item["source"])
+        public_url = str(item["public_url"])
+        candidate = (app_root / source).resolve()
+        if not candidate.is_relative_to(app_root) or not candidate.is_file():
+            raise ValueError(f"invalid frontend asset source: {source}")
+        if not public_url.startswith("/") or ".." in public_url or public_url in known_urls:
+            raise ValueError(f"invalid frontend asset URL: {public_url}")
+        dependencies = tuple(item.get("dependencies", []))
+        if not set(dependencies).issubset(known_urls):
+            raise ValueError("asset dependencies must precede their entry point")
+        assets.append(Asset(source, public_url, dependencies, item.get("required_html", True)))
+        known_urls.add(public_url)
+    if not assets:
+        raise ValueError("frontend asset manifest is empty")
+    return tuple(assets)
 
-    replacement = (
-        r'\g<indent>$("scene-backdrop").src = '
-        r'SCENE_ASSET_URLS[visualKey] || SCENE_ASSET_URLS.generic;'
-    )
-    source, count = SCENE_ASSIGNMENT.subn(replacement, source, count=1)
-    if count == 0 and "SCENE_ASSET_URLS[visualKey]" not in source:
-        raise ValueError("app.js has no supported immersive scene asset assignment")
 
-    temporary = app_js.with_name(f".{app_js.name}.scene-map.tmp")
-    temporary.write_text(source, encoding="utf-8", newline="")
-    temporary.replace(app_js)
+def _scene_manifest_tag(scene_urls: dict[str, str]) -> str:
+    encoded = html.escape(json.dumps(scene_urls, sort_keys=True, separators=(",", ":")), quote=True)
+    return f'<meta name="snow-scene-assets" content="{encoded}" />'
 
 
 def fingerprint(app_root: Path) -> dict[str, Any]:
@@ -124,11 +120,19 @@ def fingerprint(app_root: Path) -> dict[str, Any]:
     files: dict[str, str] = {}
 
     scene_urls, scene_files = _fingerprint_scenes(app_root)
-    _rewrite_scene_loader(app_root / "public_frontend" / "app.js", scene_urls)
-
-    for asset in ASSETS:
+    assets = _build_assets(app_root)
+    for asset in assets:
         source = app_root / asset.source
         payload = source.read_bytes()
+        if asset.dependencies:
+            document = payload.decode("utf-8")
+            for dependency in asset.dependencies:
+                document, replaced = _replace_reference(document, dependency, url_map[dependency])
+                # A second invocation accepts the already fingerprinted import.
+                if not replaced and url_map[dependency] not in document:
+                    raise ValueError(f"unreferenced entry dependency: {dependency}")
+            payload = document.encode("utf-8")
+            source.write_bytes(payload)
         digest = hashlib.sha256(payload).hexdigest()
         destination = _fingerprinted_path(source, digest)
         destination.write_bytes(payload)
@@ -142,7 +146,15 @@ def fingerprint(app_root: Path) -> dict[str, Any]:
     for relative_path in HTML_DOCUMENTS:
         path = app_root / relative_path
         document = path.read_text(encoding="utf-8")
-        changed = False
+        tag = _scene_manifest_tag(scene_urls)
+        pattern = r'<meta\s+name="snow-scene-assets"[^>]*>'
+        if re.search(pattern, document):
+            document = re.sub(pattern, lambda _: tag, document, count=1)
+        elif "</head>" in document:
+            document = document.replace("</head>", tag + "\n</head>", 1)
+        else:
+            document = tag + "\n" + document
+        changed = True
         for scene_name, new_url in scene_urls.items():
             old_url = f"/assets/immersive/scenes/{scene_name}.svg"
             document, count = _replace_reference(document, old_url, new_url)
@@ -160,7 +172,7 @@ def fingerprint(app_root: Path) -> dict[str, Any]:
             temporary.replace(path)
         rewritten.append(relative_path)
 
-    missing_references = sorted(set(url_map) - referenced_urls)
+    missing_references = sorted({asset.public_url for asset in assets if asset.required_html} - referenced_urls)
     if missing_references:
         raise ValueError(
             "frontend HTML does not reference required assets: "

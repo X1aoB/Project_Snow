@@ -20,7 +20,7 @@ class ReleaseManifestTests(TestCase):
             app_root=app_root,
         )
         self.assertEqual(manifest["schema_version"], "project-snow-release-1")
-        self.assertEqual(manifest["app_version"], "0.9.6")
+        self.assertEqual(manifest["app_version"], "0.10.0-rc.1")
         self.assertEqual(manifest["data_version"], "2026.08.19.1")
         self.assertEqual(manifest["media_version"], "2026.08.19.avatar.1")
         self.assertEqual(manifest["sticker_version"], "2026.08.19.sticker.1")
@@ -43,7 +43,7 @@ class ReleaseManifestTests(TestCase):
             self.assertRegex(artifact["manifest_sha256"], r"^[0-9a-f]{64}$", kind)
             if kind != "data":
                 self.assertRegex(artifact["checksums_sha256"], r"^[0-9a-f]{64}$", kind)
-        self.assertEqual(manifest["migration_heads"], ["20260819_0004"])
+        self.assertEqual(manifest["migration_heads"], ["20260907_0005"])
         self.assertEqual(manifest["application"]["digest"], "sha256:" + "b" * 64)
         self.assertEqual(
             set(manifest["configuration_sha256"]),

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .common import RUNTIME_ROOT, read_jsonl, stable_id, utc_now, write_json, write_jsonl
+from backend.snow_app.review_lock import review_locked
 
 
 ENTITY_CANDIDATE_FILENAME = "entity_node_candidates.jsonl"
@@ -245,6 +246,7 @@ def discover_entity_node_candidates(
     return rows, skipped
 
 
+@review_locked(lambda *args, **kwargs: RUNTIME_ROOT / "review" / ENTITY_CANDIDATE_FILENAME)
 def build_entity_node_candidates(dry_run: bool = False) -> dict[str, Any]:
     """Refresh the non-destructive missing-entity candidate queue."""
     review_root = RUNTIME_ROOT / "review"

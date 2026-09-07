@@ -11,6 +11,8 @@ import collections
 import json
 from dataclasses import dataclass, field
 from typing import Any
+from .review_state import initialize_candidates, preserve_review_jobs
+from backend.snow_app.review_lock import review_locked
 
 from .common import (
     CHARACTER_AUTHORITY_SOURCE_TYPES,
@@ -413,6 +415,7 @@ def _relation_job(
     return job
 
 
+@review_locked(lambda *args, **kwargs: RUNTIME_ROOT / "review" / "narrative_relation_jobs.jsonl")
 def split_pending_relation_jobs(
     max_evidence_chars: int = RELATION_JOB_MAX_EVIDENCE_CHARS, statuses: set[str] | None = None
 ) -> dict[str, Any]:
@@ -502,13 +505,13 @@ def build_relation_review_jobs() -> dict[str, Any]:
             for index, segment in enumerate(segments, start=1)
         )
     output = ensure_runtime("review")
-    write_jsonl(output / "narrative_relation_jobs.jsonl", jobs)
-    write_jsonl(output / "narrative_relation_candidates.jsonl", [])
+    jobs = preserve_review_jobs(output / "narrative_relation_jobs.jsonl", jobs)
+    initialize_candidates(output / "narrative_relation_candidates.jsonl")
     report = {
         "stage": "C",
         "job": "build_relation_review_jobs",
         "generated_at": utc_now(),
-        "queued_jobs": len(jobs),
+        "queued_jobs": sum(row.get('status') == 'queued' for row in jobs),
         "policy": "Candidates remain pending_review and are excluded from graph retrieval until approved.",
     }
     write_json(RUNTIME_ROOT / "reports" / "build_relation_review_jobs.json", report)

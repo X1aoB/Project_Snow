@@ -2,26 +2,28 @@
   "name": "project-snow-desktop",
   "version": "0.5.0",
   "private": true,
-  "author": "Project Snow",
-  "description": "Local Windows v0.5.0 dual-entry preview client for Project Snow",
+  "author": "小吉终端",
+  "description": "小吉终端本地 Windows 预览客户端",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "smoke": "electron smoke.js",
-    "package:win": "electron-builder --win portable"
+    "package:win": "electron-builder --win portable",
+    "smoke:brand": "electron brand-smoke.js"
   },
   "devDependencies": {
-    "electron": "^36.3.1",
-    "electron-builder": "^26.0.12"
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3"
   },
   "build": {
     "appId": "com.projectsnow.mvp",
-    "productName": "Project Snow Preview",
+    "productName": "小吉终端",
     "electronDist": "node_modules/electron/dist",
     "asar": true,
     "files": [
       "main.js",
-      "preload.js"
+      "preload.js",
+      "assets/**"
     ],
     "directories": {
       "output": "dist"
@@ -35,7 +37,8 @@
           ]
         }
       ],
-      "artifactName": "Project-Snow-Preview-${version}.exe"
+      "artifactName": "Xiaoji-Terminal-Preview-${version}.exe",
+      "icon": "assets/xiaoji-icon.ico"
     }
   }
 }

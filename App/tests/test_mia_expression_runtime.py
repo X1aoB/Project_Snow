@@ -95,7 +95,7 @@ class MiaExpressionRuntimeTests(TestCase):
                     self.assertEqual(image.size, expected_size, state)
                     self.assertEqual(image.mode, "RGBA", state)
 
-    def test_client_maps_every_asset_and_limits_switching_to_mia_stage(self) -> None:
+    def test_client_maps_every_legacy_asset_and_keeps_mia_fallback(self) -> None:
         for state, record in self.manifest["expressions"].items():
             self.assertIn(f'{state}: "{record["face_asset_path"]}"', self.javascript, state)
             self.assertIn(f'{state}: "{record["stage_asset_path"]}"', self.javascript, state)
@@ -104,7 +104,7 @@ class MiaExpressionRuntimeTests(TestCase):
         self.assertIn("function updateStageCharacterArt(node, character, expressionState)", self.javascript)
         self.assertIn('const candidates = requestedState === "neutral" ? ["neutral"] : [requestedState, "neutral"]', self.javascript)
         self.assertIn(
-            "if (character?.character_id !== MIA_CHARACTER_ID)",
+            "(characterId === MIA_CHARACTER_ID ? MIA_STAGE_EXPRESSION_ASSETS : null)",
             self.javascript,
         )
         self.assertIn('const artNode = $("stage-character-art")', self.javascript)
@@ -115,7 +115,7 @@ class MiaExpressionRuntimeTests(TestCase):
     def test_public_materials_page_discloses_the_waiver_and_manifest(self) -> None:
         self.assertIn("米娅舞台表情（0.9.5）", self.privacy_html)
         self.assertIn("首次发布跳过独立素材权利核验", self.privacy_html)
-        self.assertIn("不表示 Project Snow 已确认", self.privacy_html)
+        self.assertIn("不表示 小吉终端 已确认", self.privacy_html)
         self.assertIn(
             'href="/assets/expressions/mia/manifest.json"',
             self.privacy_html,

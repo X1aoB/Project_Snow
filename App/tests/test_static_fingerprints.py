@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import html
+import json
 from pathlib import Path
 import re
+import shutil
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
@@ -10,6 +13,20 @@ from scripts.fingerprint_public_frontend import FINGERPRINT_LENGTH, fingerprint
 
 
 class StaticFingerprintTests(TestCase):
+    def test_real_frontend_manifest_fingerprints_modules_and_brand_icons(self):
+        source = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path in ["public_frontend", "frontend/shared", "frontend/assets/immersive/scenes"]:
+                shutil.copytree(source/path,root/path)
+            result = fingerprint(root)
+            for name in ["xiaoji-icon.png","xiaoji-icon-192.png","xiaoji-icon-32.png","xiaoji-icon.ico"]:
+                url = result["assets"][f"/shared/brand/{name}"]
+                self.assertTrue((root/"frontend"/url.lstrip("/")).is_file())
+            module_url = result["assets"]["/modules/runtime.js"]
+            self.assertIn(module_url,(root/"public_frontend/app.js").read_text(encoding="utf-8"))
+            self.assertEqual(result,fingerprint(root))
+
     def test_build_copies_content_addressed_assets_and_rewrites_only_html(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -70,9 +87,7 @@ class StaticFingerprintTests(TestCase):
                 self.assertEqual(fingerprinted.read_bytes(), expected_payload)
 
             built_app_js = (root / "public_frontend/app.js").read_text(encoding="utf-8")
-            self.assertIn("const SCENE_ASSET_URLS = Object.freeze", built_app_js)
-            self.assertNotIn("${visualKey}.svg", built_app_js)
-            self.assertIn("SCENE_ASSET_URLS[visualKey]", built_app_js)
+            self.assertEqual(built_app_js.encode(), assets["public_frontend/app.js"])
             self.assertEqual(set(result["scene_assets"]), set(scene_payloads))
             for scene_name, scene_url in result["scene_assets"].items():
                 self.assertRegex(
@@ -96,6 +111,35 @@ class StaticFingerprintTests(TestCase):
                 6,
             )
             self.assertIn(result["scene_assets"]["generic"], rendered_html)
+            scene_manifest = re.search(r'<meta name="snow-scene-assets" content="([^"]+)"', rendered_html)
+            self.assertIsNotNone(scene_manifest)
+            self.assertEqual(json.loads(html.unescape(scene_manifest.group(1))), result["scene_assets"])
             self.assertNotIn(
                 'src="/assets/immersive/scenes/generic.svg"', rendered_html
             )
+
+    def test_declared_module_dependencies_are_hashed_before_entry_without_source_rewriting(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            public = root / "public_frontend"
+            (public / "modules").mkdir(parents=True)
+            (public / "privacy").mkdir()
+            scenes = root / "frontend/assets/immersive/scenes"
+            scenes.mkdir(parents=True)
+            (scenes / "generic.svg").write_text("<svg />")
+            module = b"export const mode = 'native';"
+            (public / "modules/runtime.js").write_bytes(module)
+            (public / "app.js").write_text('import {mode} from "/modules/runtime.js"; console.log(mode);')
+            (public / "index.html").write_text('<head></head><script src="/app.js"></script>')
+            (public / "privacy/index.html").write_text("<head></head>")
+            (public / "assets-manifest.json").write_text(json.dumps({
+                "schema_version": "project-snow-frontend-build-1", "assets": [
+                    {"source": "public_frontend/modules/runtime.js", "public_url": "/modules/runtime.js", "required_html": False},
+                    {"source": "public_frontend/app.js", "public_url": "/app.js", "dependencies": ["/modules/runtime.js"]},
+                ],
+            }))
+            result = fingerprint(root)
+            self.assertEqual(result, fingerprint(root))
+            self.assertIn(result["assets"]["/modules/runtime.js"], (public / "app.js").read_text())
+            self.assertEqual((public / "modules/runtime.js").read_bytes(), module)
+            self.assertIn("snow-scene-assets", (public / "index.html").read_text())

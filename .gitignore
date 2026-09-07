@@ -262,3 +262,6 @@ App/config/origin-edge/*
 *.keystore
 secrets/
 credentials/
+
+# Agent scratch evidence and transient packaging scripts.
+/.tmp/
