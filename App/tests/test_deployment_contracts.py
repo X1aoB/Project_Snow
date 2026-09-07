@@ -1697,7 +1697,8 @@ exit 99
             self.assertIn("--env-file", self.read(relative), relative)
         self.assertIn("promote.sh", self.read("ops/rollback.sh"))
         cleanup = self.read("ops/project-snow-cleanup.service")
-        self.assertIn("--env-file /srv/project-snow/runtime/compose.env", cleanup)
+        self.assertIn("/usr/local/libexec/project-snow/maintenance.py cleanup", cleanup)
+        self.assertNotIn("docker compose", cleanup)
 
     def test_prepare_script_installs_host_tuning_and_deploy_key(self) -> None:
         script = self.read("ops/prepare_debian.sh")
