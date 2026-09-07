@@ -241,7 +241,7 @@ class DeploymentContractTests(TestCase):
             verify_data + 1,
         )
         dependency_probe = script.index("PROJECT_SNOW_DATA_DEPENDENCIES")
-        start_api = script.index('compose up -d "$service"')
+        start_api = script.index('compose up -d --no-deps "$service"')
         smoke = script.index("/app/public_smoke.py")
         acceptance_target = script.index("candidate_app_network=project-snow-public_app")
         acceptance_smoke = script.index('candidate_internal_endpoint=')
@@ -1694,7 +1694,8 @@ exit 99
 
     def test_maintenance_commands_use_last_promoted_environment(self) -> None:
         for relative in ("ops/backup.sh", "ops/restore-postgres.sh"):
-            self.assertIn("--env-file", self.read(relative), relative)
+            self.assertIn("/usr/local/libexec/project-snow/maintenance.py", self.read(relative), relative)
+            self.assertNotIn("docker compose", self.read(relative), relative)
         self.assertIn("promote.sh", self.read("ops/rollback.sh"))
         cleanup = self.read("ops/project-snow-cleanup.service")
         self.assertIn("/usr/local/libexec/project-snow/maintenance.py cleanup", cleanup)
@@ -2846,7 +2847,7 @@ require_runner_controller_binding
         self.assertNotIn('cp "$public_env_source" "$candidate_public_env"', script)
         self.assertLess(
             script.index('build_candidate_public_env "$public_env_source"'),
-            script.index('compose up -d "$service"'),
+            script.index('compose up -d --no-deps "$service"'),
         )
 
     def test_sticker_promotion_requires_public_license_review_and_metadata(self) -> None:
@@ -2912,7 +2913,17 @@ require_runner_controller_binding
         self.assertIn("gate:\n", workflow)
         self.assertIn("All selected risk-tier jobs passed", workflow)
         self.assertIn("github.head_ref == 'codex/ci-risk-tiering'", workflow)
-        self.assertIn("Reuse previous verified embedding digest", release)
+        import yaml
+
+        jobs = yaml.safe_load(release)["jobs"]
+        steps = [step for job in jobs.values() for step in job.get("steps", [])]
+        scans = [step for step in steps if "trivy-action@" in step.get("uses", "")
+                 and "steps.embedding.outputs.digest" in step.get("with", {}).get("image-ref", "")]
+        self.assertEqual(len(scans), 1)
+        self.assertNotIn("if", scans[0], "Reused embedding digests must be freshly scanned too")
+        gates = [step for step in steps if "report_trivy_findings.py trivy-embedding.json" in step.get("run", "")]
+        self.assertEqual(len(gates), 1)
+        self.assertNotIn("if", gates[0], "The vulnerability gate must apply to built and reused images")
         self.assertIn("fetch-depth: 0", release)
         self.assertIn('git rev-list --first-parent "$PREVIOUS_SHA"', release)
         self.assertIn("Tag reused embedding digest for the current main SHA", release)

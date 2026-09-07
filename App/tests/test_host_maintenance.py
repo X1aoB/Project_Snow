@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 import shutil
@@ -9,11 +8,10 @@ from unittest.mock import patch
 
 import pytest
 
-SOURCE = Path(__file__).resolve().parents[1] / "ops" / "maintenance.py"
-spec = importlib.util.spec_from_file_location("snow_host_maintenance", SOURCE)
-maintenance = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = maintenance
-spec.loader.exec_module(maintenance)
+OPS = Path(__file__).resolve().parents[1] / "ops"
+if str(OPS) not in sys.path:
+    sys.path.insert(0, str(OPS))
+import maintenance
 
 
 @pytest.fixture
@@ -103,3 +101,57 @@ def test_environment_rejects_duplicate_image_pin(tmp_path):
     environment.write_text("PUBLIC_API_IMAGE=a\nPUBLIC_API_IMAGE=b\n")
     with patch.object(maintenance, "require_regular"), pytest.raises(maintenance.MaintenanceError):
         maintenance.read_environment(environment)
+
+
+def test_lease_recovery_requires_stopped_source_and_only_uses_its_verified_digest(release):
+    paths, image = release
+    calls = []
+    base = fake_docker(calls)
+    def execute(command):
+        if command[1] == "ps":
+            calls.append(command)
+            return ""
+        if command[1] == "run":
+            calls.append(command)
+            return '{"recovered":2,"remaining_leases":0}'
+        return base(command)
+    with patch.object(maintenance, "require_regular"):
+        result = maintenance.recover_requests(paths, execute)
+    assert result["recovered"] == 2
+    job = calls[-1]
+    assert image in job and job.count("--mount") == 1
+    assert "recover_expired_requests" in job[-1] and "time.monotonic() + 46" in job[-1]
+    assert not any("compose" in command or "prune" in command for command in calls)
+    with patch.object(maintenance, "require_regular"), pytest.raises(maintenance.MaintenanceError, match="Stop and drain"):
+        maintenance.recover_requests(paths, fake_docker([]))
+
+
+@pytest.mark.parametrize("changed", [None, "EMBEDDING_IMAGE", "POSTGRES_IMAGE", "infra/egress-squid.conf"])
+def test_stage_rejects_shared_dependency_changes(release, changed):
+    paths, image = release
+    environment = {key: image for key in maintenance.SHARED_IMAGE_KEYS}
+    (paths.root / "runtime" / "compose.env").write_text("".join(f"{key}={value}\n" for key, value in environment.items()))
+    if changed in environment:
+        environment[changed] = image.replace("a" * 64, "b" * 64)
+    candidate = paths.root / "runtime" / "candidate.env"
+    candidate.write_text("".join(f"{key}={value}\n" for key, value in environment.items()))
+    hashes = {key: "a" * 64 for key in maintenance.SHARED_CONFIG_PATHS}
+    (paths.root / "releases" / "current-config.json").write_text(json.dumps({"configuration_sha256": hashes}))
+    if changed in hashes:
+        hashes[changed] = "b" * 64
+    manifest = paths.root / "candidate.json"
+    manifest.write_text(json.dumps({"configuration_sha256": hashes}))
+    with patch.object(maintenance, "require_regular"):
+        if changed:
+            with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+                maintenance.shared_dependency_gate(paths, candidate, manifest)
+        else:
+            assert maintenance.shared_dependency_gate(paths, candidate, manifest)["status"] == "ok"
+
+
+def test_stage_never_reconciles_shared_services():
+    source = (OPS / "deploy.sh").read_text()
+    assert 'compose run --rm --no-deps "$service" alembic upgrade head' in source
+    assert 'compose up -d --no-deps "$service"' in source
+    assert 'compose up -d postgres qdrant neo4j embedding egress-proxy' not in source
+    assert source.index("shared-dependency-gate") < source.index('compose pull "$service"')

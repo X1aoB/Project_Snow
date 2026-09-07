@@ -27,6 +27,20 @@ elif [ "$#" -ne 0 ]; then
   exit 64
 fi
 
+# A distro's old gh package can exist without artifact verification. Check
+# capabilities before changing accounts, permissions or the installed runner.
+command -v gh >/dev/null 2>&1 || {
+  echo 'Install a trusted modern GitHub CLI with artifact attestation support before bootstrap.' >&2
+  exit 69
+}
+gh_attestation_help="$(gh attestation verify --help 2>/dev/null)" || exit 69
+for gh_flag in --bundle --signer-workflow --source-ref --source-digest --signer-digest --deny-self-hosted-runners; do
+  printf '%s\n' "$gh_attestation_help" | grep -F -- "$gh_flag" >/dev/null || {
+    echo "GitHub CLI is missing required attestation capability: $gh_flag" >&2
+    exit 69
+  }
+done
+
 id deploy >/dev/null 2>&1 || useradd --create-home --shell /bin/bash deploy
 dependencies_ready=1
 for required_command in curl git jq openssl python3 sudo flock runuser; do
@@ -203,6 +217,10 @@ if runuser -u deploy -- sudo -n /bin/true >/dev/null 2>&1; then
   echo 'The deploy account has an unexpected sudo grant outside the release runner.' >&2
   exit 78
 fi
+
+# Install the independently pinned verifier before this runner can stage any
+# candidate. Timers remain opt-in until host recovery and capacity checks pass.
+sh "$repo/App/ops/install-maintenance.sh"
 
 printf '%s\n' "Installed root-owned Project Snow release control at $controller_sha."
 printf '%s\n' 'Existing deploy sessions retain their old supplementary groups until logout.'

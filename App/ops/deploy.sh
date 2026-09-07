@@ -1197,6 +1197,10 @@ if [ -n "$active_colour" ]; then
   validate_config_binding "$bootstrap_config_binding" "$active_colour" "$bootstrap_marker_sha" || exit 69
 fi
 
+# Preserve both colours before the inactive slot can overwrite the sole
+# previous-release records. Anchors remain valid after any later candidate.
+python3 "$(dirname "$0")/maintenance.py" anchor --lock-held || exit 78
+
 candidate_env="$(mktemp "$colour_env.candidate.XXXXXX")" || exit 78
 candidate_manifest="$(mktemp "$colour_manifest.candidate.XXXXXX")" || exit 78
 candidate_marker="$(mktemp "$colour_marker.candidate.XXXXXX")" || exit 78
@@ -1260,6 +1264,10 @@ printf '\nPUBLIC_API_IMAGE=%s\nEMBEDDING_IMAGE=%s\n' "$PUBLIC_API_IMAGE" "$EMBED
 sed -i '/^PUBLIC_MAILER_ENV_FILE=/d' "$candidate_env"
 printf 'PUBLIC_MAILER_ENV_FILE=%s\n' "$mailer_env_file" >> "$candidate_env"
 chmod 0600 "$candidate_env"
+
+python3 "$(dirname "$0")/maintenance.py" capacity --manifest "$release_manifest" || exit 73
+python3 "$(dirname "$0")/maintenance.py" shared-dependency-gate \
+  --candidate-environment "$candidate_env" --manifest "$release_manifest" || exit 73
 
 compose() {
   docker compose --env-file "$candidate_env" -f "$candidate_config_root/compose.prod.yml" --profile "$colour" "$@"
@@ -1371,6 +1379,8 @@ if [ -n "$candidate_media_root" ]; then
 fi
 
 service="public-api-$colour"
+python3 "$(dirname "$0")/maintenance.py" candidate-record --lock-held \
+  --colour "$colour" --manifest "$release_manifest" || exit 73
 compose pull "$service"
 if [ "$embedding_changed" -eq 1 ]; then
   compose pull embedding
@@ -1379,8 +1389,9 @@ else
 fi
 compose run --rm --no-deps "$service" \
   python -m backend.snow_app.data_loader --release-root "$candidate_data_root" --verify-only
-compose run --rm "$service" alembic upgrade head
-compose up -d postgres qdrant neo4j embedding egress-proxy
+# Shared dependencies belong to their own maintenance lifecycle. Compose run
+# and up must never reconcile them from a candidate configuration snapshot.
+compose run --rm --no-deps "$service" alembic upgrade head
 postgres_ready=0
 attempt=0
 while [ "$attempt" -lt 30 ]; do
@@ -1492,7 +1503,7 @@ compose run --rm --no-deps "$service" \
   python -m backend.snow_app.data_loader --release-root "$candidate_data_root"
 # Only the inactive API is started. Caddy, origin-edge and cloudflared keep
 # serving the current colour until promote.sh is explicitly invoked.
-compose up -d "$service"
+compose up -d --no-deps "$service"
 ready=0
 attempt=0
 while [ "$attempt" -lt 30 ]; do

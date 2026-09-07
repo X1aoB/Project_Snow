@@ -17,6 +17,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 from typing import Any, Callable, Iterator
 
 GIB = 1024**3
@@ -100,6 +101,17 @@ def release_lock(path: Path) -> Iterator[None]:
         os.close(descriptor)
 
 
+def require_inherited_release_lock(path: Path) -> None:
+    import fcntl
+
+    inherited = os.fstat(9)
+    expected = path.lstat()
+    if (not stat.S_ISREG(inherited.st_mode) or inherited.st_uid != 0
+            or inherited.st_nlink != 1 or (inherited.st_dev, inherited.st_ino) != (expected.st_dev, expected.st_ino)):
+        raise MaintenanceError("The release runner lock was not inherited")
+    fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
 def active_release(paths: Paths) -> dict[str, str]:
     releases = paths.root / "releases"
     colour = read_text(releases / "active-colour").strip()
@@ -149,33 +161,86 @@ except Exception as error:
 """
 
 
-def cleanup(paths: Paths, execute: Callable[[list[str]], str] = run) -> dict[str, Any]:
+RECOVER_REQUESTS_CODE = """import json, os, sys, time
+from pathlib import Path
+try:
+    database_url = Path('/run/maintenance/database_url').read_text().strip()
+    os.setgroups([]); os.setgid(10001); os.setuid(10001)
+    from backend.snow_app.public_store import PublicStore
+    from sqlalchemy import text
+    store = PublicStore(database_url)
+    del database_url
+    recovered = 0
+    deadline = time.monotonic() + 46
+    while True:
+        with store.begin() as connection:
+            present = connection.execute(text("SELECT to_regclass('public_request_leases')")).scalar()
+            pending = int(connection.execute(text('SELECT count(*) FROM public_request_leases')).scalar()) if present else 0
+        if not pending:
+            break
+        recover = getattr(store, 'recover_expired_requests', None)
+        if recover is None:
+            raise RuntimeError('A trusted lease-aware recovery image is required')
+        recovered += recover()
+        with store.begin() as connection:
+            pending = int(connection.execute(text('SELECT count(*) FROM public_request_leases')).scalar())
+        if not pending:
+            break
+        if time.monotonic() >= deadline:
+            raise RuntimeError('Live request leases remain; recovery was not forced')
+        time.sleep(1)
+    print(json.dumps({'recovered': recovered, 'remaining_leases': 0}))
+except Exception as error:
+    print('Request recovery failed: ' + type(error).__name__, file=sys.stderr)
+    sys.exit(1)
+"""
+
+
+def database_job(paths: Paths, execute: Callable, *, require_running_api: bool, operation: str, code: str) -> tuple[dict, dict]:
     release = active_release(paths)
     network = existing_data_network(execute)
     images = docker_json(["image", "inspect", release["image"]], execute)
     if not isinstance(images, list) or len(images) != 1 or not OBJECT_ID.fullmatch(str(images[0].get("Id", ""))):
         raise MaintenanceError("Active application image is not installed")
-    identifiers = execute(["docker", "ps", "--quiet", "--no-trunc", "--filter", f"label=com.docker.compose.project={PROJECT}",
-                           "--filter", f"label=com.docker.compose.service=public-api-{release['colour']}"]).split()
-    if len(identifiers) != 1 or not OBJECT_ID.fullmatch(identifiers[0]):
-        raise MaintenanceError("Expected exactly one running active API")
-    containers = docker_json(["inspect", identifiers[0]], execute)
-    if len(containers) != 1 or containers[0].get("Image") != images[0]["Id"]:
-        raise MaintenanceError("Running API does not match the promoted image")
+    if require_running_api:
+        identifiers = execute(["docker", "ps", "--quiet", "--no-trunc", "--filter", f"label=com.docker.compose.project={PROJECT}",
+                               "--filter", f"label=com.docker.compose.service=public-api-{release['colour']}"]).split()
+        if len(identifiers) != 1 or not OBJECT_ID.fullmatch(identifiers[0]):
+            raise MaintenanceError("Expected exactly one running active API")
+        containers = docker_json(["inspect", identifiers[0]], execute)
+        if len(containers) != 1 or containers[0].get("Image") != images[0]["Id"]:
+            raise MaintenanceError("Running API does not match the promoted image")
     secret = paths.secrets / "public_database_url"
     require_regular(secret, private=True)
     command = ["docker", "run", "--rm", "--pull=never", "--network", network,
-               "--label", "io.project-snow.maintenance=cleanup", "--read-only",
+               "--label", f"io.project-snow.maintenance={operation}", "--read-only",
                "--user", "0:0", "--cap-drop=ALL", "--cap-add=SETUID", "--cap-add=SETGID",
                "--security-opt", "no-new-privileges:true", "--pids-limit", "64", "--memory", "256m", "--cpus", "0.5",
                "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m", "--mount",
                f"type=bind,source={secret},target=/run/maintenance/database_url,readonly",
-               "--entrypoint", "python", release["image"], "-c", CLEANUP_CODE]
+               "--entrypoint", "python", release["image"], "-c", code]
     result = json.loads(execute(command))
+    return release, result
+
+
+def cleanup(paths: Paths, execute: Callable[[list[str]], str] = run, *, require_running_api: bool = True) -> dict[str, Any]:
+    release, result = database_job(paths, execute, require_running_api=require_running_api, operation="cleanup", code=CLEANUP_CODE)
     deleted = result.get("deleted")
     if not isinstance(deleted, dict) or any(not isinstance(value, int) or value < 0 for value in deleted.values()):
         raise MaintenanceError("Cleanup returned invalid counters")
     return {"status": "ok", "commit_sha": release["commit_sha"], "deleted": deleted}
+
+
+def recover_requests(paths: Paths, execute: Callable[[list[str]], str] = run) -> dict[str, Any]:
+    release = active_release(paths)
+    identifiers = execute(["docker", "ps", "--quiet", "--no-trunc", "--filter", f"label=com.docker.compose.project={PROJECT}",
+                           "--filter", f"label=com.docker.compose.service=public-api-{release['colour']}"]).split()
+    if identifiers:
+        raise MaintenanceError("Stop and drain the previously active API before lease recovery")
+    _, result = database_job(paths, execute, require_running_api=False, operation="recover-requests", code=RECOVER_REQUESTS_CODE)
+    if type(result.get("recovered")) is not int or result["recovered"] < 0 or result.get("remaining_leases") != 0:
+        raise MaintenanceError("Request recovery did not establish terminal results for all previous leases")
+    return {"status": "ok", "commit_sha": release["commit_sha"], **result}
 
 
 def capacity(paths: Paths, estimated_new_bytes: int, disk_usage: Callable = shutil.disk_usage) -> dict[str, Any]:
@@ -191,25 +256,164 @@ def capacity(paths: Paths, estimated_new_bytes: int, disk_usage: Callable = shut
     return {"status": "ok", "estimated_new_bytes": estimated_new_bytes, "filesystems": filesystems}
 
 
+def estimate_release_growth(paths: Paths, manifest_path: Path) -> int:
+    manifest = json.loads(read_text(manifest_path))
+    # Reserve a bounded application-image/build-layer allowance in addition to
+    # all uploaded archive members. Shared model image upgrades are a separate
+    # maintenance operation and are rejected by ordinary stage.
+    estimated = 2 * GIB
+    for kind, field in (("data", "data_version"), ("avatar", "media_version"), ("sticker", "sticker_version")):
+        version = str(manifest.get(field, ""))
+        if not re.fullmatch(r"[0-9A-Za-z._-]+", version):
+            raise MaintenanceError("Invalid release package version")
+        archive = paths.root / "inbox" / f"{kind}-{version}.tar"
+        if archive.exists() or archive.is_symlink():
+            info = archive.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise MaintenanceError("Unsafe release archive during capacity check")
+            # The controlled client creates uncompressed tar files. Explicitly
+            # rejecting compression avoids an unbounded decompression estimate.
+            with tarfile.open(archive, mode="r:") as package:
+                total = 0
+                for count, member in enumerate(package, 1):
+                    if count > 100000 or member.size < 0:
+                        raise MaintenanceError("Release archive exceeds capacity inspection bounds")
+                    total += member.size
+            estimated += max(info.st_size, total)
+    return estimated
+
+
+SHARED_IMAGE_KEYS = ("POSTGRES_IMAGE", "QDRANT_IMAGE", "NEO4J_IMAGE", "EMBEDDING_IMAGE", "EGRESS_PROXY_IMAGE")
+SHARED_CONFIG_PATHS = ("infra/postgres/postgresql.conf", "infra/neo4j-entrypoint.sh", "infra/egress-squid.conf")
+
+
+def shared_dependency_gate(paths: Paths, candidate_environment: Path, candidate_manifest: Path) -> dict[str, Any]:
+    current = read_environment(paths.root / "runtime" / "compose.env")
+    candidate = read_environment(candidate_environment)
+    changed = [key for key in SHARED_IMAGE_KEYS if not DIGEST.fullmatch(current.get(key, ""))
+               or candidate.get(key) != current[key]]
+    previous_binding = json.loads(read_text(paths.root / "releases" / "current-config.json"))
+    next_manifest = json.loads(read_text(candidate_manifest))
+    previous_hashes = previous_binding.get("configuration_sha256") or {}
+    next_hashes = next_manifest.get("configuration_sha256") or {}
+    changed.extend(path for path in SHARED_CONFIG_PATHS if not re.fullmatch(r"[0-9a-f]{64}", str(previous_hashes.get(path, "")))
+                   or next_hashes.get(path) != previous_hashes[path])
+    if changed:
+        raise MaintenanceError("Shared dependency changes require an independent backed-up maintenance release: " + ", ".join(changed))
+    return {"status": "ok", "shared_dependencies": "unchanged"}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="operation", required=True)
     commands.add_parser("cleanup")
+    recovery_parser = commands.add_parser("recover-requests")
+    recovery_parser.add_argument("--lock-held", action="store_true")
     capacity_parser = commands.add_parser("capacity")
     capacity_parser.add_argument("--estimated-new-bytes", type=int, default=0)
+    capacity_parser.add_argument("--manifest", type=Path)
+    stage_parser = commands.add_parser("shared-dependency-gate")
+    stage_parser.add_argument("--candidate-environment", type=Path, required=True)
+    stage_parser.add_argument("--manifest", type=Path, required=True)
+    anchor_parser = commands.add_parser("anchor")
+    anchor_parser.add_argument("--lock-held", action="store_true")
+    restore_parser = commands.add_parser("restore-anchor")
+    restore_parser.add_argument("--release-id", required=True)
+    restore_parser.add_argument("--colour", choices=("blue", "green"), required=True)
+    commands.add_parser("gc-plan")
+    gc_parser = commands.add_parser("gc-remove")
+    gc_parser.add_argument("--image-id", action="append", required=True)
+    backup_parser = commands.add_parser("backup")
+    backup_parser.add_argument("--pin", action="store_true", help="Keep a baseline snapshot outside daily retention")
+    auto_parser = commands.add_parser("auto-stage")
+    auto_parser.add_argument("--retry", action="store_true")
+    commands.add_parser("monitor")
+    restore_db_parser = commands.add_parser("restore-postgres")
+    restore_db_parser.add_argument("--dump", type=Path, required=True)
+    restore_db_parser.add_argument("--sha256", required=True)
+    record_parser = commands.add_parser("candidate-record")
+    record_parser.add_argument("--manifest", type=Path, required=True)
+    record_parser.add_argument("--colour", choices=("blue", "green"), required=True)
+    record_parser.add_argument("--lock-held", action="store_true")
+    for operation in ("candidate-complete", "discard-candidate"):
+        candidate_parser = commands.add_parser(operation)
+        candidate_parser.add_argument("--sha", required=True)
+        candidate_parser.add_argument("--lock-held", action="store_true")
     args = parser.parse_args()
     paths = Paths()
     try:
-        if args.operation == "cleanup":
+        if args.operation == "recover-requests":
+            if os.geteuid() != 0:
+                raise MaintenanceError("Request recovery requires root")
+            if args.lock_held:
+                require_inherited_release_lock(paths.lock)
+                result = recover_requests(paths)
+            else:
+                with release_lock(paths.lock):
+                    result = recover_requests(paths)
+        elif args.operation == "cleanup":
             if os.geteuid() != 0:
                 raise MaintenanceError("Host cleanup requires the installed root-owned helper")
             with release_lock(paths.lock):
                 result = cleanup(paths)
+        elif args.operation == "capacity":
+            estimated = max(args.estimated_new_bytes, estimate_release_growth(paths, args.manifest) if args.manifest else 0)
+            result = capacity(paths, estimated)
+        elif args.operation == "shared-dependency-gate":
+            result = shared_dependency_gate(paths, args.candidate_environment, args.manifest)
+        elif args.operation == "monitor":
+            from monitor import monitor
+
+            if os.geteuid() != 0:
+                raise MaintenanceError("Host monitoring requires root")
+            with release_lock(paths.lock.with_name("project-snow-monitor.lock")):
+                result = monitor(paths)
+            if result["status"] == "unchanged":
+                return 0
+        elif args.operation == "auto-stage":
+            from auto_stage import auto_stage
+
+            if os.geteuid() != 0:
+                raise MaintenanceError("Candidate pull requires root")
+            with release_lock(paths.lock.with_name("project-snow-auto-stage.lock")):
+                result = auto_stage(paths, retry=args.retry)
+        elif args.operation in {"backup", "restore-postgres"}:
+            from recovery_backup import backup, restore_postgres
+
+            if os.geteuid() != 0:
+                raise MaintenanceError("Database recovery requires root")
+            with release_lock(paths.lock):
+                result = backup(paths, pin=args.pin) if args.operation == "backup" else restore_postgres(paths, args.dump, args.sha256)
         else:
-            result = capacity(paths, args.estimated_new_bytes)
+            from release_state import archive_colours, delete_planned_images, discard_candidate, image_gc_plan, record_candidate, restore_colour
+
+            if os.geteuid() != 0:
+                raise MaintenanceError("Release maintenance requires root")
+            if getattr(args, "lock_held", False):
+                require_inherited_release_lock(paths.lock)
+                if args.operation == "anchor":
+                    result = archive_colours(paths)
+                elif args.operation == "candidate-record":
+                    result = record_candidate(paths, args.colour, args.manifest)
+                else:
+                    result = discard_candidate(paths, args.sha, promoted=args.operation == "candidate-complete")
+            else:
+                with release_lock(paths.lock):
+                    if args.operation == "anchor":
+                        result = archive_colours(paths)
+                    elif args.operation == "restore-anchor":
+                        result = restore_colour(paths, args.release_id, args.colour)
+                    elif args.operation == "gc-plan":
+                        result = image_gc_plan(paths)
+                    elif args.operation == "candidate-record":
+                        result = record_candidate(paths, args.colour, args.manifest)
+                    elif args.operation in {"candidate-complete", "discard-candidate"}:
+                        result = discard_candidate(paths, args.sha, promoted=args.operation == "candidate-complete")
+                    else:
+                        result = delete_planned_images(paths, args.image_id)
         print(json.dumps(result, sort_keys=True))
         return 0
-    except (MaintenanceError, OSError, ValueError, KeyError, TypeError) as error:
+    except (MaintenanceError, OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
         # Do not print exception messages from parsers, Docker or database code.
         message = str(error) if isinstance(error, MaintenanceError) else type(error).__name__
         print("Project Snow maintenance failed: " + message, file=sys.stderr)

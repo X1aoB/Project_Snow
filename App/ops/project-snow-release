@@ -602,6 +602,11 @@ try:
         if not chunk:
             break
         payload.extend(chunk)
+        if len(payload) > 131072:
+            raise SystemExit("release inbox JSON grew beyond its permitted size")
+    after = os.fstat(descriptor)
+    if (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns):
+        raise SystemExit("release inbox JSON changed while being copied")
 finally:
     os.close(descriptor)
 json.loads(payload.decode("utf-8"))
@@ -688,8 +693,22 @@ validate_release_manifest() {
   }
 }
 
+verify_inbox_release_proof() {
+  proof_manifest="$1"
+  proof_sha="$2"
+  printf '%s\n' "$proof_sha" | grep -Eq '^[0-9a-f]{40}$' || return 1
+  proof_copy="$(mktemp /run/project-snow-release.proof.XXXXXX.json)" || return 1
+  cleanup_paths="$cleanup_paths $proof_copy"
+  copy_inbox_manifest "$inbox/release-$proof_sha.proof.json" "$proof_copy" || return 1
+  python3 /usr/local/libexec/project-snow/verify_release_proof.py \
+    --manifest "$proof_manifest" --proof "$proof_copy" --expected-sha "$proof_sha" || return 1
+}
+
 install_manifest_releases() {
   manifest_path="$1"
+  # The trusted target checkout performs this read-only gate before unpacking
+  # any uploaded data/media package. Never consume the last recovery space.
+  python3 "$app_root/ops/maintenance.py" capacity --manifest "$manifest_path" || return 1
   deploy_uid="$(id -u deploy)"
   data_version="$(jq -r '.data_version // empty' "$manifest_path")"
   avatar_version="$(jq -r '.media_version // empty' "$manifest_path")"
@@ -760,6 +779,10 @@ run_stage() {
   manifest_copy="$(mktemp /run/project-snow-release.manifest.XXXXXX.json)"
   cleanup_paths="$cleanup_paths $manifest_copy"
   copy_inbox_manifest "$manifest_source" "$manifest_copy"
+
+  # Authorization must precede checkout and every candidate-owned Python or
+  # shell script. The proof verifier is independently installed and pinned.
+  verify_inbox_release_proof "$manifest_copy" "$requested_sha" || exit 71
 
   fetch_main
   previous_controller="$(current_controller_sha)"
@@ -842,7 +865,10 @@ run_stage() {
 
 run_switch() {
   switch_operation="$1"
-  fetch_main
+  # Recovery must remain usable when GitHub or Internet access is unavailable.
+  # Retained markers/configuration and the trusted local controller are still
+  # verified below; only a forward promotion refreshes the main reference.
+  if [ "$switch_operation" = promote ]; then fetch_main; fi
   controller_sha="$(current_controller_sha)"
   runner_matches_controller "$controller_sha" || {
     echo 'Installed release runner is not bound to the checked-out controller; repeat exact stage before switching traffic.' >&2

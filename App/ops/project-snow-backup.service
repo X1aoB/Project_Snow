@@ -6,4 +6,9 @@ ConditionPathExists=/srv/project-snow/runtime/compose.env
 [Service]
 Type=oneshot
 EnvironmentFile=/etc/project-snow/restic.env
-ExecStart=/srv/project-snow/app/ops/backup.sh
+ExecStart=/usr/bin/python3 /usr/local/libexec/project-snow/maintenance.py backup
+TimeoutStartSec=45min
+UMask=0077
+Nice=10
+CPUQuota=50%
+MemoryMax=1G

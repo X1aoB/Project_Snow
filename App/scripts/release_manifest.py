@@ -212,6 +212,9 @@ def create_manifest(
         "sticker_version": sticker_version,
         "release_artifacts": release_artifacts,
         "migration_heads": migration_heads(app_root / "migrations" / "versions"),
+        "runtime_capabilities": {
+            "request_leases": (app_root / "migrations" / "versions" / "20260907_0005_request_leases.py").is_file(),
+        },
         "application": {"image": public_image, "digest": public_digest},
         "embedding": {"image": embedding_image, "digest": embedding_digest},
         "configuration_sha256": {

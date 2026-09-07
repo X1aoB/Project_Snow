@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for a signed main candidate every five minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=30s
+Unit=project-snow-auto-stage.service
+
+[Install]
+WantedBy=timers.target

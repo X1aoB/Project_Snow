@@ -1,0 +1,13 @@
+[Unit]
+Description=Project Snow public and internal health state transitions
+After=network-online.target docker.service
+ConditionPathExists=/srv/project-snow/releases/current
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/libexec/project-snow/maintenance.py monitor
+TimeoutStartSec=50s
+UMask=0077
+Nice=10
+MemoryMax=128M
+SyslogIdentifier=project-snow-monitor
