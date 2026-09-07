@@ -34,5 +34,5 @@ PyYAML==6.0.3
 # works from a single reproducible environment.
 duckdb>=1.1,<2
 neo4j>=5.24,<6
-qdrant-client>=1.12,<2
+qdrant-client>=1.19.0,<2
 sentence-transformers>=3.2,<4
