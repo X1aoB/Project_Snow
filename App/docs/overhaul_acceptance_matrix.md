@@ -1,6 +1,6 @@
 # 小吉终端全面优化验收矩阵
 
-状态截点：2026-09-07，集成分支已推送 `77b8643`，PR CI 运行中；本表不预设其结果。
+状态截点：2026-09-07，集成代码 `77b8643` 的 [PR CI 34108179431](https://github.com/X1aoB/Project_Snow/actions/runs/34108179431) 已成功；后续提交仍需自身门禁。
 生产基线为 `0.9.6 / 502ec99412bef843c37e4b31a53df8fa9faeb33c`。main 尚未合并新方案，发布证明尚未签发，未人工晋级。后续操作以对应提交、产物摘要和实际回执更新本表。
 
 状态含义：**代码已实现**仅说明存在实现；**实测通过**必须注明本地、隔离环境或生产范围；**待生产启用**尚未完成在服启用；**部分实现**仍有明确缺口；**外部任务**由独立任务交付；**尚未完成**没有足够验收证据。测试通过、合并、准备候选均不等于用户批准上线。
@@ -11,7 +11,7 @@
 | ID | 可验收工作项 | 当前状态 | 证据、通过条件与关键文件 |
 | --- | --- | --- | --- |
 | A1 | 有保护清单的镜像 GC 与容量门 | 实测通过（生产） | 移除 36 个无引用 Snow 镜像；保护 30 个摘要引用，空闲约 16.9 GiB；未删容器、卷、数据版本或 Dify。后续仍须实际引用复核并满足至少 10 GiB 容量门。[release_state.py](../ops/release_state.py)、[maintenance.py](../ops/maintenance.py)。 |
-| A2 | 修复过期数据清理任务的网络故障 | 实测通过（生产） | 旧 helper `d73e3e2` 使用既有 data 网络；清理仅过期记录，25 个容器 ID/摘要不变。不得把这次结果当作新 helper 已完成升级。[maintenance.py](../ops/maintenance.py)、[test_host_maintenance.py](../tests/test_host_maintenance.py)。 |
+| A2 | 修复过期数据清理任务的网络故障 | 实测通过（生产新 helper） | `490c0bb` 独立升级后 cleanup 实跑 exit 0 / success，沿用既有 data 网络；25 个原容器 ID、image ID、运行状态均不变。到期清理可写数据库，未更换应用部署不等于零数据写入。事务 2026-09-07 10:10:40 UTC 完成。[maintenance.py](../ops/maintenance.py)、[test_host_maintenance.py](../tests/test_host_maintenance.py)。 |
 | A3 | 共享服务配置漂移与重建控制 | 代码已实现；待生产启用 | 普通 stage 拒绝共享数据库、检索和代理依赖变更；按 Compose 模型及实际容器指纹保留无变化服务。共享升级须独立维护验收。[routing.py](../ops/routing.py)、[maintenance.py](../ops/maintenance.py)。 |
 | A4 | 原版本、配置、数据和镜像可找回 | 实测通过（生产备份及只读读回） | 固定 Git tag、root 基线锚点、永久 restic tag；10 镜像/159 blobs 和代码、配置、dump 哈希读回通过。还原能力另见 F5，不能据此称完成裸机恢复。[RECOVERY.md](../ops/RECOVERY.md)、[release_state.py](../ops/release_state.py)。 |
 
@@ -19,12 +19,12 @@
 
 | ID | 可验收工作项 | 当前状态 | 证据、通过条件与关键文件 |
 | --- | --- | --- | --- |
-| B1 | 删除、重命名及未知路径触发足够 CI | 实测通过（本地）；最终 PR CI 待完成 | 分类器测试覆盖删除/重命名；未知变更保守触发完整检查。main 发布依赖完整门禁，不能仅凭路径快检发布。[classify_changes.py](../scripts/classify_changes.py)、[ci.yml](../../.github/workflows/ci.yml)。 |
-| B2 | 真实 PostgreSQL 迁移与旧代码兼容 | 实测通过（隔离 8 组）；新增用例待 CI | 覆盖空库、增量升级、实际旧 Store 读写及崩溃回退、权限隔离和失败 DDL/版本号事务回滚；历史 0001 DDL 冻结。新增第 9 组精确续租 SQL 尚待实库执行；测试角色不代表生产凭据已拆分。[migrations](../migrations)、[test_postgres_integration.py](../tests/test_postgres_integration.py)。 |
+| B1 | 删除、重命名及未知路径触发足够 CI | 实测通过（本地及 PR CI） | 分类器测试覆盖删除/重命名；未知变更保守触发完整检查。main 发布依赖完整门禁，不能仅凭路径快检发布。[classify_changes.py](../scripts/classify_changes.py)、[ci.yml](../../.github/workflows/ci.yml)。 |
+| B2 | 真实 PostgreSQL 迁移与旧代码兼容 | 实测通过（隔离及 CI 9 组） | 覆盖空库、增量升级、实际旧 Store 读写及崩溃回退、权限隔离和失败 DDL/版本号事务回滚；历史 0001 DDL 冻结。第 9 组精确续租 SQL 已随 `77b8643` 的真实 PostgreSQL CI 通过；测试角色不代表生产凭据已拆分。[migrations](../migrations)、[test_postgres_integration.py](../tests/test_postgres_integration.py)。 |
 | B3 | 构建及实际在服镜像漏洞门禁 | 部分实现 | CI 绑定 public/embedding 摘要，复用 embedding 也重新扫描。实际在服 scanner 已实现，首次实跑失败；`77b8643` 修复 Java DB 磁盘临时目录后待重跑。须保留完整报告/退出码；旧 admin 无 manifest 的差异不能称发布一致。[publish-images.yml](../../.github/workflows/publish-images.yml)、[running_image_scan.md](running_image_scan.md)。 |
 | B4 | 成功 main CI 签发可验证发布证明 | 代码已实现；尚未完成在线签发 | 绑定 source/signer SHA、main push、run/attempt 与完整 manifest 哈希；拒绝失败或进行中的后续重跑。最终须用真实 GitHub attestation 验证；main 需稳定一个 CI 周期。[release-proof.yml](../../.github/workflows/release-proof.yml)、[verify_release_proof.py](../scripts/verify_release_proof.py)。 |
 | B5 | 候选代码执行前完成可信校验 | 实测通过（故障测试）；待生产启用 | root 快照 inbox 后先调用固定 installed verifier，再 checkout/执行候选；不受信 artifact 不作为可直接执行的脚本。在线 runner 安装与首个真实候选另验收。[project-snow-release](../ops/project-snow-release)、[verify_release_proof.py](../scripts/verify_release_proof.py)。 |
-| B6 | 候选回执、当前版本 CAS 和手工晋级 | 代码已实现；待生产启用 | 回执绑定提交、产物、配置、数据与当前版本；基线改变、过期回执或另一候选未处理时拒绝。prepare 不代表批准，不自动切公网流量。[release_manifest.py](../scripts/release_manifest.py)、[release_state.py](../ops/release_state.py)、[promote.sh](../ops/promote.sh)。 |
+| B6 | 候选回执、当前版本 CAS 和手工晋级 | 实测通过（隔离）；待生产启用 | 独立 prepare/approve；回执绑定完整当前/候选 marker、配置/资源清单、stage nonce、两色实际容器与 image ID，重验候选 build-info 完整 SHA。首次副作用前持锁核对明确人工批准、预期当前版本和最长 24 小时期限；过期、重 stage、重启及字节篡改拒绝，rollback 保留独立紧急路径。26 项本地行为测试通过，Linux 权限验收另列。[candidate_acceptance.py](../ops/candidate_acceptance.py)、[人工晋级流程](candidate_acceptance.md)。 |
 | B7 | SSE 排空、切换与代理重启保持目标 | 实测通过（隔离）；待生产维护验收 | Caddy reload 保留全部 40 SSE chunks，新连接转 green，重启保持 green；后端接受的聊天可排空最多 300 秒。首次生产持久路由挂载维护尚未验收。[routing.py](../ops/routing.py)、[test_caddy_routing_integration.py](../tests/test_caddy_routing_integration.py)。 |
 | B8 | 应用和浏览器旧→新→旧回退 | 实测通过（隔离/浏览器） | 新租约须在停新 worker 后由受信新版维护逻辑终结，应用回退不降 DB schema。浏览器无损兼容目标为补丁版 0.9.6；原始基线既有草稿覆盖缺陷仍保留并明确披露。[test_public_request_recovery.py](../tests/test_public_request_recovery.py)、[compat/README.md](../compat/README.md)。 |
 | B9 | 最终 CI、main 合并、签名、候选与晋级闭环 | 尚未完成 | 最终提交通过所选 CI 后，仍依次需要 main 合并、证明签发、服务端验证、候选验收回执及人工晋级；截至本表公网保持 0.9.6。[release-0.10.0-rc.1.md](release-0.10.0-rc.1.md)、[public_deployment.md](public_deployment.md)。 |
@@ -70,10 +70,10 @@
 
 | ID | 可验收工作项 | 当前状态 | 证据、通过条件与关键文件 |
 | --- | --- | --- | --- |
-| F1 | 分钟级探测、状态转换及日志隐私 | 代码已实现；待生产启用 | 1 分钟探测、连续 3 次异常告警/恢复；覆盖 DB、retrieval、queue、磁盘 80%/90%、备份超过 26 小时。内部 full 不向公网开放，日志不输出 keys、聊天或完整 Env。[monitor.py](../ops/monitor.py)、[project-snow-monitor.timer](../ops/project-snow-monitor.timer)。 |
+| F1 | 分钟级探测、状态转换及日志隐私 | 实测通过（生产基础探测）；旧版指标有缺口 | monitor timer 已 enabled/active，首轮 public/DB/retrieval/disk/backup 均正常；磁盘 66.0%，备份龄 6 秒。阈值为连续 3 次异常、磁盘 80%/90%、备份 26 小时；0.9.6 queue 明确 instrumentation-unavailable，缺失 draining 的默认值不能算排空覆盖。内部 full 不向公网开放，日志不含 keys/聊天/完整 Env。[monitor.py](../ops/monitor.py)、[project-snow-monitor.timer](../ops/project-snow-monitor.timer)。 |
 | F2 | 外部告警通知维护者 | 尚未完成 | 当前仅本地 journal 状态转换；需维护者选择并配置接收端，再做失败/恢复送达验收。没有接收端不能称已经通知维护者。[monitor.py](../ops/monitor.py)、[RECOVERY.md](../ops/RECOVERY.md)。 |
-| F3 | 独立 helper 升级、锁与失败回退 | 实测通过（Linux 故障注入）；生产维护执行中 | 不变 generation、原子 current、receipt 和失败还原通过 19 项 Linux 测试；新 helper 的生产完成须看独立回执，不更新应用/runner 或暗启 auto-stage。支持继承锁的命令校验 FD9；backup 自取锁。[install_maintenance.py](../ops/install_maintenance.py)、[maintenance.py](../ops/maintenance.py)。 |
-| F4 | 加密备份、永久 pin 和资源边界 | 部分实现 | 现有基线永久备份已读回；新 helper 的 backup --pin 待实跑回执。pin 不带 daily tag，不被七天 forget 选中；手工任务须显式总时限/CPU/内存限制，不可父持 release 锁后再次获取。[recovery_backup.py](../ops/recovery_backup.py)、[project-snow-backup.service](../ops/project-snow-backup.service)。 |
+| F3 | 独立 helper 升级、锁与失败回退 | 实测通过（Linux 故障注入及生产升级） | 19 项 installer 测试、7 项一次性事务故障测试通过；`490c0bb` → generation `c2639d71…` 于 10:10:40 UTC 完成，root-only 原件/回执可恢复。全部原文件恢复并验证后才重启旧 timer；收据写失败不会跳过恢复。应用/runner/checkout 不变，auto-stage 仍 disabled；结束后实际取放 release 锁成功。[install_maintenance.py](../ops/install_maintenance.py)、[维护实跑台账](overhaul_progress.md)。 |
+| F4 | 加密备份、永久 pin 和资源边界 | 实测通过（生产新备份；本次未全量还原） | 新 helper 的 backup --pin 实际生成 `55252021…`，root600 last-success 于 10:10:32 UTC 写入；旧三 pin 保留，新 pin 无 daily tag，cleanup/backup timer 已启用。实读 transient 限制 50% CPU/1 GiB/45 分钟；PG dump 沿原容器 cgroup。父锁先释放、backup 自取锁；本次校验 snapshot/TOC/restic 元数据，不等于新 snapshot 全 blob 读回或镜像归档。[recovery_backup.py](../ops/recovery_backup.py)、[维护实跑台账](overhaul_progress.md)。 |
 | F5 | 完整组件恢复、空主机 RPO/RTO | 部分实现 | 隔离 full 恢复 279.41 秒通过：schema0004、8 表、1,148 资源、API 与重建检索；临时资源清理完成。空主机恢复尚未测量，RPO≤24小时/RTO≤4小时仍是目标，生产原地覆盖默认禁用。[restore_drill.py](../ops/restore_drill.py)、[RECOVERY.md](../ops/RECOVERY.md)。 |
 | F6 | 开发校验、依赖维护、版本与桌面交付 | 部分实现 | 统一校验、依赖锁/Dependabot、候选说明已提交；API/Web 0.10.0-rc.1、桌面预览 0.5.0、数据媒体独立版本。小吉品牌/图标来源、Electron 安全 smoke 与 Windows 预览通过；可信代码签名和正式桌面发布未完成。[validate_all.ps1](../scripts/validate_all.ps1)、[dependabot.yml](../../.github/dependabot.yml)、[client/README.md](../client/README.md)。 |
 
@@ -81,8 +81,8 @@
 
 | ID | 可验收工作项 | 当前状态 | 证据、通过条件与关键文件 |
 | --- | --- | --- | --- |
-| T1 | VoiceLab 导入、目录与成本账本 | 外部任务 | 独立任务负责从旧 voice scripts 导入最新 main 隔离树；不整分支合并陈旧 runtime/UI。目标 `Data/Voice` 原始只读、`App/runtime/voice_lab` 可重建、`App/voice_lab` 代码/文档；本树尚无最后者，不算已迁移。[实施台账](overhaul_progress.md)。 |
-| T2 | 全 22 角色及琴诺 morso 语音待审核 | 外部任务；尚未完成交付 | 新发生费用硬上限 300 元；普通角色与 morso 分列，保留可复用样本、来源、参数、成本和失败记录。六类文案/候选对比、可播放文件及完整人工盲审清单齐全才算“待审核”；机器分数不算批准，语音不上线。[实施台账](overhaul_progress.md)。 |
+| T1 | VoiceLab 导入、目录与成本账本 | 外部任务已交付；账单待核对 | 独立工作树 `codex/all-character-tts-review` 签名提交 `6d9180d`；代码为 `App/scripts/voice_lab*`，说明为 `App/docs/voice_lab_all_characters.md`，生成物在根目录 `runtime/voice-lab/runs/2026-09-07-vidya-chenxing-v2/`。保守费用估计 7.32550 元，低于 300 元上限；实际账单尚未知，不将估计改写为已结算费用。[实施台账](overhaul_progress.md)。 |
+| T2 | 全 22 角色及琴诺 morso 语音待审核 | 外部任务已交付；主任务独立技术复核通过 | 23 声线档案、276 条标准试听，六类文案及独立参考覆盖齐全。主任务重新读取全部 368 个公开音频（含参考/对照），SHA256、非空 WAV、单声道 24 kHz PCM16 与时长一致性通过；状态为 `ready_for_human_review`，人工结论待填，公网语音关闭。[实施台账](overhaul_progress.md)。 |
 | S1 | 通用全角色舞台载入和失败回退 | 实测通过（合成素材）；待素材后启用 | 校验恰好 22 唯一角色、同源路径、manifest/asset 哈希、来源、批准记录和 motion allowlist；异常回退，中止/低动态偏好有处理。当前 stage_release 固定关闭。[stage.ts](../public_frontend_src/src/stage.ts)、[verify_stage_release.py](../scripts/verify_stage_release.py)、[stage-release.schema.json](../config/stage-release.schema.json)。 |
 | S2 | 全 22 角色舞台实物与统一启用 | 外部任务；尚未完成交付 | 画图任务提交完整资源和逐角色人工审核；全部 22 角色验收后统一开。现有 Mia、基础肖像或合成 fixture 均不能代替新素材批准；启用仍须绑定候选回执。[public_frontend_src/README.md](../public_frontend_src/README.md)、[实施台账](overhaul_progress.md)。 |
 

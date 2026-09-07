@@ -416,6 +416,13 @@ if [ -n "$expected_sha" ] && [ "$expected_sha" != "$marker_sha" ]; then
   echo "Staged SHA $marker_sha does not match requested SHA $expected_sha." >&2
   exit 68
 fi
+# A successful stage is not a human acceptance decision. Forward promotion
+# requires an exact, unexpired receipt and current-release CAS under FD9.
+# Emergency rollback continues to use its retained local recovery identities.
+if [ "$rollback_mode" = 0 ]; then
+  python3 "$script_dir/candidate_acceptance.py" verify --lock-held \
+    --colour "$colour" --sha "$marker_sha" || exit 78
+fi
 manifest_sha="$(jq -r '.commit_sha // empty' "$colour_manifest")"
 manifest_app_version="$(jq -r '.app_version // empty' "$colour_manifest")"
 manifest_app_ref="$(jq -r '(.application.image // "") + "@" + (.application.digest // "")' "$colour_manifest")"
