@@ -1,7 +1,7 @@
 # 小吉终端全面优化验收矩阵
 
-状态截点：2026-09-07，集成代码 `77b8643` 的 [PR CI 34108179431](https://github.com/X1aoB/Project_Snow/actions/runs/34108179431) 已成功；后续提交仍需自身门禁。
-生产基线为 `0.9.6 / 502ec99412bef843c37e4b31a53df8fa9faeb33c`。main 尚未合并新方案，发布证明尚未签发，未人工晋级。后续操作以对应提交、产物摘要和实际回执更新本表。
+状态截点：2026-09-07，`1c4b15d` 的 [PR CI 34111379744](https://github.com/X1aoB/Project_Snow/actions/runs/34111379744) 已成功，PR #36 合并为 `8c53f51`；其首次 main CI 因一个减少动态模式的浏览器等待失败而阻止发布，正在修复。
+生产基线为 `0.9.6 / 502ec99412bef843c37e4b31a53df8fa9faeb33c`。发布证明尚未签发，未人工晋级。后续操作以对应提交、产物摘要和实际回执更新本表。
 
 状态含义：**代码已实现**仅说明存在实现；**实测通过**必须注明本地、隔离环境或生产范围；**待生产启用**尚未完成在服启用；**部分实现**仍有明确缺口；**外部任务**由独立任务交付；**尚未完成**没有足够验收证据。测试通过、合并、准备候选均不等于用户批准上线。
 证据台账见 [overhaul_progress.md](overhaul_progress.md)，操作边界见 [RECOVERY.md](../ops/RECOVERY.md)。以下共 45 项，不以粗略完成百分比替代验收。
@@ -21,13 +21,13 @@
 | --- | --- | --- | --- |
 | B1 | 删除、重命名及未知路径触发足够 CI | 实测通过（本地及 PR CI） | 分类器测试覆盖删除/重命名；未知变更保守触发完整检查。main 发布依赖完整门禁，不能仅凭路径快检发布。[classify_changes.py](../scripts/classify_changes.py)、[ci.yml](../../.github/workflows/ci.yml)。 |
 | B2 | 真实 PostgreSQL 迁移与旧代码兼容 | 实测通过（隔离及 CI 9 组） | 覆盖空库、增量升级、实际旧 Store 读写及崩溃回退、权限隔离和失败 DDL/版本号事务回滚；历史 0001 DDL 冻结。第 9 组精确续租 SQL 已随 `77b8643` 的真实 PostgreSQL CI 通过；测试角色不代表生产凭据已拆分。[migrations](../migrations)、[test_postgres_integration.py](../tests/test_postgres_integration.py)。 |
-| B3 | 构建及实际在服镜像漏洞门禁 | 部分实现 | CI 绑定 public/embedding 摘要，复用 embedding 也重新扫描。实际在服 scanner 已实现，首次实跑失败；`77b8643` 修复 Java DB 磁盘临时目录后待重跑。须保留完整报告/退出码；旧 admin 无 manifest 的差异不能称发布一致。[publish-images.yml](../../.github/workflows/publish-images.yml)、[running_image_scan.md](running_image_scan.md)。 |
+| B3 | 构建及实际在服镜像漏洞门禁 | 实测完成；共享设施修复尚未完成 | 实际扫描 9 镜像/11 服务，247 条可修复 HIGH/CRITICAL（120 CVE+3 GHSA）；API/mailer/embedding 为 0，共享设施和旧 admin 需独立维护。报告 `vulnerable`/exit1，旧 admin 仍 `retained_unbound`，不能称安全通过或已证实可利用。新候选仍须对自身 digest fresh scan。[维护实跑台账](overhaul_progress.md)、[running_image_scan.md](running_image_scan.md)。 |
 | B4 | 成功 main CI 签发可验证发布证明 | 代码已实现；尚未完成在线签发 | 绑定 source/signer SHA、main push、run/attempt 与完整 manifest 哈希；拒绝失败或进行中的后续重跑。最终须用真实 GitHub attestation 验证；main 需稳定一个 CI 周期。[release-proof.yml](../../.github/workflows/release-proof.yml)、[verify_release_proof.py](../scripts/verify_release_proof.py)。 |
 | B5 | 候选代码执行前完成可信校验 | 实测通过（故障测试）；待生产启用 | root 快照 inbox 后先调用固定 installed verifier，再 checkout/执行候选；不受信 artifact 不作为可直接执行的脚本。在线 runner 安装与首个真实候选另验收。[project-snow-release](../ops/project-snow-release)、[verify_release_proof.py](../scripts/verify_release_proof.py)。 |
 | B6 | 候选回执、当前版本 CAS 和手工晋级 | 实测通过（隔离）；待生产启用 | 独立 prepare/approve；回执绑定完整当前/候选 marker、配置/资源清单、stage nonce、两色实际容器与 image ID，重验候选 build-info 完整 SHA。首次副作用前持锁核对明确人工批准、预期当前版本和最长 24 小时期限；过期、重 stage、重启及字节篡改拒绝，rollback 保留独立紧急路径。26 项本地行为测试通过，Linux 权限验收另列。[candidate_acceptance.py](../ops/candidate_acceptance.py)、[人工晋级流程](candidate_acceptance.md)。 |
 | B7 | SSE 排空、切换与代理重启保持目标 | 实测通过（隔离）；待生产维护验收 | Caddy reload 保留全部 40 SSE chunks，新连接转 green，重启保持 green；后端接受的聊天可排空最多 300 秒。首次生产持久路由挂载维护尚未验收。[routing.py](../ops/routing.py)、[test_caddy_routing_integration.py](../tests/test_caddy_routing_integration.py)。 |
 | B8 | 应用和浏览器旧→新→旧回退 | 实测通过（隔离/浏览器） | 新租约须在停新 worker 后由受信新版维护逻辑终结，应用回退不降 DB schema。浏览器无损兼容目标为补丁版 0.9.6；原始基线既有草稿覆盖缺陷仍保留并明确披露。[test_public_request_recovery.py](../tests/test_public_request_recovery.py)、[compat/README.md](../compat/README.md)。 |
-| B9 | 最终 CI、main 合并、签名、候选与晋级闭环 | 尚未完成 | 最终提交通过所选 CI 后，仍依次需要 main 合并、证明签发、服务端验证、候选验收回执及人工晋级；截至本表公网保持 0.9.6。[release-0.10.0-rc.1.md](release-0.10.0-rc.1.md)、[public_deployment.md](public_deployment.md)。 |
+| B9 | 最终 CI、main 合并、签名、候选与晋级闭环 | 部分完成；main 失败门禁生效 | PR 已合并 `8c53f51`，首次 main 完整验证的浏览器用例失败后未发布镜像/证明。仍需修复并通过 main CI、证明签发、服务端验证、候选验收回执及人工晋级；公网保持 0.9.6。[release-0.10.0-rc.1.md](release-0.10.0-rc.1.md)、[public_deployment.md](public_deployment.md)。 |
 
 ## C 后端架构、功能稳定性与安全
 
