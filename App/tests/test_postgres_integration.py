@@ -181,6 +181,25 @@ def test_expired_owner_is_fenced_and_never_reissues_provider_work(database):
             store.complete_request("one", {"answer": "late"}, owner_token="old")
 
 
+def test_renewal_targets_only_live_request_ids_with_matching_owner(database):
+    migrate(database)
+    store = PublicStore("", engine=database)
+    now = datetime(2026, 9, 7, tzinfo=UTC)
+    with patch("backend.snow_app.public_store._utcnow", return_value=now):
+        for request_id, owner in (("live", "worker"), ("orphan", "worker"), ("foreign", "other")):
+            assert store.claim_request(request_id, "subject", "hash", owner_token=owner)[0] == "claimed"
+    for seconds in (10, 20, 30, 40, 50):
+        with patch("backend.snow_app.public_store._utcnow", return_value=now + timedelta(seconds=seconds)):
+            assert store.renew_leases("worker", ("live", "foreign")) == 1
+            assert store.renew_leases("worker", ()) == 0
+    with patch("backend.snow_app.public_store._utcnow", return_value=now + timedelta(seconds=51)):
+        for request_id in ("orphan", "foreign"):
+            status, result = store.claim_request(request_id, "subject", "hash", owner_token="new")
+            assert status == "completed"
+            assert result["terminal_error"] == "generation_interrupted"
+        store.complete_request("live", {"answer": "done"}, owner_token="worker")
+
+
 def test_restricted_application_role_can_write_data_but_cannot_change_schema(database):
     """Prove the proposed runtime grants independently of the migration owner."""
     migrate(database)

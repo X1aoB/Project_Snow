@@ -6,11 +6,12 @@ import hashlib
 import json
 import secrets
 import unicodedata
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any, Iterator
+from typing import Any
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.pool import StaticPool
 
@@ -355,15 +356,27 @@ class PublicStore:
         with self.begin() as connection:
             return self._recover_expired(connection, _utcnow())
 
-    def renew_leases(self, owner_token: str) -> int:
+    def renew_leases(self, owner_token: str, request_ids: Sequence[str] = ()) -> int:
+        """Renew only requests still owned by live tasks in this worker.
+
+        An empty snapshot still reconciles expired leases. A process being
+        alive is insufficient: a failed result write can leave a cache claim
+        behind after its generating task has already ended.
+        """
         now = _utcnow()
         with self.begin() as connection:
             self._recover_expired(connection, now)
+            if not request_ids:
+                return 0
             result = connection.execute(
                 text(
-                    "UPDATE public_request_leases SET lease_expires_at = :expires WHERE owner_token = :owner"
-                ),
-                {"owner": owner_token, "expires": now + timedelta(seconds=45)},
+                    "UPDATE public_request_leases SET lease_expires_at = :expires "
+                    "WHERE owner_token = :owner AND request_id IN :request_ids"
+                ).bindparams(bindparam("request_ids", expanding=True)),
+                {
+                    "owner": owner_token, "expires": now + timedelta(seconds=45),
+                    "request_ids": tuple(set(request_ids)),
+                },
             )
             return int(result.rowcount)
 
