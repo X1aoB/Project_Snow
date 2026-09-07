@@ -103,4 +103,6 @@ monitor timer 每分钟读取公网 live 及活动 API localhost full 健康（D
 
 永久基线镜像 snapshot 回读核对 10 个镜像、159 个 blobs、1,296,395,349 字节归档内容；源码 zip、配置 tar 和 PG dump 均与记录 hash 一致。这些证据证明备份可读取、文件和镜像材料完整，尚不代表完成 Docker load 或整台主机的灾难恢复演练。
 
-首次隔离演练实际恢复了 8 张 PostgreSQL 表，migration head 为 `20260819_0004`，无未验证约束；data 11、avatar 47、sticker 1090 个文件全部通过 hash 校验。该次 API 检查因 internal 网络没有宿主端口而失败，所有临时资源成功清理；已改为容器内部 loopback 检查，完整 API/检索恢复仍须重跑后记录，不能把这次结果标成通过。
+完整隔离恢复于 **2026-09-07 09:39:42 UTC** 通过，耗时 **279.41 秒**：8 张 PostgreSQL 表、migration head `20260819_0004`、零未验证约束；data 11、avatar 47、sticker 1090 个文件全部通过 hash 校验，独立 embedding/Qdrant/Neo4j 完成索引重建，基线 API 的 readiness/full 全部正常。临时容器、网络、卷全部清理，生产数据库未被覆盖，也未调用模型或邮件服务。
+
+原始回执为 `/srv/project-snow/backups/restore-drills/run-d0303d777c9b471289feb96e33ccae42.json`，SHA256 `a6de02e4ae035f67754aec0bb7f865a1f05b40c60a8825105ac15ead50e13780`。前两次失败促成容器内 loopback 探测及 PostgreSQL 最终 TCP 就绪修复，失败回执仍保留。这是组件恢复验证，**不是空主机恢复/RTO 验收，也没有历史行数基准可逐项比对**。
