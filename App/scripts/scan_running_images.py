@@ -50,6 +50,8 @@ SERVICE_KEYS = {
     "egress-proxy": "EGRESS_PROXY_IMAGE",
 }
 GIB = 1024**3
+HOST_DISK_RESERVE = 10 * GIB
+DATABASE_SCRATCH_ESTIMATE = 4 * GIB
 MAX_REPORT = 32 * 1024**2
 CONTAINER_FORMAT = (
     '{"id":{{json .Id}},"image_id":{{json .Image}},"running":{{json .State.Running}},'
@@ -441,6 +443,8 @@ def run_scanner(
         "128",
         "--tmpfs",
         "/tmp:rw,nosuid,noexec,size=512m",
+        "--env",
+        "TMPDIR=/cache/tmp",
         "--workdir",
         "/",
         "--mount",
@@ -504,6 +508,14 @@ def run_scanner(
             commands.run(["docker", "container", "rm", "--force", owned["id"]], cleanup=True)
 
 
+def require_scratch_space(root: Path, work: Path, extra_bytes: int = 0) -> None:
+    """Keep the host reserve in addition to the next operation's scratch estimate."""
+    if shutil.disk_usage(root).free < HOST_DISK_RESERVE:
+        raise ScanError("At least 10 GiB free host disk reserve is required for scanning")
+    if shutil.disk_usage(work).free < HOST_DISK_RESERVE + extra_bytes:
+        raise ScanError("Insufficient scratch space beyond the required 10 GiB disk reserve")
+
+
 def scan(
     root: Path,
     scanner: str,
@@ -549,12 +561,16 @@ def scan(
         work = Path(directory)
         for name in ("cache", "policy", "reports"):
             (work / name).mkdir(mode=0o700)
+        # Java DB downloads/decompression can exceed /tmp's bounded tmpfs.
+        # Use private disk scratch without increasing the scanner's RAM cap.
+        (work / "cache" / "tmp").mkdir(mode=0o700)
         (work / "policy" / "trivy.yaml").write_text("{}\n")
         (work / "policy" / "ignore").write_text("")
-        if shutil.disk_usage(work).free < 3 * GIB:
-            raise ScanError("At least 3 GiB free scratch space is required before downloading databases")
+        require_scratch_space(root, work, DATABASE_SCRATCH_ESTIMATE)
         run_scanner(commands, scanner, work, ["--download-db-only"])
+        require_scratch_space(root, work, DATABASE_SCRATCH_ESTIMATE)
         run_scanner(commands, scanner, work, ["--download-java-db-only"])
+        require_scratch_space(root, work)
         metadata_path = work / "cache" / "db" / "metadata.json"
         if not metadata_path.is_file() or metadata_path.stat().st_size > 16384:
             raise ScanError("Trivy database download did not produce bounded metadata")
@@ -572,10 +588,10 @@ def scan(
             size = image["size_bytes"]
             if type(size) is not int or not 0 < size <= max_image_bytes:
                 raise ScanError("An installed running image exceeds the reviewed export size bound")
-            if shutil.disk_usage(work).free < max(2 * GIB, 2 * size + GIB):
-                raise ScanError("Insufficient scratch headroom for the next actual image export")
+            require_scratch_space(root, work, max(2 * GIB, 2 * size + GIB))
             archive = work / "image.tar"
             commands.run(["docker", "image", "save", "--output", str(archive), image["image_id"]])
+            require_scratch_space(root, work)
             if not archive.is_file() or archive.stat().st_size > max_image_bytes + GIB:
                 raise ScanError("The exported image archive exceeds its size bound")
             configs = archive_config_ids(archive, image)
@@ -611,6 +627,7 @@ def scan(
                 ],
                 archive,
             )
+            require_scratch_space(root, work)
             findings = findings_from_report(work / "reports" / name, image, configs)
             result["images"].append(
                 {

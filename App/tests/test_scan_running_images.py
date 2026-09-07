@@ -14,6 +14,7 @@ import pytest
 
 from scripts.report_trivy_findings import collect_findings
 from scripts.scan_running_images import (
+    GIB,
     Commands,
     ScanError,
     archive_config_ids,
@@ -33,6 +34,16 @@ OLD_COMMIT = "e" * 40
 SECRET = "do-not-output-this-environment-value"
 CONFIG = json.dumps({"os": "linux", "architecture": "amd64", "config": {"Env": [SECRET]}}).encode()
 CONFIG_ID = "sha256:" + hashlib.sha256(CONFIG).hexdigest()
+
+
+@pytest.fixture(autouse=True)
+def synthetic_disk_space(monkeypatch):
+    # Fake Docker writes only tiny fixtures. Contract outcomes must not depend
+    # on the CI runner's actual remaining disk space.
+    monkeypatch.setattr(
+        "scripts.scan_running_images.shutil.disk_usage",
+        lambda _path: SimpleNamespace(total=100 * GIB, used=40 * GIB, free=60 * GIB),
+    )
 
 
 def write(path, value):
@@ -112,6 +123,7 @@ class FakeDocker:
             },
         ]
         self.image_refs = {APP_ID: [APP_REF], EDGE_ID: [canonical_reference(EDGE_REF)], SCANNER_ID: [TRIVY]}
+        self.image_sizes = {}
         self.findings = []
         self.report_id = CONFIG_ID
         self.failure = None
@@ -122,6 +134,7 @@ class FakeDocker:
         self.db_expired = False
         self.timeout_before_cid = False
         self.owned_names = {}
+        self.scratch_paths = []
 
     def __call__(self, command, **kwargs):
         assert command[:3] == ["docker", "--host", "unix:///var/run/docker.sock"]
@@ -140,7 +153,7 @@ class FakeDocker:
                 {
                     "id": identifier,
                     "repo_digests": self.image_refs[identifier],
-                    "size": 100_000,
+                    "size": self.image_sizes.get(identifier, 100_000),
                     "os": "linux",
                     "architecture": "amd64",
                     "Env": [SECRET],
@@ -164,12 +177,19 @@ class FakeDocker:
             assert TRIVY in command
             assert command[command.index("--memory") + 1] == "2g"
             assert command[command.index("--cpus") + 1] == "1"
+            assert command[command.index("--tmpfs") + 1] == "/tmp:rw,nosuid,noexec,size=512m"
+            assert command[command.index("--env") + 1] == "TMPDIR=/cache/tmp"
             assert not any("docker.sock" in argument or ":main" in argument for argument in command)
             mounts = {}
             for index, argument in enumerate(command):
                 if argument == "--mount":
                     parts = dict(item.split("=", 1) for item in command[index + 1].split(",") if "=" in item)
                     mounts[parts["target"]] = Path(parts["source"])
+            scratch = mounts["/cache"] / "tmp"
+            assert scratch.is_dir() and not scratch.is_symlink()
+            assert scratch.parent.parent.name.startswith("snow-running-scan-")
+            assert scratch.parent.parent == mounts["/reports"].parent
+            self.scratch_paths.append(scratch)
             cid = Path(command[command.index("--cidfile") + 1])
             if not self.timeout_before_cid:
                 cid.write_text("8" * 64)
@@ -247,6 +267,67 @@ def test_running_digest_manifest_mismatch_refuses_before_download_or_scan(tmp_pa
     with pytest.raises(ScanError, match="does not match"):
         run_scan(tmp_path, fake)
     assert not any(command[:2] == ["docker", "run"] for command, _ in fake.calls)
+    assert not any(command[:3] == ["docker", "image", "save"] for command, _ in fake.calls)
+
+
+def test_database_and_offline_analysis_use_private_disk_tmpdir_without_expanding_ram(tmp_path):
+    fake = FakeDocker()
+    assert run_scan(tmp_path, fake)["status"] == "passed"
+    assert len(fake.scratch_paths) == 4  # two downloads, then two offline image scans
+    assert len(set(fake.scratch_paths)) == 1
+    assert fake.scratch_paths[0].is_relative_to(tmp_path)
+    assert not fake.scratch_paths[0].exists()  # private mutable tool data is removed after this run
+
+
+def test_database_download_requires_four_gib_beyond_host_reserve(tmp_path, monkeypatch):
+    fake = FakeDocker()
+    monkeypatch.setattr(
+        "scripts.scan_running_images.shutil.disk_usage", lambda _path: SimpleNamespace(free=14 * GIB - 1),
+    )
+    with pytest.raises(ScanError, match="scratch.*10 GiB"):
+        run_scan(tmp_path, fake)
+    assert not any(command[:2] == ["docker", "run"] for command, _ in fake.calls)
+
+
+def test_separate_scratch_disk_cannot_hide_low_host_reserve(tmp_path, monkeypatch):
+    fake = FakeDocker()
+    monkeypatch.setattr(
+        "scripts.scan_running_images.shutil.disk_usage",
+        lambda path: SimpleNamespace(free=10 * GIB - 1 if path == tmp_path / "host" else 60 * GIB),
+    )
+    with pytest.raises(ScanError, match="host disk reserve"):
+        run_scan(tmp_path, fake)
+    assert not any(command[:2] == ["docker", "run"] for command, _ in fake.calls)
+
+
+@pytest.mark.parametrize("image_size,free_after_download", [(100_000, 11 * GIB), (3 * GIB, 16 * GIB)])
+def test_each_export_reserves_image_scratch_in_addition_to_ten_gib(
+    tmp_path, monkeypatch, image_size, free_after_download,
+):
+    fake = FakeDocker()
+    fake.image_sizes[APP_ID] = image_size
+
+    def space(_path):
+        downloaded = any("--download-java-db-only" in command for command, _ in fake.calls)
+        return SimpleNamespace(free=free_after_download if downloaded else 20 * GIB)
+
+    monkeypatch.setattr("scripts.scan_running_images.shutil.disk_usage", space)
+    with pytest.raises(ScanError, match="scratch.*10 GiB"):
+        run_scan(tmp_path, fake)
+    assert any("--download-java-db-only" in command for command, _ in fake.calls)
+    assert not any(command[:3] == ["docker", "image", "save"] for command, _ in fake.calls)
+
+
+def test_download_that_consumes_host_reserve_cannot_report_success(tmp_path, monkeypatch):
+    fake = FakeDocker()
+
+    def space(_path):
+        downloaded = any("--download-java-db-only" in command for command, _ in fake.calls)
+        return SimpleNamespace(free=9 * GIB if downloaded else 20 * GIB)
+
+    monkeypatch.setattr("scripts.scan_running_images.shutil.disk_usage", space)
+    with pytest.raises(ScanError, match="host disk reserve"):
+        run_scan(tmp_path, fake)
     assert not any(command[:3] == ["docker", "image", "save"] for command, _ in fake.calls)
 
 
