@@ -216,7 +216,7 @@ textarea { resize: none; }
 .app-shell[data-channel="in_person"] .request-status-row { padding: 5px 10px; }
 .app-shell[data-channel="in_person"] .composer-foot { margin-top: 4px; padding-inline: 10px; }
 
-.system-banner { position: fixed; z-index: 80; top: 18px; left: 50%; translate: -50% 0; max-width: min(620px, calc(100vw - 32px)); padding: 10px 14px; border: 1px solid #acc2cf; border-radius: 12px; color: #385b70; background: rgba(251,253,254,.97); box-shadow: var(--snow-shadow); font-size: .7rem; }
+.system-banner { position: relative; z-index: 10; min-width: 0; margin: 0 10px 6px; padding: 10px 14px; border: 1px solid #acc2cf; border-radius: 12px; color: #385b70; background: rgba(251,253,254,.97); overflow-wrap: anywhere; font-size: .7rem; }
 .info-panel, .transcript-panel { position: fixed; z-index: 55; top: 0; right: 0; bottom: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(390px, 92vw); border-left: 1px solid var(--snow-line); background: #f9fcfd; box-shadow: -16px 0 50px rgba(51,77,93,.16); translate: 100% 0; transition: translate 180ms ease; }
 .info-panel.open, .transcript-panel.open { translate: 0 0; }
 .info-panel > header, .transcript-panel > header, .modal header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--snow-line-soft); }
