@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import os
 import hashlib
 import subprocess
@@ -439,4 +440,58 @@ class PublicFrontendReliabilityTests(TestCase):
             phase[0] = "current"
             self.open(page)
             self.assertEqual(page.locator("#message-input").input_value(),"新版草稿应能安全回退")
+            browser.close()
+
+    def test_enabled_stage_manifest_uses_verified_generic_art_and_rejects_tampering(self):
+        image_bytes = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=")
+        ids = ["25b23cb64398","9f5804761c56","702f4375675b"] + [f"{number:012x}" for number in range(19)]
+        asset = {"url":"/assets/stage/fixture.png","sha256":hashlib.sha256(image_bytes).hexdigest(),"media_type":"image/png","source":{"kind":"fixture","reference":"synthetic pixel"},"approval":{"status":"approved","approved_by":"fixture","approved_at":"2026-09-07T00:00:00Z","evidence":"synthetic test; not a real release approval"}}
+        payload = json.dumps({"schema":"project-snow-stage-1","version":"fixture-22","characters":[{"character_id":identifier,"states":{"neutral":asset},"motions":["none"]} for identifier in ids]}).encode()
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            tampered = [False]
+
+            def config(route):
+                value = route.fetch().json()
+                value["stage_release"] = {"enabled":True,"manifest_url":"/assets/stage/fixture.json","sha256":hashlib.sha256(payload).hexdigest()}
+                route.fulfill(status=200,content_type="application/json",body=json.dumps(value))
+
+            def characters(route):
+                value = route.fetch().json()
+                value["characters"] += [{"character_id":identifier,"display_name":f"Synthetic {index}","avatar":None} for index,identifier in enumerate(ids[3:])]
+                value["count"] = 22
+                route.fulfill(status=200,content_type="application/json",body=json.dumps(value))
+
+            page.route("**/public/v1/config",config)
+            page.route("**/public/v1/characters",characters)
+            page.route("**/assets/stage/fixture.json",lambda route:route.fulfill(status=200,content_type="application/json",body=payload))
+            page.route("**/assets/stage/fixture.png",lambda route:route.fulfill(status=200,content_type="image/png",body=b"tampered" if tampered[0] else image_bytes))
+            self.open(page)
+            page.wait_for_load_state("networkidle")
+            result = page.evaluate("""async()=>{
+              const art=document.querySelector('#stage-character-art');
+              for(let attempt=0;attempt<40;attempt++) {
+                const ready=await window.__projectSnowTest.updateStageCharacterArt(art,{character_id:'25b23cb64398'},'happy');
+                if(ready || art.dataset.stageArtFailedKey) return {ready,src:art.getAttribute('src'),state:art.dataset.expressionState};
+                await new Promise(resolve=>setTimeout(resolve,50));
+              }
+              throw new Error('verified stage did not initialize');
+            }""")
+            self.assertTrue(result["ready"])
+            self.assertTrue(result["src"].startswith("blob:"))
+            self.assertEqual(result["state"],"neutral")
+            tampered[0] = True
+            self.open(page)
+            page.wait_for_load_state("networkidle")
+            rejected = page.evaluate("""async()=>{
+              const art=document.querySelector('#stage-character-art');
+              for(let attempt=0;attempt<40;attempt++) {
+                await window.__projectSnowTest.updateStageCharacterArt(art,{character_id:'25b23cb64398'},'neutral');
+                if(art.dataset.stageArtFailedKey) return art.hidden && !art.hasAttribute('src');
+                await new Promise(resolve=>setTimeout(resolve,50));
+              }
+              return false;
+            }""")
+            self.assertTrue(rejected)
             browser.close()
