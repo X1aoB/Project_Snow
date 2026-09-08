@@ -646,6 +646,16 @@ $seal_parent"
 install_direct_origin_firewall() {
   firewall_config_root="$1"
   [ -f "$firewall_config_root/infra/OriginEdge.Caddyfile" ] || return 0
+  # Staging requires an already validated active-colour marker. Reuse the
+  # installed shared firewall; changing it belongs to independent maintenance.
+  # Keep the initial bootstrap installer below for hosts without an active release.
+  if [ -n "${active_colour:-}" ]; then
+    python3 -B ops/verify_origin_firewall.py --configuration-root "$firewall_config_root" || {
+      echo 'Origin-firewall drift or unhealthy installation; use independent maintenance before staging.' >&2
+      return 1
+    }
+    return 0
+  fi
   firewall_source="$firewall_config_root/scripts/cloudflare_origin_firewall.py"
   firewall_binary=/usr/local/sbin/project-snow-origin-firewall
   systemd_root=/etc/systemd/system
@@ -1602,12 +1612,10 @@ done
   exit 73
 }
 
-# Install the immutable firewall helper and boot ordering only after all staged
-# application gates pass. Its first live update must succeed before this colour
-# is made durable; promote.sh repeats that fail-closed gate immediately before
-# it is allowed to create or recreate origin-edge.
+# Verify the installed shared firewall after the staged application gates.
+# Ordinary staging cannot reinstall units, refresh rules or restart timers.
 install_direct_origin_firewall "$candidate_config_root" || {
-  echo 'Direct-origin firewall installation or initial update failed.' >&2
+  echo 'Direct-origin firewall verification or bootstrap failed.' >&2
   exit 73
 }
 
