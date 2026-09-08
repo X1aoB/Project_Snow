@@ -444,7 +444,7 @@ class PublicFrontendReliabilityTests(TestCase):
 
     def test_enabled_stage_manifest_uses_verified_generic_art_and_rejects_tampering(self):
         image_bytes = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=")
-        ids = ["25b23cb64398","9f5804761c56","702f4375675b"] + [f"{number:012x}" for number in range(19)]
+        ids = ["25b23cb64398","9f5804761c56","702f4375675b","78aa7ab99154"] + [f"{number:012x}" for number in range(18)]
         asset = {"url":"/assets/stage/fixture.png","sha256":hashlib.sha256(image_bytes).hexdigest(),"media_type":"image/png","source":{"kind":"fixture","reference":"synthetic pixel"},"approval":{"status":"approved","approved_by":"fixture","approved_at":"2026-09-07T00:00:00Z","evidence":"synthetic test; not a real release approval"}}
         payload = json.dumps({"schema":"project-snow-stage-1","version":"fixture-22","characters":[{"character_id":identifier,"states":{"neutral":asset},"motions":["none"]} for identifier in ids]}).encode()
         with sync_playwright() as playwright:
@@ -459,7 +459,7 @@ class PublicFrontendReliabilityTests(TestCase):
 
             def characters(route):
                 value = route.fetch().json()
-                value["characters"] += [{"character_id":identifier,"display_name":f"Synthetic {index}","avatar":None} for index,identifier in enumerate(ids[3:])]
+                value["characters"] += [{"character_id":identifier,"display_name":f"Synthetic {index}","avatar":None} for index,identifier in enumerate(ids[4:])]
                 value["count"] = 22
                 route.fulfill(status=200,content_type="application/json",body=json.dumps(value))
 
@@ -481,6 +481,15 @@ class PublicFrontendReliabilityTests(TestCase):
             self.assertTrue(result["ready"])
             self.assertTrue(result["src"].startswith("blob:"))
             self.assertEqual(result["state"],"neutral")
+            advertised = page.evaluate("""async()=>{
+              const art=document.querySelector('#stage-character-art');
+              const character={character_id:'25b23cb64398', expression_manifest_url:'/media/fixture/expressions/25b23cb64398/manifest.json'};
+              const ready=await window.__projectSnowTest.updateStageCharacterArt(art,character,'happy');
+              return {ready,src:art.getAttribute('src'),state:art.dataset.expressionState};
+            }""")
+            self.assertTrue(advertised["ready"])
+            self.assertFalse(advertised["src"].startswith("blob:"))
+            self.assertEqual(advertised["state"],"happy")
             tampered[0] = True
             self.open(page)
             page.wait_for_load_state("networkidle")
@@ -494,4 +503,19 @@ class PublicFrontendReliabilityTests(TestCase):
               return false;
             }""")
             self.assertTrue(rejected)
+            page.locator('[data-character="702f4375675b"]').click()
+            frontend_fixture.PublicFrontendE2ETests._configure_model(page)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#in-person-surface").wait_for(state="visible")
+            page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+            page.wait_for_function("document.querySelector('#stage-character-art').dataset.expressionCharacterId === '702f4375675b'")
+            bundled = page.evaluate("""async()=>{
+              const art=document.querySelector('#stage-character-art');
+              const ready=await window.__projectSnowTest.updateStageCharacterArt(art,{character_id:'702f4375675b'},'happy');
+              return {ready,src:art.getAttribute('src'),state:art.dataset.expressionState};
+            }""")
+            self.assertTrue(bundled["ready"])
+            self.assertIn("/assets/expressions/mia/",bundled["src"])
+            self.assertEqual(bundled["state"],"neutral")
             browser.close()

@@ -1708,6 +1708,7 @@ class PublicAPITests(TestCase):
                 {"type": "action", "text": "她轻轻点头。"},
                 {"type": "speech", "text": "晚上好。"},
             ],
+            "expression_state": "happy",
             "stage_motion": "lean_in",
             "response_adjustments": [],
         }
@@ -1724,7 +1725,9 @@ class PublicAPITests(TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertIn('"communication_channel":"in_person"', response.text)
+        self.assertIn('"expression_state":"happy"', response.text)
         self.assertIn('"stage_motion":"lean_in"', response.text)
+        self.assertIn('"expression_state":"happy"', replay.text)
         self.assertIn('"stage_motion":"lean_in"', replay.text)
         self.assertIn('"idempotent_replay":true', replay.text)
         self.assertIn('"type":"action"', response.text)
@@ -1894,6 +1897,7 @@ class PublicAPITests(TestCase):
                 {"type": "action", "text": "她抬眼看向你,轻轻一笑。"},
                 {"type": "speech", "text": "你来了?"},
             ],
+            "expression_state": "gentle_smile",
             "stage_motion": "startle",
             "response_adjustments": [],
             "usage": {"total_tokens": 12},
@@ -1913,6 +1917,7 @@ class PublicAPITests(TestCase):
         self.assertTrue(response.json()["model_called"])
         self.assertEqual(response.json()["reaction"]["content_blocks"][0]["type"], "action")
         self.assertEqual(response.json()["reaction"]["content_blocks"][1]["type"], "speech")
+        self.assertEqual(response.json()["reaction"]["expression_state"], "gentle_smile")
         self.assertEqual(response.json()["reaction"]["stage_motion"], "startle")
         self.assertEqual(
             response.json()["reaction"]["answer"],

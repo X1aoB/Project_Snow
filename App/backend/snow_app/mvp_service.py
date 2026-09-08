@@ -972,6 +972,28 @@ def _utc_now() -> str:
 _CONVERSATION_MODES = {"immersive", "assistant"}
 _COMMUNICATION_CHANNELS = {"in_person", "text"}
 _STAGE_MOTIONS = frozenset({"none", "lean_in", "tremble", "recoil", "startle"})
+_EXPRESSION_STATES = frozenset(
+    {
+        "neutral",
+        "gentle_smile",
+        "happy",
+        "amused",
+        "teasing",
+        "relieved",
+        "serious",
+        "focused",
+        "thinking",
+        "confused",
+        "skeptical",
+        "concerned",
+        "surprised",
+        "embarrassed",
+        "sad",
+        "disappointed",
+        "annoyed",
+        "angry",
+    }
+)
 
 
 def _normalize_stage_motion(value: Any, communication_channel: str) -> str:
@@ -981,6 +1003,24 @@ def _normalize_stage_motion(value: Any, communication_channel: str) -> str:
         return "none"
     normalized = value.strip()
     return normalized if normalized in _STAGE_MOTIONS else "none"
+
+
+def _normalize_expression_state(value: Any, communication_channel: str) -> str:
+    """Return an explicit model expression without inferring from visible text."""
+
+    if communication_channel != "in_person" or not isinstance(value, str):
+        return "neutral"
+    normalized = value.strip()
+    return normalized if normalized in _EXPRESSION_STATES else "neutral"
+
+
+def _normalize_performance_id(value: Any, communication_channel: str, catalog: list[dict[str, Any]]) -> str:
+    if communication_channel != "in_person" or not isinstance(value, str):
+        return ""
+    cue = value.strip()
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", cue):
+        return ""
+    return cue if any(isinstance(row, dict) and row.get("performance_id") == cue for row in catalog) else ""
 
 _CHANNEL_FUTURE_MARKERS = ("晚点", "稍后", "等会", "之后", "以后", "回头", "到时候", "有空再")
 _TEXT_CHANNEL_TERMS = (
@@ -6268,6 +6308,7 @@ class MVPService:
 【交流媒介：文字通讯】
 当前不是面对面场景，只能输出 type=message 的内容块；可以输出多条消息，但每条都必须是文字。
 stage_motion 必须返回 "none"；文字通讯不播放立绘演出。
+expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘表情。
 不得声称看见分析员未在消息中说明的表情、衣着、动作或环境；不得把触碰、拥抱、靠近、牵手等写成已经发生。
 “真想抱抱你”“希望现在能抱抱你”这类愿望或情绪表达可以保留，但必须明确它只是文字里的想法，不是已经完成的动作。
 历史剧情中的通讯或见面只能作为回忆，不能改变当前媒介。当前可见空间状态：{json.dumps(scene_for_rules, ensure_ascii=False)}。
@@ -6278,6 +6319,7 @@ stage_motion 必须返回 "none"；文字通讯不播放立绘演出。
 当前与分析员面对面交谈，只能输出 type=speech 或 type=action 的内容块。action 只能是角色自身在当前地点可以完成的动作或神态，必须用角色名开头的第三人称描述，禁止使用“我/我的”作为动作主语，且不得编造分析员的反应、动作或感受。
 沉浸式的自然陪伴对话中，只要语境合适，通常先用一条简短的 action 写出你自己的目光、神态或小动作，再用 speech 接住分析员的话；它应当让对话更有在场感，而不是每句都写成舞台剧。不要为了动作强行加入触碰、靠近、戏剧化情绪或剧情回顾。
 先自然完成本轮回答，再根据整轮语境独立选择 stage_motion。可选值只有 none、lean_in、tremble、recoil、startle；大多数普通回复必须使用 none。只有情绪转折、突然反应、主动拉近距离等确实值得强调的时刻才选择非 none。不得为了证明演出合理而刻意增加 action，不得从 action 的有无反推演出，也不得仅因表情变化自动播放演出。
+先自然完成本轮回答，再独立选择本轮结束时持续呈现的 expression_state。可选值只有 neutral、gentle_smile、happy、amused、teasing、relieved、serious、focused、thinking、confused、skeptical、concerned、surprised、embarrassed、sad、disappointed、annoyed、angry。不得为了证明表情合理而增加 action、改写措辞或固定回答模式；表情与 stage_motion 相互独立，单纯表情变化不得自动触发动画。
 如果本轮“分析员输入块”含 type=action，那是分析员已经明确写下的动作；可以自然回应这一动作，但仍不能补写分析员没有声明的反应、感受或后续动作。
 不要因为历史剧情出现通讯，就把当前回答写成消息；历史剧情中的通讯或见面只能作为回忆，不能改变当前媒介。当前可见空间状态：{json.dumps(scene_for_rules, ensure_ascii=False)}。
 """
@@ -6358,8 +6400,8 @@ stage_motion 必须返回 "none"；文字通讯不播放立绘演出。
 
 {dual_persona_rule}
 
-仅返回 JSON 对象，不要输出 Markdown 代码围栏。answer 必须与 content_blocks 按顺序拼接后的可读文本一致；content_blocks 是本轮媒介的唯一渲染依据。助手模式必须返回 analysis_process，并可继续返回 work_summary/work_steps 供旧客户端兼容。analysis_process 只能记录可复核的分析说明，不能包含隐藏思维链：
-{{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message|sticker","text":"...","asset_id":"仅在 sticker 时填写","caption":"仅在 sticker 时填写"}}],"stage_motion":"none|lean_in|tremble|recoil|startle","state_updates":[],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
+仅返回 JSON 对象，不要输出 Markdown 代码围栏。answer 必须与 content_blocks 按顺序拼接后的可读文本一致；content_blocks 是本轮媒介的唯一渲染依据。expression_state 和 stage_motion 仅是不可见的表现层元数据，不属于 answer 或 content_blocks。助手模式必须返回 analysis_process，并可继续返回 work_summary/work_steps 供旧客户端兼容。analysis_process 只能记录可复核的分析说明，不能包含隐藏思维链：
+{{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message|sticker","text":"...","asset_id":"仅在 sticker 时填写","caption":"仅在 sticker 时填写"}}],"expression_state":"neutral|gentle_smile|happy|amused|teasing|relieved|serious|focused|thinking|confused|skeptical|concerned|surprised|embarrassed|sad|disappointed|annoyed|angry","stage_motion":"none|lean_in|tremble|recoil|startle","state_updates":[],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
 """
 
     def _prompt(self, character: Any, message: str, context: dict[str, Any]) -> str:
@@ -8962,6 +9004,7 @@ stage_motion 必须返回 "none"；文字通讯不播放立绘演出。
         max_tokens_override: int | None = None,
         public_sticker_candidates: list[dict[str, Any]] | None = None,
         public_state_update_catalog: list[dict[str, Any]] | None = None,
+        public_performance_candidates: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if not self.chat_enabled():
             raise MVPChatDisabled("MVP 对话接口未开启。请设置 MVP_CHAT_ENABLED=true 后重启 API。")
@@ -8970,12 +9013,27 @@ stage_motion 必须返回 "none"；文字通讯不播放立绘演出。
         message = message.strip() or "请查看并说明附件内容。"
         mode = self._normalize_mode(mode)
         character = self.character(character_value)
+        performance_catalog = [
+            row for row in (public_performance_candidates or [])
+            if isinstance(row, dict) and row.get("character_id") == character.character_id
+            and re.fullmatch(r"[a-z][a-z0-9_]{0,79}", str(row.get("performance_id") or ""))
+        ]
+        if len(performance_catalog) > 6:
+            performance_catalog = []
         request_key = str(client_message_id or "").strip() or None
         duplicate = self.conversation_store.duplicate_response(request_key)
         if duplicate is not None:
             if duplicate.get("character_id") != character.character_id:
                 raise ValueError("client_message_id 已被其他角色会话使用。")
-            return {**duplicate, "idempotent_replay": True}
+            return {
+                **duplicate,
+                "performance_id": _normalize_performance_id(
+                    duplicate.get("performance_id"),
+                    str(duplicate.get("communication_channel") or "text"),
+                    performance_catalog,
+                ),
+                "idempotent_replay": True,
+            }
         resolved_session = session_id or "session_" + sha256(
             f"{character.character_id}\x1f{_utc_now()}".encode()
         ).hexdigest()[:16]
@@ -9189,6 +9247,13 @@ stage_motion 必须返回 "none"；文字通讯不播放立绘演出。
             )
             + "\n\n"
             + _COMPANION_SOCIAL_GUIDANCE
+        )
+        system_prompt += (
+            '\n\nperformance_id 是可选的不可见表现元数据，默认返回空字符串。'
+            '仅在面对面语境自然符合以下当前角色的已验收条目时，才返回对应 performance_id。'
+            '不得为了演出添加动作或改写对白；它与 expression_state、stage_motion 独立。'
+            '文字通讯或没有适合的条目时必须返回空字符串。候选数据：'
+            + json.dumps(performance_catalog if active_channel == "in_person" else [], ensure_ascii=False)
         )
         if active_channel == "text" and public_sticker_candidates:
             # The public facade supplies a small deterministic, role-filtered
@@ -10155,6 +10220,11 @@ stage_motion 必须返回 "none"；文字通讯不播放立绘演出。
             generated.get("stage_motion"),
             active_channel,
         )
+        expression_state = _normalize_expression_state(
+            generated.get("expression_state"),
+            active_channel,
+        )
+        performance_id = _normalize_performance_id(generated.get("performance_id"), active_channel, performance_catalog)
         if (
             content_block_guard_rejected
             or deterministic_fallback
@@ -10168,6 +10238,8 @@ stage_motion 必须返回 "none"；文字通讯不播放立绘演出。
             # model envelope. Deterministic repairs and local/safety fallbacks
             # never inherit a cue from superseded text.
             stage_motion = "none"
+            expression_state = "neutral"
+            performance_id = ""
         validation_disposition = (
             "rejected"
             if content_block_guard_rejected
@@ -10305,6 +10377,8 @@ stage_motion 必须返回 "none"；文字通讯不播放立绘演出。
             "coverage": (context.get("view") or {}).get("coverage", {}),
             "mode": mode,
             "communication_channel": active_channel,
+            "expression_state": expression_state,
+            "performance_id": performance_id,
             "stage_motion": stage_motion,
             "question_focus": str(context.get("question_focus") or ""),
             "analyst_content_blocks": normalized_analyst_blocks,

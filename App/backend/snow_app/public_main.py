@@ -26,7 +26,7 @@ from pydantic import ValidationError
 from .async_store import AsyncPublicStore
 from .config import PublicSettings, Settings
 from .frontend_identity import read_frontend_identity
-from .mvp_service import MVPProviderError, _normalize_stage_motion
+from .mvp_service import MVPProviderError, _normalize_expression_state, _normalize_stage_motion
 from .public_contracts import (
     ByokSessionRequest,
     ChatRequest,
@@ -1399,6 +1399,14 @@ def create_app(
                     "usage": safe_usage,
                     "safety_category": result_payload.get("safety_category"),
                     "communication_channel": result_payload.get("communication_channel", "text"),
+                    "expression_state": _normalize_expression_state(
+                        result_payload.get("expression_state"),
+                        str(result_payload.get("communication_channel") or "text"),
+                    ),
+                    "performance_id": (
+                        result_payload.get("performance_id", "")
+                        if result_payload.get("communication_channel") == "in_person" else ""
+                    ),
                     "stage_motion": _normalize_stage_motion(
                         result_payload.get("stage_motion"),
                         str(result_payload.get("communication_channel") or "text"),
