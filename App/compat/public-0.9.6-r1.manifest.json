@@ -1,0 +1,15 @@
+{
+  "schema": "project-snow-public-rollback-delta-1",
+  "version": "compat-096-r1",
+  "parent_patch_sha256": "351c868c4b047f1775664ac964f6abb624caeba5df7b720c4af1641a66887d2d",
+  "source_fix_commit": "4e97fdcd6ad1fb9423e893d2bec86638d2223ed5",
+  "patch_file": "public-0.9.6-r1.patch",
+  "patch_sha256": "db8daba6591ea06a6e77ab07fc199ea8139b6878853098acd8379e3f56aac209",
+  "files": [
+    {
+      "path": "App/public_frontend/app.js",
+      "before_sha256": "58bcbf3190ef97ab42f1f0d67b7ab980c5095af2541ee968c3d8ae350ba611cf",
+      "after_sha256": "d6b97684c15aac9c4b8704caa8233a2f9f8eeed35dc4678abd546fe1806c72a4"
+    }
+  ]
+}
