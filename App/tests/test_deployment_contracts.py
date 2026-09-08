@@ -393,7 +393,7 @@ class DeploymentContractTests(TestCase):
         )
         self.assertNotIn("/srv/project-snow/app/scripts/cloudflare_origin_firewall.py", service)
 
-    def test_firewall_update_failure_stops_before_enable_and_stage_commit(self) -> None:
+    def test_firewall_bootstrap_installs_and_update_failure_stops_before_enable(self) -> None:
         deploy = self.read("ops/deploy.sh")
         function_start = deploy.index("install_direct_origin_firewall() {")
         function_end = deploy.index(
@@ -415,8 +415,11 @@ class DeploymentContractTests(TestCase):
         harness = """\
 set -u
 test_root=$1
+active_colour=""
+export FIREWALL_STATUS=$2
 candidate_config_root="$test_root/config"
 firewall_log="$test_root/firewall.log"
+install_log="$test_root/install.log"
 systemctl_log="$test_root/systemctl.log"
 marker_log="$test_root/marker.log"
 export FIREWALL_LOG="$firewall_log"
@@ -425,10 +428,11 @@ mkdir -p "$candidate_config_root/infra" "$candidate_config_root/scripts" \
 printf '%s\n' origin-edge > "$candidate_config_root/infra/OriginEdge.Caddyfile"
 printf '%s\n' '#!/bin/sh' \
   'printf "%s\\n" update >> "$FIREWALL_LOG"' \
-  'exit 42' > "$candidate_config_root/scripts/cloudflare_origin_firewall.py"
+  'exit "$FIREWALL_STATUS"' > "$candidate_config_root/scripts/cloudflare_origin_firewall.py"
 printf '%s\n' service > "$candidate_config_root/ops/project-snow-origin-firewall.service"
 printf '%s\n' timer > "$candidate_config_root/ops/project-snow-origin-firewall.timer"
 install() {
+  printf '%s\n' install >> "$install_log"
   while [ "$#" -gt 2 ]; do shift; done
   command cp -- "$1" "$2" || return 1
   command chmod +x "$2" || return 1
@@ -447,6 +451,9 @@ stat() {
 }
 systemctl() {
   printf '%s\n' "$*" >> "$systemctl_log"
+  case "$1" in
+    cat) printf '%s\n' 'ExecStart=/usr/local/sbin/project-snow-origin-firewall update' ;;
+  esac
   return 0
 }
 commit_colour_marker() {
@@ -455,16 +462,69 @@ commit_colour_marker() {
 """ + firewall_function + "\n" + firewall_gate + """
 commit_colour_marker
 """
-        with tempfile.TemporaryDirectory() as temporary_root:
-            root = Path(temporary_root)
-            result = self.run_posix_shell(harness, root.as_posix())
-            firewall_calls = (root / "firewall.log").read_text(encoding="utf-8").splitlines()
-            systemctl_calls = (root / "systemctl.log").read_text(encoding="utf-8").splitlines()
-            marker_exists = (root / "marker.log").exists()
-        self.assertEqual(result.returncode, 73, result.stderr)
-        self.assertEqual(firewall_calls, ["update"])
-        self.assertEqual(systemctl_calls, ["daemon-reload"])
-        self.assertFalse(marker_exists)
+        for update_status in (0, 42):
+            with self.subTest(update_status=update_status), tempfile.TemporaryDirectory() as temporary_root:
+                root = Path(temporary_root)
+                result = self.run_posix_shell(harness, root.as_posix(), str(update_status))
+                firewall_calls = (root / "firewall.log").read_text(encoding="utf-8").splitlines()
+                systemctl_calls = (root / "systemctl.log").read_text(encoding="utf-8").splitlines()
+                install_calls = (root / "install.log").read_text(encoding="utf-8").splitlines()
+                self.assertEqual(result.returncode, 73 if update_status else 0, result.stderr)
+                self.assertEqual(firewall_calls, ["update"])
+                self.assertEqual(install_calls, ["install"] * 3)
+                self.assertEqual(systemctl_calls, ["daemon-reload"] if update_status else [
+                    "daemon-reload",
+                    "enable project-snow-origin-firewall.service project-snow-origin-firewall.timer",
+                    "cat --no-pager project-snow-origin-firewall.service",
+                    "start project-snow-origin-firewall.timer",
+                    "is-enabled --quiet project-snow-origin-firewall.service",
+                    "is-enabled --quiet project-snow-origin-firewall.timer",
+                    "is-active --quiet project-snow-origin-firewall.timer",
+                ])
+                self.assertEqual((root / "marker.log").exists(), update_status == 0)
+
+    def test_existing_release_firewall_stage_only_verifies_and_drift_stops_publication(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        function_start = deploy.index("install_direct_origin_firewall() {")
+        function_end = deploy.index("\n}\n\ninstall_direct_origin_tls()", function_start) + 2
+        gate_start = deploy.index('install_direct_origin_firewall "$candidate_config_root" || {')
+        gate_end = deploy.index("\n}", gate_start) + 2
+        # The top-level stage flow obtains this value itself and rejects absent
+        # or invalid markers; an environment override cannot request bootstrap.
+        reset = deploy.index('active_colour=""', function_end)
+        loaded = deploy.index('active_colour="$(cat "$active_file")"', reset)
+        valid = deploy.index('case "$active_colour" in blue|green)', loaded)
+        self.assertLess(valid, gate_start)
+        harness = """\
+set -u
+test_root=$1
+active_colour=$2
+verify_status=$3
+candidate_config_root="$test_root/config"
+mkdir -p "$candidate_config_root/infra"
+printf '%s\n' origin-edge > "$candidate_config_root/infra/OriginEdge.Caddyfile"
+install() { printf '%s\n' install >> "$test_root/mutations"; return 88; }
+systemctl() { printf '%s\n' "$*" >> "$test_root/mutations"; return 88; }
+python3() {
+  printf '%s\n' "$1" "$2" "$3" "$4" >> "$test_root/verification"
+  return "$verify_status"
+}
+""" + deploy[function_start:function_end] + "\n" + deploy[gate_start:gate_end] + """
+printf '%s\n' committed > "$test_root/committed"
+"""
+        for active in ("blue", "green"):
+            for status in (0, 1):
+                with self.subTest(active=active, status=status), tempfile.TemporaryDirectory() as temporary_root:
+                    root = Path(temporary_root)
+                    result = self.run_posix_shell(harness, root.as_posix(), active, str(status))
+                    self.assertEqual(result.returncode, 73 if status else 0, result.stderr)
+                    self.assertFalse((root / "mutations").exists())
+                    self.assertEqual((root / "verification").read_text(encoding="utf-8").splitlines(), [
+                        "-B", "ops/verify_origin_firewall.py", "--configuration-root", (root / "config").as_posix(),
+                    ])
+                    self.assertEqual((root / "committed").exists(), status == 0)
+                    if status:
+                        self.assertIn("independent maintenance", result.stderr)
 
     def test_checkout_controller_propagates_each_critical_git_failure(self) -> None:
         runner = self.read("ops/project-snow-release")
