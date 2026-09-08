@@ -1,7 +1,7 @@
 # 小吉终端全面优化验收矩阵
 
-状态截点：2026-09-08 05:54 UTC。S1 `7ce0205 / 0.10.0-rc.1 / green` 已完成 CI、签名、服务器验证、候选、批准、晋级和独立后验；桌面/窄屏公网草稿保存恢复通过。实际回执为 `b88b93a4…`，控制器独立更新到 `b149d05`。
-受保护基线仍为 `0.9.6 / 502ec99412bef843c37e4b31a53df8fa9faeb33c`，原 blue 容器停止保留。晋级额外重建 origin-edge 的偏差已单独验证并记录；S2 品牌/新界面未启用。见 [S1 上线记录](s1-production-20260908.md)。
+状态截点：2026-09-08 07:36 UTC。公网仍为 S1 `7ce0205 / 0.10.0-rc.1 / green / compat`。S2 `c350963 / blue / current` 已通过自身主线 CI、签名、服务器验签、候选部署和独立后验，实际桌面/窄屏草稿恢复通过；回执 `85d59164…` 为 ready_for_review，尚未批准或晋级。控制器随正式 stage 更新到 c350963。见 [S2 候选记录](s2-candidate-20260908.md)。
+受保护基线仍为 `0.9.6 / 502ec99412bef843c37e4b31a53df8fa9faeb33c`，但原 blue 容器已被 S2 候选替换；恢复使用独立锚点、镜像与永久备份。41 个既有锚点文件与在服 S1 恢复环境保持。S1 晋级额外重建 origin-edge 的历史偏差仍见 [S1 上线记录](s1-production-20260908.md)。
 
 状态含义：**代码已实现**仅说明存在实现；**实测通过**必须注明本地、隔离环境或生产范围；**待生产启用**尚未完成在服启用；**部分实现**仍有明确缺口；**外部任务**由独立任务交付；**尚未完成**没有足够验收证据。测试通过、合并、准备候选均不等于用户批准上线。
 证据台账见 [overhaul_progress.md](overhaul_progress.md)，操作边界见 [RECOVERY.md](../ops/RECOVERY.md)。以下共 45 项，不以粗略完成百分比替代验收。
@@ -10,9 +10,9 @@
 
 | ID | 可验收工作项 | 当前状态 | 证据、通过条件与关键文件 |
 | --- | --- | --- | --- |
-| A1 | 有保护清单的镜像 GC 与容量门 | 实测通过（生产） | 移除 36 个无引用 Snow 镜像；保护 30 个摘要引用，空闲约 16.9 GiB；未删容器、卷、数据版本或 Dify。后续仍须实际引用复核并满足至少 10 GiB 容量门。[release_state.py](../ops/release_state.py)、[maintenance.py](../ops/maintenance.py)。 |
+| A1 | 有保护清单的镜像 GC 与容量门 | 实测通过（生产） | 首次清理移除 36 个无引用 Snow 镜像、保护 30 个摘要引用，未删容器、卷、数据版本或 Dify。S2 stage 后空闲约 16.1 GiB；后续仍须实际引用复核并满足至少 10 GiB 容量门。[release_state.py](../ops/release_state.py)、[maintenance.py](../ops/maintenance.py)。 |
 | A2 | 修复过期数据清理任务的网络故障 | 实测通过（生产新 helper） | `490c0bb` 独立升级后 cleanup 实跑 exit 0 / success，沿用既有 data 网络；25 个原容器 ID、image ID、运行状态均不变。到期清理可写数据库，未更换应用部署不等于零数据写入。事务 2026-09-07 10:10:40 UTC 完成。[maintenance.py](../ops/maintenance.py)、[test_host_maintenance.py](../tests/test_host_maintenance.py)。 |
-| A3 | 共享服务配置漂移与重建控制 | 部分生产实测；origin 保留分支需修复 | 普通 stage 拒绝共享依赖漂移；S1 晋级保留 Caddy/cloudflared/egress，但额外重建了同策略 origin-edge。已验证其镜像/TLS/安全配置一致，原后验失败保留；后续修复单独 PR，不能将本次归为全部代理保留。[实跑记录](s1-production-20260908.md)。 |
+| A3 | 共享服务配置漂移与重建控制 | 防火墙复用已生产实测；origin 保留待晋级验证 | S2 stage 只有 blue API 被替换，其余 24 容器及防火墙文件保持；普通 stage 只验证已安装规则维护组件。PR #49 的 origin 等价配置保留修复已随控制器安装，实际晋级分支仍待验证；不改写 S1 额外重建代理的历史结论。[S2 记录](s2-candidate-20260908.md)。 |
 | A4 | 原版本、配置、数据和镜像可找回 | 实测通过（生产备份及只读读回） | 固定 Git tag、root 基线锚点、永久 restic tag；10 镜像/159 blobs 和代码、配置、dump 哈希读回通过。还原能力另见 F5，不能据此称完成裸机恢复。[RECOVERY.md](../ops/RECOVERY.md)、[release_state.py](../ops/release_state.py)。 |
 
 ## B CI/CD、发布和回滚
@@ -22,12 +22,12 @@
 | B1 | 删除、重命名及未知路径触发足够 CI | 实测通过（本地及 PR CI） | 分类器测试覆盖删除/重命名；未知变更保守触发完整检查。main 发布依赖完整门禁，不能仅凭路径快检发布。[classify_changes.py](../scripts/classify_changes.py)、[ci.yml](../../.github/workflows/ci.yml)。 |
 | B2 | 真实 PostgreSQL 迁移与旧代码兼容 | 实测通过（隔离及 CI 9 组） | 覆盖空库、增量升级、实际旧 Store 读写及崩溃回退、权限隔离和失败 DDL/版本号事务回滚；历史 0001 DDL 冻结。第 9 组精确续租 SQL 已随 `77b8643` 的真实 PostgreSQL CI 通过；测试角色不代表生产凭据已拆分。[migrations](../migrations)、[test_postgres_integration.py](../tests/test_postgres_integration.py)。 |
 | B3 | 构建及实际在服镜像漏洞门禁 | 实测完成；共享设施修复尚未完成 | 实际扫描 9 镜像/11 服务，247 条可修复 HIGH/CRITICAL（120 CVE+3 GHSA）；API/mailer/embedding 为 0，共享设施和旧 admin 需独立维护。报告 `vulnerable`/exit1，旧 admin 仍 `retained_unbound`，不能称安全通过或已证实可利用。新候选仍须对自身 digest fresh scan。[维护实跑台账](overhaul_progress.md)、[running_image_scan.md](running_image_scan.md)。 |
-| B4 | 成功 main CI 签发可验证发布证明 | 实测通过（真实 GitHub 签发与服务器验签） | S1 main CI 34182286331、proof 34182824713 成功，独立 installed verifier 验证来源、成功门禁及产物摘要后执行；controller b149d05 也经过自身 CI/签名。每次新提交仍需自己的门禁。[上线证据](s1-production-20260908.md)。 |
+| B4 | 成功 main CI 签发可验证发布证明 | 实测通过（真实 GitHub 签发与服务器验签） | S1 链路已上线；S2 c350963 的 main CI 34197619104、proof 34198355478 通过，服务器 independently installed verifier 在任何候选代码执行前验证成功。每个后续新提交仍需自己的门禁。[S2 证据](s2-candidate-20260908.md)。 |
 | B5 | 候选代码执行前完成可信校验 | 实测通过（故障测试及生产） | 固定 installed verifier 先验 root 快照 inbox，再执行受信候选；实际 runner/controller 独立升级和 green stage 完成。应用、控制器与维护 helper 版本独立记录。[上线证据](s1-production-20260908.md)。 |
 | B6 | 候选回执、当前版本 CAS 和手工晋级 | 实测通过（隔离及生产晋级） | 路由维护后新回执 b88b93a4… 于 05:28 创建、05:30 记录用户批准；绑定 7ce 候选、502 预期当前、实际容器/镜像和 nonce，经持锁 CAS 后晋级。过期/篡改拒绝测试继续保留。[上线证据](s1-production-20260908.md)。 |
 | B7 | SSE 排空、切换与代理重启保持目标 | 隔离 SSE 通过；生产路由维护完成 | 隔离测试保留全部 40 SSE chunks，新连接转 green，重启保持 green。生产首次持久挂载 05:28 完成，晋级后 route 为 green；维护时请求/租约/TCP 为零。未在真实付费流中测零中断；origin 额外重启另见偏差记录。[实跑记录](s1-production-20260908.md)。 |
-| B8 | 应用和浏览器旧→新→旧回退 | S1 生产兼容目标已建立；S2 待发布 | IDB v4/public-state-2 保持；S1 实际兼容资源树已上线，桌面/窄屏草稿刷新恢复通过。原始 502 标签页须刷新进入 S1；S1→S2→S1 静态产物回归通过不等于 S2 已生产验收。应用回滚不降 DB schema。[兼容说明](../compat/README.md)。 |
-| B9 | 最终 CI、main 合并、签名、候选与晋级闭环 | S1 实测闭环；持续自动 stage 未启用 | PR #46 / 7ce 的 CI、签名、服务器验签、stage、精确回执批准和晋级均完成；05:48 后验通过。额外 origin 重建单独记录，22 容器完整记录不变。auto-stage timer 仍 disabled，尚未验收持续自动候选流程。[上线证据](s1-production-20260908.md)。 |
+| B8 | 应用和浏览器旧→新→旧回退 | S1 生产兼容目标已建立；S2 候选通过 | IDB v4/public-state-2 保持，S1→S2→S1 回归及实际 S2 候选桌面/窄屏草稿恢复通过。S2 尚未切换公网；原始 502 标签页须刷新进入 S1。应用回滚不降 DB schema。[S2 证据](s2-candidate-20260908.md)、[兼容说明](../compat/README.md)。 |
+| B9 | 最终 CI、main 合并、签名、候选与晋级闭环 | S1 闭环；S2 待人工晋级 | S1 已完成晋级和后验；S2 已完成 c350963 的 CI、签名、服务器验签、stage、实际后验与回执准备，未批准。auto-stage timer 仍 disabled，尚未验收持续自动候选流程。[S2 证据](s2-candidate-20260908.md)。 |
 
 ## C 后端架构、功能稳定性与安全
 
