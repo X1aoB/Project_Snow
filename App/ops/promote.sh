@@ -618,6 +618,7 @@ origin_edge_retained_env=""
 origin_edge_retained_config_root=""
 origin_edge_retained_colour=""
 origin_edge_prestart_failure_preserve=0
+origin_edge_equivalence_failed_unchanged=0
 origin_edge_tunnel_retain=0
 promote_signal_phase=pre-switch
 promote_signal_handling=0
@@ -1687,6 +1688,12 @@ remove_snapshot_origin_edge_if_present() {
       --profile "$remove_colour" rm -f origin-edge
 }
 
+origin_edge_snapshots_equivalent() {
+  python3 -B "$script_dir/origin_retention.py" \
+    --target-environment "$1" --target-configuration "$2" --target-colour "$3" \
+    --retained-environment "$4" --retained-configuration "$5" --retained-colour "$6"
+}
+
 begin_origin_edge_replacement() {
   replacement_target_env="$1"
   replacement_target_config_root="$2"
@@ -1735,6 +1742,7 @@ prepare_or_retain_origin_edge() {
   prepare_config_root="$2"
   prepare_colour="$3"
   origin_edge_prestart_failure_preserve=0
+  origin_edge_equivalence_failed_unchanged=0
   validate_docker_dns_security_floor || return 1
   origin_uplink_exists=0
   origin_backend_exists=0
@@ -1788,6 +1796,24 @@ prepare_or_retain_origin_edge() {
           origin_edge_prestart_mode=overlay
           return 0
         fi
+        origin_edge_prestart_failure_preserve=1
+        origin_equivalence_status=0
+        origin_edge_snapshots_equivalent "$prepare_env" "$prepare_config_root" "$prepare_colour" \
+          "$origin_edge_retained_env" "$origin_edge_retained_config_root" "$origin_edge_retained_colour" || \
+          origin_equivalence_status=$?
+        case "$origin_equivalence_status" in
+          0)
+            # Equal content under a new app SHA is not a listener migration.
+            # Keep the binding for the actual old mount source and TLS bundle.
+            origin_edge_overlay_env="$origin_edge_retained_env"
+            origin_edge_overlay_config_root="$origin_edge_retained_config_root"
+            origin_edge_overlay_colour="$origin_edge_retained_colour"
+            origin_edge_prestart_mode=overlay
+            return 0
+            ;;
+          10) ;; # A real model change follows the existing maintenance gates.
+          *) origin_edge_equivalence_failed_unchanged=1; return 1 ;;
+        esac
         begin_origin_edge_replacement "$prepare_env" "$prepare_config_root" \
           "$prepare_colour" "$origin_edge_retained_env" \
           "$origin_edge_retained_config_root" "$origin_edge_retained_colour" || return 1
@@ -1808,6 +1834,22 @@ prepare_or_retain_origin_edge() {
           origin_edge_prestart_mode=overlay
           return 0
         fi
+        origin_edge_prestart_failure_preserve=1
+        origin_equivalence_status=0
+        origin_edge_snapshots_equivalent "$prepare_env" "$prepare_config_root" "$prepare_colour" \
+          "$previous_env" "$previous_config_root" "$previous_colour" || origin_equivalence_status=$?
+        case "$origin_equivalence_status" in
+          0)
+            persist_live_origin_edge_binding "$previous_env" "$previous_config_root" "$previous_colour" || return 1
+            origin_edge_overlay_env="$origin_edge_retained_env"
+            origin_edge_overlay_config_root="$origin_edge_retained_config_root"
+            origin_edge_overlay_colour="$origin_edge_retained_colour"
+            origin_edge_prestart_mode=overlay
+            return 0
+            ;;
+          10) ;;
+          *) origin_edge_equivalence_failed_unchanged=1; return 1 ;;
+        esac
         begin_origin_edge_replacement "$prepare_env" "$prepare_config_root" \
           "$prepare_colour" "$previous_env" "$previous_config_root" \
           "$previous_colour" || return 1
@@ -2279,6 +2321,14 @@ if [ "$target_has_origin_edge" -eq 1 ]; then
   origin_edge_prestart_failure_preserve=1
   if ! validate_origin_edge_material "$colour_env" "$colour_config_root" ||
      ! prepare_or_retain_origin_edge "$colour_env" "$colour_config_root" "$colour"; then
+    if [ "$origin_edge_equivalence_failed_unchanged" -eq 1 ] &&
+       [ "$promote_signal_phase" = pre-switch ] && [ "$origin_edge_replacement_active" -eq 0 ]; then
+      # The independent live listener has already passed its exact old binding.
+      # No traffic/listener switch began. Recovery would re-enter the same
+      # failed inspection and could stop a listener older than the previous API.
+      echo 'Origin equivalence inspection failed before switching; the validated live listener remains unchanged.' >&2
+      exit 72
+    fi
     echo 'Target origin-edge could not pass its retained-runtime or stopped pre-start gate; public 443 was not started.' >&2
     target_allow_origin=0
     if [ "$origin_edge_prestart_failure_preserve" -ne 1 ] && ! stop_known_origin_edge; then
