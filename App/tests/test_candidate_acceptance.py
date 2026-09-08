@@ -21,6 +21,7 @@ CANDIDATE = "b" * 40
 NOW = datetime(2026, 9, 7, 10, tzinfo=UTC)
 PUBLIC = "ghcr.io/x1aob/project_snow-public"
 EMBEDDING = "ghcr.io/x1aob/project_snow-embedding@sha256:" + "c" * 64
+FRONTEND = {"track": "compat", "version": "compat-096-r1", "bundle_sha256": "6" * 64}
 
 
 @pytest.fixture
@@ -39,6 +40,7 @@ def staged(tmp_path, monkeypatch):
     manifest = {
         "commit_sha": CANDIDATE,
         "app_version": "0.10.0-rc.1",
+        "frontend": dict(FRONTEND),
         "application": {"image": PUBLIC, "digest": "sha256:" + "e" * 64},
         "embedding": {"image": EMBEDDING.split("@")[0], "digest": EMBEDDING.split("@")[1]},
     }
@@ -93,7 +95,7 @@ def staged(tmp_path, monkeypatch):
         "green": {"id": "3" * 64, "image_id": "sha256:" + "4" * 64, "image": new_image, "running": True},
     }
     expected_images = {old_image: runtime["blue"]["image_id"], new_image: runtime["green"]["image_id"]}
-    build = {"revision": CANDIDATE, "app_version": "0.10.0-rc.1"}
+    build = {"revision": CANDIDATE, "app_version": "0.10.0-rc.1", "frontend": dict(FRONTEND)}
     calls = []
 
     def execute(command):
@@ -216,6 +218,47 @@ def test_same_commit_manifest_tampering_is_not_accepted(staged):
     path = staged[0].root / "releases/colours/green-manifest.json"
     path.write_bytes(path.read_bytes() + b" ")
     with pytest.raises(maintenance.MaintenanceError, match="disagree"):
+        ready(staged)
+
+
+@pytest.mark.parametrize(
+    "field,value", [("track", "current"), ("version", "0.10.0-rc.1"), ("bundle_sha256", "7" * 64)]
+)
+def test_promote_rechecks_the_running_selected_frontend(staged, field, value):
+    approved(staged)
+    staged[3]["frontend"][field] = value
+    with pytest.raises(maintenance.MaintenanceError, match="frontend differs"):
+        acceptance.verify(staged[0], "green", CANDIDATE, now=NOW, execute=staged[1])
+
+
+@pytest.mark.parametrize(
+    "frontend",
+    [
+        None,
+        {},
+        [],
+        {**FRONTEND, "extra": "override"},
+        {**FRONTEND, "track": ["compat"]},
+        {**FRONTEND, "version": "../current"},
+        {**FRONTEND, "bundle_sha256": "sha256:" + "6" * 64},
+    ],
+)
+def test_missing_or_malformed_runtime_frontend_cannot_be_approved(staged, frontend):
+    staged[3]["frontend"] = frontend
+    with pytest.raises(maintenance.MaintenanceError, match="selected frontend identity"):
+        ready(staged)
+
+
+def test_old_current_release_remains_readable_but_candidate_requires_frontend(staged):
+    paths = staged[0]
+    assert "frontend" not in json.loads((paths.root / "releases/current-manifest.json").read_text())
+    receipt = ready(staged)
+    assert acceptance.load_receipt(paths, receipt["receipt_id"])["snapshot"]["frontend"] == FRONTEND
+    manifest_path = paths.root / "releases/colours/green-manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["frontend"]
+    manifest_path.write_bytes(acceptance.encoded(manifest))
+    with pytest.raises(maintenance.MaintenanceError, match="selected frontend identity"):
         ready(staged)
 
 

@@ -3,22 +3,22 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import hashlib
 import json
-from pathlib import Path
 import re
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
-
 
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-REVISION_PATTERN = re.compile(
-    r'^revision(?:\s*:\s*str)?\s*=\s*["\']([^"\']+)["\']', re.MULTILINE
-)
+FRONTEND_VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+REVISION_PATTERN = re.compile(r'^revision(?:\s*:\s*str)?\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
 DOWN_REVISION_PATTERN = re.compile(
-    r'^down_revision(?:\s*:\s*(?:str\s*\|\s*None|Union\[[^\]]+\]))?\s*=\s*(.+)$',
+    r"^down_revision(?:\s*:\s*(?:str\s*\|\s*None|Union\[[^\]]+\]))?\s*=\s*(.+)$",
     re.MULTILINE,
 )
 
@@ -62,10 +62,7 @@ def _public_certificate_sha256(path: Path, label: str) -> str:
     payload = path.read_bytes()
     if b"PRIVATE KEY" in payload:
         raise ValueError(f"{label} must never contain private key material")
-    if (
-        payload.count(b"-----BEGIN CERTIFICATE-----") != 1
-        or payload.count(b"-----END CERTIFICATE-----") != 1
-    ):
+    if payload.count(b"-----BEGIN CERTIFICATE-----") != 1 or payload.count(b"-----END CERTIFICATE-----") != 1:
         raise ValueError(f"{label} must contain exactly one PEM certificate")
     return hashlib.sha256(payload).hexdigest()
 
@@ -76,8 +73,7 @@ def read_origin_tls_binding(app_root: Path) -> dict[str, str]:
     )
     aop_ca_sha256 = _public_certificate_sha256(app_root / AOP_CA_PATH, "AOP CA")
     identity_payload = (
-        f"{ORIGIN_TLS_SCHEMA}\n{ORIGIN_TLS_HOSTNAME}\n"
-        f"{origin_certificate_sha256}\n{aop_ca_sha256}\n"
+        f"{ORIGIN_TLS_SCHEMA}\n{ORIGIN_TLS_HOSTNAME}\n{origin_certificate_sha256}\n{aop_ca_sha256}\n"
     ).encode("ascii")
     return {
         "schema_version": ORIGIN_TLS_SCHEMA,
@@ -101,9 +97,7 @@ def read_public_versions(app_root: Path) -> tuple[str, str, str, str]:
     media_version = values.get("PUBLIC_MEDIA_VERSION", "")
     sticker_version = values.get("PUBLIC_STICKER_VERSION", "")
     data_pointer = json.loads(
-        (app_root / "config" / "public_knowledge" / "data_release.json").read_text(
-            encoding="utf-8"
-        )
+        (app_root / "config" / "public_knowledge" / "data_release.json").read_text(encoding="utf-8")
     )
     data_version = str(data_pointer.get("data_version") or "")
     if not app_version or not data_version or not media_version or not sticker_version:
@@ -182,6 +176,53 @@ def migration_heads(versions_directory: Path) -> list[str]:
     return heads
 
 
+def _read_frontend_binding(
+    app_root: Path, *, commit_sha: str, frontend_bundle: Path | None = None
+) -> dict[str, str]:
+    # The release host reconstructs this from the verified target checkout; it
+    # has no CI build directory. CI additionally verifies the exact Docker input.
+    if __package__:
+        from .prepare_public_frontend import prepare, verify_bundle
+    else:
+        from prepare_public_frontend import prepare, verify_bundle
+
+    with TemporaryDirectory(prefix="project-snow-frontend-manifest-") as temporary:
+        output = Path(temporary) / "public-ui"
+        identity = prepare(app_root, output)
+        if verify_bundle(output, expected_source_commit=commit_sha) != identity:
+            raise ValueError("Generated frontend identity differs from its verified bundle")
+    if (
+        not isinstance(identity, dict)
+        or set(identity) != {"schema_version", "track", "version", "bundle_sha256"}
+        or identity.get("schema_version") != "project-snow-frontend-identity-1"
+        or identity.get("track") not in ("compat", "current")
+        or not isinstance(identity.get("version"), str)
+        or not FRONTEND_VERSION_PATTERN.fullmatch(identity["version"])
+        or not isinstance(identity.get("bundle_sha256"), str)
+        or not SHA256_PATTERN.fullmatch(identity["bundle_sha256"])
+    ):
+        raise ValueError("Invalid selected frontend identity")
+    if (
+        frontend_bundle is not None
+        and verify_bundle(frontend_bundle, expected_source_commit=commit_sha) != identity
+    ):
+        raise ValueError("Prepared frontend bundle differs from the trusted source selection")
+    return {name: identity[name] for name in ("track", "version", "bundle_sha256")}
+
+
+def read_frontend_binding(
+    app_root: Path, *, commit_sha: str, frontend_bundle: Path | None = None
+) -> dict[str, str]:
+    # Manifest reconstruction must not leave a new ignored cache namespace in
+    # the host's trusted checkout. Preserve the caller's interpreter policy.
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        return _read_frontend_binding(app_root, commit_sha=commit_sha, frontend_bundle=frontend_bundle)
+    finally:
+        sys.dont_write_bytecode = previous
+
+
 def create_manifest(
     *,
     commit_sha: str,
@@ -190,6 +231,7 @@ def create_manifest(
     embedding_image: str,
     embedding_digest: str,
     app_root: Path,
+    frontend_bundle: Path | None = None,
 ) -> dict[str, Any]:
     if not SHA_PATTERN.fullmatch(commit_sha):
         raise ValueError("commit SHA must contain 40 lowercase hexadecimal characters")
@@ -207,13 +249,16 @@ def create_manifest(
         "schema_version": "project-snow-release-1",
         "commit_sha": commit_sha,
         "app_version": app_version,
+        "frontend": read_frontend_binding(app_root, commit_sha=commit_sha, frontend_bundle=frontend_bundle),
         "data_version": data_version,
         "media_version": media_version,
         "sticker_version": sticker_version,
         "release_artifacts": release_artifacts,
         "migration_heads": migration_heads(app_root / "migrations" / "versions"),
         "runtime_capabilities": {
-            "request_leases": (app_root / "migrations" / "versions" / "20260907_0005_request_leases.py").is_file(),
+            "request_leases": (
+                app_root / "migrations" / "versions" / "20260907_0005_request_leases.py"
+            ).is_file(),
         },
         "application": {"image": public_image, "digest": public_digest},
         "embedding": {"image": embedding_image, "digest": embedding_digest},
@@ -222,8 +267,7 @@ def create_manifest(
             for relative_path in RUNTIME_CONFIGURATION_PATHS
         },
         "release_control_sha256": {
-            relative_path: _sha256_file(app_root / relative_path)
-            for relative_path in RELEASE_CONTROL_PATHS
+            relative_path: _sha256_file(app_root / relative_path) for relative_path in RELEASE_CONTROL_PATHS
         },
         "direct_origin_tls": read_origin_tls_binding(app_root),
         "generated_at": datetime.now(UTC).isoformat(),
@@ -238,6 +282,9 @@ def main() -> int:
     parser.add_argument("--embedding-image", required=True)
     parser.add_argument("--embedding-digest", required=True)
     parser.add_argument("--app-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--frontend-bundle", type=Path, help="Verify the exact prepared UI used as Docker input"
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     manifest = create_manifest(
@@ -247,6 +294,7 @@ def main() -> int:
         embedding_image=args.embedding_image,
         embedding_digest=args.embedding_digest,
         app_root=args.app_root,
+        frontend_bundle=args.frontend_bundle,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

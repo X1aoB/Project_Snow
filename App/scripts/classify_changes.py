@@ -16,6 +16,15 @@ from pathlib import Path
 
 CATEGORIES = ("ui", "api", "data", "embedding", "deploy")
 
+FRONTEND_RELEASE_PATTERNS = (
+    "App/config/public_frontend_release.json",
+    "App/scripts/prepare_public_frontend.py",
+    "App/scripts/fingerprint_public_frontend.py",
+    "App/compat/**",
+    "App/tests/test_public_frontend_bundle*.py",
+    "App/tests/test_frontend_release_contracts.py",
+)
+
 DOC_PATTERNS = (
     "*.md",
     "docs/**",
@@ -101,6 +110,7 @@ APP_IMAGE_PATTERNS = (
     "App/migrations/**",
     "App/alembic.ini",
     "App/public_frontend/**",
+    "App/public_frontend_src/**",
     # The public image copies these shared immersive assets. A change here
     # must build and smoke-test the image, not only run browser assertions.
     "App/frontend/shared/**",
@@ -135,6 +145,10 @@ def classify(paths: Iterable[str], *, force_full: bool = False) -> dict[str, boo
         result["embedding"] |= _matches(path, EMBEDDING_PATTERNS)
         result["deploy"] |= _matches(path, DEPLOY_PATTERNS)
         result["app_image"] |= _matches(path, APP_IMAGE_PATTERNS)
+        if _matches(path, FRONTEND_RELEASE_PATTERNS):
+            # Selecting a UI changes the actual shipped application even when
+            # no canonical frontend file changed.
+            result.update(ui=True, app_image=True, deploy=True)
 
         known = result["docs_only"] or any(
             _matches(path, patterns)
@@ -144,6 +158,7 @@ def classify(paths: Iterable[str], *, force_full: bool = False) -> dict[str, boo
                 DATA_PATTERNS,
                 EMBEDDING_PATTERNS,
                 DEPLOY_PATTERNS,
+                FRONTEND_RELEASE_PATTERNS,
             )
         )
         if not known:

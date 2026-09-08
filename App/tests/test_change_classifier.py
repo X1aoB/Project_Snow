@@ -9,6 +9,23 @@ from scripts.classify_changes import changed_files, classify
 
 
 class ChangeClassifierTests(TestCase):
+    def test_frontend_selection_builder_and_compatibility_changes_run_release_checks(self):
+        for path in (
+            "App/config/public_frontend_release.json",
+            "App/scripts/prepare_public_frontend.py",
+            "App/scripts/fingerprint_public_frontend.py",
+            "App/compat/public-0.9.6-r1.patch",
+            "App/compat/public-0.9.6-r1.manifest.json",
+            "App/tests/test_public_frontend_bundle.py",
+        ):
+            with self.subTest(path=path):
+                tiers = classify([path])
+                self.assertTrue(all(tiers[key] for key in ("ui", "app_image", "deploy")))
+                self.assertFalse(tiers["embedding"])
+
+    def test_typescript_source_changes_also_build_the_shipped_application(self):
+        self.assertTrue(classify(["App/public_frontend_src/src/runtime.ts"])["app_image"])
+
     def test_browser_reliability_only_change_runs_browser_tier(self):
         result = classify(["App/tests/test_public_frontend_reliability.py"])
         self.assertTrue(result["ui"])

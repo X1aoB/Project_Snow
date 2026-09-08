@@ -3,30 +3,35 @@ from __future__ import annotations
 from hashlib import sha256
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
-from scripts.release_manifest import create_manifest
 from scripts.install_origin_tls import origin_tls_bundle_sha256
+from scripts.release_manifest import create_manifest
 
 
 class ReleaseManifestTests(TestCase):
     def test_manifest_records_immutable_runtime_inputs(self) -> None:
         app_root = Path(__file__).resolve().parents[1]
-        manifest = create_manifest(
-            commit_sha="a" * 40,
-            public_image="ghcr.io/x1aob/project_snow-public",
-            public_digest="sha256:" + "b" * 64,
-            embedding_image="ghcr.io/x1aob/project_snow-embedding",
-            embedding_digest="sha256:" + "c" * 64,
-            app_root=app_root,
-        )
+        frontend = {"track": "compat", "version": "compat-096-r1", "bundle_sha256": "d" * 64}
+        # This existing test covers real deployment configuration inputs. The
+        # committed-source bundle reconstruction has separate fault tests.
+        with patch("scripts.release_manifest.read_frontend_binding", return_value=frontend) as binding:
+            manifest = create_manifest(
+                commit_sha="a" * 40,
+                public_image="ghcr.io/x1aob/project_snow-public",
+                public_digest="sha256:" + "b" * 64,
+                embedding_image="ghcr.io/x1aob/project_snow-embedding",
+                embedding_digest="sha256:" + "c" * 64,
+                app_root=app_root,
+            )
+        binding.assert_called_once_with(app_root, commit_sha="a" * 40, frontend_bundle=None)
+        self.assertEqual(manifest["frontend"], frontend)
         self.assertEqual(manifest["schema_version"], "project-snow-release-1")
         self.assertEqual(manifest["app_version"], "0.10.0-rc.1")
         self.assertEqual(manifest["data_version"], "2026.08.19.1")
         self.assertEqual(manifest["media_version"], "2026.08.19.avatar.1")
         self.assertEqual(manifest["sticker_version"], "2026.08.19.sticker.1")
-        self.assertEqual(
-            set(manifest["release_artifacts"]), {"data", "avatar", "sticker"}
-        )
+        self.assertEqual(set(manifest["release_artifacts"]), {"data", "avatar", "sticker"})
         self.assertEqual(
             manifest["release_artifacts"]["data"]["version"],
             manifest["data_version"],
@@ -112,7 +117,5 @@ class ReleaseManifestTests(TestCase):
         self.assertEqual(tls_binding["bundle_sha256"], expected_bundle_identity)
         self.assertEqual(
             tls_binding["bundle_sha256"],
-            origin_tls_bundle_sha256(
-                tls_binding["origin_certificate_sha256"], tls_binding["aop_ca_sha256"]
-            ),
+            origin_tls_bundle_sha256(tls_binding["origin_certificate_sha256"], tls_binding["aop_ca_sha256"]),
         )

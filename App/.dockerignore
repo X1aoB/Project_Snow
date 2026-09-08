@@ -16,3 +16,10 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.py[cod]
+# Only the deterministically selected, verified UI enters the image context.
+/public_frontend/
+/public_frontend_src/
+/frontend/
+/.build/*
+!/.build/public-ui/
+!/.build/public-ui/**
