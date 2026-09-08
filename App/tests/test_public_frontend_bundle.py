@@ -1,28 +1,44 @@
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import mimetypes
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
-from tempfile import TemporaryDirectory
 import threading
 from http.server import ThreadingHTTPServer
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase, skipUnless
 from urllib.parse import urlparse
 
-from scripts.prepare_public_frontend import prepare, verify_bundle, IDENTITY_FILE, MANIFEST_FILE
-
+from scripts.prepare_public_frontend import IDENTITY_FILE, MANIFEST_FILE, prepare, verify_bundle
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 
 
 def git(repo: Path, *args: str) -> str:
-    return subprocess.run(["git", "-c", "commit.gpgsign=false", "-c", "user.name=Bundle Fixture", "-c", "user.email=bundle@invalid.local", *args],
-                          cwd=repo, check=True, capture_output=True, text=True, timeout=90).stdout.strip()
+    return subprocess.run(
+        [
+            "git",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=Bundle Fixture",
+            "-c",
+            "user.email=bundle@invalid.local",
+            *args,
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=90,
+    ).stdout.strip()
 
 
 def fixture_repo(directory: Path) -> Path:
@@ -32,7 +48,11 @@ def fixture_repo(directory: Path) -> Path:
     git(repo, "read-tree", "HEAD")
     # New review inputs can be tested before their integration commit. Remaining
     # source trees deliberately need not exist in this clone's working tree.
-    names = ["config/public_frontend_release.json", "compat/public-0.9.6-r1.patch", "compat/public-0.9.6-r1.manifest.json"]
+    names = [
+        "config/public_frontend_release.json",
+        "compat/public-0.9.6-r1.patch",
+        "compat/public-0.9.6-r1.manifest.json",
+    ]
     for name in names:
         target = repo / "App" / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -71,11 +91,18 @@ class PublicFrontendBundleTests(TestCase):
 
     def test_compat_full_tree_is_fingerprinted_and_original_patch_is_unchanged(self):
         original = (APP_ROOT / "compat/public-0.9.6.patch").read_bytes()
-        self.assertEqual(hashlib.sha256(original).hexdigest(), "351c868c4b047f1775664ac964f6abb624caeba5df7b720c4af1641a66887d2d")
+        self.assertEqual(
+            hashlib.sha256(original).hexdigest(),
+            "351c868c4b047f1775664ac964f6abb624caeba5df7b720c4af1641a66887d2d",
+        )
         self.assertEqual(self.compat_identity["track"], "compat")
         self.assertEqual(self.compat_identity["version"], "compat-096-r1")
-        self.assertEqual(verify_bundle(self.compat, expected_source_commit=self.compat_sha), self.compat_identity)
-        self.assertIn("composerDraftKey", (self.compat / "public_frontend/app.js").read_text(encoding="utf-8"))
+        self.assertEqual(
+            verify_bundle(self.compat, expected_source_commit=self.compat_sha), self.compat_identity
+        )
+        self.assertIn(
+            "composerDraftKey", (self.compat / "public_frontend/app.js").read_text(encoding="utf-8")
+        )
         self.assertTrue((self.compat / "public_frontend/privacy/index.html").is_file())
         self.assertTrue((self.compat / "frontend/shared/immersive.css").is_file())
         self.assertTrue((self.compat / "frontend/assets/immersive/scenes/generic.svg").is_file())
@@ -88,7 +115,10 @@ class PublicFrontendBundleTests(TestCase):
         self.assertEqual(self.current_identity["track"], "current")
         self.assertNotEqual(self.current_identity["bundle_sha256"], self.compat_identity["bundle_sha256"])
         self.assertIn("小吉终端", (self.current / "public_frontend/index.html").read_text(encoding="utf-8"))
-        self.assertEqual({path.name for path in self.current.iterdir()}, {"public_frontend", "frontend", IDENTITY_FILE, MANIFEST_FILE})
+        self.assertEqual(
+            {path.name for path in self.current.iterdir()},
+            {"public_frontend", "frontend", IDENTITY_FILE, MANIFEST_FILE},
+        )
 
     def test_build_is_deterministic_and_ignores_uncommitted_static_and_selector(self):
         source = self.repo / "App/public_frontend"
@@ -100,7 +130,9 @@ class PublicFrontendBundleTests(TestCase):
             selector.write_text("not valid JSON", encoding="utf-8")
             again = self.root / "again"
             self.assertEqual(prepare(self.repo / "App", again), self.current_identity)
-            self.assertEqual((again / MANIFEST_FILE).read_bytes(), (self.current / MANIFEST_FILE).read_bytes())
+            self.assertEqual(
+                (again / MANIFEST_FILE).read_bytes(), (self.current / MANIFEST_FILE).read_bytes()
+            )
         finally:
             selector.write_bytes(original)
 
@@ -148,12 +180,46 @@ class PublicFrontendBundleTests(TestCase):
                 prepare(repo / "App", root / "rejected")
             self.assertFalse((root / "rejected").exists())
 
+    def test_valid_patch_digest_cannot_hide_an_undeclared_file_change(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = fixture_repo(root)
+            select(repo, "compat-096")
+            target = "App/frontend/shared/immersive.css"
+            before = git(repo, "show", "502ec99412bef843c37e4b31a53df8fa9faeb33c:" + target) + "\n"
+            extra = "".join(
+                difflib.unified_diff(
+                    before.splitlines(True),
+                    (before + "/* undeclared */\n").splitlines(True),
+                    fromfile="a/" + target,
+                    tofile="b/" + target,
+                )
+            )
+            patch = repo / "App/compat/public-0.9.6-r1.patch"
+            patch.write_bytes(patch.read_bytes() + extra.encode("utf-8"))
+            manifest_path = repo / "App/compat/public-0.9.6-r1.manifest.json"
+            manifest = json.loads(manifest_path.read_bytes())
+            manifest["patch_sha256"] = hashlib.sha256(patch.read_bytes()).hexdigest()
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            git(
+                repo,
+                "add",
+                "--",
+                "App/compat/public-0.9.6-r1.patch",
+                "App/compat/public-0.9.6-r1.manifest.json",
+            )
+            git(repo, "commit", "-m", "Synthetic undeclared patch target")
+            with self.assertRaisesRegex(ValueError, "paths differ"):
+                prepare(repo / "App", root / "rejected")
+            self.assertFalse((root / "rejected").exists())
+
 
 @skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser bundle regression tier")
 class PublicFrontendBundleBrowserTests(TestCase):
     @classmethod
     def setUpClass(cls):
         from tests import test_public_frontend_e2e as fixture
+
         cls.fixture = fixture
         cls.temporary = TemporaryDirectory()
         cls.root = Path(cls.temporary.name)
@@ -204,10 +270,16 @@ class PublicFrontendBundleBrowserTests(TestCase):
             else:
                 self.missing_assets.append(path)
                 route.fulfill(status=404, body="missing selected-bundle resource")
+
         # API requests must reach the fixture directly: its deterministic arrival
         # test waits on a server-side Event while Playwright is not dispatching
         # Python route callbacks. Intercepting even to continue would deadlock it.
-        page.route(re.compile(r"^" + re.escape(self.base_url) + r"/(?!(?:public/v1/|media/|announcements\.json(?:\?|$)))"), serve)
+        page.route(
+            re.compile(
+                r"^" + re.escape(self.base_url) + r"/(?!(?:public/v1/|media/|announcements\.json(?:\?|$)))"
+            ),
+            serve,
+        )
 
     def open(self, page):
         page.goto(self.base_url, wait_until="networkidle")
@@ -217,6 +289,7 @@ class PublicFrontendBundleBrowserTests(TestCase):
 
     def test_complete_bundles_old_new_old_keep_v4_draft_pending_uuid_and_privacy(self):
         from tests.test_public_frontend_reliability import PublicFrontendReliabilityTests as helpers
+
         with self.fixture.sync_playwright() as playwright:
             browser = self.fixture._launch_browser(playwright)
             page = browser.new_page()
@@ -226,13 +299,34 @@ class PublicFrontendBundleBrowserTests(TestCase):
             page.on("pageerror", lambda error: errors.append(str(error)))
             self.open(page)
             helpers.seed(page, count=2)
-            snapshot = {"request_id": "de305d54-75b4-431b-adb2-eb6b9e546014", "character_id": "25b23cb64398", "communication_channel": "text", "message": "synthetic pending", "state_package": "fixed-subject.signature", "local_day_key": "2026-09-07"}
-            page.evaluate("""async snapshot => {
-              const db=await new Promise(resolve=>{const r=indexedDB.open('project-snow-public',4);r.onsuccess=()=>resolve(r.result)});
-              await new Promise(resolve=>{const tx=db.transaction('messages','readwrite');const store=tx.objectStore('messages');const r=store.get('fixture-000001');
-                r.onsuccess=()=>store.put({...r.result,status:'pending',requestId:snapshot.request_id,requestSnapshot:snapshot});tx.oncomplete=resolve});db.close();
-            }""", snapshot)
-            for edition, draft in (("compat-096", "S1兼容草稿"), ("current", "S2新版草稿"), ("compat-096", "回退草稿")):
+            snapshot = {
+                "request_id": "de305d54-75b4-431b-adb2-eb6b9e546014",
+                "character_id": "25b23cb64398",
+                "communication_channel": "text",
+                "message": "synthetic pending",
+                "state_package": "fixed-subject.signature",
+                "local_day_key": "2026-09-07",
+            }
+            page.evaluate(
+                """async snapshot => {
+              const db=await new Promise(resolve=>{
+                const r=indexedDB.open('project-snow-public',4);r.onsuccess=()=>resolve(r.result)
+              });
+              await new Promise(resolve=>{
+                const tx=db.transaction('messages','readwrite');
+                const store=tx.objectStore('messages');const r=store.get('fixture-000001');
+                r.onsuccess=()=>store.put({...r.result,status:'pending',
+                  requestId:snapshot.request_id,requestSnapshot:snapshot});
+                tx.oncomplete=resolve
+              });db.close();
+            }""",
+                snapshot,
+            )
+            for edition, draft in (
+                ("compat-096", "S1兼容草稿"),
+                ("current", "S2新版草稿"),
+                ("compat-096", "回退草稿"),
+            ):
                 phase[0] = edition
                 self.open(page)
                 if edition == "current":
@@ -255,14 +349,18 @@ class PublicFrontendBundleBrowserTests(TestCase):
     def test_both_selected_bundles_preserve_typing_during_arrival_storage_completion(self):
         # Reuse the deterministic real-IDB transaction gate and channel/character
         # draft assertions already used to reproduce the main CI failure.
-        method = self.fixture.PublicFrontendE2ETests.test_arrival_storage_completion_preserves_newly_typed_draft
+        method = (
+            self.fixture.PublicFrontendE2ETests.test_arrival_storage_completion_preserves_newly_typed_draft
+        )
         original_launch = self.fixture._launch_browser
         for edition in ("compat-096", "current"):
             with self.subTest(edition=edition):
                 self.setUp()
+
                 def launch(playwright, edition=edition):
                     browser = original_launch(playwright)
                     original_new_page = browser.new_page
+
                     def new_page(**kwargs):
                         page = original_new_page(**kwargs)
                         if edition == "compat-096":
@@ -283,8 +381,10 @@ class PublicFrontendBundleBrowserTests(TestCase):
                               });""")
                         self.route_bundle(page, [edition])
                         return page
+
                     browser.new_page = new_page
                     return browser
+
                 self.fixture._launch_browser = launch
                 try:
                     # The borrowed test calls this fixture's model helper only;
