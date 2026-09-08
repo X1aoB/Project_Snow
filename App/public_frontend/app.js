@@ -3344,12 +3344,43 @@ function inputBlocks() {
   }
   return [action ? { type: "action", text: action } : null, speech ? { type: "speech", text: speech } : null].filter(Boolean);
 }
+function resizeMessageInput() {
+  const input = $("message-input");
+  if (!input.getClientRects().length) return;
+  const style = getComputedStyle(input);
+  const minimum = Number.parseFloat(style.minHeight) || 0;
+  const maximum = Number.parseFloat(style.maxHeight) || Infinity;
+  const borders = Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.borderBottomWidth);
+  // While capped text still overflows, leave the live box alone so the browser
+  // can keep scrolling the caret as typing continues. Resetting its height here
+  // would undo that scroll. Deletion/widening that fits re-enters measurement.
+  if (input.value && input.offsetHeight >= maximum && input.scrollHeight > input.clientHeight) return;
+  const scrollTop = input.scrollTop;
+  // Measure from the intrinsic single row so deletion and wider layouts shrink
+  // again. Only the box changes; drafts, selection and manual scroll stay intact.
+  input.style.height = "auto";
+  input.style.overflowY = "hidden";
+  // A long placeholder can wrap even when the composer has no draft.
+  const height = input.value ? input.scrollHeight + borders : input.offsetHeight;
+  input.style.height = `${Math.max(minimum, Math.min(maximum, height))}px`;
+  input.style.overflowY = height > maximum ? "auto" : "hidden";
+  input.scrollTop = scrollTop;
+}
+let messageInputResizeFrame = 0;
+function scheduleMessageInputResize() {
+  if (messageInputResizeFrame) return;
+  messageInputResizeFrame = window.requestAnimationFrame(() => {
+    messageInputResizeFrame = 0;
+    resizeMessageInput();
+  });
+}
 function updateInputCount() {
   const count = $("message-input").value.length + ($("action-input").value.length || 0);
   $("input-count").textContent = `${count} / 2000`;
   $("input-count").style.color = count > 2000 ? "#ff9dac" : "";
   const foot = $("input-count").closest(".composer-foot");
   if (foot) foot.hidden = count === 0;
+  resizeMessageInput();
 }
 function renderSelectedSticker() {
   const root = $("selected-sticker");
@@ -4394,6 +4425,17 @@ $("character-search").addEventListener("keydown", (event) => {
   if (first) { event.preventDefault(); first.focus(); }
 });
 window.matchMedia("(max-width: 820px)").addEventListener("change", syncResponsiveLayout);
+let messageInputWidth = 0;
+const messageInputResizeObserver = new ResizeObserver(([entry]) => {
+  const width = entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+  if (width === messageInputWidth) return;
+  messageInputWidth = width;
+  // Height-only observations must not loop. Defer width-driven layout work;
+  // recording zero also makes showing a previously hidden composer remeasure.
+  if (width > 0) scheduleMessageInputResize();
+});
+messageInputResizeObserver.observe($("message-input"));
+document.fonts?.ready.then(scheduleMessageInputResize);
 window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", event => { if (event.matches) { cancelStageMotion(); renderStage(); } });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { void saveDraftNow(); cancelBackgroundSummaries(); cancelStageMotion(); }

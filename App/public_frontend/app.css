@@ -415,7 +415,8 @@ html.privacy-root body.privacy-page { height: auto; min-height: 100%; overflow: 
   .contact-footer { grid-template-columns: repeat(3, max-content) 44px; gap: 1px; padding-inline: 5px; }
   .active-character p { display: none; }
   .chat-controls { gap: 3px; }
-  .presence-switch { max-width: 102px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .presence-switch { max-width: 102px; min-width: 0; overflow: hidden; white-space: nowrap; }
+  #go-in-person-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
   .in-person-surface { --stage-dialogue-height: clamp(116px, 21dvh, 168px); grid-template-rows: auto minmax(0, 1fr) var(--stage-dialogue-height); }
   .scene-hud { grid-template-columns: minmax(0,1fr) auto; gap: 4px; min-height: 62px; padding-block: 5px; }
   .scene-character-button { max-width: 150px; border-color: transparent; background: transparent; }
@@ -461,7 +462,7 @@ html.privacy-root body.privacy-page { height: auto; min-height: 100%; overflow: 
   .active-character { gap: 6px; }
   .active-character .portrait { width: 36px; height: 36px; flex-basis: 36px; }
   .active-character h1 { font-size: .875rem; }
-  .presence-switch { max-width: 68px; padding-inline: 7px; }
+  .presence-switch { max-width: 68px; padding-inline: 5px; }
   .contact-footer { grid-template-columns: repeat(3, max-content) 40px; gap: 0; padding-inline: 3px; }
   .footer-command { min-width: 0; white-space: nowrap; padding-inline: 4px; font-size: 13px; }
 }

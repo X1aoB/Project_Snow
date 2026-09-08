@@ -35,6 +35,24 @@ BOUNDARY_IN_PERSON_BLOCKS = [
     {"type": "speech", "text": "第二段\n\n第三段"},
 ]
 BOUNDARY_IN_PERSON_REPLY = "第一句。第二句。 Hello. World. 第一段\n第二段\n\n第三段"
+END_CARET_VISIBLE = """() => {
+  const input=document.querySelector('#message-input');
+  if (!input.value.endsWith('\\nx') || input.selectionStart !== input.value.length
+      || input.selectionEnd !== input.value.length) return false;
+  const style=getComputedStyle(input);
+  const context=document.createElement('canvas').getContext('2d');
+  context.font=style.font;
+  const metrics=context.measureText('x');
+  const fontHeight=metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
+  // Native scrolling exposes the caret, not bottom padding or the font's
+  // half-leading below it. Arial and CJK fonts have different bounding boxes
+  // at the same 24px line-height; compare the caret box, with pixel rounding.
+  const halfLeading=Math.max(0,(parseFloat(style.lineHeight)-fontHeight)/2);
+  const bottom=input.scrollHeight-parseFloat(style.paddingBottom)-halfLeading;
+  const top=bottom-fontHeight;
+  return Number.isFinite(top) && top >= input.scrollTop-2
+    && bottom <= input.scrollTop+input.clientHeight+2;
+}"""
 
 
 def _browser_launch_kwargs() -> dict[str, str]:
@@ -1806,6 +1824,166 @@ class PublicFrontendE2ETests(TestCase):
                 self.assertEqual(scroll["overflowY"], "auto")
                 page.close()
             browser.close()
+
+    def test_narrow_presence_label_ellipsizes_without_clipping_action_prefix(self) -> None:
+        location = "基地公共休息室与观景走廊"
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            try:
+                for width in (390, 320):
+                    with self.subTest(width=width):
+                        page = browser.new_page(viewport={"width": width, "height": 844})
+
+                        def presence(route):
+                            payload = route.fetch().json()
+                            payload["scene_state"]["character_location"] = location
+                            route.fulfill(json=payload)
+
+                        page.route("**/public/v1/presence/resolve", presence)
+                        page.goto(self.base_url, wait_until="networkidle")
+                        page.locator("#accept-experience-notice").click()
+                        page.wait_for_function(
+                            "document.querySelector('#connection-status').textContent === '服务已连接'"
+                        )
+                        label = page.locator("#go-in-person-label")
+                        self.assertEqual(label.inner_text(), f"去见她 · {location}")
+                        self.assertEqual(
+                            page.locator("#go-in-person").get_attribute("aria-label"), label.inner_text()
+                        )
+                        bounds = label.evaluate("""node => {
+                          const range = document.createRange();
+                          range.setStart(node.firstChild,0);range.setEnd(node.firstChild,3);
+                          const prefix=range.getBoundingClientRect(), rect=node.getBoundingClientRect();
+                          const button=node.parentElement.getBoundingClientRect();
+                          const style=getComputedStyle(node);
+                          const measure=document.createElement('canvas').getContext('2d');
+                          measure.font=style.font;
+                          return {prefixLeft:prefix.left,prefixRight:prefix.right,left:rect.left,
+                            right:rect.right,buttonLeft:button.left,buttonRight:button.right,
+                            ellipsis:measure.measureText('…').width,
+                            overflow:style.textOverflow,scroll:node.scrollWidth,client:node.clientWidth};
+                        }""")
+                        self.assertEqual(bounds["overflow"], "ellipsis")
+                        self.assertGreater(bounds["scroll"], bounds["client"])
+                        self.assertGreaterEqual(bounds["left"], bounds["buttonLeft"])
+                        self.assertLessEqual(bounds["right"], bounds["buttonRight"])
+                        self.assertGreaterEqual(bounds["prefixLeft"], bounds["left"] - 1)
+                        self.assertLessEqual(bounds["prefixRight"], bounds["right"] - bounds["ellipsis"] + 1)
+                        self._assert_no_horizontal_overflow(page)
+                        page.close()
+            finally:
+                browser.close()
+
+    def test_composer_multiline_height_scroll_and_draft_reload_at_narrow_and_zoom_widths(self) -> None:
+        from tests.test_public_frontend_reliability import PublicFrontendReliabilityTests
+
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            try:
+                # 640x400 CSS px at DPR 2 models the layout/raster of a
+                # 1280x800 desktop at 200% browser zoom, not a CSS zoom override.
+                for width, height, scale, font in (
+                    (390, 844, 1, None), (320, 720, 1, None), (640, 400, 2, None),
+                    (390, 844, 1, "Arial"),
+                ):
+                    with self.subTest(width=width, scale=scale, font=font):
+                        page = browser.new_page(
+                            viewport={"width": width, "height": height}, device_scale_factor=scale
+                        )
+                        errors = []
+                        page.on("pageerror", lambda error: errors.append(str(error)))
+                        page.goto(self.base_url, wait_until="networkidle")
+                        page.locator("#accept-experience-notice").click()
+                        page.wait_for_function(
+                            "document.querySelector('#connection-status').textContent === '服务已连接'"
+                        )
+                        page.locator("#skip-onboarding").click()
+                        composer = page.locator("#message-input")
+                        initial_height = composer.evaluate("node => node.getBoundingClientRect().height")
+                        draft = "第一行草稿\n第二行草稿\n第三行草稿"
+                        composer.fill(draft)
+                        page.wait_for_function(
+                            "document.querySelector('#message-input').scrollHeight"
+                            " <= document.querySelector('#message-input').clientHeight + 1",
+                            timeout=3000,
+                        )
+                        self.assertGreater(composer.evaluate("node=>node.clientHeight"), initial_height + 30)
+                        PublicFrontendReliabilityTests.wait_saved_draft(page, draft)
+                        page.reload(wait_until="networkidle")
+                        page.wait_for_function(
+                            "document.querySelector('#connection-status').textContent === '服务已连接'"
+                        )
+                        self.assertEqual(composer.input_value(), draft)
+                        page.wait_for_function(
+                            "document.querySelector('#message-input').scrollHeight"
+                            " <= document.querySelector('#message-input').clientHeight + 1",
+                            timeout=3000,
+                        )
+                        self._assert_no_horizontal_overflow(page)
+                        self.assertLessEqual(
+                            composer.evaluate("node=>node.getBoundingClientRect().bottom"), height
+                        )
+                        if directory := os.environ.get("SNOW_COMPOSER_SCREENSHOTS"):
+                            path = Path(directory)
+                            path.mkdir(parents=True, exist_ok=True)
+                            page.screenshot(path=str(path / f"composer-{width}-{scale}x.png"))
+                        if font:
+                            composer.evaluate("(node,font)=>node.style.fontFamily=font", font)
+                        composer.fill("\n".join(f"较长草稿第{index}行" for index in range(20)))
+                        metrics = composer.evaluate("""node => ({
+                          height:node.getBoundingClientRect().height,
+                          max:parseFloat(getComputedStyle(node).maxHeight),
+                          scroll:node.scrollHeight,client:node.clientHeight,
+                          overflow:getComputedStyle(node).overflowY
+                        })""")
+                        self.assertLessEqual(metrics["height"], metrics["max"] + 1)
+                        self.assertGreater(metrics["scroll"], metrics["client"])
+                        self.assertEqual(metrics["overflow"], "auto")
+                        self.assertGreater(
+                            composer.evaluate(
+                                "node=>{node.scrollTop=node.scrollHeight;return node.scrollTop}"
+                            ), 0
+                        )
+                        composer.press("Control+End")
+                        composer.press("Shift+Enter")
+                        composer.press("x")
+                        page.wait_for_function(END_CARET_VISIBLE, timeout=3000)
+                        # A resize implementation that undoes native caret
+                        # scrolling must still fail this font-aware check.
+                        composer.evaluate("node=>{node.scrollTop=0}")
+                        self.assertFalse(page.evaluate(END_CARET_VISIBLE))
+                        self.assertLessEqual(
+                            composer.evaluate("node=>node.getBoundingClientRect().bottom"), height
+                        )
+                        composer.fill("")
+                        self.assertAlmostEqual(
+                            composer.evaluate("node=>node.getBoundingClientRect().height"),
+                            initial_height, delta=1
+                        )
+                        if width == 390:
+                            wrapped = "宽度变化应重新计算输入高度" * 2
+                            composer.fill(wrapped)
+                            wide_height = composer.evaluate("node=>node.getBoundingClientRect().height")
+                            composer.evaluate("node=>node.setSelectionRange(2,5)")
+                            page.set_viewport_size({"width": 320, "height": 844})
+                            page.wait_for_function(
+                                "previous=>document.querySelector('#message-input').getBoundingClientRect().height"
+                                " > previous", arg=wide_height, timeout=3000,
+                            )
+                            self.assertEqual(composer.input_value(), wrapped)
+                            self.assertEqual(
+                                composer.evaluate("node=>[node.selectionStart,node.selectionEnd]"), [2, 5]
+                            )
+                            page.set_viewport_size({"width": 390, "height": 844})
+                            page.wait_for_function(
+                                "previous=>document.querySelector('#message-input').getBoundingClientRect().height"
+                                " <= previous + 1", arg=wide_height, timeout=3000,
+                            )
+                        self.assertEqual(errors, [])
+                        page.close()
+                self.assertEqual(PublicFrontendHandler.chat_payloads, [])
+            finally:
+                browser.close()
 
     def test_desktop_contacts_toggle_and_exact_pinyin_search(self) -> None:
         with sync_playwright() as playwright:
