@@ -9,19 +9,25 @@ production activation. This ledger records evidence rather than inferred complet
 | Protected image GC and disk capacity | first production batch verified | 36 unused Snow images removed; 30 protected digest references; 94% → 64% used; 16.9 GiB free |
 | Retention maintenance | production helper upgrade verified | source `490c0bb`, generation `c2639d71…`; cleanup passed and pinned backup completed at 2026-09-07 10:10:32 UTC; all 25 container identities unchanged |
 | Immutable baseline / full restore | isolated component restore passed; whole-host drill pending | 10 images / 159 blobs verified; restored DB/assets/API and rebuilt retrieval passed in 279.41 seconds |
-| CI classification / PostgreSQL / attestations | real proof and technical staging passed | main `2b68f60`, successful CI and signing run, anonymous host verification before controller upgrade and green staging; compatibility rollout remains pending |
+| CI classification / PostgreSQL / attestations | S1 signed candidate ready for manual review | main `7ce0205`, CI 34182286331 and proof 34182824713 passed; host verification, isolated stage and actual candidate checks passed; public blue remains 0.9.6 |
 | Backend budgets / lifecycle / modular core | first modular core implemented | actual shared budget, bounded DB adapter, leases/drain, loopback/local boundary and 3-second retrieval budget |
 | Review preservation / versioned data / quality | first batch implemented | cross-process review protection; no activation GC; 22 × 8 offline behavior cases |
 | Browser persistence / TS / UI | implemented and locally verified | 66 Python/UI checks, 15 subtests, extra generic-stage browser check, 6 Node checks; source typecheck/build |
 | 小吉终端 name and restored icon | implemented and packaged | AI source disclosed; Electron 44.2.0 smoke and Windows preview package, dependency audit 0; binary has no trusted code-signing certificate |
 | All-character stage assets | external drawing task | requires all 22 approved; runtime integration remains disabled until ready |
 | All-character TTS | separate task delivered for human review | 23 profiles, 276 standard auditions; all 368 public WAVs independently hash/format checked; conservative estimate CNY 7.32550, actual invoice unknown; public voice disabled |
-| Production promotion | pending manual acceptance | exact release and receipt approved after gates |
+| Production promotion | S1 receipt prepared, approval pending | receipt `09ed2cd6…`, expires 2026-09-09 04:12:44 UTC; no approval or promotion recorded |
 
 Initial host audit: 16 vCPU, ~16 GiB RAM, 49 GiB filesystem, 94% used.
 Backup timer last succeeded; retention timer failed while Compose tried to
 reconcile a management network occupied by an old admin container. Dify shares
 the host and is outside the mutation scope.
+
+## S1 candidate ready for review (2026-09-08)
+
+[S1 acceptance record](s1-candidate-20260908.md) binds main `7ce0205`, its real signed manifest and actual green image to receipt `09ed2cd6797ad1aa141e48809ec9563f4c3cc403d945637685f23a1c0c08cb0b`. CI passed 908 portable / 61 browser tests (overlapping groups); private candidate browser checks passed on desktop and 390px. Independent post-stage inspection verified 24 other containers unchanged, blue recovery bytes/mode/inode unchanged, 27 prior anchor files protected, and data/avatar/sticker hashes. Public remains baseline blue. The full overhaul is not complete; S1 still needs manual promotion before it can become S2's supported browser rollback target.
+
+S2 narrow composer improvements are retained separately at `2ca1f8854e414d939d63df94e420fe5c72210138`: truncation belongs to the button label, textarea grows to a bounded height and preserves long-draft scrolling. Local browser regression and fingerprint checks passed. These changes are not part of the staged S1 image.
 
 ## Recorded implementation evidence (2026-09-07)
 
@@ -72,10 +78,13 @@ Do not treat this ledger, passing unit tests, or a prepared candidate as approva
 
 ## Remaining acceptance and follow-up scope
 
-- Complete the S1 compatibility-bundle main CI, exact proof, stage and concrete manual acceptance before enabling S2. The first real proof/controller/stage chain passed for `2b68f60`; the controller is upgraded but public blue remains the baseline and the auto-stage timer is still disabled. Main must remain stable through each CI/signing cycle. Continuous auto-stage operation remains to be validated and enabled after the supported first rollout.
+- S1 promotion is now user-authorized. The first independent Caddy routing maintenance at 04:52 UTC detected a false retained-service mismatch and restored the old Caddy automatically; public TLS still reports `ok / 0.9.6`. Repeated read-only inspection proved Docker Mounts array order is unstable. Canonical mount ordering must pass CI and be installed as a separate controller update before retrying the maintenance; no server approval or API traffic switch has occurred. The failed maintenance receipt is preserved with SHA256 `93e9516f464af1dffa65ed92ee98c77c6e3eff0aef5b4fe32b53d8d15b0ac00f`.
+
+- Complete the independent routing/controller prerequisite, extend the concrete S1 evidence, record the already granted user approval against the exact receipt, then promote before enabling S2. S1 main `7ce0205` completed CI, proof, stage and candidate checks; blue remains the baseline and the auto-stage timer is still disabled. Main must remain stable through each CI/signing cycle. Continuous auto-stage operation remains to be validated and enabled after the supported first rollout.
 - Exercise the implemented acceptance gate against the real candidate before any new promotion. Root-owned review evidence and explicit approval bind the current marker, exact candidate bytes/configuration, stage attempt and expiry, and are rechecked under the release lock before side effects. Passing isolated tests does not approve the production candidate.
 - Complete a separately timed empty-host rehearsal. RPO ≤24 hours and RTO ≤4 hours are targets, not measured achievements. Connect an operator-chosen external alert destination; current monitoring writes local journal transitions only. Remediate the actual shared-infrastructure findings in a separately validated maintenance release; do not silently replace current shared dependencies while staging an API candidate.
 - Continue extracting the large compatibility facade and remaining plain JavaScript into the typed/runtime modules. Local review JSONL writes now coordinate processes but are not a crash-atomic multi-file database. Production role separation, full capacity/load measurements and real-model persona evaluations remain separate acceptance items.
 - Artwork production and human approval for all 22 characters remain with the drawing task. The generic stage loader is disabled until a complete validated package is supplied. No stage approval is inferred from base portraits or synthetic browser fixtures.
+- Latest TTS handoff supersedes the older review status below: the separate task is now idle and reports 23 selected character/variant voices with 138 archived auditions at signed commit `f28d0f9`. Its `App/docs/private_voice_test_handoff.md` (SHA256 `aa5281251fa10da7b0fac88fb96cd30e9a324f4bdb4c23f9823eedbcc23f07b0`) records preparation only and a user decision to defer implementation. Future testing is planned for the user's local browser only, with no public voice entry. This integration task has read the handoff but has not re-audited that new audio set, started a private service, or authorized new paid calls.
 - TTS task `01a07ac7-6477-7a10-8101-83fe68a50af9`, titled “Project Snow 全角色 TTS 候选制作与待审核交付”, delivered signed commit `6d9180d` on its independent `codex/all-character-tts-review` worktree. The current package is `runtime/voice-lab/runs/2026-09-07-vidya-chenxing-v2/`: 23 profiles (22 characters plus Qinno morso), 276 standard auditions. This integration task independently re-read all 368 public audio files, confirming SHA256, nonempty WAV frames, mono 24 kHz PCM16 and duration agreement. Status is `ready_for_human_review`; human decisions remain blank and public rollout is disabled. The conservative cost estimate is CNY 7.32550 against the CNY 300 cap; actual invoiced cost remains unknown. This separate delivery is not merged into the public application branch.
 - Production remains 0.9.6 / 502ec99 until an exact candidate is accepted and manually promoted. Component release versions and final release notes must be set for that accepted release.

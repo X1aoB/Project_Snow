@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
@@ -82,6 +83,92 @@ def test_manual_container_drift_disables_retention(edge):
     containers["caddy"]["HostConfig"]["Privileged"] = True
     result = routing.prepare(state, environment, configuration, "green", ["caddy"], execute)
     assert result["recreate"] == ["caddy"]
+
+
+def test_inspect_mount_order_changes_preserve_recorded_services(edge):
+    paths, environment, configuration, root, containers, calls, execute = edge
+    services = ["caddy", "cloudflared", "egress-proxy"]
+    for name, container in containers.items():
+        container["Mounts"].append({
+            "Type": "bind", "Source": str(configuration / name),
+            "Destination": "/etc/" + name, "Mode": "ro", "RW": False,
+            "Propagation": "rprivate",
+        })
+    original = deepcopy(containers)
+    inspections = 0
+
+    def reordered_inspect(command):
+        nonlocal inspections
+        payload = execute(command)
+        if command[1] == "inspect":
+            document = json.loads(payload)
+            inspections += 1
+            # Reproduce Docker returning the same Mounts in opposite order
+            # between record, prepare and the next record/readback.
+            if inspections % 2:
+                document[0]["Mounts"].reverse()
+            return json.dumps(document)
+        return payload
+
+    routing.prepare(paths, environment, configuration, "blue", services, reordered_inspect)
+    routing.record(paths, environment, configuration, "blue", services, reordered_inspect)
+    first_bindings = routing.saved_bindings(root)
+    result = routing.prepare(paths, environment, configuration, "green", services, reordered_inspect)
+    assert result["retained"] == services and result["recreate"] == []
+    routing.record(paths, environment, configuration, "green", services, reordered_inspect)
+    assert routing.saved_bindings(root) == first_bindings
+    assert containers == original  # Fingerprinting must not reorder caller data.
+
+
+@pytest.mark.parametrize("field,value", [
+    ("Source", "/unexpected/config"),
+    ("Destination", "/unexpected/container-path"),
+    ("RW", True),
+    ("Mode", "rw"),
+    ("Propagation", "shared"),
+    ("Type", "volume"),
+    ("FutureDockerMetadata", {"security": "changed"}),
+])
+def test_mount_content_changes_still_require_recreation(edge, field, value):
+    paths, environment, configuration, root, containers, calls, execute = edge
+    services = ["cloudflared"]
+    routing.prepare(paths, environment, configuration, "blue", services, execute)
+    routing.record(paths, environment, configuration, "blue", services, execute)
+    containers["cloudflared"]["Mounts"][0][field] = value
+    result = routing.prepare(paths, environment, configuration, "green", services, execute)
+    assert result["recreate"] == services and result["retained"] == []
+
+
+def test_duplicate_mounts_are_preserved_in_fingerprint(edge):
+    paths, environment, configuration, root, containers, calls, execute = edge
+    services = ["cloudflared"]
+    routing.prepare(paths, environment, configuration, "blue", services, execute)
+    routing.record(paths, environment, configuration, "blue", services, execute)
+    mount = containers["cloudflared"]["Mounts"][0]
+    containers["cloudflared"]["Mounts"].append(deepcopy(mount))
+    result = routing.prepare(paths, environment, configuration, "green", services, execute)
+    assert result["recreate"] == services and result["retained"] == []
+
+
+def test_network_identity_changes_still_require_recreation(edge):
+    paths, environment, configuration, root, containers, calls, execute = edge
+    services = ["cloudflared"]
+    routing.prepare(paths, environment, configuration, "blue", services, execute)
+    routing.record(paths, environment, configuration, "blue", services, execute)
+    containers["cloudflared"]["NetworkSettings"]["Networks"]["app"]["NetworkID"] = "e" * 64
+    result = routing.prepare(paths, environment, configuration, "green", services, execute)
+    assert result["recreate"] == services and result["retained"] == []
+
+
+def test_config_array_order_remains_part_of_fingerprint(edge):
+    paths, environment, configuration, root, containers, calls, execute = edge
+    services = ["cloudflared"]
+    containers["cloudflared"]["Config"]["Env"] = ["SETTING=first", "SETTING=last"]
+    routing.prepare(paths, environment, configuration, "blue", services, execute)
+    routing.record(paths, environment, configuration, "blue", services, execute)
+    containers["cloudflared"]["Config"]["Env"].reverse()
+    result = routing.prepare(paths, environment, configuration, "green", services, execute)
+    assert result["recreate"] == services and result["retained"] == []
 
 
 def test_failed_new_routing_followed_by_legacy_rollback_restores_restart_source(edge):
