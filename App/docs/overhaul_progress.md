@@ -57,6 +57,12 @@ the host and is outside the mutation scope.
 
 Do not treat this ledger, passing unit tests, or a prepared candidate as approval of new artwork, TTS voices, production promotion, or completion of the entire overhaul.
 
+## Continuation evidence (2026-09-08)
+
+- Main's reduced-motion failure was a real composer race: an arrival confirmation's delayed IndexedDB completion restored the same channel's old draft after typing, leaving an empty submit and no chat request. `4e97fdc` restores drafts only when the composer changes character/channel. A deterministic real-IndexedDB completion gate fails on the old code and passes with the correction; nine focused browser/static checks passed, including cross-tab drafts and patched old→new→old compatibility. Exact PR and main gates remain required.
+- Controller cache handling was independently verified on Linux: 14 tests and 13 subcases passed, zero skips, in 2.25 seconds. The helper only permits two known root-controlled CPython cache directories and preserves their bytes; all other ignored/untracked files remain blockers. Helper SHA256 `6ab4b76ea728ebbb8c9919175380bf25d9a577b938d9429efddadcf57bb5c85c`; JUnit SHA256 `19cc41aa28ff552523c63a628aaa90cb45219684653f809d2b61c6f4fe8c5002`. This verifies the helper, not a production controller upgrade.
+- Read-only host check at 2026-09-08 01:57 UTC: public `ok / 0.9.6`, checkout still `502ec99`, 17,814,126,592 bytes free (65% used); cleanup, backup and monitor timers active, auto-stage inactive.
+
 ## Remaining acceptance and follow-up scope
 
 - Resolve the main browser failure, pass the final main CI, then install the reviewed release runner in a separate maintenance operation and exercise real Sigstore issuance/verification and candidate staging. The independent helper generation is already installed and tested in production; the runner and auto-stage remain unchanged/disabled. Main must remain stable for a CI cycle; a newer main commit causes an older completion event to be intentionally skipped. The host's default GitHub address currently times out; a one-command DNS override with normal TLS validation fetched the exact main history without a persistent DNS change. Routine automatic network access remains to be verified.
