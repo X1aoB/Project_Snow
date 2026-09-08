@@ -1,7 +1,7 @@
 # 小吉终端全面优化验收矩阵
 
 状态截点：2026-09-07，`1c4b15d` 的 [PR CI 34111379744](https://github.com/X1aoB/Project_Snow/actions/runs/34111379744) 已成功，PR #36 合并为 `8c53f51`；其首次 main CI 因一个减少动态模式的浏览器等待失败而阻止发布，正在修复。
-生产基线为 `0.9.6 / 502ec99412bef843c37e4b31a53df8fa9faeb33c`。`2b68f60` 已完成真实证明签发、服务器验证及 green 技术候选准备；公网未切流。兼容旧界面的 S1 仍须独立通过同样门禁和人工验收，随后才能启用 S2 新界面。
+生产基线为 `0.9.6 / 502ec99412bef843c37e4b31a53df8fa9faeb33c`。S1 `7ce0205` 已通过真实 CI、签名、服务器验证、green 准备和候选验收，已生成待审核回执 `09ed2cd6…`；公网未切流。S1 人工晋级并建立兼容回退目标后，才能启用 S2 新界面。见 [S1 验收记录](s1-candidate-20260908.md)。
 
 状态含义：**代码已实现**仅说明存在实现；**实测通过**必须注明本地、隔离环境或生产范围；**待生产启用**尚未完成在服启用；**部分实现**仍有明确缺口；**外部任务**由独立任务交付；**尚未完成**没有足够验收证据。测试通过、合并、准备候选均不等于用户批准上线。
 证据台账见 [overhaul_progress.md](overhaul_progress.md)，操作边界见 [RECOVERY.md](../ops/RECOVERY.md)。以下共 45 项，不以粗略完成百分比替代验收。
@@ -27,7 +27,7 @@
 | B6 | 候选回执、当前版本 CAS 和手工晋级 | 实测通过（隔离）；待生产启用 | 独立 prepare/approve；回执绑定完整当前/候选 marker、配置/资源清单、stage nonce、两色实际容器与 image ID，重验候选 build-info 完整 SHA。首次副作用前持锁核对明确人工批准、预期当前版本和最长 24 小时期限；过期、重 stage、重启及字节篡改拒绝，rollback 保留独立紧急路径。26 项本地行为测试通过，Linux 权限验收另列。[candidate_acceptance.py](../ops/candidate_acceptance.py)、[人工晋级流程](candidate_acceptance.md)。 |
 | B7 | SSE 排空、切换与代理重启保持目标 | 实测通过（隔离）；待生产维护验收 | Caddy reload 保留全部 40 SSE chunks，新连接转 green，重启保持 green；后端接受的聊天可排空最多 300 秒。首次生产持久路由挂载维护尚未验收。[routing.py](../ops/routing.py)、[test_caddy_routing_integration.py](../tests/test_caddy_routing_integration.py)。 |
 | B8 | 应用和浏览器旧→新→旧回退 | 完整静态产物回归通过；S1 生产兼容窗口待建立 | 新租约须在停新 worker 后由受信新版维护逻辑终结，应用回退不降 DB schema。S1 由固定原版+兼容补丁+到场草稿修复构建旧外观，S2 通过后续正常发布启用新界面；镜像只装一个版本，身份绑定证明和 build-info。原始 502 及未刷新的旧标签页不可宣称无损。[test_public_frontend_bundle.py](../tests/test_public_frontend_bundle.py)、[compat/README.md](../compat/README.md)。 |
-| B9 | 最终 CI、main 合并、签名、候选与晋级闭环 | 首次真实签名与技术 stage 通过；未晋级 | PR #45 修复真实草稿竞态；main `2b68f60` 的 CI 34178927888、proof 34179438766 均成功。服务器独立验证后升级 controller 并启动 green，实际镜像摘要匹配；24 个其余容器不变。S1 兼容发布的证明、验收及人工晋级仍待完成，公网保持 0.9.6。[overhaul_progress.md](overhaul_progress.md)。 |
+| B9 | 最终 CI、main 合并、签名、候选与晋级闭环 | S1 已生成待审核回执；未晋级 | PR #46 / main `7ce0205` 的 CI 34182286331、proof 34182824713 成功。服务器验签、实际镜像/UI 身份及浏览器验收通过；24 个其他容器、蓝槽恢复配置字节/inode 未变。回执 `09ed2cd6…` 待人工批准，公网保持 0.9.6。[S1 验收记录](s1-candidate-20260908.md)。 |
 
 ## C 后端架构、功能稳定性与安全
 
