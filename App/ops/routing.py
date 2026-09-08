@@ -53,8 +53,13 @@ def fingerprint(container: dict) -> str:
     # Ignore process times and endpoint IPs, which legitimately change on a
     # restart. Preserve configuration, mounts and network identities so manual
     # changes invalidate retention and force the existing reconciliation path.
+    # Docker can return the same mounts in different array orders. Sort whole
+    # records without mutating the inspection or dropping fields/duplicates;
+    # source, permissions and future mount metadata must still fence retention.
+    mounts = sorted(container.get("Mounts", []),
+                    key=lambda mount: json.dumps(mount, sort_keys=True, separators=(",", ":")))
     document = {"Id": container["Id"], "Image": container["Image"], "Config": container["Config"],
-                "HostConfig": container["HostConfig"], "Mounts": container.get("Mounts", []),
+                "HostConfig": container["HostConfig"], "Mounts": mounts,
                 "Networks": {name: value.get("NetworkID") for name, value in
                              container.get("NetworkSettings", {}).get("Networks", {}).items()}}
     return digest(json.dumps(document, sort_keys=True, separators=(",", ":")).encode())
