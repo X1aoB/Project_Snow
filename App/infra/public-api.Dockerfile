@@ -16,11 +16,12 @@ COPY backend ./backend
 COPY config/public_knowledge ./config/public_knowledge
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
-COPY public_frontend ./public_frontend
-COPY frontend/shared ./frontend/shared
-COPY frontend/assets/immersive ./frontend/assets/immersive
-COPY scripts/fingerprint_public_frontend.py ./scripts/fingerprint_public_frontend.py
-RUN python ./scripts/fingerprint_public_frontend.py --app-root /app
+COPY .build/public-ui/public_frontend ./public_frontend
+COPY .build/public-ui/frontend/shared ./frontend/shared
+COPY .build/public-ui/frontend/assets/immersive ./frontend/assets/immersive
+COPY .build/public-ui/frontend-identity.json .build/public-ui/frontend-bundle-manifest.json ./
+COPY scripts/prepare_public_frontend.py ./scripts/prepare_public_frontend.py
+RUN python ./scripts/prepare_public_frontend.py --verify --output /app
 COPY infra/public_smoke.py ./public_smoke.py
 COPY infra/public-entrypoint.sh ./infra/public-entrypoint.sh
 RUN chmod 0755 ./infra/public-entrypoint.sh

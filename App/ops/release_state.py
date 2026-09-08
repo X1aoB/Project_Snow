@@ -52,6 +52,56 @@ def _controlled_directory(path: Path) -> None:
         raise MaintenanceError("Recovery directory is not root-controlled")
 
 
+def pin_recovery_environment(paths: Paths, colour: str, data_root: Path) -> dict[str, str]:
+    """Pin active recovery settings atomically; keep already-correct bytes intact.
+
+    The caller holds the release lock. A candidate must never truncate the
+    active colour's recovery file while preparing its own independent slot.
+    """
+    active = active_release(paths)
+    if colour != active["colour"]:
+        raise MaintenanceError("Recovery settings must belong to the active colour")
+    manifest = json.loads(read_text(paths.root / "releases" / "current-manifest.json"))
+    version = manifest.get("data_version", "")
+    if (not isinstance(version, str) or not re.fullmatch(r"[0-9A-Za-z._-]+", version)
+            or version in {".", ".."} or data_root != paths.root / "data" / "releases" / version):
+        raise MaintenanceError("Recovery data path differs from the active release")
+    for parent in (data_root, *data_root.parents):
+        _controlled_directory(parent)
+    if not data_root.is_dir() or data_root.is_symlink():
+        raise MaintenanceError("Recovery data directory is missing or linked")
+    data_manifest = json.loads(read_text(data_root / "manifest.json"))
+    if data_manifest.get("data_version") != version:
+        raise MaintenanceError("Recovery data manifest differs from the active release")
+    path = paths.root / "runtime" / "colours" / f"{colour}.compose.env"
+    for parent in (path.parent, *path.parent.parents):
+        _controlled_directory(parent)
+    require_regular(path, private=True)
+    values = read_environment(path)
+    if values.get("PUBLIC_API_IMAGE") != active["image"]:
+        raise MaintenanceError("Recovery application image differs from the active release")
+    desired = {
+        "PUBLIC_DATA_ROOT": str(data_root),
+        "PUBLIC_MAILER_ENV_FILE": "/etc/project-snow/feedback-mailer.env",
+    }
+    if all(values.get(key) == value for key, value in desired.items()):
+        # A previous replace may have succeeded before its directory fsync
+        # failed. Retrying still establishes durability without rewriting bytes.
+        sync(path.parent)
+        return {"status": "unchanged", "colour": colour}
+    original = path.read_bytes()
+    # Preserve all unrelated line bytes; the strict environment reader above
+    # already rejected duplicate or malformed fields.
+    replaced_keys = {key.encode() for key in desired}
+    lines = [line for line in original.splitlines(keepends=True) if line.split(b"=", 1)[0] not in replaced_keys]
+    payload = b"".join(lines)
+    if payload and not payload.endswith(b"\n"):
+        payload += b"\n"
+    payload += "".join(f"{key}={value}\n" for key, value in desired.items()).encode()
+    atomic_write(path, payload)
+    return {"status": "updated", "colour": colour}
+
+
 def verify_anchor(paths: Paths, identifier: str) -> tuple[Path, dict[str, Any]]:
     if not ANCHOR_ID.fullmatch(identifier):
         raise MaintenanceError("Invalid immutable recovery anchor ID")

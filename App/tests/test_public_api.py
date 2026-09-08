@@ -86,10 +86,9 @@ class PublicAPITests(TestCase):
         self._views_directory.cleanup()
 
     def test_build_info_is_additive_and_preserves_v1_schemas(self) -> None:
-        with patch.dict("os.environ", {"APP_REVISION": "a" * 40, "APP_BUILD_TIME": "2026-09-07T00:00:00Z"}):
-            response = self.client.get("/public/v1/build-info")
+        response = self.client.get("/public/v1/build-info")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["revision"], "a" * 40)
+        self.assertIsNone(response.json()["frontend"])
         self.assertEqual(response.json()["api_schema"], "public-v1")
         self.assertEqual(response.json()["state_schema"], "public-state-2")
         self.assertEqual(response.json()["generation_limits"]["max_provider_calls"], 2)

@@ -1107,11 +1107,8 @@ if [ -n "$active_colour" ]; then
     echo "Cannot pin rollback data release $bootstrap_data_version." >&2
     exit 69
   fi
-  sed -i '/^PUBLIC_DATA_ROOT=/d' "$bootstrap_colour_env"
-  sed -i '/^PUBLIC_MAILER_ENV_FILE=/d' "$bootstrap_colour_env"
-  printf 'PUBLIC_DATA_ROOT=%s\nPUBLIC_MAILER_ENV_FILE=%s\n' \
-    "$bootstrap_data_root" "$mailer_env_file" >> "$bootstrap_colour_env"
-  chmod 0600 "$bootstrap_colour_env"
+  python3 "$(dirname "$0")/maintenance.py" pin-recovery-env --lock-held \
+    --colour "$active_colour" --data-root "$bootstrap_data_root" || exit 69
 
   bootstrap_config_binding="$colour_release_root/$active_colour-config.json"
   bootstrap_config_root="$configuration_release_root/$bootstrap_marker_sha"

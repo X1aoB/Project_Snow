@@ -29,3 +29,6 @@ client/dist/
 client/.cache/
 client/.electron/
 client/release/
+
+# Selected public UI bundles are derived from committed release inputs.
+/.build/

@@ -317,6 +317,10 @@ def main() -> int:
     stage_parser.add_argument("--manifest", type=Path, required=True)
     anchor_parser = commands.add_parser("anchor")
     anchor_parser.add_argument("--lock-held", action="store_true")
+    pin_parser = commands.add_parser("pin-recovery-env")
+    pin_parser.add_argument("--colour", choices=("blue", "green"), required=True)
+    pin_parser.add_argument("--data-root", type=Path, required=True)
+    pin_parser.add_argument("--lock-held", action="store_true")
     restore_parser = commands.add_parser("restore-anchor")
     restore_parser.add_argument("--release-id", required=True)
     restore_parser.add_argument("--colour", choices=("blue", "green"), required=True)
@@ -385,7 +389,15 @@ def main() -> int:
             with release_lock(paths.lock):
                 result = backup(paths, pin=args.pin) if args.operation == "backup" else restore_postgres(paths, args.dump, args.sha256)
         else:
-            from release_state import archive_colours, delete_planned_images, discard_candidate, image_gc_plan, record_candidate, restore_colour
+            from release_state import (
+                archive_colours,
+                delete_planned_images,
+                discard_candidate,
+                image_gc_plan,
+                pin_recovery_environment,
+                record_candidate,
+                restore_colour,
+            )
 
             if os.geteuid() != 0:
                 raise MaintenanceError("Release maintenance requires root")
@@ -393,6 +405,8 @@ def main() -> int:
                 require_inherited_release_lock(paths.lock)
                 if args.operation == "anchor":
                     result = archive_colours(paths)
+                elif args.operation == "pin-recovery-env":
+                    result = pin_recovery_environment(paths, args.colour, args.data_root)
                 elif args.operation == "candidate-record":
                     result = record_candidate(paths, args.colour, args.manifest)
                 else:
@@ -401,6 +415,8 @@ def main() -> int:
                 with release_lock(paths.lock):
                     if args.operation == "anchor":
                         result = archive_colours(paths)
+                    elif args.operation == "pin-recovery-env":
+                        result = pin_recovery_environment(paths, args.colour, args.data_root)
                     elif args.operation == "restore-anchor":
                         result = restore_colour(paths, args.release_id, args.colour)
                     elif args.operation == "gc-plan":

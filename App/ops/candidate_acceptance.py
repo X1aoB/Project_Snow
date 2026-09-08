@@ -29,6 +29,21 @@ RECEIPT_SCHEMA = "project-snow-candidate-acceptance-1"
 APPROVAL_SCHEMA = "project-snow-candidate-approval-1"
 CHECKS = ("api_health", "build_identity", "data_media", "browser_smoke", "rollback_baseline")
 HASH = re.compile(r"^[0-9a-f]{64}$")
+FRONTEND_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def frontend_identity(value: object) -> dict:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"track", "version", "bundle_sha256"}
+        or value.get("track") not in ("compat", "current")
+        or not isinstance(value.get("version"), str)
+        or not FRONTEND_VERSION.fullmatch(value["version"])
+        or not isinstance(value.get("bundle_sha256"), str)
+        or not HASH.fullmatch(value["bundle_sha256"])
+    ):
+        raise MaintenanceError("Forward promotion requires an immutable selected frontend identity")
+    return value
 
 
 def run(command: list[str], *, timeout: float = 20) -> str:
@@ -145,6 +160,7 @@ def snapshot(paths: Paths, colour: str, commit: str, expected_current: str, exec
     marker = payloads[f"releases/colours/{colour}"].decode().split()
     manifest_bytes = payloads[f"releases/colours/{colour}-manifest.json"]
     manifest = json.loads(manifest_bytes)
+    frontend = frontend_identity(manifest.get("frontend"))
     application = manifest.get("application", {})
     public_image = f"{application.get('image', '')}@{application.get('digest', '')}"
     embedding_image = (
@@ -170,10 +186,13 @@ def snapshot(paths: Paths, colour: str, commit: str, expected_current: str, exec
     build = json.loads(execute(["docker", "exec", candidate["id"], "python", "-c", probe]))
     if build.get("revision") != commit or build.get("app_version") != manifest.get("app_version"):
         raise MaintenanceError("Running candidate build identity differs from the signed release")
+    if frontend_identity(build.get("frontend")) != frontend:
+        raise MaintenanceError("Running candidate frontend differs from the signed release")
     return {
         "files": {name: sha256(payload) for name, payload in payloads.items()},
         "candidate_container": candidate,
         "current_container": container_identity(active["colour"], active["image"], execute),
+        "frontend": frontend,
     }
 
 
