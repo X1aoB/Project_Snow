@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
+from contextlib import contextmanager
+import importlib.util
+import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 
 class DeploymentContractTests(TestCase):
@@ -3408,3 +3414,364 @@ seal_configuration_snapshot "$seal_root"
         self.assertEqual(workflow.count("google-chrome --version"), 2)
         self.assertNotIn("playwright.chromium.launch()", frontend_tests)
         self.assertEqual(frontend_tests.count("playwright.chromium.launch("), 1)
+
+
+class OriginRetentionTests(TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app_root = Path(__file__).resolve().parents[1]
+        with patch.object(sys, "path", [str(cls.app_root / "ops"), *sys.path]):
+            spec = importlib.util.spec_from_file_location("tested_origin_retention", cls.app_root / "ops/origin_retention.py")
+            cls.gate = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(cls.gate)
+
+    def test_fifo_is_rejected_without_waiting_for_a_writer(self):
+        if not sys.platform.startswith("linux"):
+            self.skipTest("FIFO nonblocking behavior requires Linux")
+        with tempfile.TemporaryDirectory() as temporary:
+            fifo = Path(temporary) / "unexpected-fifo"
+            os.mkfifo(fifo, mode=0o600)
+            code = """import sys
+sys.path.insert(0, sys.argv[1])
+import origin_retention
+# Test file-type handling independently of root ownership and /tmp ancestry.
+origin_retention.controlled_directory = lambda path: None
+try:
+    origin_retention.read_payload(origin_retention.Path(sys.argv[2]))
+except origin_retention.MaintenanceError:
+    print('rejected-special-file')
+else:
+    raise SystemExit('FIFO unexpectedly accepted')
+"""
+            result = subprocess.run([sys.executable, "-B", "-c", code, str(self.app_root / "ops"), str(fifo)],
+                                    capture_output=True, text=True, check=False, timeout=3)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "rejected-special-file")
+
+    @contextmanager
+    def fixture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            configurations = [root / "releases/configurations" / (character * 40) for character in "ab"]
+            image_ref = "caddy@sha256:" + "c" * 64
+            tls_root = "/etc/project-snow/origin-edge/releases/" + "d" * 64
+            for configuration in configurations:
+                (configuration / "infra").mkdir(parents=True)
+                (configuration / "compose.prod.yml").write_text("synthetic compose")
+                (configuration / "infra/OriginEdge.Caddyfile").write_text("synthetic fixed TLS policy")
+            network_definitions = {
+                "origin-backend": {"name": "ps-origin1", "internal": True, "driver": "bridge",
+                                   "driver_opts": {"com.docker.network.bridge.name": "ps-origin1"}},
+                "origin-uplink": {"name": "ps-origin0", "driver": "bridge",
+                                  "driver_opts": {"com.docker.network.bridge.name": "ps-origin0"}},
+            }
+            service = {
+                "image": image_ref, "restart": "unless-stopped", "command": ["caddy", "run"], "entrypoint": None,
+                "dns": ["127.0.0.1"], "cpus": 0.5, "mem_limit": 268435456, "pids_limit": 64,
+                "cap_drop": ["ALL"], "cap_add": ["NET_BIND_SERVICE"],
+                "security_opt": ["no-new-privileges:true"], "read_only": True,
+                "ports": [{"target": 8443, "published": "443", "protocol": "tcp", "mode": "ingress"}],
+                "tmpfs": ["/config:rw,nosuid,size=16m", "/data:rw,nosuid,size=16m"],
+                "logging": {"driver": "json-file", "options": {"max-size": "10m", "max-file": "5"}},
+                "networks": {name: None for name in network_definitions}, "depends_on": {"caddy": {"condition": "service_started"}},
+                "volumes": [{"type": "bind", "source": str(configurations[0] / "infra/OriginEdge.Caddyfile"),
+                             "target": "/etc/caddy/OriginEdge.Caddyfile", "read_only": True, "bind": {"create_host_path": True}}]
+                           + [{"type": "bind", "source": tls_root + "/" + name,
+                               "target": "/run/project-snow-origin/" + name, "read_only": True}
+                              for name in sorted(self.gate.TLS_NAMES)],
+            }
+            documents = [{"name": "project-snow-public", "services": {"origin-edge": deepcopy(service)},
+                          "networks": deepcopy(network_definitions)} for _ in range(2)]
+            documents[1]["services"]["origin-edge"]["volumes"][0]["source"] = str(configurations[1] / "infra/OriginEdge.Caddyfile")
+            runtime_networks = {value["name"]: {"Id": character * 64, "Name": value["name"], "Driver": "bridge",
+                                                "Internal": value.get("internal", False), "Options": value["driver_opts"]}
+                                for character, value in zip("ef", network_definitions.values())}
+            # Actual production shape: Compose explicitly renders null, image
+            # Config omits Entrypoint, and container Config contains null.
+            image = {"Id": "sha256:" + "c" * 64, "Config": {"Env": ["PATH=/synthetic"]}}
+            container = {
+                "Id": "1" * 64, "Image": image["Id"], "State": {"Running": True},
+                "Config": {"Image": image_ref, "Cmd": service["command"], "Env": ["PATH=/synthetic"], "Entrypoint": None,
+                           "Labels": {"com.docker.compose.project": "project-snow-public", "com.docker.compose.service": "origin-edge"}},
+                "HostConfig": {"NanoCpus": 500000000, "Memory": 268435456, "MemorySwap": 536870912, "PidsLimit": 64,
+                               "LogConfig": {"Type": "json-file", "Config": service["logging"]["options"]},
+                               "Tmpfs": dict(item.split(":", 1) for item in service["tmpfs"]),
+                               "RestartPolicy": {"Name": "unless-stopped", "MaximumRetryCount": 0},
+                               "ReadonlyRootfs": True, "Dns": service["dns"], "CapAdd": ["CAP_NET_BIND_SERVICE"],
+                               "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true"]},
+                "NetworkSettings": {"Networks": {name: {"NetworkID": value["Id"]} for name, value in runtime_networks.items()}},
+            }
+            calls = []
+            environments = [root / "old.env", root / "new.env"]
+            settings = {str(environment): {"CADDY_IMAGE": image_ref, "ORIGIN_TLS_ROOT": tls_root} for environment in environments}
+            def execute(command):
+                calls.append(command)
+                if command[:2] == ["docker", "compose"]:
+                    index = [str(path / "compose.prod.yml") for path in configurations].index(command[command.index("-f") + 1])
+                    return json.dumps(documents[index])
+                if command[:2] == ["docker", "ps"]:
+                    return container["Id"]
+                if command[:2] == ["docker", "inspect"]:
+                    return json.dumps([container])
+                if command[:3] == ["docker", "image", "inspect"]:
+                    return json.dumps([image])
+                if command[:3] == ["docker", "network", "inspect"]:
+                    return json.dumps([runtime_networks[command[3]]])
+                raise AssertionError(command)
+            def compare():
+                return self.gate.equivalent(self.gate.Paths(root=root), environments[1], configurations[1], "green",
+                                            environments[0], configurations[0], "blue", execute)
+            with patch.object(self.gate, "controlled_directory"), \
+                 patch.object(self.gate, "read_environment", side_effect=lambda path: settings[str(path)]), \
+                 patch.object(self.gate, "read_payload", side_effect=lambda path, **kwargs: path.read_bytes()), \
+                 patch.object(self.gate, "tls_identity", side_effect=lambda root, config: {"root": str(root), "files": "synthetic"}):
+                yield compare, documents, container, configurations, settings, runtime_networks, image, calls
+
+    def test_equal_origin_content_under_different_release_paths_is_retained(self):
+        with self.fixture() as (compare, documents, _, _, _, _, _, calls):
+            before = deepcopy(documents)
+            self.assertNotEqual(documents[0], documents[1])  # Reproduces 502 -> new SHA source-only drift.
+            self.assertTrue(compare())
+            self.assertEqual(documents, before)
+            self.assertEqual(len([command for command in calls if command[:2] == ["docker", "compose"]]), 2)
+            self.assertFalse(any("up" in command or "pull" in command or "exec" in command for command in calls))
+
+    def test_real_origin_model_changes_follow_replacement(self):
+        mutations = {
+            "resource": lambda service: service.update(mem_limit=536870912),
+            "security": lambda service: service.update(security_opt=["seccomp:unconfined"]),
+            "port": lambda service: service["ports"][0].update(published="444"),
+            "tls_directory": lambda service: service["volumes"][1].update(source="/etc/project-snow/origin-edge/releases/" + "9" * 64 + "/aop-ca.pem"),
+            "image": lambda service: service.update(image="caddy@sha256:" + "9" * 64),
+            "future_option": lambda service: service.update(init=True),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(change=label), self.fixture() as (compare, documents, _, _, settings, _, _, _):
+                mutate(documents[1]["services"]["origin-edge"])
+                if label == "image":
+                    list(settings.values())[1]["CADDY_IMAGE"] = documents[1]["services"]["origin-edge"]["image"]
+                self.assertFalse(compare())
+        with self.fixture() as (compare, documents, _, configurations, _, _, _, _):
+            (configurations[1] / "infra/OriginEdge.Caddyfile").write_text("different TLS policy")
+            self.assertFalse(compare())
+
+    def test_entrypoint_null_preserves_image_default_but_explicit_override_does_not(self):
+        with self.fixture() as (compare, documents, container, _, _, _, image, _):
+            self.assertIsNone(documents[0]["services"]["origin-edge"]["entrypoint"])
+            self.assertIsNone(container["Config"]["Entrypoint"])
+            self.assertNotIn("Entrypoint", image["Config"])
+            self.assertTrue(compare())
+            del documents[0]["services"]["origin-edge"]["entrypoint"]
+            self.assertTrue(compare())  # Omitted and null both inherit image defaults.
+            documents[1]["services"]["origin-edge"]["entrypoint"] = []
+            self.assertFalse(compare())  # [] clears the default and is not normalized away.
+            documents[0]["services"]["origin-edge"]["entrypoint"] = []
+            with self.assertRaisesRegex(self.gate.MaintenanceError, "entrypoint override"):
+                compare()
+        with self.fixture() as (compare, _, _, _, _, _, image, _):
+            image["Config"]["Entrypoint"] = ["/unexpected-default"]
+            with self.assertRaisesRegex(self.gate.MaintenanceError, "process configuration"):
+                compare()
+        with self.fixture() as (compare, documents, _, _, _, _, _, _):
+            documents[1]["networks"]["origin-backend"]["internal"] = False
+            self.assertFalse(compare())
+
+    def test_equal_models_cannot_hide_actual_runtime_drift(self):
+        mutations = {
+            "cpu": lambda container, networks, image: container["HostConfig"].update(NanoCpus=1000000000),
+            "memory": lambda container, networks, image: container["HostConfig"].update(Memory=536870912),
+            "pids": lambda container, networks, image: container["HostConfig"].update(PidsLimit=-1),
+            "logging": lambda container, networks, image: container["HostConfig"]["LogConfig"].update(Config={}),
+            "tmpfs": lambda container, networks, image: container["HostConfig"]["Tmpfs"].update({"/config": "rw,size=1g"}),
+            "hardening": lambda container, networks, image: container["HostConfig"].update(SecurityOpt=["no-new-privileges:true", "seccomp:unconfined"]),
+            "network_id": lambda container, networks, image: networks["ps-origin0"].update(Id="9" * 64),
+            "image_id": lambda container, networks, image: image.update(Id="sha256:" + "9" * 64),
+            "process_env": lambda container, networks, image: container["Config"].update(Env=["HTTP_PROXY=unexpected"]),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(change=label), self.fixture() as (compare, _, container, _, _, networks, image, _):
+                mutate(container, networks, image)
+                with self.assertRaises(self.gate.MaintenanceError):
+                    compare()
+
+    def test_tls_metadata_and_public_configuration_bind_actual_bytes(self):
+        gate = self.gate
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            configuration = root / "config-root"
+            (configuration / "config/origin-edge").mkdir(parents=True)
+            content = {"origin-cert.pem": b"synthetic certificate", "origin-key.pem": b"synthetic private key", "aop-ca.pem": b"synthetic CA"}
+            hashes = {name: gate.sha256(value) for name, value in content.items()}
+            identity = gate.sha256(f"{gate.TLS_SCHEMA}\nsnow.xiaob.dev\n{hashes['origin-cert.pem']}\n{hashes['aop-ca.pem']}\n".encode())
+            class Bundle:
+                name = identity
+                def as_posix(self): return "/etc/project-snow/origin-edge/releases/" + self.name
+                def __str__(self): return self.as_posix()
+                def __truediv__(self, name): return root / name
+                def stat(self): return type("Metadata", (), {"st_mode": 0o700})()
+            for name, value in content.items():
+                (root / name).write_bytes(value)
+                if name != "origin-key.pem":
+                    (configuration / "config/origin-edge" / name).write_bytes(value)
+            metadata = {"schema_version": "project-snow-origin-tls-install-1", "hostname": "snow.xiaob.dev",
+                        "bundle_sha256": identity, "origin_certificate_sha256": hashes["origin-cert.pem"],
+                        "aop_ca_sha256": hashes["aop-ca.pem"], "origin_private_key_sha256": hashes["origin-key.pem"]}
+            (root / "metadata.json").write_text(json.dumps(metadata))
+            with patch.object(gate, "controlled_directory"), patch.object(gate, "read_payload", side_effect=lambda path, **kwargs: path.read_bytes()):
+                self.assertEqual(gate.tls_identity(Bundle(), configuration)["files"], hashes)
+                (root / "origin-key.pem").write_bytes(b"unexpected synthetic replacement key")
+                with self.assertRaisesRegex(gate.MaintenanceError, "content identity"):
+                    gate.tls_identity(Bundle(), configuration)
+                (root / "origin-key.pem").write_bytes(content["origin-key.pem"])
+                (configuration / "config/origin-edge/origin-cert.pem").write_bytes(b"changed candidate public certificate")
+                with self.assertRaisesRegex(gate.MaintenanceError, "immutable configuration"):
+                    gate.tls_identity(Bundle(), configuration)
+
+    def test_forward_source_only_change_uses_overlay_and_inspection_failure_never_replaces(self):
+        script = (self.app_root / "ops/promote.sh").read_text()
+        start = script.index("prepare_or_retain_origin_edge() {")
+        end = script.index("\n}\n\nprobe_prepared_origin_edge()", start) + 2
+        function = script[start:end]
+        harness = r'''set -u
+comparison=$1
+binding=$2
+rollback_mode=0
+origin_edge_network=ps-origin0
+origin_edge_internal_network=ps-origin1
+origin_edge_retained_env=old.env
+origin_edge_retained_config_root=old-config
+origin_edge_retained_colour=blue
+previous_env=old.env
+previous_config_root=old-config
+previous_colour=blue
+previous_has_origin_edge=1
+[ "$binding" = saved ] || origin_edge_retained_env=
+validate_docker_dns_security_floor() { :; }
+validate_origin_edge_network() { :; }
+running_origin_edge_matches_snapshot() { [ "$1" = old.env ]; }
+origin_tls_root_for_env() { printf '%s\n' /etc/project-snow/origin-edge/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }
+origin_edge_snapshots_equivalent() { printf '%s\n' compare; return "$comparison"; }
+persist_live_origin_edge_binding() {
+  printf '%s\n' persist-old
+  origin_edge_retained_env=$1
+  origin_edge_retained_config_root=$2
+  origin_edge_retained_colour=$3
+}
+begin_origin_edge_replacement() { printf '%s\n' replacement; }
+ensure_caddy_origin_backend() { :; }
+validate_origin_edge_container() { :; }
+docker() {
+  case "$1" in
+    network) return 0 ;;
+    inspect) printf '%s\n' true ;;
+    compose)
+      case "$*" in
+        *'ps --all --quiet origin-edge'*) printf '%s\n' container ;;
+        *'up --no-start --no-deps --force-recreate origin-edge'*) printf '%s\n' recreate ;;
+        *) return 99 ;;
+      esac ;;
+    *) return 99 ;;
+  esac
+}
+''' + function + r'''
+status=0
+prepare_or_retain_origin_edge new.env new-config green || status=$?
+printf 'result:%s:%s\n' "$status" "${origin_edge_prestart_mode:-unset}"
+printf 'retained:%s:%s:%s\n' "${origin_edge_overlay_env:-unset}" "${origin_edge_overlay_config_root:-unset}" "${origin_edge_overlay_colour:-unset}"
+exit "$status"
+'''
+        for binding in ("saved", "previous"):
+            with self.subTest(binding=binding):
+                accepted = DeploymentContractTests.run_posix_shell(self, harness, "0", binding)
+                self.assertEqual(accepted.returncode, 0, accepted.stderr)
+                self.assertIn("result:0:overlay", accepted.stdout)
+                self.assertIn("retained:old.env:old-config:blue", accepted.stdout)
+                self.assertNotIn("recreate", accepted.stdout)
+                self.assertNotIn("replacement", accepted.stdout)
+                changed = DeploymentContractTests.run_posix_shell(self, harness, "10", binding)
+                self.assertEqual(changed.returncode, 0, changed.stderr)
+                self.assertIn("replacement\nrecreate\nresult:0:start", changed.stdout)
+                failed = DeploymentContractTests.run_posix_shell(self, harness, "1", binding)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertNotIn("replacement", failed.stdout)
+                self.assertNotIn("recreate", failed.stdout)
+
+    def test_outer_preflight_failure_preserves_older_live_listener_without_entering_restore(self):
+        script = (self.app_root / "ops/promote.sh").read_text()
+        prepare_start = script.index("prepare_or_retain_origin_edge() {")
+        prepare_end = script.index("\n}\n\nprobe_prepared_origin_edge()", prepare_start) + 2
+        restore_start = script.index("restore_previous_runtime() {")
+        restore_end = script.index("\n}\n\nif ! discover_running_origin_edge_binding", restore_start) + 2
+        cleanup_start = script.index("cleanup() {")
+        cleanup_end = script.index("\n}\n\nterminate_promote_signal()", cleanup_start) + 2
+        outer_start = script.index("target_allow_origin=1\ntarget_origin_mode=none")
+        outer_end = script.index('\nif [ "$rollback_mode" = 1 ] &&', outer_start)
+        # Execute the real outer gate, cleanup and complete restore function.
+        # Only add a restore-entry observation; do not mock away its stop chain.
+        restore = script[restore_start:restore_end].replace(
+            "  restore_failed=0", '  printf "%s\\n" restore-entered >> "$log_file"\n  restore_failed=0', 1)
+        harness = r'''set -u
+log_file=$1
+promote_signal_phase=$2
+origin_edge_replacement_active=$3
+binding=$4
+rollback_mode=0
+colour=green
+colour_env=target.env
+colour_config_root=target-config
+target_has_origin_edge=1
+target_has_mailer=0
+previous_has_origin_edge=1
+previous_has_mailer=0
+previous_env=previous.env
+previous_config_root=previous-config
+previous_colour=blue
+previous_service=public-api-blue
+previous_services='caddy origin-edge cloudflared'
+origin_edge_network=ps-origin0
+origin_edge_internal_network=ps-origin1
+origin_edge_retained_env=older-listener.env
+origin_edge_retained_config_root=older-listener-config
+origin_edge_retained_colour=green
+origin_edge_prestart_failure_preserve=0
+origin_edge_equivalence_failed_unchanged=0
+expected_live_env=older-listener.env
+if [ "$binding" = previous ]; then
+  origin_edge_retained_env=
+  expected_live_env=previous.env
+fi
+validate_docker_dns_security_floor() { :; }
+validate_origin_edge_network() { :; }
+validate_origin_edge_material() { :; }
+running_origin_edge_matches_snapshot() { [ "$1" = "$expected_live_env" ]; }
+origin_tls_root_for_env() { printf '%s\n' /etc/project-snow/origin-edge/releases/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; }
+origin_edge_snapshots_equivalent() { printf '%s\n' compare-failed >> "$log_file"; return 1; }
+stop_known_origin_edge() { printf '%s\n' STOP-listener >> "$log_file"; }
+stop_snapshot_service() { printf '%s\n' STOP-snapshot >> "$log_file"; }
+restore_replaced_origin_edge() { printf '%s\n' restore-replacement >> "$log_file"; }
+previous_compose() { printf '%s\n' previous-api >> "$log_file"; }
+switch_edge() { printf '%s\n' switch >> "$log_file"; }
+run_origin_firewall() { printf '%s\n' firewall >> "$log_file"; }
+docker() {
+  case "$1" in
+    network) return 0 ;;
+    inspect) printf '%s\n' true ;;
+    compose) printf '%s\n' container ;;
+    *) printf '%s\n' UNEXPECTED-docker-mutation >> "$log_file"; return 99 ;;
+  esac
+}
+''' + script[prepare_start:prepare_end] + "\n" + restore + "\n" + script[cleanup_start:cleanup_end] + \
+            "\ntrap cleanup EXIT\n" + script[outer_start:outer_end] + "\nexit 99\n"
+        for binding in ("saved", "previous"):
+            for phase, replacement in (("pre-switch", "0"), ("switching", "0"), ("pre-switch", "1")):
+                with self.subTest(binding=binding, phase=phase, replacement=replacement), tempfile.TemporaryDirectory() as temporary:
+                    log = Path(temporary) / "events.log"
+                    result = DeploymentContractTests.run_posix_shell(self, harness, log.as_posix(), phase, replacement, binding)
+                    events = log.read_text().splitlines()
+                    self.assertEqual(result.returncode, 72, result.stderr)
+                    if phase == "pre-switch" and replacement == "0":
+                        self.assertEqual(events, ["compare-failed"])
+                        self.assertIn("validated live listener remains unchanged", result.stderr)
+                    else:
+                        self.assertIn("restore-entered", events)
+                        self.assertIn("STOP-listener", events)
