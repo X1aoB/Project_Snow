@@ -35,6 +35,24 @@ BOUNDARY_IN_PERSON_BLOCKS = [
     {"type": "speech", "text": "第二段\n\n第三段"},
 ]
 BOUNDARY_IN_PERSON_REPLY = "第一句。第二句。 Hello. World. 第一段\n第二段\n\n第三段"
+END_CARET_VISIBLE = """() => {
+  const input=document.querySelector('#message-input');
+  if (!input.value.endsWith('\\nx') || input.selectionStart !== input.value.length
+      || input.selectionEnd !== input.value.length) return false;
+  const style=getComputedStyle(input);
+  const context=document.createElement('canvas').getContext('2d');
+  context.font=style.font;
+  const metrics=context.measureText('x');
+  const fontHeight=metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
+  // Native scrolling exposes the caret, not bottom padding or the font's
+  // half-leading below it. Arial and CJK fonts have different bounding boxes
+  // at the same 24px line-height; compare the caret box, with pixel rounding.
+  const halfLeading=Math.max(0,(parseFloat(style.lineHeight)-fontHeight)/2);
+  const bottom=input.scrollHeight-parseFloat(style.paddingBottom)-halfLeading;
+  const top=bottom-fontHeight;
+  return Number.isFinite(top) && top >= input.scrollTop-2
+    && bottom <= input.scrollTop+input.clientHeight+2;
+}"""
 
 
 def _browser_launch_kwargs() -> dict[str, str]:
@@ -1864,8 +1882,11 @@ class PublicFrontendE2ETests(TestCase):
             try:
                 # 640x400 CSS px at DPR 2 models the layout/raster of a
                 # 1280x800 desktop at 200% browser zoom, not a CSS zoom override.
-                for width, height, scale in ((390, 844, 1), (320, 720, 1), (640, 400, 2)):
-                    with self.subTest(width=width, scale=scale):
+                for width, height, scale, font in (
+                    (390, 844, 1, None), (320, 720, 1, None), (640, 400, 2, None),
+                    (390, 844, 1, "Arial"),
+                ):
+                    with self.subTest(width=width, scale=scale, font=font):
                         page = browser.new_page(
                             viewport={"width": width, "height": height}, device_scale_factor=scale
                         )
@@ -1906,6 +1927,8 @@ class PublicFrontendE2ETests(TestCase):
                             path = Path(directory)
                             path.mkdir(parents=True, exist_ok=True)
                             page.screenshot(path=str(path / f"composer-{width}-{scale}x.png"))
+                        if font:
+                            composer.evaluate("(node,font)=>node.style.fontFamily=font", font)
                         composer.fill("\n".join(f"较长草稿第{index}行" for index in range(20)))
                         metrics = composer.evaluate("""node => ({
                           height:node.getBoundingClientRect().height,
@@ -1924,12 +1947,11 @@ class PublicFrontendE2ETests(TestCase):
                         composer.press("Control+End")
                         composer.press("Shift+Enter")
                         composer.press("x")
-                        page.wait_for_function("""() => {
-                          const input=document.querySelector('#message-input');
-                          const padding=parseFloat(getComputedStyle(input).paddingBottom);
-                          // Native caret scrolling need not expose bottom padding.
-                          return input.scrollTop + input.clientHeight >= input.scrollHeight - padding - 2;
-                        }""", timeout=3000)
+                        page.wait_for_function(END_CARET_VISIBLE, timeout=3000)
+                        # A resize implementation that undoes native caret
+                        # scrolling must still fail this font-aware check.
+                        composer.evaluate("node=>{node.scrollTop=0}")
+                        self.assertFalse(page.evaluate(END_CARET_VISIBLE))
                         self.assertLessEqual(
                             composer.evaluate("node=>node.getBoundingClientRect().bottom"), height
                         )
