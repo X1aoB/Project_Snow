@@ -15,6 +15,7 @@
 ```sh
 sudo python3 /srv/project-snow/repo/App/scripts/scan_running_images.py \
   --root /srv/project-snow \
+  --work-root /root/APPROVED-PRIVATE-DISK-WORK-DIRECTORY \
   --trivy-image ghcr.io/aquasecurity/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969 \
   --deadline-seconds 1800 \
   --output /srv/project-snow/running-image-scan-20260907.json
@@ -60,6 +61,8 @@ Trivy 容器使用批准的完整 digest 和 `--pull=never`，不挂载 Docker s
 这些阶段性检查不是文件系统硬配额，其他进程同时占用磁盘仍可能影响扫描。
 显式 `--work-root` 和 `--output` 的所有父目录必须为 root 控制、无符号链接且不可被组或其他用户写入；
 默认临时目录使用系统安全随机目录机制创建 mode 0700 的工作目录。
+以上工作目录须先由维护者创建并核对所在磁盘。本次生产主机的 `/tmp` 为约 8 GiB 的独立
+临时文件系统，不能满足 10 GiB 保留空间；实际验收显式选用 `/root` 下的私有磁盘目录。
 
 退出码与验收：
 

@@ -66,6 +66,7 @@ const state = {
   storageAvailable: true,
   memoryStores: { threads: new Map(), messages: new Map(), app_state: new Map() },
   drafts: new Map(),
+  composerDraftKey: "",
   draftTimer: 0,
   pinnedCharacters: new Set(),
   timelineVisibleLimit: 60,
@@ -1281,6 +1282,7 @@ function scheduleDraftSave() {
 function restoreDraft() {
   if (!state.selected) return;
   const channel = currentThread()?.channel || "text";
+  state.composerDraftKey = draftKey(state.selected, channel);
   $("message-input").value = state.drafts.get(draftKey(state.selected, channel, "message")) || "";
   $("action-input").value = state.drafts.get(draftKey(state.selected, channel, "action")) || "";
   updateInputCount();
@@ -3307,7 +3309,8 @@ async function setChannel(channel, persist = true, targetThread = null) {
   // A character switch may happen while the persistence write is pending.
   // Only the selected thread owns the visible surface and composer controls.
   if (thread && thread.characterId !== state.selected) return;
-  state.actionComposerOpen = false;
+  const composerChanged = state.composerDraftKey !== draftKey(state.selected, channel);
+  if (composerChanged) state.actionComposerOpen = false;
   if (channel === "in_person") state.selectedSticker = null;
   $("chat-app").dataset.channel = channel;
   $("text-surface").hidden = channel === "in_person";
@@ -3315,7 +3318,10 @@ async function setChannel(channel, persist = true, targetThread = null) {
   $("chat-app").dataset.channel = channel === "in_person" ? "in_person" : "text";
   syncContactToggleState();
   renderAll();
-  restoreDraft();
+  // Arrival can confirm the already-visible channel after an IndexedDB write.
+  // Keep edits made during that wait; only a new character/channel restores a
+  // different draft into the composer.
+  if (composerChanged) restoreDraft();
   updateComposerAvailability();
   if (restoreCollapsedSidebarFocus) window.setTimeout(() => $("open-contacts")?.focus(), 0);
 }

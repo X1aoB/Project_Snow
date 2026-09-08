@@ -1422,7 +1422,8 @@ class PublicFrontendE2ETests(TestCase):
             reduced_page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
             reduced_page.locator("#stage-character-art").wait_for(state="visible", timeout=8000)
             reduced_page.locator("#message-input").fill("演出靠近测试")
-            reduced_page.locator("#send-message").click()
+            with reduced_page.expect_request(lambda request: request.url.endswith("/chat/stream"), timeout=12000):
+                reduced_page.locator("#send-message").click()
             reduced_page.wait_for_function(
                 "() => document.querySelector('#stage-character-art')?.dataset.stageMotionKey?.endsWith(':lean_in')",
                 timeout=12000,
@@ -1431,6 +1432,93 @@ class PublicFrontendE2ETests(TestCase):
             self.assertIsNone(reduced_art.get_attribute("data-stage-motion-play-count"))
             self.assertEqual(reduced_art.evaluate("element => element.getAnimations().length"), 0)
             reduced_browser.close()
+
+    def test_arrival_storage_completion_preserves_newly_typed_draft(self) -> None:
+        PublicFrontendHandler.arrival_started = threading.Event()
+        PublicFrontendHandler.arrival_release = threading.Event()
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
+            errors = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            try:
+                page.goto(self.base_url, wait_until="networkidle")
+                page.locator("#accept-experience-notice").click()
+                page.locator("#open-contacts").click()
+                self._configure_model(page)
+                page.locator('[data-character="702f4375675b"]').click()
+                page.locator("#active-character h1", has_text="米娅").wait_for()
+                page.locator("#message-input").fill("米娅的文字通讯草稿")
+                page.locator("#go-in-person").click()
+                page.locator("#confirm-presence-transition").click()
+                self.assertTrue(PublicFrontendHandler.arrival_started.wait(timeout=5))
+                # Hold only the completion notification of the next real draft
+                # transaction. This is the same-channel save after arrival;
+                # typing must remain safe while persistence is still awaited.
+                page.evaluate("""() => {
+                    const put = IDBObjectStore.prototype.put;
+                    const listen = IDBTransaction.prototype.addEventListener;
+                    const later = window.setTimeout;
+                    let draftTransaction = null;
+                    IDBObjectStore.prototype.put = function(value, ...args) {
+                        if (!draftTransaction && this.name === 'app_state' && value?.key === 'drafts') {
+                            draftTransaction = this.transaction;
+                        }
+                        return put.call(this, value, ...args);
+                    };
+                    IDBTransaction.prototype.addEventListener = function(type, callback, options) {
+                        if (type !== 'complete') return listen.call(this, type, callback, options);
+                        return listen.call(this, type, event => {
+                            const complete = () => typeof callback === 'function'
+                                ? callback.call(this, event) : callback.handleEvent(event);
+                            if (this === draftTransaction) {
+                                window.__releaseDraftCommit = complete;
+                                window.__draftCommitHeld = true;
+                            } else complete();
+                        }, options);
+                    };
+                    // Keep the 220ms autosave from refreshing the draft cache
+                    // before the suspended restore; no wall-clock race remains.
+                    window.setTimeout = (callback, delay, ...args) => delay === 220
+                        ? 0 : later(callback, delay, ...args);
+                    window.__restoreDraftGate = () => {
+                        IDBObjectStore.prototype.put = put;
+                        IDBTransaction.prototype.addEventListener = listen;
+                        window.setTimeout = later;
+                    };
+                }""")
+                PublicFrontendHandler.arrival_release.set()
+                page.wait_for_function("window.__draftCommitHeld === true")
+                page.locator("#message-input").fill("演出靠近测试")
+                self.assertTrue(page.locator("#send-message").is_disabled())
+                page.evaluate("window.__releaseDraftCommit()")
+                page.wait_for_function("!document.querySelector('#send-message').disabled")
+                self.assertEqual(page.locator("#message-input").input_value(), "演出靠近测试")
+                page.evaluate("window.__restoreDraftGate()")
+                with page.expect_request(lambda request: request.url.endswith("/chat/stream")):
+                    page.locator("#send-message").click()
+                page.wait_for_function(
+                    "document.querySelector('#stage-character-art').dataset.stageMotionKey?.endsWith(':lean_in')"
+                )
+                self.assertEqual(PublicFrontendHandler.chat_payloads[-1]["message"], "演出靠近测试")
+                self.assertEqual(PublicFrontendHandler.chat_payloads[-1]["communication_channel"], "in_person")
+                self.assertEqual(page.locator("#stage-character-art").evaluate("node => node.getAnimations().length"), 0)
+                self.assertEqual(errors, [])
+                page.wait_for_function("!document.querySelector('#send-message').disabled")
+                page.locator("#message-input").fill("米娅的面对面草稿")
+                page.locator("#open-communicator").click()
+                page.locator("#text-surface").wait_for(state="visible")
+                self.assertEqual(page.locator("#message-input").input_value(), "米娅的文字通讯草稿")
+                page.locator("#open-contacts").click()
+                page.locator('[data-character="25b23cb64398"]').click()
+                page.locator("#active-character h1", has_text="凯茜娅").wait_for()
+                self.assertEqual(page.locator("#message-input").input_value(), "")
+                page.locator("#open-contacts").click()
+                page.locator('[data-character="702f4375675b"]').click()
+                page.locator("#active-character h1", has_text="米娅").wait_for()
+                self.assertEqual(page.locator("#message-input").input_value(), "米娅的文字通讯草稿")
+            finally:
+                browser.close()
 
     def test_feedback_turnstile_is_visible_retryable_and_preserves_the_form(self) -> None:
         PublicFrontendHandler.turnstile_site_key = "e2e-site-key"
