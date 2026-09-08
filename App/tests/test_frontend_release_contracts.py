@@ -170,17 +170,27 @@ def test_docker_copies_only_selected_ui_and_verifies_final_bytes():
     assert "ARG FRONTEND" not in dockerfile and "ENV FRONTEND" not in dockerfile
 
 
-def test_real_committed_bundle_and_host_manifest_reconstruction_agree(tmp_path):
+@pytest.mark.parametrize(
+    ("edition", "expected_track", "expected_version"),
+    [
+        ("compat-096", "compat", "compat-096-r1"),
+        ("current", "current", "0.10.0-rc.1"),
+    ],
+)
+def test_real_committed_bundle_and_host_manifest_reconstruction_agree(
+    tmp_path, edition, expected_track, expected_version
+):
     from scripts.prepare_public_frontend import prepare
-    from tests.test_public_frontend_bundle import fixture_repo, git
+    from tests.test_public_frontend_bundle import fixture_repo, git, select
 
     repo = fixture_repo(tmp_path)
+    select(repo, edition)
     commit = git(repo, "rev-parse", "HEAD")
     output = tmp_path / "docker-ui"
     prepared = prepare(repo / "App", output)
     actual = release_manifest.read_frontend_binding(repo / "App", commit_sha=commit, frontend_bundle=output)
     assert actual == {key: prepared[key] for key in ("track", "version", "bundle_sha256")}
-    assert actual["track"] == "compat" and actual["version"] == "compat-096-r1"
+    assert actual["track"] == expected_track and actual["version"] == expected_version
     # Changing a served byte without rebuilding identity cannot be signed.
     asset = output / "public_frontend/index.html"
     asset.write_bytes(asset.read_bytes() + b"\n<!-- unexpected build drift -->")
