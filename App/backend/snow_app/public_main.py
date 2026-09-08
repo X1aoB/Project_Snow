@@ -25,6 +25,7 @@ from pydantic import ValidationError
 
 from .async_store import AsyncPublicStore
 from .config import PublicSettings, Settings
+from .frontend_identity import read_frontend_identity
 from .mvp_service import MVPProviderError, _normalize_stage_motion
 from .public_contracts import (
     ByokSessionRequest,
@@ -300,6 +301,10 @@ def create_app(
 ) -> FastAPI:
     public_settings = public_settings or PublicSettings.from_environment()
     internal_settings = internal_settings or Settings.from_environment()
+    image_revision = os.getenv("APP_REVISION", "").strip()
+    revision = os.getenv("APP_REVISION", os.getenv("GIT_SHA", "")).strip()
+    build_time = os.getenv("APP_BUILD_TIME", "").strip()
+    frontend_identity = read_frontend_identity(required=bool(image_revision))
     store = store or PublicStore(public_settings.database_url)
     provider_http = ProviderHTTPPool()
     async_store = AsyncPublicStore(store)
@@ -611,21 +616,31 @@ def create_app(
 
     @app.get("/public/v1/build-info")
     def build_info() -> dict[str, Any]:
-        revision = os.getenv("APP_REVISION", os.getenv("GIT_SHA", "")).strip()
-        build_time = os.getenv("APP_BUILD_TIME", "").strip()
+        parsed_build_time = build_time
         try:
-            if len(build_time) > 64 or datetime.fromisoformat(build_time.replace("Z", "+00:00")).tzinfo is None:
-                build_time = ""
+            if (
+                len(build_time) > 64
+                or datetime.fromisoformat(build_time.replace("Z", "+00:00")).tzinfo is None
+            ):
+                parsed_build_time = ""
         except ValueError:
-            build_time = ""
+            parsed_build_time = ""
         return {
             "app_version": public_settings.app_version,
             "data_version": public_settings.data_version,
-            "revision": revision if 7 <= len(revision) <= 64 and all(c in "0123456789abcdef" for c in revision.lower()) else None,
-            "build_time": build_time or None,
+            "revision": (
+                revision
+                if 7 <= len(revision) <= 64 and all(c in "0123456789abcdef" for c in revision.lower())
+                else None
+            ),
+            "build_time": parsed_build_time or None,
+            "frontend": frontend_identity.public_value() if frontend_identity else None,
             "api_schema": "public-v1",
             "state_schema": "public-state-2",
-            "generation_limits": {"active": 4, "queued": 8, "max_provider_calls": public_settings.max_provider_calls_per_action},
+            "generation_limits": {
+                "active": 4, "queued": 8,
+                "max_provider_calls": public_settings.max_provider_calls_per_action,
+            },
         }
 
     @app.get("/public/v1/config")
