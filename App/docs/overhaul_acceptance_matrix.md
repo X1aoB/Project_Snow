@@ -1,7 +1,7 @@
 # 小吉终端全面优化验收矩阵
 
-状态截点：2026-09-07，`1c4b15d` 的 [PR CI 34111379744](https://github.com/X1aoB/Project_Snow/actions/runs/34111379744) 已成功，PR #36 合并为 `8c53f51`；其首次 main CI 因一个减少动态模式的浏览器等待失败而阻止发布，正在修复。
-生产基线为 `0.9.6 / 502ec99412bef843c37e4b31a53df8fa9faeb33c`。`2b68f60` 已完成真实证明签发、服务器验证及 green 技术候选准备；公网未切流。兼容旧界面的 S1 仍须独立通过同样门禁和人工验收，随后才能启用 S2 新界面。
+状态截点：2026-09-08 05:54 UTC。S1 `7ce0205 / 0.10.0-rc.1 / green` 已完成 CI、签名、服务器验证、候选、批准、晋级和独立后验；桌面/窄屏公网草稿保存恢复通过。实际回执为 `b88b93a4…`，控制器独立更新到 `b149d05`。
+受保护基线仍为 `0.9.6 / 502ec99412bef843c37e4b31a53df8fa9faeb33c`，原 blue 容器停止保留。晋级额外重建 origin-edge 的偏差已单独验证并记录；S2 品牌/新界面未启用。见 [S1 上线记录](s1-production-20260908.md)。
 
 状态含义：**代码已实现**仅说明存在实现；**实测通过**必须注明本地、隔离环境或生产范围；**待生产启用**尚未完成在服启用；**部分实现**仍有明确缺口；**外部任务**由独立任务交付；**尚未完成**没有足够验收证据。测试通过、合并、准备候选均不等于用户批准上线。
 证据台账见 [overhaul_progress.md](overhaul_progress.md)，操作边界见 [RECOVERY.md](../ops/RECOVERY.md)。以下共 45 项，不以粗略完成百分比替代验收。
@@ -12,7 +12,7 @@
 | --- | --- | --- | --- |
 | A1 | 有保护清单的镜像 GC 与容量门 | 实测通过（生产） | 移除 36 个无引用 Snow 镜像；保护 30 个摘要引用，空闲约 16.9 GiB；未删容器、卷、数据版本或 Dify。后续仍须实际引用复核并满足至少 10 GiB 容量门。[release_state.py](../ops/release_state.py)、[maintenance.py](../ops/maintenance.py)。 |
 | A2 | 修复过期数据清理任务的网络故障 | 实测通过（生产新 helper） | `490c0bb` 独立升级后 cleanup 实跑 exit 0 / success，沿用既有 data 网络；25 个原容器 ID、image ID、运行状态均不变。到期清理可写数据库，未更换应用部署不等于零数据写入。事务 2026-09-07 10:10:40 UTC 完成。[maintenance.py](../ops/maintenance.py)、[test_host_maintenance.py](../tests/test_host_maintenance.py)。 |
-| A3 | 共享服务配置漂移与重建控制 | 代码已实现；待生产启用 | 普通 stage 拒绝共享数据库、检索和代理依赖变更；按 Compose 模型及实际容器指纹保留无变化服务。共享升级须独立维护验收。[routing.py](../ops/routing.py)、[maintenance.py](../ops/maintenance.py)。 |
+| A3 | 共享服务配置漂移与重建控制 | 部分生产实测；origin 保留分支需修复 | 普通 stage 拒绝共享依赖漂移；S1 晋级保留 Caddy/cloudflared/egress，但额外重建了同策略 origin-edge。已验证其镜像/TLS/安全配置一致，原后验失败保留；后续修复单独 PR，不能将本次归为全部代理保留。[实跑记录](s1-production-20260908.md)。 |
 | A4 | 原版本、配置、数据和镜像可找回 | 实测通过（生产备份及只读读回） | 固定 Git tag、root 基线锚点、永久 restic tag；10 镜像/159 blobs 和代码、配置、dump 哈希读回通过。还原能力另见 F5，不能据此称完成裸机恢复。[RECOVERY.md](../ops/RECOVERY.md)、[release_state.py](../ops/release_state.py)。 |
 
 ## B CI/CD、发布和回滚
@@ -22,12 +22,12 @@
 | B1 | 删除、重命名及未知路径触发足够 CI | 实测通过（本地及 PR CI） | 分类器测试覆盖删除/重命名；未知变更保守触发完整检查。main 发布依赖完整门禁，不能仅凭路径快检发布。[classify_changes.py](../scripts/classify_changes.py)、[ci.yml](../../.github/workflows/ci.yml)。 |
 | B2 | 真实 PostgreSQL 迁移与旧代码兼容 | 实测通过（隔离及 CI 9 组） | 覆盖空库、增量升级、实际旧 Store 读写及崩溃回退、权限隔离和失败 DDL/版本号事务回滚；历史 0001 DDL 冻结。第 9 组精确续租 SQL 已随 `77b8643` 的真实 PostgreSQL CI 通过；测试角色不代表生产凭据已拆分。[migrations](../migrations)、[test_postgres_integration.py](../tests/test_postgres_integration.py)。 |
 | B3 | 构建及实际在服镜像漏洞门禁 | 实测完成；共享设施修复尚未完成 | 实际扫描 9 镜像/11 服务，247 条可修复 HIGH/CRITICAL（120 CVE+3 GHSA）；API/mailer/embedding 为 0，共享设施和旧 admin 需独立维护。报告 `vulnerable`/exit1，旧 admin 仍 `retained_unbound`，不能称安全通过或已证实可利用。新候选仍须对自身 digest fresh scan。[维护实跑台账](overhaul_progress.md)、[running_image_scan.md](running_image_scan.md)。 |
-| B4 | 成功 main CI 签发可验证发布证明 | 代码已实现；尚未完成在线签发 | 绑定 source/signer SHA、main push、run/attempt 与完整 manifest 哈希；拒绝失败或进行中的后续重跑。最终须用真实 GitHub attestation 验证；main 需稳定一个 CI 周期。[release-proof.yml](../../.github/workflows/release-proof.yml)、[verify_release_proof.py](../scripts/verify_release_proof.py)。 |
-| B5 | 候选代码执行前完成可信校验 | 实测通过（故障测试）；待生产启用 | root 快照 inbox 后先调用固定 installed verifier，再 checkout/执行候选；不受信 artifact 不作为可直接执行的脚本。在线 runner 安装与首个真实候选另验收。[project-snow-release](../ops/project-snow-release)、[verify_release_proof.py](../scripts/verify_release_proof.py)。 |
-| B6 | 候选回执、当前版本 CAS 和手工晋级 | 实测通过（隔离）；待生产启用 | 独立 prepare/approve；回执绑定完整当前/候选 marker、配置/资源清单、stage nonce、两色实际容器与 image ID，重验候选 build-info 完整 SHA。首次副作用前持锁核对明确人工批准、预期当前版本和最长 24 小时期限；过期、重 stage、重启及字节篡改拒绝，rollback 保留独立紧急路径。26 项本地行为测试通过，Linux 权限验收另列。[candidate_acceptance.py](../ops/candidate_acceptance.py)、[人工晋级流程](candidate_acceptance.md)。 |
-| B7 | SSE 排空、切换与代理重启保持目标 | 实测通过（隔离）；待生产维护验收 | Caddy reload 保留全部 40 SSE chunks，新连接转 green，重启保持 green；后端接受的聊天可排空最多 300 秒。首次生产持久路由挂载维护尚未验收。[routing.py](../ops/routing.py)、[test_caddy_routing_integration.py](../tests/test_caddy_routing_integration.py)。 |
-| B8 | 应用和浏览器旧→新→旧回退 | 完整静态产物回归通过；S1 生产兼容窗口待建立 | 新租约须在停新 worker 后由受信新版维护逻辑终结，应用回退不降 DB schema。S1 由固定原版+兼容补丁+到场草稿修复构建旧外观，S2 通过后续正常发布启用新界面；镜像只装一个版本，身份绑定证明和 build-info。原始 502 及未刷新的旧标签页不可宣称无损。[test_public_frontend_bundle.py](../tests/test_public_frontend_bundle.py)、[compat/README.md](../compat/README.md)。 |
-| B9 | 最终 CI、main 合并、签名、候选与晋级闭环 | 首次真实签名与技术 stage 通过；未晋级 | PR #45 修复真实草稿竞态；main `2b68f60` 的 CI 34178927888、proof 34179438766 均成功。服务器独立验证后升级 controller 并启动 green，实际镜像摘要匹配；24 个其余容器不变。S1 兼容发布的证明、验收及人工晋级仍待完成，公网保持 0.9.6。[overhaul_progress.md](overhaul_progress.md)。 |
+| B4 | 成功 main CI 签发可验证发布证明 | 实测通过（真实 GitHub 签发与服务器验签） | S1 main CI 34182286331、proof 34182824713 成功，独立 installed verifier 验证来源、成功门禁及产物摘要后执行；controller b149d05 也经过自身 CI/签名。每次新提交仍需自己的门禁。[上线证据](s1-production-20260908.md)。 |
+| B5 | 候选代码执行前完成可信校验 | 实测通过（故障测试及生产） | 固定 installed verifier 先验 root 快照 inbox，再执行受信候选；实际 runner/controller 独立升级和 green stage 完成。应用、控制器与维护 helper 版本独立记录。[上线证据](s1-production-20260908.md)。 |
+| B6 | 候选回执、当前版本 CAS 和手工晋级 | 实测通过（隔离及生产晋级） | 路由维护后新回执 b88b93a4… 于 05:28 创建、05:30 记录用户批准；绑定 7ce 候选、502 预期当前、实际容器/镜像和 nonce，经持锁 CAS 后晋级。过期/篡改拒绝测试继续保留。[上线证据](s1-production-20260908.md)。 |
+| B7 | SSE 排空、切换与代理重启保持目标 | 隔离 SSE 通过；生产路由维护完成 | 隔离测试保留全部 40 SSE chunks，新连接转 green，重启保持 green。生产首次持久挂载 05:28 完成，晋级后 route 为 green；维护时请求/租约/TCP 为零。未在真实付费流中测零中断；origin 额外重启另见偏差记录。[实跑记录](s1-production-20260908.md)。 |
+| B8 | 应用和浏览器旧→新→旧回退 | S1 生产兼容目标已建立；S2 待发布 | IDB v4/public-state-2 保持；S1 实际兼容资源树已上线，桌面/窄屏草稿刷新恢复通过。原始 502 标签页须刷新进入 S1；S1→S2→S1 静态产物回归通过不等于 S2 已生产验收。应用回滚不降 DB schema。[兼容说明](../compat/README.md)。 |
+| B9 | 最终 CI、main 合并、签名、候选与晋级闭环 | S1 实测闭环；持续自动 stage 未启用 | PR #46 / 7ce 的 CI、签名、服务器验签、stage、精确回执批准和晋级均完成；05:48 后验通过。额外 origin 重建单独记录，22 容器完整记录不变。auto-stage timer 仍 disabled，尚未验收持续自动候选流程。[上线证据](s1-production-20260908.md)。 |
 
 ## C 后端架构、功能稳定性与安全
 
@@ -64,16 +64,16 @@
 | E5 | 1,000/10,000 消息历史与稳定分页 | 实测通过（真实浏览器/合成数据） | 验证长历史、同时间戳排序分页、持久化清理和有限 DOM 渲染；真实用户设备性能仍须后续采样。[view.ts](../public_frontend_src/src/view.ts)、[test_public_frontend_reliability.py](../tests/test_public_frontend_reliability.py)。 |
 | E6 | 导入导出原子性与凭据隔离 | 实测通过（真实浏览器） | 导入事务失败可恢复；导出不携带模型 keys 或签名状态，导入未完成请求不自动重放付费调用。[persistence.ts](../public_frontend_src/src/persistence.ts)、[compat/README.md](../compat/README.md)。 |
 | E7 | 无障碍、移动布局、缩放与软键盘 | 部分实现 | 已检查焦点/抽屉、1440×900、390×844、原生 200% 缩放和状态栏遮挡；短视口只模拟键盘占位。真实 Android/iOS 软键盘及辅助技术未完成验收。[app.css](../public_frontend/app.css)、[test_public_frontend_reliability.py](../tests/test_public_frontend_reliability.py)。 |
-| E8 | build-info 更新提示与安全刷新 | 实测通过（本地/浏览器）；待生产启用 | 对比 revision/app_version，协议版本仅提示兼容；保存草稿和请求快照后在空闲时更新，不强制中断聊天。实际跨发布更新仍待 B9。[public_main.py](../backend/snow_app/public_main.py)、[app.js](../public_frontend/app.js)。 |
+| E8 | build-info 更新提示与安全刷新 | build-info 已生产验证；新 UI 更新提示待 S2 | 实际公网 build-info 返回 7ce/0.10.0-rc.1/compat 包身份。新 UI 的空闲更新、草稿保存和请求快照逻辑已有本地回归；当前 S1 旧外观不能推断新 UI 提示已启用。[上线记录](s1-production-20260908.md)。 |
 
 ## F 运维、开发规范与文档
 
 | ID | 可验收工作项 | 当前状态 | 证据、通过条件与关键文件 |
 | --- | --- | --- | --- |
-| F1 | 分钟级探测、状态转换及日志隐私 | 实测通过（生产基础探测）；旧版指标有缺口 | monitor timer 已 enabled/active，首轮 public/DB/retrieval/disk/backup 均正常；磁盘 66.0%，备份龄 6 秒。阈值为连续 3 次异常、磁盘 80%/90%、备份 26 小时；0.9.6 queue 明确 instrumentation-unavailable，缺失 draining 的默认值不能算排空覆盖。内部 full 不向公网开放，日志不含 keys/聊天/完整 Env。[monitor.py](../ops/monitor.py)、[project-snow-monitor.timer](../ops/project-snow-monitor.timer)。 |
+| F1 | 分钟级探测、状态转换及日志隐私 | 实测通过（S1 生产基础监测） | 05:38 UTC public/DB/retrieval/queue/draining/backup/disk 均正常；S1 队列指标已可用，0 活跃/0 排队、配置上限4/8。阈值保持3次失败、磁盘80%/90%、备份26小时。此短时快照不是容量或长稳结论，外部告警未配置。[实跑记录](s1-production-20260908.md)。 |
 | F2 | 外部告警通知维护者 | 尚未完成 | 当前仅本地 journal 状态转换；需维护者选择并配置接收端，再做失败/恢复送达验收。没有接收端不能称已经通知维护者。[monitor.py](../ops/monitor.py)、[RECOVERY.md](../ops/RECOVERY.md)。 |
 | F3 | 独立 helper 升级、锁与失败回退 | 实测通过（Linux 故障注入及生产升级） | 19 项 installer 测试、7 项一次性事务故障测试通过；`490c0bb` → generation `c2639d71…` 于 10:10:40 UTC 完成，root-only 原件/回执可恢复。全部原文件恢复并验证后才重启旧 timer；收据写失败不会跳过恢复。应用/runner/checkout 不变，auto-stage 仍 disabled；结束后实际取放 release 锁成功。[install_maintenance.py](../ops/install_maintenance.py)、[维护实跑台账](overhaul_progress.md)。 |
-| F4 | 加密备份、永久 pin 和资源边界 | 实测通过（生产新备份；本次未全量还原） | 新 helper 的 backup --pin 实际生成 `55252021…`，root600 last-success 于 10:10:32 UTC 写入；旧三 pin 保留，新 pin 无 daily tag，cleanup/backup timer 已启用。实读 transient 限制 50% CPU/1 GiB/45 分钟；PG dump 沿原容器 cgroup。父锁先释放、backup 自取锁；本次校验 snapshot/TOC/restic 元数据，不等于新 snapshot 全 blob 读回或镜像归档。[recovery_backup.py](../ops/recovery_backup.py)、[维护实跑台账](overhaul_progress.md)。 |
+| F4 | 加密备份、永久 pin 和资源边界 | S1 固定备份和加密清单读回通过；未全量恢复 | 05:42:14 UTC backup --pin 成功，快照 a2a685ad… 匹配7ce；独立 restic 元数据确认仅永久pin标签，加密 recovery.json 读回与green/7ce/dump匹配。原三基线pin保留。新快照未全量恢复、镜像归档独立。[实跑记录](s1-production-20260908.md)。 |
 | F5 | 完整组件恢复、空主机 RPO/RTO | 部分实现 | 隔离 full 恢复 279.41 秒通过：schema0004、8 表、1,148 资源、API 与重建检索；临时资源清理完成。空主机恢复尚未测量，RPO≤24小时/RTO≤4小时仍是目标，生产原地覆盖默认禁用。[restore_drill.py](../ops/restore_drill.py)、[RECOVERY.md](../ops/RECOVERY.md)。 |
 | F6 | 开发校验、依赖维护、版本与桌面交付 | 部分实现 | 统一校验、依赖锁/Dependabot、候选说明已提交；API/Web 0.10.0-rc.1、桌面预览 0.5.0、数据媒体独立版本。小吉品牌/图标来源、Electron 安全 smoke 与 Windows 预览通过；可信代码签名和正式桌面发布未完成。[validate_all.ps1](../scripts/validate_all.ps1)、[dependabot.yml](../../.github/dependabot.yml)、[client/README.md](../client/README.md)。 |
 
@@ -81,8 +81,8 @@
 
 | ID | 可验收工作项 | 当前状态 | 证据、通过条件与关键文件 |
 | --- | --- | --- | --- |
-| T1 | VoiceLab 导入、目录与成本账本 | 外部任务已交付；账单待核对 | 独立工作树 `codex/all-character-tts-review` 签名提交 `6d9180d`；代码为 `App/scripts/voice_lab*`，说明为 `App/docs/voice_lab_all_characters.md`，生成物在根目录 `runtime/voice-lab/runs/2026-09-07-vidya-chenxing-v2/`。保守费用估计 7.32550 元，低于 300 元上限；实际账单尚未知，不将估计改写为已结算费用。[实施台账](overhaul_progress.md)。 |
-| T2 | 全 22 角色及琴诺 morso 语音待审核 | 外部任务已交付；主任务独立技术复核通过 | 23 声线档案、276 条标准试听，六类文案及独立参考覆盖齐全。主任务重新读取全部 368 个公开音频（含参考/对照），SHA256、非空 WAV、单声道 24 kHz PCM16 与时长一致性通过；状态为 `ready_for_human_review`，人工结论待填，公网语音关闭。[实施台账](overhaul_progress.md)。 |
+| T1 | VoiceLab 导入、目录与成本账本 | 独立交接已读取；本地语音实现按用户决定暂停 | 最新 f28d0f9 签名交接及 private_voice_test_handoff.md 已读取并校验 SHA；用户选择未来仅本地浏览器测试，当前只准备材料。原300元上限与账单待核对边界不变；主任务未新增付费调用。[实施台账](overhaul_progress.md)。 |
+| T2 | 全 22 角色及琴诺 morso 语音待审核 | 独立任务报告已定选；最新音频集未由本任务重审 | 最新交接报告23个角色/变体定选、138条存档试听；旧6d9180d的276条标准试听及368个文件技术复核是历史证据，不覆盖后续变更。未启动私有服务、未接入公网语音。[实施台账](overhaul_progress.md)。 |
 | S1 | 通用全角色舞台载入和失败回退 | 实测通过（合成素材）；待素材后启用 | 校验恰好 22 唯一角色、同源路径、manifest/asset 哈希、来源、批准记录和 motion allowlist；异常回退，中止/低动态偏好有处理。当前 stage_release 固定关闭。[stage.ts](../public_frontend_src/src/stage.ts)、[verify_stage_release.py](../scripts/verify_stage_release.py)、[stage-release.schema.json](../config/stage-release.schema.json)。 |
 | S2 | 全 22 角色舞台实物与统一启用 | 外部任务；尚未完成交付 | 画图任务提交完整资源和逐角色人工审核；全部 22 角色验收后统一开。现有 Mia、基础肖像或合成 fixture 均不能代替新素材批准；启用仍须绑定候选回执。[public_frontend_src/README.md](../public_frontend_src/README.md)、[实施台账](overhaul_progress.md)。 |
 
