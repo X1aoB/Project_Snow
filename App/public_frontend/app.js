@@ -2431,17 +2431,49 @@ async function verifiedExpressionBytes(url, expectedHashes, maximum, signal) {
     signal?.removeEventListener("abort", abort);
   }
 }
+function expressionImageDataUrl(bytes, mediaType, signal) {
+  // Production CSP permits data: images. Encode only already verified bytes;
+  // do not fetch the image again or retain another encoded-image cache.
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    let settled = false;
+    let timer = null;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reader.onload = null;
+      reader.onerror = null;
+      reader.onabort = null;
+      if (reader.readyState === FileReader.LOADING) reader.abort();
+      callback(value);
+    };
+    const abort = () => finish(reject, new DOMException("Aborted", "AbortError"));
+    reader.onload = () => {
+      const src = reader.result;
+      if (typeof src !== "string" || !src.startsWith(`data:${mediaType};base64,`)) {
+        finish(reject, new Error("expression_image_encoding_failed"));
+      } else finish(resolve, src);
+    };
+    reader.onerror = () => finish(reject, new Error("expression_image_encoding_failed"));
+    reader.onabort = abort;
+    if (signal?.aborted) return abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    timer = setTimeout(() => finish(reject, new Error("expression_image_encoding_timeout")), EXPRESSION_DECODE_TIMEOUT_MS);
+    try { reader.readAsDataURL(new Blob([bytes], { type: mediaType })); }
+    catch (error) { finish(reject, error); }
+  });
+}
 async function verifiedExpressionImage(assetPath, sha256, signal) {
   const bytes = await verifiedExpressionBytes(assetPath, sha256, EXPRESSION_IMAGE_MAX_BYTES, signal);
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const png = bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71;
   const webp = new TextDecoder().decode(bytes.subarray(0, 4)) === "RIFF" && new TextDecoder().decode(bytes.subarray(8, 12)) === "WEBP";
   if (!png && !webp) throw new Error("expression_image_invalid");
-  const src = URL.createObjectURL(new Blob([bytes], { type: png ? "image/png" : "image/webp" }));
-  try {
-    const image = await preloadImage(src, signal);
-    return { src, image, dispose: () => URL.revokeObjectURL(src) };
-  } catch (error) { URL.revokeObjectURL(src); throw error; }
+  const src = await expressionImageDataUrl(bytes, png ? "image/png" : "image/webp", signal);
+  const image = await preloadImage(src, signal);
+  return { src, image, dispose: () => image.removeAttribute("src") };
 }
 function normalizePresentationLayers(presentation, manifestUrl) {
   const canvas = presentation.canvas;
@@ -2652,7 +2684,7 @@ const STAGE_PRESENTATION_RENDERERS = Object.freeze({
       const layers = [];
       try {
         // Every pixel source is verified before decode. Sequential leases keep the
-        // failure path bounded and ensure already decoded blob URLs are released.
+        // failure path bounded and ensure already decoded image sources are released.
         for (const layer of presentation.layers) layers.push(await verifiedExpressionImage(layer.assetPath, layer.sha256, signal));
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const canvas = document.createElement("canvas");
