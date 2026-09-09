@@ -4,6 +4,12 @@ Baseline: `502ec99412bef843c37e4b31a53df8fa9faeb33c` / public `0.9.6`.
 Production promotion requires candidate acceptance; implementation does not imply
 production activation. This ledger records evidence rather than inferred completion.
 
+2026-09-09: the user authorized monitoring the approved U4 character delivery,
+then beginning its production rollout, and implementing selected-voice testing
+locally. See [current coordination](rollout_coordination_20260909.md). The scoped
+authorization supersedes the earlier implementation pause and generic promotion
+question; fresh candidate acceptance and all technical gates remain required.
+
 | Workstream | Status | Required evidence |
 | --- | --- | --- |
 | Protected image GC and disk capacity | first production batch verified | 36 unused Snow images removed; initial 94% → 64% used; after S2 stage 16.1 GiB free, above the release reserve |
@@ -14,8 +20,8 @@ production activation. This ledger records evidence rather than inferred complet
 | Review preservation / versioned data / quality | first batch implemented | cross-process review protection; no activation GC; 22 × 8 offline behavior cases |
 | Browser persistence / TS / UI | S2 actual candidate browser verified | exact main CI and S1→S2→S1 regression; desktop/390px candidate drafts survive IndexedDB v4 reload; native font/caret and bounded composer fixes tested |
 | 小吉终端 name and restored icon | S2 candidate verified; public activation pending | actual 85-file bundle and 32/192/1024 icons verified; AI source disclosed; existing Electron preview smoke/package evidence remains separate |
-| All-character stage assets | external drawing task | requires all 22 approved; runtime integration remains disabled until ready |
-| All-character TTS | separate task reports selected voices; private implementation deferred | latest signed f28d0f9 handoff reports 23 selected voices/variants and 138 auditions; new set not independently re-audited here; public voice disabled |
+| All-character stage assets | U4 technical delivery complete; rollout integration in progress | exact 9e50a64 / CI 34303066734; 22 characters / 456 selected presentations and 1468 file hashes checked; browser integrity and private metadata gates added before release |
+| All-character TTS | private loopback auditions delivered; new synthesis currency confirmation pending | local 117ff4f, 23 selected voices/variants and 138 auditions; 47 tests and actual Windows/Chrome playback/download passed; shared ¥20 capacity allocated, new provider spend 0; public voice disabled |
 | Production promotion | S1 live, independent post-validation passed | receipt `b88b93a4…` approved 05:30:22 UTC; promotion ended 05:31:35; postcheck 05:48:54; same-policy origin restart recorded separately |
 
 Initial host audit: 16 vCPU, ~16 GiB RAM, 49 GiB filesystem, 94% used.
