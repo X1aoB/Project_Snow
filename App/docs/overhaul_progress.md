@@ -4,18 +4,24 @@ Baseline: `502ec99412bef843c37e4b31a53df8fa9faeb33c` / public `0.9.6`.
 Production promotion requires candidate acceptance; implementation does not imply
 production activation. This ledger records evidence rather than inferred completion.
 
+2026-09-09: the user authorized monitoring the approved U4 character delivery,
+then beginning its production rollout, and implementing selected-voice testing
+locally. See [current coordination](rollout_coordination_20260909.md). The scoped
+authorization supersedes the earlier implementation pause and generic promotion
+question; fresh candidate acceptance and all technical gates remain required.
+
 | Workstream | Status | Required evidence |
 | --- | --- | --- |
-| Protected image GC and disk capacity | first production batch verified | 36 unused Snow images removed; 30 protected digest references; 94% → 64% used; 16.9 GiB free |
+| Protected image GC and disk capacity | first production batch verified | 36 unused Snow images removed; initial 94% → 64% used; after S2 stage 16.1 GiB free, above the release reserve |
 | Retention maintenance | production helper upgrade verified | source `490c0bb`, generation `c2639d71…`; cleanup passed and pinned backup completed at 2026-09-07 10:10:32 UTC; all 25 container identities unchanged |
 | Immutable baseline / full restore | isolated component restore passed; whole-host drill pending | 10 images / 159 blobs verified; restored DB/assets/API and rebuilt retrieval passed in 279.41 seconds |
-| CI classification / PostgreSQL / attestations | S1 production chain verified | main `7ce0205`, CI 34182286331 and proof 34182824713 passed; host verification, stage, exact approval and promotion completed; public green is 0.10.0-rc.1 |
+| CI classification / PostgreSQL / attestations | S1 live; S2 candidate chain verified | S2 main `c350963`, CI 34197619104 and proof 34198355478 passed; independent host verification and blue stage passed; S2 not approved/promoted |
 | Backend budgets / lifecycle / modular core | first modular core implemented | actual shared budget, bounded DB adapter, leases/drain, loopback/local boundary and 3-second retrieval budget |
 | Review preservation / versioned data / quality | first batch implemented | cross-process review protection; no activation GC; 22 × 8 offline behavior cases |
-| Browser persistence / TS / UI | implemented and locally verified | 66 Python/UI checks, 15 subtests, extra generic-stage browser check, 6 Node checks; source typecheck/build |
-| 小吉终端 name and restored icon | implemented and packaged | AI source disclosed; Electron 44.2.0 smoke and Windows preview package, dependency audit 0; binary has no trusted code-signing certificate |
-| All-character stage assets | external drawing task | requires all 22 approved; runtime integration remains disabled until ready |
-| All-character TTS | separate task reports selected voices; private implementation deferred | latest signed f28d0f9 handoff reports 23 selected voices/variants and 138 auditions; new set not independently re-audited here; public voice disabled |
+| Browser persistence / TS / UI | S2 actual candidate browser verified | exact main CI and S1→S2→S1 regression; desktop/390px candidate drafts survive IndexedDB v4 reload; native font/caret and bounded composer fixes tested |
+| 小吉终端 name and restored icon | S2 candidate verified; public activation pending | actual 85-file bundle and 32/192/1024 icons verified; AI source disclosed; existing Electron preview smoke/package evidence remains separate |
+| All-character stage assets | U4 technical delivery complete; rollout integration in progress | exact 9e50a64 / CI 34303066734; 22 characters / 456 selected presentations and 1468 file hashes checked; browser integrity and private metadata gates added before release |
+| All-character TTS | private loopback auditions delivered; new synthesis currency confirmation pending | local 117ff4f, 23 selected voices/variants and 138 auditions; 47 tests and actual Windows/Chrome playback/download passed; shared ¥20 capacity allocated, new provider spend 0; public voice disabled |
 | Production promotion | S1 live, independent post-validation passed | receipt `b88b93a4…` approved 05:30:22 UTC; promotion ended 05:31:35; postcheck 05:48:54; same-policy origin restart recorded separately |
 
 Initial host audit: 16 vCPU, ~16 GiB RAM, 49 GiB filesystem, 94% used.
@@ -23,11 +29,19 @@ Backup timer last succeeded; retention timer failed while Compose tried to
 reconcile a management network occupied by an old admin container. Dify shares
 the host and is outside the mutation scope.
 
-## S1 production release (2026-09-08)
+## S2 candidate ready for manual review (2026-09-08)
+
+[S2 candidate record](s2-candidate-20260908.md) binds `c35096383928380857cddca6b06f7bb6e6bb8775 / blue` to signed image `fa9f005…`, current frontend bundle `1c137b64…` and ready-for-review receipt `85d591646eb619956aceebcd73a9c50f8e4c34bafaecb17d95ca78284a33d92a`. The receipt expects current S1 `7ce0205` and expires 2026-09-09 07:36:18 UTC. No S2 approval or promotion has occurred.
+
+Formal stage finished 07:24:50 UTC and independent post-validation passed at 07:26:13. Only blue API changed among 25 containers; 41 pre-existing anchor files and S1 recovery bytes/inode were preserved. The stopped original blue/502 container was replaced: recover baseline 502 through its independent anchor/images/backups, not by referring to the blue slot. Controller is now c350963, public S1 remains green/compat, and installed maintenance remains a separate generation. Ordinary stage reused the existing firewall without installation; the origin-edge retention correction still awaits the actual S2 promotion path.
+
+Actual candidate browser checks passed desktop and 390px at 07:30:13 UTC, including branding/icons, onboarding, 22 characters, settings cancellation and draft reload. Four anonymous presence writes were allowed; no model/chat/feedback/mail calls were made. Screenshots were reviewed. Stage auxiliary scripts now require an independently observed process exit plus hash-bound invocation receipt; Linux wrapper 49 and driver 8 tests passed, including a real child-process late-fsync failure. The overall overhaul, full-character artwork approval, public voice, whole-host RTO and load/quality evaluation remain incomplete.
+
+## S1 production release (2026-09-08, historical operation record)
 
 [S1 production record](s1-production-20260908.md) binds main `7ce0205`, its signed manifest and actual green image to the renewed, approved receipt `b88b93a4c6b2bef614a64282b3a9018455407a5caf1e08b2d0d416a02b3ae265`. Production is `0.10.0-rc.1`, with the original-looking compat UI. Controller-only fix `b149d05` and persistent Caddy routing maintenance completed first. Post-validation passed with 22 container records unchanged, blue stopped in place, mailer updated, and one independently verified same-policy origin-edge restart recorded as a release deviation. Recovery anchors remain intact; 17,461,370,880 bytes are free. The S1 pinned backup completed at 05:42:14 UTC. The full overhaul is not complete; S2 branding/UI remains a separate release.
 
-S2 narrow composer improvements are retained separately at `2ca1f8854e414d939d63df94e420fe5c72210138`: truncation belongs to the button label, textarea grows to a bounded height and preserves long-draft scrolling. Local browser regression and fingerprint checks passed. These changes are not part of the staged S1 image.
+S2 narrow composer improvements originated at `2ca1f8854e414d939d63df94e420fe5c72210138` and are now included in the c350963 candidate above. They are not part of the live S1 image.
 
 ## Recorded implementation evidence (2026-09-07)
 
@@ -78,13 +92,13 @@ Do not treat this ledger, passing unit tests, or a prepared candidate as approva
 
 ## Remaining acceptance and follow-up scope
 
-- S1 promotion is now user-authorized. The first independent Caddy routing maintenance at 04:52 UTC detected a false retained-service mismatch and restored the old Caddy automatically; public TLS still reports `ok / 0.9.6`. Repeated read-only inspection proved Docker Mounts array order is unstable. Canonical mount ordering must pass CI and be installed as a separate controller update before retrying the maintenance; no server approval or API traffic switch has occurred. The failed maintenance receipt is preserved with SHA256 `93e9516f464af1dffa65ed92ee98c77c6e3eff0aef5b4fe32b53d8d15b0ac00f`.
+- S2 c350963 is staged and ready for manual review under receipt 85d59164…, with current S1 fixed as its expected predecessor. Preparation is complete; S2 approval, public cutover, independent promotion post-validation and its new stable backup remain pending.
 
-- The preceding pre-promotion observations are historical. The routing/controller prerequisite, renewed receipt, user-authorized approval and S1 promotion subsequently completed; see the production record for exact receipts and the extra origin-edge restart. Auto-stage remains disabled; continuous automatic staging remains to be validated separately. Main must remain stable through each CI/signing cycle.
+- S1's routing/controller prerequisite, renewed receipt, user-authorized approval and promotion completed; see the production record for the initial failed mount-order check and subsequent same-policy origin-edge restart. Auto-stage remains disabled; continuous automatic staging remains to be validated separately. Main must remain stable through each CI/signing cycle.
 - Exercise the implemented acceptance gate against the real candidate before any new promotion. Root-owned review evidence and explicit approval bind the current marker, exact candidate bytes/configuration, stage attempt and expiry, and are rechecked under the release lock before side effects. Passing isolated tests does not approve the production candidate.
 - Complete a separately timed empty-host rehearsal. RPO ≤24 hours and RTO ≤4 hours are targets, not measured achievements. Connect an operator-chosen external alert destination; current monitoring writes local journal transitions only. Remediate the actual shared-infrastructure findings in a separately validated maintenance release; do not silently replace current shared dependencies while staging an API candidate.
 - Continue extracting the large compatibility facade and remaining plain JavaScript into the typed/runtime modules. Local review JSONL writes now coordinate processes but are not a crash-atomic multi-file database. Production role separation, full capacity/load measurements and real-model persona evaluations remain separate acceptance items.
 - Artwork production and human approval for all 22 characters remain with the drawing task. The generic stage loader is disabled until a complete validated package is supplied. No stage approval is inferred from base portraits or synthetic browser fixtures.
 - Latest TTS handoff supersedes the older review status below: the separate task is now idle and reports 23 selected character/variant voices with 138 archived auditions at signed commit `f28d0f9`. Its `App/docs/private_voice_test_handoff.md` (SHA256 `aa5281251fa10da7b0fac88fb96cd30e9a324f4bdb4c23f9823eedbcc23f07b0`) records preparation only and a user decision to defer implementation. Future testing is planned for the user's local browser only, with no public voice entry. This integration task has read the handoff but has not re-audited that new audio set, started a private service, or authorized new paid calls.
 - Historical TTS delivery at signed `6d9180d` contained 23 profiles and 276 standard auditions. This integration task independently re-read all 368 public audio files then present, confirming SHA256, nonempty WAV frames, mono 24 kHz PCM16 and duration agreement. Its then-current status was `ready_for_human_review`; the later `f28d0f9` handoff above supersedes that review state. The historical conservative estimate was CNY 7.32550 against the CNY 300 cap; actual invoiced cost remains unknown. Neither delivery is merged into the public application branch.
-- Production remains 0.9.6 / 502ec99 until an exact candidate is accepted and manually promoted. Component release versions and final release notes must be set for that accepted release.
+- Production remains S1 `0.10.0-rc.1 / 7ce0205 / green / compat` while S2 awaits manual promotion. Commit and frontend identity distinguish these two releases despite their shared application version.
