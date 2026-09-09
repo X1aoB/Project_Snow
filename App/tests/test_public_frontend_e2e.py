@@ -137,6 +137,7 @@ class BrowserLaunchContractTests(TestCase):
 
 
 class PublicFrontendHandler(BaseHTTPRequestHandler):
+    content_security_policy = ""
     announcement_payload: dict[str, object] | None = None
     announcement_failures = 0
     announcement_requests = 0
@@ -157,6 +158,11 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
 
     def log_message(self, _format: str, *_args: object) -> None:
         return
+
+    def end_headers(self) -> None:
+        if self.content_security_policy:
+            self.send_header("Content-Security-Policy", self.content_security_policy)
+        super().end_headers()
 
     def _json(self, payload: dict[str, object], status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode()
@@ -749,6 +755,7 @@ class PublicFrontendE2ETests(TestCase):
         cls.thread.join(timeout=5)
 
     def setUp(self) -> None:
+        PublicFrontendHandler.content_security_policy = ""
         PublicFrontendHandler.announcement_payload = None
         PublicFrontendHandler.announcement_failures = 0
         PublicFrontendHandler.announcement_requests = 0
@@ -1345,6 +1352,154 @@ class PublicFrontendE2ETests(TestCase):
                 self.assertEqual(content_type, "image/webp", f"{state}/{kind}")
             browser.close()
 
+    def test_production_csp_stage_displays_single_layered_and_verified_fallback(self) -> None:
+        from io import BytesIO
+        from PIL import Image
+
+        # Use the shipping response policy verbatim, including connect-src.
+        # This must exercise the application document, not a policy-free canvas page.
+        caddy = (APP_ROOT / "infra/Caddyfile").read_text(encoding="utf-8")
+        policy = next(line.strip().split('"', 2)[1] for line in caddy.splitlines()
+                      if line.strip().startswith('Content-Security-Policy "'))
+        self.assertIn("img-src 'self' data:;", policy)
+        self.assertNotIn("blob:", policy)
+        PublicFrontendHandler.content_security_policy = policy
+        images = {}
+        for name, size, color, file_format in (
+            ("flat.webp", (6, 8), (30, 60, 90, 255), "WEBP"),
+            ("body.png", (6, 8), (40, 60, 80, 255), "PNG"),
+            ("head.png", (2, 2), (200, 160, 120, 255), "PNG"),
+            ("substitute.png", (2, 2), (240, 10, 30, 255), "PNG"),
+        ):
+            buffer = BytesIO()
+            Image.new("RGBA", size, color).save(buffer, format=file_format, lossless=True, compress_level=0)
+            images[name] = buffer.getvalue()
+        self.assertEqual(len(images["head.png"]), len(images["substitute.png"]))
+
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            try:
+                for strategy in ("single", "layered", "fallback", "tampered"):
+                    with self.subTest(strategy=strategy):
+                        payload = PublicFrontendHandler._expression_manifest("25b23cb64398")
+                        payload["expressions"]["neutral"]["stage_asset_path"] = "/csp-stage/flat.webp"
+                        payload["expressions"]["neutral"]["stage_asset_sha256"] = sha256(images["flat.webp"]).hexdigest()
+                        if strategy != "single":
+                            payload["expressions"]["neutral"]["presentation_id"] = "expression.neutral"
+                            payload["presentations"] = {"expression.neutral": {
+                                "render_strategy": "layered_sprite", "canvas": {"width": 6, "height": 8},
+                                "layers": [
+                                    {"asset_path": "/csp-stage/body.png", "asset_sha256": sha256(images["body.png"]).hexdigest(),
+                                     "dimensions": {"width": 6, "height": 8}, "position": {"x": 0, "y": 0}, "composite": "source-over"},
+                                    {"asset_path": "/csp-stage/" + ("missing.png" if strategy == "fallback" else "head.png"),
+                                     "asset_sha256": sha256(images["head.png"]).hexdigest(),
+                                     "dimensions": {"width": 2, "height": 2}, "position": {"x": 2, "y": 1}, "composite": "source-over"},
+                                ],
+                            }}
+                        manifest = json.dumps(payload).encode()
+                        requested = []
+                        forbidden = []
+                        page = browser.new_page(viewport={"width": 1280, "height": 800})
+                        page.add_init_script("""window.__cspViolations = []; window.__decodedImageHashes = [];
+                            document.addEventListener('securitypolicyviolation', event =>
+                                window.__cspViolations.push({directive:event.effectiveDirective, blocked:event.blockedURI}));
+                            const decode = HTMLImageElement.prototype.decode;
+                            HTMLImageElement.prototype.decode = async function() {
+                                if (this.src.startsWith('data:image/')) {
+                                    // No fetch(data:): production connect-src intentionally forbids it.
+                                    const bytes = Uint8Array.from(atob(this.src.split(',')[1]), value => value.charCodeAt(0));
+                                    window.__decodedImageHashes.push([...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
+                                        .map(value => value.toString(16).padStart(2,'0')).join(''));
+                                }
+                                return decode.call(this);
+                            };""")
+
+                        def route_local(route):
+                            path = urlparse(route.request.url).path
+                            if not route.request.url.startswith(self.base_url + "/"):
+                                forbidden.append("external")
+                                route.abort()
+                            elif route.request.method == "POST":
+                                if path != "/public/v1/presence/resolve":
+                                    forbidden.append(path)
+                                    route.abort()
+                                    return
+                                result = route.fetch().json()
+                                result["scene_state"].update(analyst_location="观景区", co_located=True)
+                                route.fulfill(json=result)
+                            elif path == "/public/v1/characters":
+                                result = route.fetch().json()
+                                for character in result["characters"]:
+                                    if character["character_id"] == "25b23cb64398":
+                                        character.update(expression_manifest_url="/csp-stage/manifest.json",
+                                                         expression_manifest_sha256=sha256(manifest).hexdigest())
+                                route.fulfill(json=result)
+                            elif path.startswith("/csp-stage/"):
+                                requested.append(path)
+                                name = path.rsplit("/", 1)[-1]
+                                if name == "manifest.json":
+                                    route.fulfill(content_type="application/json", body=manifest)
+                                elif name in images:
+                                    actual = "substitute.png" if strategy == "tampered" and name == "head.png" else name
+                                    route.fulfill(content_type="image/png" if name.endswith(".png") else "image/webp", body=images[actual])
+                                else:
+                                    route.fulfill(status=404, body="missing fixture")
+                            else:
+                                route.continue_()
+
+                        page.route("**/*", route_local)
+                        response = page.goto(self.base_url, wait_until="networkidle")
+                        self.assertEqual(response.header_value("content-security-policy"), policy)
+                        page.locator("#accept-experience-notice").click()
+                        page.locator('[data-character="25b23cb64398"]').click()
+                        page.wait_for_function("document.querySelector('#connection-status').textContent === '服务已连接'")
+                        # Restore a real persisted in-person thread without BYOK or generation.
+                        page.evaluate("""async () => {
+                            const open = indexedDB.open('project-snow-public');
+                            const db = await new Promise((resolve, reject) => {
+                                open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error);
+                            });
+                            const tx = db.transaction('threads', 'readwrite'), store = tx.objectStore('threads');
+                            const read = store.get('25b23cb64398');
+                            read.onsuccess = () => store.put({...read.result, characterId:'25b23cb64398', channel:'in_person'});
+                            await new Promise((resolve, reject) => {tx.oncomplete=resolve; tx.onerror=() => reject(tx.error);});
+                            db.close();
+                        }""")
+                        page.reload(wait_until="networkidle")
+                        page.locator("#in-person-surface").wait_for(state="visible")
+                        page.wait_for_function("""() => {
+                            const art=document.querySelector('#stage-character-art');
+                            return Boolean(art.dataset.stageArtFailedKey) || (!art.hidden && art.complete && art.naturalWidth > 0);
+                        }""", timeout=10000)
+                        art = page.locator("#stage-character-art")
+                        diagnostics = art.evaluate("""node => ({hidden:node.hidden, width:node.naturalWidth,
+                            height:node.naturalHeight, strategy:node.dataset.renderStrategy,
+                            violations:window.__cspViolations})""")
+                        self.assertTrue(art.is_visible(), diagnostics)
+                        self.assertEqual([diagnostics["width"], diagnostics["height"]], [6, 8])
+                        self.assertEqual(diagnostics["strategy"], "layered_sprite" if strategy == "layered" else "single_sprite")
+                        pixel = art.evaluate("""node => {
+                            const canvas=document.createElement('canvas');canvas.width=6;canvas.height=8;
+                            const context=canvas.getContext('2d');context.drawImage(node,0,0);
+                            return [...context.getImageData(2,1,1,1).data];
+                        }""")
+                        self.assertEqual(pixel, [200, 160, 120, 255] if strategy == "layered" else [30, 60, 90, 255])
+                        self.assertEqual(diagnostics["violations"], [])
+                        self.assertEqual(forbidden, [])
+                        self.assertIn("/csp-stage/manifest.json", requested)
+                        if strategy == "tampered":
+                            decoded = page.evaluate("window.__decodedImageHashes")
+                            self.assertIn("/csp-stage/head.png", requested)
+                            self.assertNotIn(sha256(images["substitute.png"]).hexdigest(), decoded)
+                            self.assertIn(sha256(images["flat.webp"]).hexdigest(), decoded)
+                        if strategy in ("fallback", "tampered"):
+                            self.assertIn("/csp-stage/flat.webp", requested)
+                        if strategy == "fallback":
+                            self.assertIn("/csp-stage/missing.png", requested)
+                        page.close()
+            finally:
+                browser.close()
+
     def test_layered_stage_uses_native_pixels_complete_fallback_and_latest_request(self) -> None:
         from io import BytesIO
         from PIL import Image
@@ -1470,7 +1625,7 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(result["removedArm"], [0, 0, 0, 0])
             self.assertEqual(result["strategy"], "layered_sprite")
             self.assertEqual(result["fallback"]["renderStrategy"], "single_sprite")
-            self.assertTrue(result["fallback"]["src"].startswith("blob:"))
+            self.assertTrue(result["fallback"]["src"].startswith("data:image/"))
             self.assertEqual(result["sizeFallback"], "single_sprite")
             self.assertEqual(result["abortName"], "AbortError")
             self.assertEqual(result["retainedCues"], [[], ["friendly_greeting"],
@@ -1492,7 +1647,7 @@ class PublicFrontendE2ETests(TestCase):
                 const decode = HTMLImageElement.prototype.decode;
                 const gate = new Promise((resolve) => { window.__releaseSlowLayer = resolve; });
                 HTMLImageElement.prototype.decode = async function() {
-                    if (this.src.startsWith('blob:') && [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join('') === window.__slowLayerHash) {
+                    if (this.src.startsWith('data:image/') && [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join('') === window.__slowLayerHash) {
                         window.__slowLayerWaiting = true;
                         await gate;
                     }
@@ -1527,7 +1682,7 @@ class PublicFrontendE2ETests(TestCase):
                 const gate = new Promise((resolve) => { release = resolve; });
                 const started = new Promise((resolve) => { waiting = resolve; });
                 HTMLImageElement.prototype.decode = async function() {
-                    if (this.src.startsWith('blob:') && [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join('') === window.__slowLayerHash) {
+                    if (this.src.startsWith('data:image/') && [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join('') === window.__slowLayerHash) {
                         waiting();
                         await gate;
                     }
@@ -1636,7 +1791,7 @@ class PublicFrontendE2ETests(TestCase):
                 const nativeDecode = HTMLImageElement.prototype.decode;
                 const decoded = [];
                 HTMLImageElement.prototype.decode = async function() {
-                    if(this.src.startsWith('blob:')) decoded.push([...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join(''));
+                    if(this.src.startsWith('data:image/')) decoded.push([...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join(''));
                     return nativeDecode.call(this);
                 };
                 try {
@@ -1656,6 +1811,8 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(result["png"], {"ready": True, "state": "happy", "sha256": sha256(images["flat.webp"]).hexdigest(), "strategy": "single_sprite"})
             self.assertNotIn(sha256(images["substitute.webp"]).hexdigest(), result["decoded"])
             self.assertNotIn(sha256(images["substitute.png"]).hexdigest(), result["decoded"])
+            self.assertIn(sha256(images["neutral.webp"]).hexdigest(), result["decoded"])
+            self.assertIn(sha256(images["flat.webp"]).hexdigest(), result["decoded"])
             self.assertFalse(result["tampered"])
             self.assertTrue(result["tamperedHidden"])
             self.assertFalse(result["absent"])
@@ -1684,20 +1841,21 @@ class PublicFrontendE2ETests(TestCase):
             decode_deadline = page.evaluate("""async () => {
                 const hooks = window.__projectSnowTest, art = document.querySelector('#stage-character-art');
                 const decode = HTMLImageElement.prototype.decode, later = window.setTimeout;
-                const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
-                const live = new Set();
-                HTMLImageElement.prototype.decode = () => new Promise(() => {});
-                URL.createObjectURL = blob => { const value = create(blob); live.add(value); return value; };
-                URL.revokeObjectURL = value => { live.delete(value); revoke(value); };
+                const preloaded = [];
+                HTMLImageElement.prototype.decode = function() {
+                    if (this.src.startsWith('data:image/')) preloaded.push(this);
+                    return new Promise(() => {});
+                };
                 window.setTimeout = (callback, ms, ...args) => later(callback, ms === 8000 ? 30 : ms, ...args);
                 try {
                     const ready = await hooks.updateStageCharacterArt(art, window.__integrityCharacter, 'happy');
-                    return {ready,hidden:art.hidden&&!art.hasAttribute('src'),unreleased:live.size};
+                    return {ready,hidden:art.hidden&&!art.hasAttribute('src'),attempted:preloaded.length,
+                        unreleased:preloaded.filter(image => Boolean(image.getAttribute('src'))).length};
                 } finally {
                     HTMLImageElement.prototype.decode = decode; window.setTimeout = later;
-                    URL.createObjectURL = create; URL.revokeObjectURL = revoke;
                 }
             }""")
+            self.assertGreater(decode_deadline.pop("attempted"), 0)
             self.assertEqual(decode_deadline, {"ready": False, "hidden": True, "unreleased": 0})
             browser.close()
 
@@ -1740,7 +1898,7 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(len(states), 18)
             for state, values in states.items():
                 self.assertEqual(values["artState"], state)
-                self.assertTrue(values["artSrc"].startswith("blob:"))
+                self.assertTrue(values["artSrc"].startswith("data:image/"))
                 manifest = json.loads((PUBLIC_ROOT / "assets/expressions/mia/manifest.json").read_text(encoding="utf-8"))
                 self.assertEqual(values["sha256"], manifest["expressions"][state]["stage_asset_sha256"])
                 self.assertFalse(values["hidden"])
@@ -1797,7 +1955,7 @@ class PublicFrontendE2ETests(TestCase):
                 "() => window.__stageArtTransitions.find((row) => row.incomingCharacterId === '78aa7ab99154')"
             )
             self.assertEqual(transition["outgoingCharacterId"], "702f4375675b")
-            self.assertTrue(transition["outgoingSrc"].startswith("blob:"))
+            self.assertTrue(transition["outgoingSrc"].startswith("data:image/"))
             page.wait_for_function(
                 "() => document.querySelectorAll('.stage-character-art-outgoing').length === 0"
             )
@@ -1840,7 +1998,7 @@ class PublicFrontendE2ETests(TestCase):
                 }"""
             )
             self.assertEqual(fallback_state["state"], "neutral")
-            self.assertTrue(fallback_state["src"].startswith("blob:"))
+            self.assertTrue(fallback_state["src"].startswith("data:image/"))
             page.locator("#toggle-stage-ui").click()
             self.assertTrue(page.locator("#stage-character-art").is_visible())
             page.locator("#restore-stage-ui").click()

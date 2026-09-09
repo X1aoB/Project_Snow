@@ -27,7 +27,7 @@ class ReleaseManifestTests(TestCase):
         binding.assert_called_once_with(app_root, commit_sha="a" * 40, frontend_bundle=None)
         self.assertEqual(manifest["frontend"], frontend)
         self.assertEqual(manifest["schema_version"], "project-snow-release-1")
-        self.assertEqual(manifest["app_version"], "0.10.0-rc.2")
+        self.assertEqual(manifest["app_version"], "0.10.0-rc.3")
         self.assertEqual(manifest["data_version"], "2026.08.19.1")
         self.assertEqual(manifest["media_version"], "2026.09.09.character.1")
         self.assertEqual(manifest["sticker_version"], "2026.08.19.sticker.1")

@@ -479,7 +479,7 @@ class PublicFrontendReliabilityTests(TestCase):
               throw new Error('verified stage did not initialize');
             }""")
             self.assertTrue(result["ready"])
-            self.assertTrue(result["src"].startswith("blob:"))
+            self.assertTrue(result["src"].startswith("data:image/png;base64,"))
             self.assertEqual(result["state"],"neutral")
             advertised = page.evaluate("""async(hash)=>{
               const art=document.querySelector('#stage-character-art');
@@ -488,7 +488,7 @@ class PublicFrontendReliabilityTests(TestCase):
               return {ready,src:art.getAttribute('src'),state:art.dataset.expressionState};
             }""", PublicFrontendHandler._expression_digest("25b23cb64398"))
             self.assertTrue(advertised["ready"])
-            self.assertTrue(advertised["src"].startswith("blob:"))
+            self.assertTrue(advertised["src"].startswith("data:image/"))
             self.assertEqual(advertised["state"],"happy")
             tampered[0] = True
             self.open(page)
@@ -516,6 +516,75 @@ class PublicFrontendReliabilityTests(TestCase):
               return {ready,src:art.getAttribute('src'),state:art.dataset.expressionState};
             }""")
             self.assertTrue(bundled["ready"])
-            self.assertTrue(bundled["src"].startswith("blob:"))
+            self.assertTrue(bundled["src"].startswith("data:image/"))
             self.assertEqual(bundled["state"],"neutral")
+            browser.close()
+
+    def test_verified_stage_encoding_is_cancelled_bounded_and_recovers_without_refetch(self):
+        image_bytes = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1sAAAAASUVORK5CYII=")
+        image_hash = hashlib.sha256(image_bytes).hexdigest()
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            requests = []
+
+            def image(route):
+                requests.append(route.request.url)
+                route.fulfill(status=200, content_type="image/png", body=image_bytes)
+
+            page.route("**/encoding-fixture.png", image)
+            self.open(page)
+            result = page.evaluate("""async hash => {
+                const originalReader = window.FileReader, nativeDecode = HTMLImageElement.prototype.decode;
+                const later = window.setTimeout, readers = [];
+                let aborts = 0, decodes = 0;
+                const hooks = window.__projectSnowTest;
+                const presentation = {stageAssetPath:'/encoding-fixture.png',stageAssetSha256:hash,renderStrategy:'single_sprite'};
+                window.FileReader = class {
+                    static LOADING = 1;
+                    constructor() { this.readyState = 0; this.result = null; }
+                    readAsDataURL() { this.readyState = 1; this.lateLoad = this.onload; readers.push(this); }
+                    abort() { this.readyState = 2; aborts++; this.onabort?.(); }
+                };
+                HTMLImageElement.prototype.decode = function() { decodes++; return nativeDecode.call(this); };
+                const outcome = promise => promise.then(()=>'unexpected success',error=>error.name+':'+error.message);
+                try {
+                    const controller = new AbortController();
+                    const pending = outcome(hooks.preloadStagePresentation(presentation, controller.signal));
+                    for (let count=0; readers.length<1 && count<100; count++) await new Promise(resolve=>later(resolve,10));
+                    if (readers.length !== 1) throw new Error('encoder did not start');
+                    controller.abort();
+                    const cancelled = await pending;
+                    // Simulate an already-queued load event after cancellation.
+                    readers[0].result = 'data:image/png;base64,untrusted-late-result';
+                    readers[0].lateLoad();
+                    window.setTimeout = (callback, ms, ...args) => later(callback, ms===8000 ? 30 : ms, ...args);
+                    const timedOut = await outcome(hooks.preloadStagePresentation(presentation));
+                    const cleaned = readers.every(reader=>reader.onload===null && reader.onerror===null && reader.onabort===null);
+                    const rejectedDecodes = decodes;
+                    window.FileReader = originalReader;
+                    window.setTimeout = later;
+                    const {prepared} = await hooks.preloadStagePresentation(presentation);
+                    const loaded = {src:prepared.src.startsWith('data:image/png;base64,'),width:prepared.image.naturalWidth};
+                    const verifiedHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256',
+                        await (await fetch(prepared.src)).arrayBuffer()))].map(value=>value.toString(16).padStart(2,'0')).join('');
+                    prepared.dispose();
+                    return {cancelled,timedOut,aborts,cleaned,rejectedDecodes,loaded,verifiedHash,
+                        disposed:!prepared.image.hasAttribute('src')};
+                } finally {
+                    window.FileReader = originalReader;
+                    HTMLImageElement.prototype.decode = nativeDecode;
+                    window.setTimeout = later;
+                }
+            }""", image_hash)
+            self.assertTrue(result["cancelled"].startswith("AbortError:"))
+            self.assertEqual(result["timedOut"], "Error:expression_image_encoding_timeout")
+            self.assertEqual(result["aborts"], 2)
+            self.assertTrue(result["cleaned"])
+            self.assertEqual(result["rejectedDecodes"], 0)
+            self.assertEqual(result["loaded"], {"src": True, "width": 1})
+            self.assertEqual(result["verifiedHash"], image_hash)
+            self.assertTrue(result["disposed"])
+            self.assertEqual(len(requests), 1)
+            self.assertEqual(PublicFrontendHandler.chat_payloads, [])
             browser.close()
