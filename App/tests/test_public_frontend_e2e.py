@@ -56,6 +56,45 @@ END_CARET_VISIBLE = """() => {
 }"""
 
 
+def _announcement_test_feed() -> dict[str, object]:
+    """Fixed clock/calendar inputs, independent of published release notices.
+
+    Return fresh nested values because revision and shared-birthday scenarios
+    intentionally mutate their feed. The links are synthetic and never opened.
+    """
+    birthday_rows = (
+        ("伊切尔", 11, 29), ("克罗瑞娜", 3, 13), ("凯茜娅", 11, 8),
+        ("卜卜", 1, 31), ("奈莉德", 12, 31), ("妮塔", 5, 5),
+        ("安卡希雅", 12, 20), ("恩雅", 1, 19), ("晴", 8, 20),
+        ("猫汐尔", 10, 10), ("琴诺", 2, 27), ("瑟瑞斯", 7, 19),
+        ("米娅", 8, 15), ("肴", 12, 23), ("胧嫣", 2, 1),
+        ("芙提雅", 4, 23), ("芬妮", 7, 30), ("苔丝", 9, 16),
+        ("茉莉安", 9, 5), ("薇蒂雅", 6, 14), ("辰星", 11, 5),
+        ("里芙", 3, 21),
+    )
+    return {
+        "schema_version": 1,
+        "timezone": "Asia/Shanghai",
+        "updates": [{
+            "id": "fixture-announcement",
+            "published_at": "2026-09-05T13:00:00+08:00",
+            "title": "公告与生日提醒上线",
+            "summary": "固定的公告行为测试内容。",
+            "items": ["查看公告与角色生日。", "已读公告不重复自动提示。"],
+        }],
+        "birthdays": [
+            {
+                "character_id": f"fixture-birthday-{index}",
+                "display_name": name,
+                "month": month,
+                "day": day,
+                "source_url": f"https://example.test/birthdays/{index}?oldid=1",
+            }
+            for index, (name, month, day) in enumerate(birthday_rows)
+        ],
+    }
+
+
 def _browser_launch_kwargs() -> dict[str, str]:
     """Select only an explicitly reviewed browser channel for CI.
 
@@ -761,7 +800,7 @@ class PublicFrontendE2ETests(TestCase):
             page.screenshot(path=str(path / f"{name}.png"), full_page=True)
 
     def test_announcements_auto_once_reopen_and_notify_revised_content(self):
-        PublicFrontendHandler.announcement_payload = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        PublicFrontendHandler.announcement_payload = _announcement_test_feed()
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
             page = browser.new_page(viewport={"width": 1280, "height": 900}, timezone_id="America/Los_Angeles")
@@ -805,7 +844,7 @@ class PublicFrontendE2ETests(TestCase):
             browser.close()
 
     def test_announcements_birthday_changes_at_beijing_midnight_and_next_year(self):
-        PublicFrontendHandler.announcement_payload = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        PublicFrontendHandler.announcement_payload = _announcement_test_feed()
         PublicFrontendHandler.announcement_payload["updates"] = []
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
@@ -826,7 +865,7 @@ class PublicFrontendE2ETests(TestCase):
             browser.close()
 
     def test_announcements_calendar_handles_year_boundary_leap_year_and_shared_birthdays(self):
-        feed = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        feed = _announcement_test_feed()
         feed["updates"] = []
         PublicFrontendHandler.announcement_payload = feed
         with sync_playwright() as playwright:
@@ -857,7 +896,7 @@ class PublicFrontendE2ETests(TestCase):
             browser.close()
 
     def test_announcements_loading_retry_storage_fallback_and_safe_text(self):
-        feed = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        feed = _announcement_test_feed()
         feed["updates"][0]["title"] = '<img src=x onerror="window.injected=true">公告'
         PublicFrontendHandler.announcement_payload = feed
         PublicFrontendHandler.announcement_failures = 2
@@ -885,7 +924,7 @@ class PublicFrontendE2ETests(TestCase):
             browser.close()
 
     def test_announcements_wait_for_settings_and_do_not_publish_future_updates(self):
-        feed = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        feed = _announcement_test_feed()
         feed["birthdays"] = []
         feed["updates"][0]["published_at"] = "2026-09-05T14:00:00+08:00"
         PublicFrontendHandler.announcement_payload = feed
@@ -917,7 +956,7 @@ class PublicFrontendE2ETests(TestCase):
             browser.close()
 
     def test_announcements_mobile_button_and_dialog_fit_both_surfaces(self):
-        PublicFrontendHandler.announcement_payload = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        PublicFrontendHandler.announcement_payload = _announcement_test_feed()
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
             for width, height in ((390, 844), (320, 568)):
