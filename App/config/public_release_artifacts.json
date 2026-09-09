@@ -6,9 +6,9 @@
       "manifest_sha256": "46046a61d6747a2cb1b5e1d27caa5e2bf6a1e8cc3cc1e5995bc499093a68d90b"
     },
     "avatar": {
-      "version": "2026.08.19.avatar.1",
-      "manifest_sha256": "258fdb3efeca4792d87f39803defa4f7a525af69fca30539142e6458e958c6fa",
-      "checksums_sha256": "a8a9686fe799539b96e74610bff1719fdd135ceb54fb2427e55ae4067d7ff3f3"
+      "version": "2026.09.09.character.1",
+      "manifest_sha256": "9739c993d5fea7ac2cb6395ba4b23f4c26d1da1a93a6c8255e0c373fa580cd60",
+      "checksums_sha256": "d229a818f24347859b9c00c878451ea55e6825de86c770244263c0c821d8643f"
     },
     "sticker": {
       "version": "2026.08.19.sticker.1",
