@@ -611,7 +611,9 @@ def create_app(
                     return JSONResponse(status_code=status, content={"detail": {"code": code}})
                 # Authenticate before granting the heartbeat allowance. A personal
                 # connector never drains the website's ordinary IP/chat buckets.
-                ip_subject = "subscription-connector:" + connector_hash
+                # Keep the namespaced identity within PostgreSQL's VARCHAR(64)
+                # contract, independently of browser/IP rate-limit subjects.
+                ip_subject = hashlib.sha256(("subscription-connector:" + connector_hash).encode()).hexdigest()
                 ip_limits = [("subscription_connector_hour", "hour", 1800),
                              ("subscription_connector_day", "day", 43200)]
             elif path.startswith("/public/v1/subscription/"):

@@ -35,7 +35,7 @@ export function validateJob(job) {
   if (!job || typeof job.job_id !== 'string' || !/^[A-Za-z0-9_-]{12,128}$/.test(job.job_id) ||
       typeof job.model !== 'string' || !MODEL_ID.test(job.model) || !REASONING_EFFORTS.has(job.effort) ||
       !Array.isArray(job.messages) ||
-      job.messages.length < 1 || job.messages.length > 32 ||
+      job.messages.length < 1 || job.messages.length > 128 ||
       Buffer.byteLength(JSON.stringify(job), 'utf8') > 256 * 1024) {
     throw new ConnectorError('subscription_invalid_job');
   }

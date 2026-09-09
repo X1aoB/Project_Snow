@@ -7,8 +7,10 @@ database. No production secret discovery or user runtime data is used.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -165,6 +167,104 @@ def test_parallel_claim_and_limits_are_atomic(database):
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         assert sum(pool.map(consume, range(8))) == 3
+
+
+def test_subscription_pair_poll_result_and_connector_limits_use_postgres(database):
+    from fastapi.testclient import TestClient
+
+    from backend.snow_app.config import Settings
+    from backend.snow_app.public_main import _anonymous_cookie_name, create_app
+    from backend.snow_app.public_security import open_byok_credential
+    from backend.snow_app.public_subscription import MODEL, PROVIDER
+    from tests.test_public_api import _settings
+
+    migrate(database)
+    store = PublicStore("", engine=database)
+    settings = replace(_settings(), subscription_enabled=True, auto_create_schema=False)
+    app = create_app(settings, Settings.from_environment(), store)
+    broker = app.state.subscription_broker
+    origin = {"Origin": "https://snow.xiaob.dev"}
+    notices = {"accepted_transit_notice": True, "accepted_cost_notice": True,
+               "accepted_local_history_notice": True}
+    catalogue = [{"id": MODEL, "display_name": "Synthetic model", "reasoning_efforts": ["max"],
+                  "default_reasoning_effort": "max"}]
+
+    def counters():
+        with database.connect() as connection:
+            return {(row.subject_hash, row.scope): row.count for row in connection.execute(text(
+                "SELECT subject_hash, scope, count FROM public_rate_limit"
+            ))}
+
+    # Both sessions use the same HTTP client address, but each authenticated
+    # connector must receive its own allowance. All jobs/results are synthetic;
+    # no provider or local Codex process is invoked.
+    with TestClient(app) as client:
+        completed = []
+        for _ in range(2):
+            client.cookies.clear()
+            paired = client.post("/public/v1/subscription/pair", headers=origin, json=notices)
+            assert paired.status_code == 200
+            assert client.get("/public/v1/subscription/status").json()["status"] == "waiting"
+            connected = client.post("/public/v1/subscription/connector/connect", headers=origin,
+                                    json={"pairing_code": paired.json()["pairing_code"],
+                                          "protocol_version": 2, "models": catalogue})
+            assert connected.status_code == 200
+            assert client.get("/public/v1/subscription/status").json()["status"] == "connected"
+            token = connected.json()["connector_token"]
+            relay = open_byok_credential(settings,
+                anonymous_id=client.cookies.get(_anonymous_cookie_name(settings)),
+                token=paired.json()["credential"], expected_provider=PROVIDER)["api_key"]
+            connection, job = broker._new_job(relay, {
+                "model": MODEL, "reasoning_effort": "max",
+                "messages": [{"role": "user", "content": "synthetic PostgreSQL relay check"}],
+            }, 30)
+            polled = client.post("/public/v1/subscription/connector/poll", headers=origin,
+                                 json={"connector_token": token})
+            assert polled.status_code == 200
+            assert polled.json()["job"]["job_id"] == job.job_id
+            result = {"connector_token": token, "job_id": job.job_id,
+                      "content": "synthetic reply", "usage": {"total_tokens": 1}}
+            delivered = client.post("/public/v1/subscription/connector/result", headers=origin, json=result)
+            assert delivered.status_code == 200 and delivered.json() == {"accepted": True}
+            assert job.future.result(timeout=1)["choices"][0]["message"]["content"] == "synthetic reply"
+            broker._release_completed(connection, job)
+            completed.append(result)
+
+        initial = counters()
+        connector_rows = {key: count for key, count in initial.items() if key[1].startswith("subscription_connector_")}
+        subjects = {key[0] for key in connector_rows}
+        assert len(subjects) == 2 and all(re.fullmatch(r"[0-9a-f]{64}", value) for value in subjects)
+        assert len(connector_rows) == 4 and set(connector_rows.values()) == {2}
+        assert not any(scope.startswith("write_ip_") for _, scope in initial)
+
+        # Locate the first token's bucket by observed behavior, then exhaust its
+        # unchanged production hourly allowance without touching the other one.
+        acknowledged = client.post("/public/v1/subscription/connector/result", headers=origin, json=completed[0])
+        assert acknowledged.status_code == 200
+        before_limit = counters()
+        limited_subject = next(subject for subject in subjects
+                               if before_limit[(subject, "subscription_connector_hour")] == 3)
+        with database.begin() as connection:
+            connection.execute(text("UPDATE public_rate_limit SET count=1800 "
+                                    "WHERE subject_hash=:subject AND scope='subscription_connector_hour'"),
+                               {"subject": limited_subject})
+        exhausted = counters()
+        rejected = client.post("/public/v1/subscription/connector/result", headers=origin, json=completed[0])
+        assert rejected.status_code == 429
+        assert rejected.json()["detail"] == {"code": "rate_limit_exceeded",
+                                              "scope": "subscription_connector_hour", "limit": 1800}
+        assert rejected.headers["Retry-After"] == "60" and counters() == exhausted
+        other = client.post("/public/v1/subscription/connector/result", headers=origin, json=completed[1])
+        assert other.status_code == 200
+        after = counters()
+        other_subject = (subjects - {limited_subject}).pop()
+        for scope in ("subscription_connector_hour", "subscription_connector_day"):
+            assert after[(other_subject, scope)] == 3
+        assert all(after[key] == value for key, value in exhausted.items()
+                   if key[0] != other_subject or not key[1].startswith("subscription_connector_"))
+        invalid = client.post("/public/v1/subscription/connector/poll", headers=origin,
+                              json={"connector_token": "A" * 43})
+        assert invalid.status_code == 401 and counters() == after
 
 
 def test_expired_owner_is_fenced_and_never_reissues_provider_work(database):
