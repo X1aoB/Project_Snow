@@ -172,6 +172,30 @@ test('generation uses an empty environment, disables named MCPs, and accepts eve
   assert.equal(rpc.listeners.size, 0);
 });
 
+test('the broker maximum of 128 messages reaches one model turn without truncating conversation history', async () => {
+  const messages = [{ role: 'system', content: 'Synthetic character instructions' },
+    ...Array.from({ length: 127 }, (_, index) => ({
+      role: index % 2 ? 'assistant' : 'user', content: `Synthetic conversation message ${index}`,
+    }))];
+  const rpc = generationRpc();
+  const runner = new JobRunner((value) => generate(rpc, '/synthetic-empty-directory', value));
+  const result = await runner.run({ ...job(), messages });
+  assert.equal(result.error, null);
+  const starts = rpc.calls.filter(({ method }) => method === 'turn/start');
+  assert.equal(starts.length, 1);
+  assert.deepEqual(JSON.parse(starts[0].params.input[0].text), messages.slice(1));
+  assert.equal(rpc.calls.find(({ method }) => method === 'thread/start').params.baseInstructions, messages[0].content);
+});
+
+test('exceeding the broker maximum with 129 messages rejects the job before any model RPC', async () => {
+  const rpc = generationRpc();
+  const runner = new JobRunner((value) => generate(rpc, '/synthetic-empty-directory', value));
+  const messages = Array.from({ length: 129 }, () => ({ role: 'user', content: 'Synthetic message' }));
+  await assert.rejects(runner.run({ ...job(), messages }), /subscription_invalid_job/);
+  assert.deepEqual(rpc.calls, []);
+  assert.equal(runner.results.size, 0);
+});
+
 test('a live MCP tool or loaded instruction prevents any model turn', async () => {
   for (const overrides of [
     { 'mcpServerStatus/list': () => ({ data: [{ name: 'unexpected', tools: { execute: {} } }] }) },
