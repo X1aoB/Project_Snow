@@ -3858,3 +3858,137 @@ docker() {
                     else:
                         self.assertIn("restore-entered", events)
                         self.assertIn("STOP-listener", events)
+
+
+class RetainedOriginCoordinatesTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        app = Path(__file__).resolve().parents[1]
+        source = (app / "ops/promote.sh").read_text(encoding="utf-8")
+        prepare_start = source.index("prepare_or_retain_origin_edge() {")
+        prepare_end = source.index("\n}\n\nprobe_prepared_origin_edge()", prepare_start) + 2
+        switch_start = source.index("switch_edge() {")
+        switch_end = source.index("\n}\n\nstop_snapshot_service()", switch_start) + 2
+        cls.functions = source[prepare_start:prepare_end] + "\n" + source[switch_start:switch_end]
+        candidates = ("C:/Program Files/Git/bin/bash.exe", shutil.which("sh"), shutil.which("bash"))
+        cls.shell = next(
+            (candidate for candidate in candidates if candidate and Path(candidate).is_file()), None,
+        )
+
+    def execute(self, fault="none", rollback="1"):
+        self.assertIsNotNone(self.shell, "A POSIX shell is required for deployment tests.")
+        harness = r'''set -u
+fault=$1
+rollback_mode=$2
+runtime_root=$3
+target_env=/synthetic/runtime/colours/green.compose.env
+target_root=/synthetic/releases/configurations/7ce0205f1f9d6fad275b6542c853541ef1224db6
+durable_env=/synthetic/runtime/origin-edge/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.compose.env
+origin_edge_network=ps-origin0
+origin_edge_internal_network=ps-origin1
+origin_edge_tunnel_retain=0
+origin_edge_retained_env=
+origin_edge_retained_config_root=
+origin_edge_retained_colour=
+live_origin_edge_binding_loaded=1
+live_origin_edge_binding=/synthetic/live-origin-edge-config.json
+container_checks=0
+service_list_has() { [ "$2" = origin-edge ]; }
+validate_docker_dns_security_floor() { :; }
+validate_origin_edge_network() { :; }
+running_origin_edge_matches_snapshot() {
+  [ "$1" = "$target_env" ] && [ "$2" = "$target_root" ] && [ "$3" = green ]
+}
+persist_live_origin_edge_binding() {
+  [ "$1" = "$target_env" ] && [ "$2" = "$target_root" ] && [ "$3" = green ] || return 90
+  # The real publisher copies equal environment bytes to a content-addressed
+  # path. Earlier tests incorrectly returned the slot path and hid this defect.
+  origin_edge_retained_env=$durable_env
+  origin_edge_retained_config_root=$target_root
+  origin_edge_retained_colour=green
+  [ "$fault" != empty-environment ] || origin_edge_retained_env=
+  [ "$fault" != wrong-configuration ] || origin_edge_retained_config_root=/synthetic/wrong
+  [ "$fault" != wrong-colour ] || origin_edge_retained_colour=blue
+  printf '%s\n' binding-persisted
+}
+validate_origin_edge_material() {
+  printf '%s\n' material-check
+  [ "$fault" != tls ] && { [ "$1" = "$durable_env" ] || [ "$1" = "$target_env" ]; } &&
+    [ "$2" = "$target_root" ]
+}
+validate_origin_edge_container() {
+  container_checks=$((container_checks + 1))
+  printf 'container-check:%s\n' "$container_checks"
+  { [ "$1" = "$durable_env" ] || [ "$1" = "$target_env" ]; } && [ "$2" = "$target_root" ] &&
+    [ "$3" = green ] && [ "$4" = true ] || return 91
+  [ "$fault" != policy ] || return 92
+  [ "$fault" != policy-late ] || [ "$container_checks" -ne 2 ]
+}
+validate_running_origin_edge_caddy() {
+  printf '%s\n' caddy-check
+  [ "$fault" != caddy ]
+}
+validate_live_origin_edge_binding() {
+  printf '%s\n' binding-check
+  [ "$fault" != binding ] || return 93
+  [ "$fault" != binding-drift ] || origin_edge_retained_env=/synthetic/changed.env
+}
+ensure_caddy_origin_backend() { printf '%s\n' backend-check; }
+grep() { return 1; }
+docker() {
+  case "$1" in
+    network) return 0 ;;
+    inspect) printf '%s\n' true ;;
+    ps) printf '%s\n' synthetic-origin ;;
+    compose)
+      case "$*" in
+        *'ps --all --quiet origin-edge') printf '%s\n' synthetic-origin ;;
+        *'up -d --no-deps --force-recreate caddy egress-proxy') printf '%s\n' edge-reconcile ;;
+        *) printf '%s\n' forbidden-docker-command >&2; return 99 ;;
+      esac ;;
+    *) printf '%s\n' forbidden-docker-command >&2; return 99 ;;
+  esac
+}
+''' + self.functions + r'''
+prepare_or_retain_origin_edge "$target_env" "$target_root" green || exit $?
+printf 'prepared:%s\n' "$origin_edge_prestart_mode"
+status=0
+switch_edge "$target_env" "$target_root" green "caddy origin-edge" 1 "$origin_edge_prestart_mode" || status=$?
+printf 'result:%s\n' "$status"
+exit "$status"
+'''
+        with tempfile.TemporaryDirectory(prefix="origin-coordinate-contract-") as temporary:
+            script = Path(temporary) / "contract.sh"
+            script.write_text(harness, encoding="utf-8", newline="\n")
+            command = [str(self.shell), str(script), fault, rollback, str(Path(temporary) / "runtime")]
+            return subprocess.run(command, capture_output=True, text=True, check=False, timeout=10)
+
+    def test_matching_listener_uses_persisted_coordinates_for_forward_and_rollback(self):
+        for rollback in ("0", "1"):
+            with self.subTest(rollback=rollback):
+                result = self.execute(rollback=rollback)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(result.stderr, "")
+                self.assertIn("prepared:retain\n", result.stdout)
+                self.assertIn(
+                    "container-check:1\nedge-reconcile\nbackend-check\ncontainer-check:2\n", result.stdout,
+                )
+                self.assertIn("caddy-check\nbinding-check\nresult:0\n", result.stdout)
+
+    def test_invalid_durable_coordinates_and_policy_fail_before_edge_reconcile(self):
+        for fault in ("empty-environment", "wrong-configuration", "wrong-colour", "tls", "policy"):
+            with self.subTest(fault=fault):
+                result = self.execute(fault)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("prepared:retain\n", result.stdout)
+                self.assertNotIn("edge-reconcile", result.stdout)
+                self.assertNotIn("forbidden-docker-command", result.stderr)
+
+    def test_runtime_and_binding_revalidation_still_refuse_late_changes(self):
+        for fault in ("policy-late", "caddy", "binding", "binding-drift"):
+            with self.subTest(fault=fault):
+                result = self.execute(fault)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("edge-reconcile\n", result.stdout)
+                self.assertIn("container-check:2\n", result.stdout)
+                self.assertNotIn("forbidden-docker-command", result.stderr)

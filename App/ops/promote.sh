@@ -1941,6 +1941,14 @@ switch_edge() {
         edge_start_origin=1
         ;;
       retain)
+        # Persisting a matching slot snapshots its environment under origin-edge/.
+        # Validate the listener against those durable coordinates, just as an
+        # overlay does; the slot environment has equal bytes but a different path.
+        edge_runtime_env="$origin_edge_retained_env"
+        edge_runtime_config_root="$origin_edge_retained_config_root"
+        edge_runtime_colour="$origin_edge_retained_colour"
+        [ -n "$edge_runtime_env" ] && [ -n "$edge_runtime_config_root" ] &&
+          [ -n "$edge_runtime_colour" ] || return 1
         edge_retain_origin=1
         ;;
       overlay)
