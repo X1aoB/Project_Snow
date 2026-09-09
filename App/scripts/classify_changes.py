@@ -104,6 +104,7 @@ DEPLOY_PATTERNS = (
     "App/scripts/release_manifest.py",
     "App/scripts/validate_shared_design.py",
     "App/tests/test_deployment_contracts.py",
+    "App/tests/test_subscription_deployment.py",
     "App/tests/test_shared_design.py",
 )
 

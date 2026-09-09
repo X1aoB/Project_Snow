@@ -90,6 +90,7 @@ jobs:
           python -m pytest
           tests/test_public_security.py
           tests/test_public_subscription.py
+          tests/test_subscription_deployment.py
           tests/test_migration_secret_config.py
           tests/test_change_classifier.py
           tests/test_release_manifest.py
@@ -248,7 +249,7 @@ jobs:
         run: |
           find App/ops App/infra -name '*.sh' -print0 | xargs -0 -n1 bash -n
           python -m py_compile App/scripts/bootstrap_release_host.py App/scripts/cloudflare_origin_firewall.py App/scripts/install_origin_tls.py App/scripts/install_release_archive.py App/scripts/release_manifest.py
-          PYTHONPATH=App python -m pytest App/tests/test_deployment_contracts.py App/tests/test_change_classifier.py App/tests/test_install_origin_tls.py App/tests/test_origin_firewall.py App/tests/test_release_manifest.py App/tests/test_frontend_release_contracts.py App/tests/test_candidate_acceptance.py -q
+          PYTHONPATH=App python -m pytest App/tests/test_deployment_contracts.py App/tests/test_subscription_deployment.py App/tests/test_change_classifier.py App/tests/test_install_origin_tls.py App/tests/test_origin_firewall.py App/tests/test_release_manifest.py App/tests/test_frontend_release_contracts.py App/tests/test_candidate_acceptance.py -q
 
   app-image:
     if: >-

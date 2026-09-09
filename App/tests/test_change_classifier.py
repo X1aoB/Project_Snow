@@ -108,9 +108,11 @@ class ChangeClassifierTests(TestCase):
         self.assertFalse(result["app_image"])
 
     def test_deployment_change_runs_deploy_contracts(self) -> None:
-        result = classify(["App/ops/deploy.sh"])
-        self.assertTrue(result["deploy"])
-        self.assertFalse(result["app_image"])
+        for path in ("App/ops/deploy.sh", "App/tests/test_subscription_deployment.py"):
+            with self.subTest(path=path):
+                result = classify([path])
+                self.assertTrue(result["deploy"])
+                self.assertFalse(result["app_image"])
 
     def test_release_artifact_digest_index_is_a_deployment_change(self) -> None:
         result = classify(["App/config/public_release_artifacts.json"])
