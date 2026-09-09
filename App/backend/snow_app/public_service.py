@@ -107,12 +107,15 @@ _PUBLIC_NORMALIZATION_ADJUSTMENTS = frozenset({
 })
 
 
-def _public_immersive_thinking_decision(provider: ProviderSpec, max_provider_calls: int = 2) -> dict[str, Any]:
+def _public_immersive_thinking_decision(
+    provider: ProviderSpec, max_provider_calls: int = 2, reasoning_effort: str | None = None,
+) -> dict[str, Any]:
     """Build the complete provider request contract for public dialogue."""
 
     if provider.provider_id == "codex_subscription":
-        return {"requested": "max", "effective": "max", "reason": "personal_codex_subscription",
-                "provider_kind": provider.provider_id, "request_fields": {"reasoning_effort": "max"},
+        return {"requested": reasoning_effort or "account_default", "effective": reasoning_effort or "account_default",
+                "reason": "personal_codex_subscription", "provider_kind": provider.provider_id,
+                "request_fields": {"reasoning_effort": reasoning_effort} if reasoning_effort is not None else {},
                 "max_provider_http_calls": max(1, min(2, max_provider_calls)),
                 "disable_compatibility_retries": True}
     return {
@@ -1838,7 +1841,9 @@ class PublicChatService:
                         "model_name": request.model,
                         "reason": "public_presence_arrival",
                     },
-                    thinking_decision=_public_immersive_thinking_decision(provider, self.public_settings.max_provider_calls_per_action),
+                    thinking_decision=_public_immersive_thinking_decision(
+                        provider, self.public_settings.max_provider_calls_per_action, request.reasoning_effort,
+                    ),
                     max_tokens_override=1600,
                     persist_exchange=False,
                     remember_session=False,
@@ -2193,7 +2198,9 @@ class PublicChatService:
                             "model_name": request.model,
                             "reason": "public_byok",
                         },
-                        thinking_decision=_public_immersive_thinking_decision(provider, budget.max_provider_calls),
+                        thinking_decision=_public_immersive_thinking_decision(
+                            provider, budget.max_provider_calls, request.reasoning_effort,
+                        ),
                         max_tokens_override=1600,
                         persist_exchange=False,
                         remember_session=False,
@@ -2726,6 +2733,7 @@ class PublicChatService:
                 user_prompt=prompt,
                 max_tokens=1200,
                 client=self.provider_client,
+                reasoning_effort=request.reasoning_effort,
             )
 
         # Summaries use the same global 4-active/8-queued budget as chat and

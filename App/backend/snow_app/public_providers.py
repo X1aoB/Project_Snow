@@ -46,11 +46,12 @@ class ProviderHTTPPool:
 
     async def get(self, url: str, **kwargs: Any) -> httpx.Response:
         if str(url).startswith("https://codex-subscription.invalid"):
-            from .public_subscription import BASE_URL, MODEL, SubscriptionError, relay_authorization
+            from .public_subscription import BASE_URL, SubscriptionError, relay_authorization
             if url != BASE_URL + "/models" or self.subscription_broker is None:
                 raise SubscriptionError("subscription_disabled", 404)
-            self.subscription_broker.preflight(relay_authorization(kwargs.get("headers")), MODEL)
-            return httpx.Response(200, json={"data": [{"id": MODEL}]}, request=httpx.Request("GET", url))
+            catalogue = self.subscription_broker.catalogue(relay_authorization(kwargs.get("headers")))
+            return httpx.Response(200, json={"data": [{"id": item["id"]} for item in catalogue]},
+                                  request=httpx.Request("GET", url))
         client = await self._for_current_loop()
         return await client.get(url, **kwargs)
 
@@ -85,7 +86,7 @@ class ProviderSpec:
 
 PROVIDERS: dict[str, ProviderSpec] = {
     "codex_subscription": ProviderSpec(
-        "codex_subscription", "Codex 订阅 · Luna Max", "https://codex-subscription.invalid/v1",
+        "codex_subscription", "Codex 订阅", "https://codex-subscription.invalid/v1",
         "https://developers.openai.com/codex/app-server/", "https://openai.com/policies/privacy-policy/",
     ),
     "openai": ProviderSpec(
@@ -204,6 +205,7 @@ async def simple_completion(
     max_tokens: int = 800,
     timeout: float = 120,
     client: ProviderHTTPPool | None = None,
+    reasoning_effort: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     if spec.provider_id == "codex_subscription" and client is None:
         raise ProviderRequestError("subscription_not_connected", 409)
@@ -216,6 +218,8 @@ async def simple_completion(
         "temperature": 0.2,
         "max_tokens": max_tokens,
     }
+    if spec.provider_id == "codex_subscription" and reasoning_effort is not None:
+        body["reasoning_effort"] = reasoning_effort
     try:
         if client is not None:
             response = await client.post(

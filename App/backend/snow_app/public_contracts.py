@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -105,6 +107,7 @@ class ChatRequest(StrictModel):
     provider: str = Field(min_length=1, max_length=24)
     credential: str = Field(min_length=20, max_length=8192)
     model: str = Field(min_length=1, max_length=200)
+    reasoning_effort: ReasoningEffort | None = None
     character_id: str = Field(min_length=12, max_length=32)
     message: str = Field(default="", max_length=2000)
     communication_channel: Literal["text", "in_person"] = "text"
@@ -144,6 +147,7 @@ class SummarizeRequest(StrictModel):
     provider: str = Field(min_length=1, max_length=24)
     credential: str = Field(min_length=20, max_length=8192)
     model: str = Field(min_length=1, max_length=200)
+    reasoning_effort: ReasoningEffort | None = None
     character_id: str = Field(min_length=12, max_length=32)
     turns: list[HistoryTurn] = Field(min_length=2, max_length=24)
     previous_summary: str = Field(default="", max_length=6000)
@@ -217,6 +221,7 @@ class PresenceArrivalRequest(StrictModel):
     provider: str = Field(min_length=1, max_length=24)
     credential: str = Field(min_length=20, max_length=8192)
     model: str = Field(min_length=1, max_length=200)
+    reasoning_effort: ReasoningEffort | None = None
     character_id: str = Field(min_length=12, max_length=32)
     recent_history: list[HistoryTurn] = Field(default_factory=list, max_length=24)
     history_summary: str = Field(default="", max_length=6000)

@@ -9,6 +9,9 @@ import { createInterface } from 'node:readline/promises';
 
 export const MODEL = 'gpt-5.6-luna';
 export const EFFORT = 'max';
+export const PROTOCOL_VERSION = 2;
+const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const MAX_WIRE_BYTES = 1024 * 1024;
 const MAX_RESULT_BYTES = 48 * 1024;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -30,7 +33,8 @@ export function siteOrigin(raw, allowLocal = false) {
 
 export function validateJob(job) {
   if (!job || typeof job.job_id !== 'string' || !/^[A-Za-z0-9_-]{12,128}$/.test(job.job_id) ||
-      job.model !== MODEL || job.effort !== EFFORT || !Array.isArray(job.messages) ||
+      typeof job.model !== 'string' || !MODEL_ID.test(job.model) || !REASONING_EFFORTS.has(job.effort) ||
+      !Array.isArray(job.messages) ||
       job.messages.length < 1 || job.messages.length > 32 ||
       Buffer.byteLength(JSON.stringify(job), 'utf8') > 256 * 1024) {
     throw new ConnectorError('subscription_invalid_job');
@@ -166,22 +170,46 @@ export class CodexRpc {
 }
 
 export async function verifyAccountAndModel(rpc) {
+  rpc.models = [];
   const account = await rpc.request('account/read', { refreshToken: false });
   if (account?.account?.type !== 'chatgpt') throw new ConnectorError('subscription_login_required');
   let cursor;
+  const cursors = new Set();
+  const models = new Map();
   for (let page = 0; page < 20; page++) {
-    const response = await rpc.request('model/list', { limit: 100, includeHidden: true, ...(cursor ? { cursor } : {}) });
-    const model = response?.data?.find((candidate) => candidate.model === MODEL);
-    if (model) {
-      if (!model.supportedReasoningEfforts?.some((item) => item.reasoningEffort === EFFORT)) {
-        throw new ConnectorError('subscription_model_unavailable');
+    const response = await rpc.request('model/list', { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) });
+    if (!Array.isArray(response?.data)) throw new ConnectorError('subscription_protocol_error');
+    for (const candidate of response.data) {
+      if (!candidate || candidate.hidden === true || typeof candidate.model !== 'string' ||
+          !MODEL_ID.test(candidate.model) ||
+          (candidate.inputModalities !== undefined && (!Array.isArray(candidate.inputModalities) ||
+            !candidate.inputModalities.includes('text'))) ||
+          (candidate.outputModalities !== undefined && (!Array.isArray(candidate.outputModalities) ||
+            !candidate.outputModalities.includes('text'))) ||
+          !Array.isArray(candidate.supportedReasoningEfforts)) continue;
+      const efforts = [...new Set(candidate.supportedReasoningEfforts.map((item) => item?.reasoningEffort)
+        .filter((effort) => REASONING_EFFORTS.has(effort)))];
+      if (!efforts.length || !efforts.includes(candidate.defaultReasoningEffort)) continue;
+      const model = { id: candidate.model,
+        display_name: (typeof candidate.displayName === 'string' ? candidate.displayName : candidate.model)
+          .replace(/[\x00-\x1f\x7f<>]/g, '').trim().slice(0, 120) || candidate.model.slice(0, 120),
+        reasoning_efforts: efforts, default_reasoning_effort: candidate.defaultReasoningEffort };
+      if (models.has(model.id) && JSON.stringify(models.get(model.id)) !== JSON.stringify(model)) {
+        throw new ConnectorError('subscription_protocol_error');
       }
-      return;
+      models.set(model.id, model);
+      if (models.size > 128) throw new ConnectorError('subscription_protocol_error');
     }
     cursor = response?.nextCursor;
-    if (!cursor) break;
+    if (cursor === undefined || cursor === null || cursor === '') {
+      if (!models.size) throw new ConnectorError('subscription_model_unavailable');
+      rpc.models = [...models.values()];
+      return rpc.models;
+    }
+    if (typeof cursor !== 'string' || cursors.has(cursor)) throw new ConnectorError('subscription_protocol_error');
+    cursors.add(cursor);
   }
-  throw new ConnectorError('subscription_model_unavailable');
+  throw new ConnectorError('subscription_protocol_error');
 }
 
 export async function postSite(site, route, body, timeout = 30000, fetcher = fetch) {
@@ -280,7 +308,6 @@ export const ISOLATED_CONFIG = Object.freeze({
   'otel.exporter': 'none', 'otel.trace_exporter': 'none', 'otel.metrics_exporter': 'none',
   'analytics.enabled': false,
   'history.persistence': 'none', 'otel.log_user_prompt': false, 'model_provider': 'openai',
-  'model_reasoning_effort': EFFORT,
 });
 
 export function configArguments(config) {
@@ -296,7 +323,7 @@ function startRpc(command, cwd, config) {
 
 async function initialize(rpc) {
   await rpc.request('initialize', {
-    clientInfo: { name: 'snow_personal_connector', title: '小吉终端个人订阅连接器', version: '1.0.0' },
+    clientInfo: { name: 'snow_personal_connector', title: '小吉终端个人订阅连接器', version: '1.1.0' },
     capabilities: { experimentalApi: true },
   });
   rpc.write({ method: 'initialized', params: {} });
@@ -330,10 +357,10 @@ export async function openIsolatedCodex(command, cwd) {
 export function threadParameters(job, cwd, isolationConfig = {}) {
   validateJob(job);
   return {
-    model: MODEL, modelProvider: 'openai', allowProviderModelFallback: false,
+    model: job.model, modelProvider: 'openai', allowProviderModelFallback: false,
     approvalPolicy: 'never', sandbox: 'read-only', cwd, ephemeral: true,
     environments: [], runtimeWorkspaceRoots: [], dynamicTools: [], selectedCapabilityRoots: [],
-    config: { ...isolationConfig, model_reasoning_effort: EFFORT },
+    config: { ...isolationConfig, model_reasoning_effort: job.effort },
     baseInstructions: job.messages.filter((message) => ['system', 'developer'].includes(message.role))
       .map((message) => message.content).join('\n\n'),
     developerInstructions: 'Answer the provided conversation as a text-only assistant. Do not call tools. Return only the requested final response.',
@@ -342,6 +369,8 @@ export function threadParameters(job, cwd, isolationConfig = {}) {
 
 export async function generate(rpc, cwd, job) {
   validateJob(job);
+  const model = rpc.models?.find((candidate) => candidate.id === job.model);
+  if (!model?.reasoning_efforts.includes(job.effort)) throw new ConnectorError('subscription_model_unavailable');
   const seconds = job.timeout_seconds === undefined ? 120 : job.timeout_seconds;
   if (!Number.isFinite(seconds) || seconds <= 5) throw new ConnectorError('subscription_result_unknown');
   const deadline = performance.now() + Math.min(175000, (seconds - 5) * 1000);
@@ -352,7 +381,7 @@ export async function generate(rpc, cwd, job) {
   };
   const started = await rpc.request('thread/start', threadParameters(job, cwd, rpc.threadConfig), Math.min(30000, remaining()));
   const threadId = started?.thread?.id;
-  if (!threadId || started.model !== MODEL || started.reasoningEffort !== EFFORT ||
+  if (!threadId || started.model !== job.model || started.reasoningEffort !== job.effort ||
       started.sandbox?.type !== 'readOnly' || started.sandbox?.networkAccess !== false ||
       started.thread.ephemeral !== true || (started.runtimeWorkspaceRoots || []).length ||
       (started.instructionSources || []).length) {
@@ -407,7 +436,7 @@ export async function generate(rpc, cwd, job) {
     const text = messages.length === 1 && messages[0].role === 'user'
       ? messages[0].content : JSON.stringify(messages);
     const response = await rpc.request('turn/start', {
-      threadId, input: [{ type: 'text', text }], model: MODEL, effort: EFFORT,
+      threadId, input: [{ type: 'text', text }], model: job.model, effort: job.effort,
       approvalPolicy: 'never', environments: [],
       sandboxPolicy: { type: 'readOnly', networkAccess: false },
     }, Math.min(remaining(), 30000));
@@ -430,7 +459,7 @@ const FRIENDLY = {
   codex_unavailable: '找不到可运行的 Codex。请安装或更新官方 Codex CLI，或用 --codex 指定官方 codex.exe 路径。',
   codex_update_required: '请更新官方 Codex 至 0.153.4 或更新版本，再启动连接器。',
   subscription_login_required: '请先运行 codex login，并使用包含 Codex 权限的 ChatGPT 订阅账号登录。',
-  subscription_model_unavailable: '当前账号没有 Luna Max 权限；连接器不会自动改用其他模型。',
+  subscription_model_unavailable: '当前账号没有可用的文字聊天模型，或所选模型与推理强度已不可用。请重新配对并选择；连接器不会自动替换。',
   subscription_isolation_unavailable: '当前 Codex 配置不能建立隔离会话，请更新 Codex 后重试。',
   subscription_disabled: '本站尚未启用订阅连接，请联系站点维护者。',
   subscription_pairing_expired: '配对码已过期，请在网站生成新配对码。',
@@ -465,7 +494,7 @@ export async function main(argv = process.argv.slice(2)) {
   process.once('SIGTERM', stop);
   try {
     rpc = await openIsolatedCodex(command, cwd);
-    console.log('已确认：ChatGPT 订阅登录 · Luna Max 可用。登录凭据留在本机。');
+    console.log('已确认：ChatGPT 订阅登录 · ' + rpc.models.length + ' 个可用模型。登录凭据留在本机。');
     if (args['--check']) return;
     console.log('即将连接：' + site + '\n仅输入你自己在该网站生成的配对码。连接期间保持本程序运行；Ctrl+C 停止。');
     const prompt = createInterface({ input: process.stdin, output: process.stdout });
@@ -473,14 +502,14 @@ export async function main(argv = process.argv.slice(2)) {
     try { pairingCode = (await prompt.question('配对码：')).trim(); } finally { prompt.close(); }
     if (!/^[A-Za-z0-9_-]{32,64}$/.test(pairingCode)) throw new ConnectorError('subscription_pairing_invalid');
     const connection = await postSite(site, 'connector/connect', { pairing_code: pairingCode,
-      protocol_version: 1, model: MODEL, effort: EFFORT });
+      protocol_version: PROTOCOL_VERSION, models: rpc.models });
     pairingCode = '';
     if (typeof connection.connector_token !== 'string' || connection.connector_token.length < 32) {
       throw new ConnectorError('subscription_protocol_error');
     }
     const token = connection.connector_token;
     const runner = new JobRunner((job) => generate(rpc, cwd, job));
-    console.log('连接成功。返回网站，选择“使用 Luna Max”即可聊天。');
+    console.log('连接成功。返回网站选择模型和推理强度，再点击“使用所选模型”即可聊天。');
     let failures = 0;
     while (!interrupted) {
       let polled;

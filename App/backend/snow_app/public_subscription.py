@@ -20,9 +20,9 @@ from typing import Any, Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import Field
+from pydantic import ConfigDict, Field, model_validator
 
-from .public_contracts import StrictModel
+from .public_contracts import ReasoningEffort, StrictModel
 from .public_providers import ProviderRequestError
 from .public_security import issue_byok_credential
 
@@ -30,13 +30,13 @@ PROVIDER = "codex_subscription"
 MODEL = "gpt-5.6-luna"
 EFFORT = "max"
 BASE_URL = "https://codex-subscription.invalid/v1"
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 PAIR_SECONDS = 300
 MAX_CONNECTIONS = 128
 MAX_JOB_BYTES = 256 * 1024
 SAFE_ERRORS = frozenset({
     "subscription_result_unknown", "subscription_not_connected",
-    "subscription_model_unavailable", "subscription_login_required",
+    "subscription_model_unavailable", "subscription_effort_unavailable", "subscription_login_required",
     "subscription_rate_limited", "subscription_generation_failed",
     "subscription_protocol_error", "subscription_connector_stopped",
 })
@@ -57,6 +57,7 @@ class _Job:
     job_id: str
     wire: dict[str, Any]
     deadline: float
+    model: str
     future: Future = field(default_factory=Future)
     delivered: bool = False
     terminal: bool = False
@@ -70,6 +71,8 @@ class _Connection:
     pairing_expires: float
     expires: float
     connector_hash: str = ""
+    protocol_version: int = PROTOCOL_VERSION
+    models: list[dict[str, Any]] = field(default_factory=list)
     last_seen: float = 0
     blocked: bool = False
     job: _Job | None = None
@@ -138,8 +141,10 @@ class SubscriptionBroker:
             self._pairings[connection.pairing_hash] = connection
             return relay, code, connection.expires
 
-    def connect(self, code: str) -> tuple[str, float]:
+    def connect(self, code: str, *, protocol_version: int = 1,
+                models: list[dict[str, Any]] | None = None) -> tuple[str, float]:
         self.require_enabled()
+        catalogue = normalize_catalogue(models, protocol_version)
         with self._lock:
             self._prune()
             connection = self._pairings.pop(_digest(code), None)
@@ -147,6 +152,8 @@ class SubscriptionBroker:
                 raise SubscriptionError("subscription_pairing_expired", 401)
             token = secrets.token_urlsafe(32)
             connection.connector_hash = _digest(token)
+            connection.protocol_version = protocol_version
+            connection.models = catalogue
             connection.last_seen = self._clock()
             self._connectors[connection.connector_hash] = connection
             return token, connection.expires
@@ -166,6 +173,8 @@ class SubscriptionBroker:
                     "waiting" if not connection.connector_hash else "disconnected"
                 )
             return {"status": status, "model": MODEL, "effort": EFFORT,
+                    "models": json.loads(json.dumps(connection.models)) if status == "connected" else [],
+                    "protocol_version": connection.protocol_version if connection else PROTOCOL_VERSION,
                     "expires_at": _timestamp(connection.expires) if connection else None}
 
     def disconnect(self, subject):
@@ -183,17 +192,33 @@ class SubscriptionBroker:
                 raise SubscriptionError("credential_invalid", 401)
             return connection.connector_hash
 
-    def preflight(self, relay: str, model: str):
+    def catalogue(self, relay: str) -> list[dict[str, Any]]:
         self.require_enabled()
-        if model != MODEL:
-            raise SubscriptionError("subscription_model_unavailable", 422)
         with self._lock:
             self._prune()
             connection = self._relays.get(_digest(relay))
             if not connection or not self._connected(connection):
                 raise SubscriptionError("subscription_not_connected")
+            return json.loads(json.dumps(connection.models))
+
+    def preflight(self, relay: str, model: str, effort: str | None = None) -> str:
+        self.require_enabled()
+        with self._lock:
+            self._prune()
+            connection = self._relays.get(_digest(relay))
+            if not connection or not self._connected(connection):
+                raise SubscriptionError("subscription_not_connected")
+            candidate = next((item for item in connection.models if item["id"] == model), None)
+            if candidate is None:
+                raise SubscriptionError("subscription_model_unavailable", 422)
+            selected_effort = effort if effort is not None else (
+                EFFORT if model == MODEL else candidate["default_reasoning_effort"]
+            )
+            if selected_effort not in candidate["reasoning_efforts"]:
+                raise SubscriptionError("subscription_effort_unavailable", 422)
             if connection.job and not connection.job.terminal:
                 raise SubscriptionError("subscription_busy")
+            return selected_effort
 
     async def poll(self, token: str, *, wait_seconds: float = 20):
         connector_hash = self.authenticate(token)
@@ -237,7 +262,8 @@ class SubscriptionBroker:
                     waiter.set_result(None)
 
     def _new_job(self, relay, body, timeout):
-        self.preflight(relay, str(body.get("model") or ""))
+        model = str(body.get("model") or "")
+        effort = self.preflight(relay, model, body.get("reasoning_effort"))
         messages = body.get("messages")
         if not isinstance(messages, list) or not 1 <= len(messages) <= 128 or any(
             not isinstance(message, dict) or message.get("role") not in {"system", "developer", "user", "assistant"}
@@ -249,16 +275,16 @@ class SubscriptionBroker:
             not isinstance(response_format, dict) or response_format.get("type") not in {"json_object", "json_schema", "text"}
         ):
             raise SubscriptionError("subscription_protocol_error", 422)
-        wire = {"job_id": secrets.token_urlsafe(24), "model": MODEL, "effort": EFFORT,
+        wire = {"job_id": secrets.token_urlsafe(24), "model": model, "effort": effort,
                 "messages": [{"role": item["role"], "content": item["content"]} for item in messages],
                 "response_format": response_format, "timeout_seconds": timeout}
         if len(json.dumps({"job": wire}, ensure_ascii=False).encode()) > MAX_JOB_BYTES:
             raise SubscriptionError("subscription_request_too_large", 413)
         with self._lock:
             # Two threads can pass the earlier validation simultaneously.
-            self.preflight(relay, MODEL)
+            self.preflight(relay, model, effort)
             connection = self._relays[_digest(relay)]
-            job = _Job(wire["job_id"], wire, self._clock() + timeout)
+            job = _Job(wire["job_id"], wire, self._clock() + timeout, model)
             connection.job = job
             self._wake(connection)
             return connection, job
@@ -334,7 +360,7 @@ class SubscriptionBroker:
                     safe_usage = {key: value for key, value in usage.items()
                                   if key in {"prompt_tokens", "completion_tokens", "total_tokens"}
                                   and isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10000000}
-                    job.future.set_result({"id": job_id, "model": MODEL,
+                    job.future.set_result({"id": job_id, "model": job.model,
                                            "choices": [{"message": {"role": "assistant", "content": content}}],
                                            "usage": safe_usage})
             connection.receipts[job_id] = self._clock() + 600
@@ -392,11 +418,55 @@ class PairRequest(StrictModel):
     accepted_local_history_notice: bool
 
 
+class SubscriptionModel(StrictModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
+
+    id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
+    display_name: str = Field(min_length=1, max_length=200)
+    reasoning_efforts: list[ReasoningEffort] = Field(min_length=1, max_length=8)
+    default_reasoning_effort: ReasoningEffort
+
+    @model_validator(mode="after")
+    def validate_efforts(self):
+        if len(set(self.reasoning_efforts)) != len(self.reasoning_efforts):
+            raise ValueError("duplicate reasoning effort")
+        if self.default_reasoning_effort not in self.reasoning_efforts:
+            raise ValueError("unsupported default reasoning effort")
+        return self
+
+
+def normalize_catalogue(models, protocol_version):
+    if protocol_version == 1:
+        if models is not None:
+            raise SubscriptionError("subscription_protocol_error", 422)
+        return [{"id": MODEL, "display_name": "Luna", "reasoning_efforts": [EFFORT],
+                 "default_reasoning_effort": EFFORT}]
+    if protocol_version != 2 or not isinstance(models, list) or not 1 <= len(models) <= 128:
+        raise SubscriptionError("subscription_protocol_error", 422)
+    try:
+        catalogue = [SubscriptionModel.model_validate(item).model_dump() for item in models]
+    except ValueError:
+        raise SubscriptionError("subscription_protocol_error", 422) from None
+    if len({item["id"] for item in catalogue}) != len(catalogue):
+        raise SubscriptionError("subscription_protocol_error", 422)
+    return catalogue
+
+
 class ConnectorConnect(StrictModel):
     pairing_code: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]+$")
-    protocol_version: Literal[1]
-    model: Literal["gpt-5.6-luna"]
-    effort: Literal["max"]
+    protocol_version: Literal[1, 2]
+    model: Literal["gpt-5.6-luna"] | None = None
+    effort: Literal["max"] | None = None
+    models: list[SubscriptionModel] | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_protocol(self):
+        if self.protocol_version == 1:
+            if self.model != MODEL or self.effort != EFFORT or self.models is not None:
+                raise ValueError("invalid v1 connector")
+        elif self.models is None or self.model is not None or self.effort is not None:
+            raise ValueError("invalid v2 connector")
+        return self
 
 
 class ConnectorPoll(StrictModel):
@@ -439,9 +509,10 @@ def install_subscription_routes(app: FastAPI, settings, broker: SubscriptionBrok
 
     @app.post("/public/v1/subscription/connector/connect")
     async def connect(payload: ConnectorConnect):
-        token, expires = broker.connect(payload.pairing_code)
+        token, expires = broker.connect(payload.pairing_code, protocol_version=payload.protocol_version,
+                                        models=[item.model_dump() for item in payload.models] if payload.models else None)
         return {"connector_token": token, "expires_at": _timestamp(expires),
-                "model": MODEL, "effort": EFFORT, "protocol_version": PROTOCOL_VERSION}
+                "model": MODEL, "effort": EFFORT, "protocol_version": payload.protocol_version}
 
     @app.post("/public/v1/subscription/connector/poll")
     async def poll(payload: ConnectorPoll):

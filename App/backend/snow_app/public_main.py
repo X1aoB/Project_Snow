@@ -73,6 +73,7 @@ from .public_store import (
 from .public_subscription import (
     EFFORT as SUBSCRIPTION_EFFORT,
     MODEL as SUBSCRIPTION_MODEL,
+    PROTOCOL_VERSION as SUBSCRIPTION_PROTOCOL_VERSION,
     PROVIDER as SUBSCRIPTION_PROVIDER,
     SubscriptionBroker,
     SubscriptionError,
@@ -260,6 +261,15 @@ def _request_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _model_request_body(payload: ChatRequest | PresenceArrivalRequest | SummarizeRequest) -> dict[str, Any]:
+    body = payload.model_dump(mode="json", exclude={"credential"})
+    # Preserve hashes of request snapshots created before effort selection was
+    # introduced. Explicit efforts remain part of the idempotency contract.
+    if body.get("reasoning_effort") is None:
+        body.pop("reasoning_effort", None)
+    return body
 
 
 def _feedback_blocks(blocks: list[Any], limit: int) -> list[dict[str, str]]:
@@ -709,7 +719,7 @@ def create_app(
             "language": "zh-CN",
             "providers": enabled,
             "subscription": {"enabled": subscription_broker.enabled, "model": SUBSCRIPTION_MODEL,
-                             "effort": SUBSCRIPTION_EFFORT, "protocol_version": 1},
+                             "effort": SUBSCRIPTION_EFFORT, "protocol_version": SUBSCRIPTION_PROTOCOL_VERSION},
             "turnstile_site_key": public_settings.turnstile_site_key,
             "limits": {
                 "input_characters": 2000,
@@ -960,8 +970,8 @@ def create_app(
     @app.post("/public/v1/presence/arrival")
     async def presence_arrival(request: Request, payload: PresenceArrivalRequest) -> dict[str, Any]:
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
-        if spec.provider_id == SUBSCRIPTION_PROVIDER and payload.model != SUBSCRIPTION_MODEL:
-            raise _error("subscription_model_unavailable", 422)
+        if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
+            raise _error("reasoning_effort_not_supported", 422)
         claims = open_byok_credential(
             public_settings,
             anonymous_id=request.state.anonymous_id,
@@ -969,7 +979,7 @@ def create_app(
             expected_provider=spec.provider_id,
         )
         cache_id = "presence-arrival:" + str(payload.arrival_id)
-        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        request_body = _model_request_body(payload)
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
@@ -997,7 +1007,9 @@ def create_app(
                 result = {key: value for key, value in prepared.items() if key != "state"}
             else:
                 if spec.provider_id == SUBSCRIPTION_PROVIDER:
-                    subscription_broker.preflight(str(claims["api_key"]), payload.model)
+                    payload.reasoning_effort = subscription_broker.preflight(
+                        str(claims["api_key"]), payload.model, payload.reasoning_effort,
+                    )
                 try:
                     await async_store.call("consume_limits",
                         request.state.subject_hash,
@@ -1055,8 +1067,8 @@ def create_app(
     @app.post("/public/v1/chat/stream")
     async def chat_stream(request: Request, payload: ChatRequest):
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
-        if spec.provider_id == SUBSCRIPTION_PROVIDER and payload.model != SUBSCRIPTION_MODEL:
-            raise _error("subscription_model_unavailable", 422)
+        if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
+            raise _error("reasoning_effort_not_supported", 422)
         public_model = redact_sensitive_text(payload.model, 200)
         chat_service.ensure_character_available(payload.character_id)
         try:
@@ -1082,7 +1094,7 @@ def create_app(
             token=payload.credential,
             expected_provider=spec.provider_id,
         )
-        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        request_body = _model_request_body(payload)
         request_id = str(payload.request_id)
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, request_id)
@@ -1121,7 +1133,9 @@ def create_app(
         else:
             try:
                 if spec.provider_id == SUBSCRIPTION_PROVIDER:
-                    subscription_broker.preflight(str(claims["api_key"]), payload.model)
+                    payload.reasoning_effort = subscription_broker.preflight(
+                        str(claims["api_key"]), payload.model, payload.reasoning_effort,
+                    )
                 await async_store.call("consume_limits",
                     request.state.subject_hash,
                     [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
@@ -1502,8 +1516,8 @@ def create_app(
     @app.post("/public/v1/chat/summarize")
     async def summarize(request: Request, payload: SummarizeRequest) -> dict[str, Any]:
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
-        if spec.provider_id == SUBSCRIPTION_PROVIDER and payload.model != SUBSCRIPTION_MODEL:
-            raise _error("subscription_model_unavailable", 422)
+        if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
+            raise _error("reasoning_effort_not_supported", 422)
         claims = open_byok_credential(
             public_settings,
             anonymous_id=request.state.anonymous_id,
@@ -1511,7 +1525,7 @@ def create_app(
             expected_provider=spec.provider_id,
         )
         cache_id = "chat-summary:" + str(payload.request_id)
-        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        request_body = _model_request_body(payload)
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
@@ -1536,7 +1550,9 @@ def create_app(
                     raise _error(str(cached["terminal_error"]), 409)
                 return {**cached, "idempotent_replay": True}
             if spec.provider_id == SUBSCRIPTION_PROVIDER:
-                subscription_broker.preflight(str(claims["api_key"]), payload.model)
+                payload.reasoning_effort = subscription_broker.preflight(
+                    str(claims["api_key"]), payload.model, payload.reasoning_effort,
+                )
             # Summaries are extra model calls and therefore consume the same
             # daily 200-call budget as chat, but deliberately do not touch the
             # hourly 50-round bucket.

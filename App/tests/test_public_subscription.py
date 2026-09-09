@@ -15,9 +15,10 @@ from fastapi.testclient import TestClient
 
 from backend.snow_app.config import Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
-from backend.snow_app.public_main import _anonymous_cookie_name, create_app
+from backend.snow_app.public_contracts import ChatRequest, PresenceArrivalRequest, SummarizeRequest
+from backend.snow_app.public_main import _anonymous_cookie_name, _request_hash, create_app
 from backend.snow_app.public_providers import PROVIDERS, ProviderHTTPPool, discover_models
-from backend.snow_app.public_security import open_byok_credential
+from backend.snow_app.public_security import open_byok_credential, subject_hash
 from backend.snow_app.public_service import _public_immersive_thinking_decision
 from backend.snow_app.public_store import PublicStore
 from backend.snow_app.public_subscription import (
@@ -35,6 +36,13 @@ BODY = {"model": MODEL, "messages": [{"role": "user", "content": "synthetic requ
 ORIGIN = {"Origin": "https://snow.xiaob.dev"}
 NOTICES = {"accepted_transit_notice": True, "accepted_cost_notice": True,
            "accepted_local_history_notice": True}
+OTHER_MODEL = "gpt-account-model"
+CATALOGUE = [
+    {"id": MODEL, "display_name": "Luna", "reasoning_efforts": ["low", "max"],
+     "default_reasoning_effort": "low"},
+    {"id": OTHER_MODEL, "display_name": "Account model", "reasoning_efforts": ["medium", "high", "ultra"],
+     "default_reasoning_effort": "medium"},
+]
 
 
 class SubscriptionBrokerTests(TestCase):
@@ -151,6 +159,104 @@ class SubscriptionBrokerTests(TestCase):
             broker.complete(relay, {**BODY, "messages": [{"role": "user", "content": "x" * 262144}]})
         self.assertIsNone(broker._subjects["first"].job)
 
+    def test_v2_catalogues_are_account_scoped_copied_and_v1_remains_luna_max(self):
+        broker = SubscriptionBroker(True)
+        self.addCleanup(broker.close)
+        first_relay, code, _ = broker.pair("first", 3600)
+        source = json.loads(json.dumps(CATALOGUE))
+        broker.connect(code, protocol_version=2, models=source)
+        second_relay, _ = self.connected(broker, "second")
+        source[0]["reasoning_efforts"].append("ultra")
+        first = broker.status("first")
+        self.assertEqual(first["protocol_version"], 2)
+        self.assertEqual(first["models"], CATALOGUE)
+        first["models"][0]["reasoning_efforts"].append("ultra")
+        self.assertEqual(broker.status("first")["models"], CATALOGUE)
+        self.assertEqual(broker.status("second")["protocol_version"], 1)
+        self.assertEqual(broker.preflight(second_relay, MODEL), "max")
+        for model, effort, code in ((OTHER_MODEL, "medium", "subscription_model_unavailable"),
+                                    (MODEL, "low", "subscription_effort_unavailable")):
+            with self.subTest(model=model, effort=effort), self.assertRaisesRegex(SubscriptionError, code):
+                broker.preflight(second_relay, model, effort)
+
+        async def discover():
+            pool = ProviderHTTPPool(broker)
+            self.assertEqual(set(await discover_models(PROVIDERS[PROVIDER], first_relay, client=pool)),
+                             {MODEL, OTHER_MODEL})
+            self.assertEqual(await discover_models(PROVIDERS[PROVIDER], second_relay, client=pool), [MODEL])
+            self.assertIsNone(pool._client)
+            await pool.close()
+
+        asyncio.run(discover())
+        self.assertEqual(broker.status("unrelated")["models"], [])
+        broker.disconnect("first")
+        self.assertEqual(broker.status("first")["models"], [])
+        self.assertEqual(len(broker.status("second")["models"]), 1)
+
+    def test_v2_jobs_keep_exact_model_effort_and_default_selection(self):
+        broker = SubscriptionBroker(True)
+        self.addCleanup(broker.close)
+        relay, code, _ = broker.pair("first", 3600)
+        token, _ = broker.connect(code, protocol_version=2, models=CATALOGUE)
+        choices = [(MODEL, None, "max"), (MODEL, "low", "low"),
+                   (OTHER_MODEL, None, "medium"), (OTHER_MODEL, "high", "high"),
+                   (OTHER_MODEL, "ultra", "ultra")]
+        with ThreadPoolExecutor() as executor:
+            for model, selected, expected in choices:
+                with self.subTest(model=model, effort=selected):
+                    body = {**BODY, "model": model, "reasoning_effort": selected}
+                    pending = executor.submit(broker.complete, relay, body, 5)
+                    first = asyncio.run(broker.poll(token))["job"]
+                    self.assertEqual((first["model"], first["effort"]), (model, expected))
+                    # A new choice cannot mutate an already enqueued operation.
+                    body["model"] = "changed-after-submission"
+                    body["reasoning_effort"] = "none"
+                    repeated = asyncio.run(broker.poll(token))["job"]
+                    self.assertEqual((repeated["job_id"], repeated["model"], repeated["effort"]),
+                                     (first["job_id"], model, expected))
+                    with self.assertRaisesRegex(SubscriptionError, "subscription_busy"):
+                        broker.complete(relay, BODY)
+                    broker.result(token, first["job_id"], "synthetic reply", None, {})
+                    self.assertEqual(pending.result(timeout=2)["model"], model)
+
+    def test_v2_unsupported_pairs_and_missing_luna_max_never_enqueue(self):
+        broker = SubscriptionBroker(True)
+        self.addCleanup(broker.close)
+        relay, code, _ = broker.pair("first", 3600)
+        broker.connect(code, protocol_version=2, models=CATALOGUE)
+        for model, effort, code in ((OTHER_MODEL, "max", "subscription_effort_unavailable"),
+                                    (MODEL, "ultra", "subscription_effort_unavailable"),
+                                    ("another-account-model", "high", "subscription_model_unavailable")):
+            with self.subTest(model=model, effort=effort), self.assertRaisesRegex(SubscriptionError, code):
+                broker.complete(relay, {**BODY, "model": model, "reasoning_effort": effort})
+            self.assertIsNone(broker._subjects["first"].job)
+        relay, code, _ = broker.pair("first", 3600)
+        broker.connect(code, protocol_version=2, models=[{**CATALOGUE[0], "reasoning_efforts": ["low"]}])
+        with self.assertRaisesRegex(SubscriptionError, "subscription_effort_unavailable"):
+            broker.complete(relay, BODY)
+        self.assertIsNone(broker._subjects["first"].job)
+
+    def test_invalid_v2_catalogues_do_not_consume_pairing_code(self):
+        broker = SubscriptionBroker(True)
+        self.addCleanup(broker.close)
+        _, code, _ = broker.pair("first", 3600)
+        bad_entries = [
+            {**CATALOGUE[0], "reasoning_efforts": ["maximum"]},
+            {**CATALOGUE[0], "reasoning_efforts": ["low", "low"]},
+            {**CATALOGUE[0], "default_reasoning_effort": "ultra"},
+            *[{**CATALOGUE[0], "id": value} for value in
+              ("https://example.invalid/model", " white-space", "white space", "trailing ", "a" * 201)],
+        ]
+        for catalogue in ([], CATALOGUE * 65, [CATALOGUE[0], CATALOGUE[0]],
+                          *[[entry] for entry in bad_entries]):
+            with self.subTest(catalogue=catalogue), self.assertRaisesRegex(SubscriptionError, "subscription_protocol_error"):
+                broker.connect(code, protocol_version=2, models=catalogue)
+        all_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+        broker.connect(code, protocol_version=2, models=[{
+            **CATALOGUE[1], "reasoning_efforts": all_efforts,
+        }])
+        self.assertEqual(broker.status("first")["models"][0]["reasoning_efforts"], all_efforts)
+
 
 class SubscriptionAPITests(TestCase):
     def setUp(self):
@@ -185,9 +291,17 @@ class SubscriptionAPITests(TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["connector_token"]
 
+    def connect_v2(self, code, models=CATALOGUE):
+        response = self.connector.post("/public/v1/subscription/connector/connect", headers=ORIGIN,
+                                       json={"pairing_code": code, "protocol_version": 2, "models": models})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["protocol_version"], 2)
+        return response.json()["connector_token"]
+
     def test_config_notice_origin_pairing_and_subject_scope(self):
         config = self.client.get("/public/v1/config").json()
         self.assertTrue(config["subscription"]["enabled"])
+        self.assertEqual(config["subscription"]["protocol_version"], 2)
         self.assertIn(PROVIDER, [provider["provider_id"] for provider in config["providers"]])
         self.assertEqual(self.client.post("/public/v1/subscription/pair", json=NOTICES).status_code, 403)
         response = self.client.post("/public/v1/subscription/pair", headers=ORIGIN,
@@ -198,6 +312,7 @@ class SubscriptionAPITests(TestCase):
         self.assertEqual(self.client.get("/public/v1/subscription/status").json()["status"], "waiting")
         token = self.connect(pairing["pairing_code"])
         self.assertEqual(self.client.get("/public/v1/subscription/status").json()["status"], "connected")
+        self.assertEqual(self.client.get("/public/v1/subscription/status").json()["protocol_version"], 1)
         self.assertEqual(self.connector.get("/public/v1/subscription/status").json()["status"], "disconnected")
         self.connector.post("/public/v1/subscription/disconnect", headers=ORIGIN, json={})
         self.assertEqual(self.client.get("/public/v1/subscription/status").json()["status"], "connected")
@@ -274,9 +389,10 @@ class SubscriptionAPITests(TestCase):
 
     def test_chat_unknown_crosses_real_facade_and_replays_without_rewrite(self):
         pairing = self.pair()
-        self.connect(pairing["pairing_code"])
+        self.connect_v2(pairing["pairing_code"])
         service = self.app.state.chat_service
-        body = {"provider": PROVIDER, "credential": pairing["credential"], "model": MODEL,
+        body = {"provider": PROVIDER, "credential": pairing["credential"], "model": OTHER_MODEL,
+                "reasoning_effort": "high",
                 "request_id": str(uuid4()), "character_id": MVP_CHARACTERS[0].character_id,
                 "message": "synthetic hello"}
         with patch.object(service, "_request_state", return_value=nullcontext(("session", "world", {}))), \
@@ -293,11 +409,14 @@ class SubscriptionAPITests(TestCase):
             self.assertEqual(replay.status_code, 200, replay.text)
             self.assertIn("subscription_result_unknown", replay.text)
             self.assertEqual(generation.call_count, 1)
+            self.assertEqual(generation.call_args.kwargs["thinking_decision"]["request_fields"],
+                             {"reasoning_effort": "high"})
+            self.assertEqual(generation.call_args.kwargs["model_settings"][2], OTHER_MODEL)
 
     def test_mvp_http_layer_preserves_unknown_without_compatibility_retry(self):
         service = self.app.state.chat_service
         error = SubscriptionError("subscription_result_unknown", submitted=True)
-        decision = _public_immersive_thinking_decision(PROVIDERS[PROVIDER])
+        decision = _public_immersive_thinking_decision(PROVIDERS[PROVIDER], reasoning_effort="max")
         with patch.object(service.mvp._model_http_client, "post", side_effect=error) as request:
             with self.assertRaises(SubscriptionError) as caught:
                 service.mvp._call_model("synthetic rules", "synthetic request",
@@ -309,9 +428,10 @@ class SubscriptionAPITests(TestCase):
 
     def test_arrival_unknown_crosses_real_facade_and_replays_without_rewrite(self):
         pairing = self.pair()
-        self.connect(pairing["pairing_code"])
+        self.connect_v2(pairing["pairing_code"])
         service = self.app.state.chat_service
         body = {"provider": PROVIDER, "credential": pairing["credential"], "model": MODEL,
+                "reasoning_effort": "low",
                 "arrival_id": str(uuid4()), "character_id": MVP_CHARACTERS[0].character_id}
         prepared = {"decision": "noticed", "state_package": "", "state": {}, "model_called": False}
         with patch.object(service, "prepare_presence_arrival", return_value=prepared), \
@@ -327,12 +447,15 @@ class SubscriptionAPITests(TestCase):
             self.assertEqual(replay.status_code, 200, replay.text)
             self.assertEqual(replay.json()["terminal_error"], "subscription_result_unknown")
             self.assertEqual(generation.call_count, 1)
+            self.assertEqual(generation.call_args.kwargs["thinking_decision"]["request_fields"],
+                             {"reasoning_effort": "low"})
 
     def test_summary_unknown_is_terminal_and_replays_the_specific_error(self):
         pairing = self.pair()
-        self.connect(pairing["pairing_code"])
+        self.connect_v2(pairing["pairing_code"])
         service = self.app.state.chat_service
-        body = {"provider": PROVIDER, "credential": pairing["credential"], "model": MODEL,
+        body = {"provider": PROVIDER, "credential": pairing["credential"], "model": OTHER_MODEL,
+                "reasoning_effort": "ultra",
                 "request_id": str(uuid4()), "character_id": MVP_CHARACTERS[0].character_id,
                 "turns": [{"role": "user", "content": "synthetic question"},
                           {"role": "assistant", "content": "synthetic answer"}]}
@@ -346,6 +469,98 @@ class SubscriptionAPITests(TestCase):
             self.assertEqual(replay.status_code, 409, replay.text)
             self.assertEqual(replay.json()["detail"]["code"], "subscription_result_unknown")
             self.assertEqual(generation.call_count, 1)
+            self.assertEqual(generation.call_args.kwargs["json"]["reasoning_effort"], "ultra")
+            self.assertEqual(generation.call_args.kwargs["json"]["model"], OTHER_MODEL)
+
+    def test_v2_endpoint_catalogue_and_model_discovery_do_not_leak_to_another_browser(self):
+        pairing = self.pair()
+        self.assertEqual(self.client.get("/public/v1/subscription/status").json()["models"], [])
+        self.connect_v2(pairing["pairing_code"])
+        status = self.client.get("/public/v1/subscription/status").json()
+        self.assertEqual(status["models"], CATALOGUE)
+        self.assertEqual((status["model"], status["effort"], status["protocol_version"]), (MODEL, "max", 2))
+        self.assertEqual(self.connector.get("/public/v1/subscription/status").json()["models"], [])
+        models = self.client.post("/public/v1/byok/models", headers=ORIGIN,
+                                  json={"provider": PROVIDER, "credential": pairing["credential"],
+                                        "request_id": str(uuid4())})
+        self.assertEqual(models.status_code, 200, models.text)
+        self.assertEqual(set(models.json()["models"]), {MODEL, OTHER_MODEL})
+
+    def request_cases(self, credential):
+        base = {"provider": PROVIDER, "credential": credential, "model": MODEL,
+                "character_id": MVP_CHARACTERS[0].character_id}
+        return [
+            ("/public/v1/chat/stream", ChatRequest, "", "request_id",
+             {**base, "request_id": str(uuid4()), "message": "synthetic request"}),
+            ("/public/v1/presence/arrival", PresenceArrivalRequest, "presence-arrival:", "arrival_id",
+             {**base, "arrival_id": str(uuid4())}),
+            ("/public/v1/chat/summarize", SummarizeRequest, "chat-summary:", "request_id",
+             {**base, "request_id": str(uuid4()), "turns": [
+                 {"role": "user", "content": "synthetic question"},
+                 {"role": "assistant", "content": "synthetic answer"}]}),
+        ]
+
+    def test_all_endpoints_replay_pre_effort_snapshots_without_a_connection(self):
+        pairing = self.pair()
+        subject = subject_hash(self.client.cookies.get(_anonymous_cookie_name(self.settings)))
+        service = self.app.state.chat_service
+        with patch.object(service, "chat") as chat, patch.object(service, "finish_presence_arrival") as arrival, \
+                patch.object(service, "summarize") as summary:
+            for path, contract, prefix, id_field, body in self.request_cases(pairing["credential"]):
+                with self.subTest(path=path):
+                    # Seed a durable snapshot using the exact contract fields
+                    # present before protocol 2. Neither omitted nor null effort
+                    # may turn it into a different operation after an upgrade.
+                    legacy = contract.model_validate(body).model_dump(
+                        mode="json", exclude={"credential", "reasoning_effort"},
+                    )
+                    cache_id = prefix + body[id_field]
+                    self.assertEqual(self.store.claim_request(cache_id, subject, _request_hash(legacy))[0], "claimed")
+                    self.store.complete_request(cache_id, {"terminal_error": "subscription_result_unknown"})
+                    for snapshot in (body, {**body, "reasoning_effort": None}):
+                        replay = self.client.post(path, headers=ORIGIN, json=snapshot)
+                        self.assertEqual(replay.status_code, 409 if prefix == "chat-summary:" else 200, replay.text)
+                        self.assertIn("subscription_result_unknown", replay.text)
+                    for change in ({"reasoning_effort": "max"}, {"model": OTHER_MODEL}):
+                        conflict = self.client.post(path, headers=ORIGIN, json={**body, **change})
+                        self.assertEqual(conflict.status_code, 409, conflict.text)
+                        self.assertEqual(conflict.json()["detail"]["code"], "request_id_conflict")
+            chat.assert_not_called()
+            arrival.assert_not_called()
+            summary.assert_not_called()
+
+    def test_unsupported_pairs_stop_all_endpoints_before_generation_and_chat_budget(self):
+        pairing = self.pair()
+        self.connect_v2(pairing["pairing_code"])
+        service = self.app.state.chat_service
+        prepared = {"decision": "noticed", "state_package": "", "state": {}, "model_called": False}
+        with patch.object(service, "prepare_presence_arrival", return_value=prepared), \
+                patch.object(service, "chat") as chat, patch.object(service, "finish_presence_arrival") as arrival, \
+                patch.object(service, "summarize") as summary, \
+                patch.object(self.app.state.async_store, "call", wraps=self.app.state.async_store.call) as store_call:
+            for path, _, _, _, body in self.request_cases(pairing["credential"]):
+                for model, effort, code in ((OTHER_MODEL, "max", "subscription_effort_unavailable"),
+                                            ("another-account-model", "high", "subscription_model_unavailable")):
+                    with self.subTest(path=path, model=model, effort=effort):
+                        response = self.client.post(path, headers=ORIGIN,
+                                                    json={**body, "model": model, "reasoning_effort": effort})
+                        self.assertEqual(response.status_code, 422, response.text)
+                        self.assertEqual(response.json()["detail"]["code"], code)
+            limits = [limit for call in store_call.call_args_list if call.args[0] == "consume_limits"
+                      for limit in call.args[2]]
+            self.assertFalse(any(limit[0] in {"chat_hour", "chat_day"} for limit in limits))
+            chat.assert_not_called()
+            arrival.assert_not_called()
+            summary.assert_not_called()
+        self.assertTrue(all(connection.job is None for connection in self.app.state.subscription_broker._subjects.values()))
+
+    def test_non_subscription_providers_reject_new_effort_instead_of_changing_existing_behavior(self):
+        for path, _, _, _, body in self.request_cases("x" * 40):
+            with self.subTest(path=path):
+                response = self.client.post(path, headers=ORIGIN,
+                                            json={**body, "provider": "openai", "reasoning_effort": "high"})
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(response.json()["detail"]["code"], "reasoning_effort_not_supported")
 
     def test_disabled_config_does_not_enable_subscription_through_provider_list(self):
         settings = replace(self.settings, subscription_enabled=False, enabled_providers=(PROVIDER, "openai"))

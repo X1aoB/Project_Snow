@@ -302,6 +302,11 @@ textarea { resize: none; }
 .subscription-settings p { margin: 0; font-size: .875rem; line-height: 1.7; color: var(--snow-muted); overflow-wrap: anywhere; }
 .subscription-model { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 14px; border: 1px solid var(--snow-line); border-radius: 12px; background: #edf5f9; }
 .subscription-model strong { font-size: 1.1rem; }.subscription-model span { color: var(--snow-muted); font-size: .82rem; }
+.subscription-model strong, .subscription-model span { min-width: 0; overflow-wrap: anywhere; }
+.subscription-model-controls { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 8px 10px; min-width: 0; }
+.subscription-model-controls label, .subscription-model-controls select { min-width: 0; }
+.subscription-model-controls select { text-overflow: ellipsis; }
+.subscription-model-controls .subscription-selection-hint { grid-column: 1 / -1; font-size: .75rem; line-height: 1.45; }
 .subscription-settings .subscription-status { padding: 11px 13px; border-radius: 10px; background: #eef3f6; color: #466477; }
 .subscription-status[data-status="connected"] { background: #e9f4ed; color: #426b57; }
 .subscription-status[data-status="error"] { background: #fff1f3; color: var(--snow-danger); }
@@ -423,6 +428,7 @@ html.privacy-root body.privacy-page { height: auto; min-height: 100%; overflow: 
   .floating-feedback { right: 10px; bottom: 10px; }
 }
 @media (max-width: 560px) {
+  .subscription-model-controls { grid-template-columns: minmax(0, 1fr); }
   .chat-header { gap: 7px; }
   .active-character { gap: 8px; }
   .announcements-modal .announcements-header { padding: 20px 18px 16px; }

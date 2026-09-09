@@ -2,8 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { CodexRpc, JobRunner, MODEL, EFFORT, siteOrigin, validateJob, postSite,
+import { CodexRpc, JobRunner, siteOrigin, validateJob, postSite,
   verifyAccountAndModel, generate } from '../public_frontend/downloads/snow-codex-connector.mjs';
+
+const MODEL = 'gpt-5.6-luna';
+const EFFORT = 'max';
+const ALTERNATE_MODEL = 'gpt-5.5';
+const ULTRA_MODEL = 'gpt-6-astra';
+const catalogModel = (id, efforts, defaultEffort = efforts[0]) => ({ id, display_name: id,
+  reasoning_efforts: efforts, default_reasoning_effort: defaultEffort });
+const rawModel = (id, efforts, extra = {}) => ({ id: `catalog-entry-${id}`, model: id,
+  displayName: id, hidden: false, inputModalities: ['text', 'image'],
+  supportedReasoningEfforts: efforts.map((reasoningEffort) => ({ reasoningEffort, description: 'Fixture' })),
+  defaultReasoningEffort: efforts[0], ...extra });
 
 const job = (id = 'job_012345678901234567890') => ({ job_id: id, model: MODEL, effort: EFFORT,
   messages: [{ role: 'system', content: '角色规则' }, { role: 'user', content: '你好' }] });
@@ -19,9 +30,12 @@ test('site accepts only a root HTTPS origin; local HTTP is an explicit developme
   assert.throws(() => siteOrigin('http://192.168.1.1', true), /invalid_site/);
 });
 
-test('untrusted jobs cannot change the model, effort, or add tool/image inputs', () => {
+test('jobs accept model choices but reject invalid IDs, effort values, and tool/image inputs', () => {
   assert.equal(validateJob(job()).model, MODEL);
-  for (const value of [{ ...job(), model: 'another-model' }, { ...job(), effort: 'low' },
+  assert.equal(validateJob({ ...job(), model: ALTERNATE_MODEL, effort: 'low' }).model, ALTERNATE_MODEL);
+  for (const value of [{ ...job(), model: 'https://untrusted.example/model' },
+    { ...job(), model: 'x'.repeat(201) }, { ...job(), model: '--model=private' },
+    { ...job(), effort: 'invented-effort' },
     { ...job(), messages: [{ role: 'tool', content: 'run code' }] },
     { ...job(), messages: [{ role: 'user', content: [{ type: 'image_url', image_url: 'file:///secret' }] }] },
     { ...job(), messages: [{ role: 'user', content: 'x'.repeat(300000) }] }]) {
@@ -55,13 +69,16 @@ test('unknown or oversized results remain terminal even if the same job is redel
   }
 });
 
-test('metadata requires ChatGPT subscription and the exact supported max effort', async () => {
-  const rpc = (type, efforts) => ({ request: async (method) => method === 'account/read'
-    ? { account: { type } } : { data: [{ model: MODEL, supportedReasoningEfforts:
-      efforts.map((reasoningEffort) => ({ reasoningEffort })) }] } });
-  await verifyAccountAndModel(rpc('chatgpt', ['max']));
-  await assert.rejects(verifyAccountAndModel(rpc('apiKey', ['max'])), /subscription_login_required/);
-  await assert.rejects(verifyAccountAndModel(rpc('chatgpt', ['high'])), /subscription_model_unavailable/);
+test('metadata accepts a ChatGPT account without Luna and preserves that model exact supported efforts', async () => {
+  const rpc = (type, models) => ({ request: async (method) => method === 'account/read'
+    ? { account: { type } } : { data: models, nextCursor: null } });
+  const available = rpc('chatgpt', [rawModel(ALTERNATE_MODEL, ['low', 'high', 'xhigh'])]);
+  const models = await verifyAccountAndModel(available);
+  assert.deepEqual(models, [catalogModel(ALTERNATE_MODEL, ['low', 'high', 'xhigh'])]);
+  assert.deepEqual(available.models, models);
+  assert.equal(models[0].reasoning_efforts.includes('max'), false);
+  await assert.rejects(verifyAccountAndModel(rpc('apiKey', [rawModel(MODEL, ['max'])])), /subscription_login_required/);
+  await assert.rejects(verifyAccountAndModel(rpc('chatgpt', [])), /subscription_model_unavailable/);
 });
 
 test('site posts never follow redirects and never echo arbitrary server diagnostics', async () => {
@@ -108,6 +125,9 @@ test('RPC accepts fragmented notifications, denies tools and rejects unsafe proc
 function generationRpc(overrides = {}) {
   const rpc = {
     listeners: new Set(), calls: [], closed: false,
+    models: [catalogModel(MODEL, ['low', 'medium', 'high', 'xhigh', 'max']),
+      catalogModel(ALTERNATE_MODEL, ['low', 'medium', 'high', 'xhigh']),
+      catalogModel(ULTRA_MODEL, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])],
     threadConfig: { mcp_servers: { 'local.server': { enabled: false } } },
     emit(method, params = {}) { for (const listener of [...this.listeners]) listener({ method, params }); },
     close() { this.closed = true; this.failed = new Error('closed'); this.emit('connector/closed'); },
@@ -115,7 +135,8 @@ function generationRpc(overrides = {}) {
       this.calls.push({ method, params });
       if (overrides[method]) return overrides[method](params, this);
       if (method === 'thread/start') return {
-        thread: { id: 'isolated-thread', ephemeral: true }, model: MODEL, reasoningEffort: EFFORT,
+        thread: { id: 'isolated-thread', ephemeral: true }, model: params.model,
+        reasoningEffort: params.config.model_reasoning_effort,
         sandbox: { type: 'readOnly', networkAccess: false }, runtimeWorkspaceRoots: [], instructionSources: [],
       };
       if (method === 'mcpServerStatus/list') return { data: [{ name: 'local.server', tools: {} }], nextCursor: null };
@@ -277,4 +298,145 @@ test('invalid RPC message shapes become a safe protocol failure without an uncau
     await pending;
     assert.equal(rpc.pending.size, 0);
   }
+});
+
+test('model discovery reads every visible page, deduplicates IDs, and excludes unusable entries', async () => {
+  const pages = [
+    { data: [rawModel(MODEL, ['low', 'max']), rawModel('hidden-model', ['high'], { hidden: true }),
+      rawModel('image-input-only', ['low'], { inputModalities: ['image'] })], nextCursor: 'page-two' },
+    { data: [rawModel(MODEL, ['low', 'max']), rawModel(ALTERNATE_MODEL, ['low', 'xhigh']),
+      rawModel('unknown-effort-only', ['not-a-real-effort']),
+      rawModel('invalid-default', ['low'], { defaultReasoningEffort: 'max' }),
+      rawModel('image-output-only', ['low'], { outputModalities: ['image'] })], nextCursor: null },
+  ];
+  const calls = [];
+  const rpc = { request: async (method, params) => {
+    if (method === 'account/read') return { account: { type: 'chatgpt' } };
+    calls.push(params);
+    return pages[calls.length - 1];
+  } };
+  const models = await verifyAccountAndModel(rpc);
+  assert.deepEqual(models.map((model) => model.id), [MODEL, ALTERNATE_MODEL]);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].includeHidden, false);
+  assert.equal(calls[1].includeHidden, false);
+  assert.equal(calls[1].cursor, 'page-two');
+  assert.deepEqual(models[1].reasoning_efforts, ['low', 'xhigh']);
+  assert.equal(models[1].reasoning_efforts.includes('max'), false);
+});
+
+test('model metadata is bounded plain display text and carries only advertised effort values', async () => {
+  const rpc = { request: async (method) => method === 'account/read'
+    ? { account: { type: 'chatgpt' } } : { data: [rawModel('safe-model-id', ['low', 'low', 'high', 'invented'], {
+      displayName: '\u001b[31m<img src=x onerror=alert(1)>\n' + 'x'.repeat(1000),
+      defaultReasoningEffort: 'low', privateMetadata: 'must not leave this process',
+    })], nextCursor: null } };
+  const [model] = await verifyAccountAndModel(rpc);
+  assert.deepEqual(Object.keys(model).sort(), ['default_reasoning_effort', 'display_name', 'id', 'reasoning_efforts']);
+  assert.equal(model.id, 'safe-model-id');
+  assert.deepEqual(model.reasoning_efforts, ['low', 'high']);
+  assert.ok(model.reasoning_efforts.includes(model.default_reasoning_effort));
+  assert.equal(model.reasoning_efforts.includes('max'), false);
+  assert.equal(typeof model.display_name, 'string');
+  assert.ok(model.display_name.length > 0 && model.display_name.length <= 120);
+  assert.doesNotMatch(model.display_name, /[\u0000-\u001f\u007f]/);
+  assert.doesNotMatch(JSON.stringify(model), /must not leave this process/);
+});
+
+test('malformed or endlessly paginated model catalogs fail instead of publishing partial choices', async () => {
+  for (const result of [{ data: null }, { data: [rawModel(MODEL, ['low'])], nextCursor: 'same-page-forever' }]) {
+    let calls = 0;
+    const rpc = { request: async (method) => {
+      if (method === 'account/read') return { account: { type: 'chatgpt' } };
+      calls++;
+      if (calls > 25) throw new Error('unbounded metadata pagination');
+      return result;
+    } };
+    await assert.rejects(verifyAccountAndModel(rpc), /subscription_(protocol_error|model_unavailable)/);
+    assert.ok(calls <= 20);
+    assert.ok(!rpc.models?.length, 'an incomplete catalog must not authorize generation');
+  }
+});
+
+test('each selected model and effort is passed unchanged to both thread and turn', async () => {
+  for (const [model, effort] of [[ALTERNATE_MODEL, 'low'], [ALTERNATE_MODEL, 'xhigh'], [MODEL, 'medium'], [ULTRA_MODEL, 'ultra']]) {
+    const rpc = generationRpc();
+    const selected = { ...job(), model, effort };
+    await generate(rpc, '/synthetic-empty-directory', selected);
+    const start = rpc.calls.find((call) => call.method === 'thread/start').params;
+    const turn = rpc.calls.find((call) => call.method === 'turn/start').params;
+    assert.equal(start.model, model);
+    assert.equal(start.config.model_reasoning_effort, effort);
+    assert.equal(start.allowProviderModelFallback, false);
+    assert.equal(turn.model, model);
+    assert.equal(turn.effort, effort);
+  }
+});
+
+test('an unadvertised model or effort pair fails before creating any model turn', async () => {
+  for (const [model, effort] of [[ALTERNATE_MODEL, 'max'], ['unavailable-model', 'low'], [MODEL, 'minimal']]) {
+    const rpc = generationRpc();
+    await assert.rejects(generate(rpc, '/synthetic-empty-directory', { ...job(), model, effort }), /subscription_model_unavailable/);
+    assert.equal(rpc.calls.filter(({ method }) => method === 'turn/start').length, 0);
+  }
+});
+
+test('the App Server cannot silently substitute a different selected model or effort', async () => {
+  for (const mismatch of [{ model: MODEL }, { reasoningEffort: 'max' }]) {
+    const rpc = generationRpc({ 'thread/start': () => ({
+      thread: { id: 'changed-thread', ephemeral: true }, model: ALTERNATE_MODEL, reasoningEffort: 'low',
+      sandbox: { type: 'readOnly', networkAccess: false }, instructionSources: [], runtimeWorkspaceRoots: [], ...mismatch,
+    }) });
+    await assert.rejects(generate(rpc, '/synthetic-empty-directory', { ...job(), model: ALTERNATE_MODEL, effort: 'low' }));
+    assert.equal(rpc.calls.filter(({ method }) => method === 'turn/start').length, 0);
+  }
+});
+
+test('redelivering a job with a changed model or effort never submits another generation', async () => {
+  let calls = 0;
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const runner = new JobRunner(async (value) => { calls++; await held; return { content: value.model + ':' + value.effort }; });
+  const original = runner.run(job());
+  const altered = runner.run({ ...job(), model: ALTERNATE_MODEL, effort: 'low' });
+  release();
+  const originalResult = await original;
+  const changedResult = await altered;
+  assert.ok(changedResult.error || changedResult.content === originalResult.content);
+  const effortOnly = await runner.run({ ...job(), effort: 'low' });
+  assert.ok(effortOnly.error || effortOnly.content === originalResult.content);
+  assert.equal(calls, 1);
+});
+
+test('discovery retains every advertised legal effort including none, minimal, and ultra', async () => {
+  const efforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+  const rpc = { request: async (method) => method === 'account/read'
+    ? { account: { type: 'chatgpt' } } : { data: [rawModel('fixture-all-efforts', efforts)], nextCursor: null } };
+  const models = await verifyAccountAndModel(rpc);
+  assert.deepEqual(models, [catalogModel('fixture-all-efforts', efforts, 'none')]);
+});
+
+test('contradictory duplicate model capabilities and oversized catalogs fail closed', async () => {
+  const rows = [
+    [rawModel(MODEL, ['low']), rawModel(MODEL, ['low', 'max'])],
+    Array.from({ length: 129 }, (_, index) => rawModel(`fixture-model-${index}`, ['low'])),
+  ];
+  for (const data of rows) {
+    const rpc = { request: async (method) => method === 'account/read'
+      ? { account: { type: 'chatgpt' } } : { data, nextCursor: null } };
+    await assert.rejects(verifyAccountAndModel(rpc), /subscription_protocol_error/);
+    assert.ok(!rpc.models?.length);
+  }
+});
+
+test('unique pagination cursors cannot bypass the twenty-page discovery limit', async () => {
+  let pages = 0;
+  const rpc = { request: async (method) => {
+    if (method === 'account/read') return { account: { type: 'chatgpt' } };
+    pages++;
+    return { data: [rawModel(MODEL, ['low'])], nextCursor: `page-${pages}` };
+  } };
+  await assert.rejects(verifyAccountAndModel(rpc), /subscription_protocol_error/);
+  assert.equal(pages, 20);
+  assert.ok(!rpc.models?.length);
 });

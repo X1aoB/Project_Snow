@@ -9,6 +9,7 @@ const dbVersion = 4;
 const SUBSCRIPTION_PROVIDER = "codex_subscription";
 const SUBSCRIPTION_MODEL = "gpt-5.6-luna";
 const SUBSCRIPTION_EFFORT = "max";
+const SUBSCRIPTION_EFFORT_LABELS = Object.freeze({ none: "无推理", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "更高", max: "极高", ultra: "最高" });
 const SUBSCRIPTION_SESSION_KEY = "project-snow-public:subscription-pair";
 const SCENE_ASSET_URLS = Object.freeze(JSON.parse(document.querySelector('meta[name="snow-scene-assets"]')?.content || "{}"));
 const SCENE_KEYS = new Set(["generic", "quarters", "lounge", "training", "archive", "canteen", "observation", "medical", "corridor"]);
@@ -18,9 +19,10 @@ const state = {
   credentialExpiresAt: 0,
   provider: "",
   model: "",
+  reasoningEffort: "",
   modelSetupMode: "api",
   apiProviderChoice: "",
-  subscription: { status: "disconnected", credential: "", expiresAt: 0, pairingExpiresAt: 0, pairingCode: "", error: "" },
+  subscription: createSubscriptionState(),
   characters: [],
   stickers: [],
   stickerCatalog: new Map(),
@@ -309,7 +311,8 @@ const errorMessages = {
   subscription_not_connected: "个人连接器尚未连接或已离线。请打开模型设置，重新配对你自己的 Codex 订阅。",
   subscription_disconnected: "个人连接器已断开，请在模型设置中重新配对。",
   subscription_pairing_expired: "配对码已过期，请重新生成。",
-  subscription_model_unavailable: "当前账号或连接器不支持 Luna Max（gpt-5.6-luna · max），请检查本机 Codex 的模型列表。不会替换为其他模型。",
+  subscription_model_unavailable: "当前账号或连接器不支持所选模型与推理强度，请重新选择；不会自动替换为其他模型。",
+  subscription_effort_unavailable: "当前账号不支持所选推理强度，请在模型设置中重新选择强度并保存。",
   subscription_result_unknown: "请求已经交给个人连接器，但结果尚未确认。请检查连接器状态，避免重复发送这条消息。",
   subscription_login_required: "请在自己的电脑上运行 codex login，使用有订阅的 ChatGPT 账号登录，再重新连接。",
   subscription_rate_limited: "你的 Codex 订阅目前已触发额度或频率限制，请查看自己的账号用量并稍后再试。",
@@ -1308,19 +1311,20 @@ function restoreDraft() {
 function sessionKey() { return "project-snow-public:byok"; }
 function saveCredential() {
   if (!state.credential || !state.credentialExpiresAt) return;
-  tabPreferences.setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, expiresAt: state.credentialExpiresAt }));
+  tabPreferences.setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, ...(state.provider === SUBSCRIPTION_PROVIDER ? { reasoningEffort: state.reasoningEffort } : {}), expiresAt: state.credentialExpiresAt }));
 }
 function clearCredential() {
   tabPreferences.removeItem(sessionKey());
   state.credential = "";
   state.credentialExpiresAt = 0;
   state.model = "";
+  state.reasoningEffort = "";
   refreshCredentialStatus();
   updateComposerAvailability();
 }
 function configured() {
   if (state.credentialExpiresAt && state.credentialExpiresAt <= Date.now()) clearCredential();
-  if (state.provider === SUBSCRIPTION_PROVIDER && (state.subscription.status !== "connected" || state.model !== SUBSCRIPTION_MODEL)) return false;
+  if (state.provider === SUBSCRIPTION_PROVIDER && (state.subscription.status !== "connected" || !subscriptionCombinationSupported(state.model, state.reasoningEffort))) return false;
   return Boolean(state.credential && state.provider && state.model);
 }
 function refreshCredentialStatus() {
@@ -1511,10 +1515,100 @@ let subscriptionPollController = null;
 let subscriptionPollTimer = 0;
 let subscriptionPollSequence = 0;
 function apiProviders() { return (state.config?.providers || []).filter((provider) => provider.provider_id !== SUBSCRIPTION_PROVIDER); }
+function createSubscriptionState(overrides = {}) {
+  return { status: "disconnected", credential: "", expiresAt: 0, pairingExpiresAt: 0, pairingCode: "", error: "", models: [], protocolVersion: 1, draftModel: "", draftEffort: "", selectionInitialized: false, selectionNotice: "", ...overrides };
+}
+function subscriptionCombinationSupported(model, effort) {
+  return Boolean(state.subscription.models.find((item) => item.id === model)?.reasoning_efforts.includes(effort));
+}
+function subscriptionReasoningPayload() {
+  return state.provider === SUBSCRIPTION_PROVIDER ? { reasoning_effort: state.reasoningEffort } : {};
+}
+function snapshotSubscriptionEffort(payload) {
+  if (payload?.provider !== SUBSCRIPTION_PROVIDER) return "";
+  return Object.hasOwn(payload, "reasoning_effort") ? plain(payload.reasoning_effort) : payload.model === SUBSCRIPTION_MODEL ? SUBSCRIPTION_EFFORT : "";
+}
+function subscriptionCatalogue(payload) {
+  const version = Number(payload.protocol_version || 1);
+  if (![1, 2].includes(version)) throw new Error("subscription_protocol_error");
+  if (!Array.isArray(payload.models)) {
+    if (version === 1 && payload.model === SUBSCRIPTION_MODEL && payload.effort === SUBSCRIPTION_EFFORT) {
+      return [{ id: SUBSCRIPTION_MODEL, display_name: "GPT-5.6 Luna", reasoning_efforts: [SUBSCRIPTION_EFFORT], default_reasoning_effort: SUBSCRIPTION_EFFORT }];
+    }
+    throw new Error("subscription_model_unavailable");
+  }
+  const seen = new Set();
+  return payload.models.flatMap((item) => {
+    const model = plain(item?.id).trim();
+    const efforts = [...new Set((Array.isArray(item?.reasoning_efforts) ? item.reasoning_efforts : []).filter((effort) => Object.hasOwn(SUBSCRIPTION_EFFORT_LABELS, effort)))];
+    if (!model || model.length > 200 || seen.has(model) || !efforts.length) return [];
+    if (version === 1 && (model !== SUBSCRIPTION_MODEL || !efforts.includes(SUBSCRIPTION_EFFORT))) return [];
+    seen.add(model);
+    const allowed = version === 1 ? [SUBSCRIPTION_EFFORT] : efforts;
+    return [{ id: model, display_name: plain(item.display_name).trim() || model, reasoning_efforts: allowed,
+      default_reasoning_effort: allowed.includes(item.default_reasoning_effort) ? item.default_reasoning_effort : allowed.length === 1 ? allowed[0] : "" }];
+  });
+}
+function updateSubscriptionSelection(payload) {
+  const subscription = state.subscription;
+  subscription.models = subscriptionCatalogue(payload);
+  subscription.protocolVersion = Number(payload.protocol_version || 1);
+  if (!subscription.selectionInitialized) {
+    subscription.selectionInitialized = true;
+    if (state.provider === SUBSCRIPTION_PROVIDER && state.model) {
+      subscription.draftModel = state.model;
+      subscription.draftEffort = state.reasoningEffort;
+    } else {
+      const luna = subscription.models.find((item) => item.id === SUBSCRIPTION_MODEL);
+      subscription.draftModel = luna?.id || "";
+      subscription.draftEffort = luna?.reasoning_efforts.includes(SUBSCRIPTION_EFFORT) ? SUBSCRIPTION_EFFORT : luna?.default_reasoning_effort || "";
+      subscription.selectionNotice = !luna ? "当前账号没有默认的 Luna Max，请明确选择一个可用模型。"
+        : subscription.draftEffort !== SUBSCRIPTION_EFFORT ? `当前账号的 Luna 不支持 max，请确认所示默认强度 ${subscription.draftEffort || "（请选择）"}。` : "";
+    }
+  }
+  if (subscription.draftModel && !subscriptionCombinationSupported(subscription.draftModel, subscription.draftEffort)) {
+    if (!subscription.models.some((item) => item.id === subscription.draftModel)) subscription.draftModel = "";
+    subscription.draftEffort = "";
+    subscription.selectionNotice = "账号可用模型或推理强度已改变，请重新选择并保存。当前聊天配置不会自动替换。";
+  }
+}
+function chooseSubscriptionModel(model) {
+  const subscription = state.subscription;
+  const selected = subscription.models.find((item) => item.id === model);
+  subscription.draftModel = selected?.id || "";
+  subscription.selectionNotice = "";
+  if (!selected) subscription.draftEffort = "";
+  else if (!selected.reasoning_efforts.includes(subscription.draftEffort)) {
+    subscription.draftEffort = selected.default_reasoning_effort;
+    subscription.selectionNotice = subscription.draftEffort ? `已显示该模型默认推理强度：${SUBSCRIPTION_EFFORT_LABELS[subscription.draftEffort]}（${subscription.draftEffort}）。保存后生效。` : "请为此模型选择推理强度。";
+  }
+  renderSubscriptionSettings();
+}
+function renderSubscriptionModelControls() {
+  const subscription = state.subscription;
+  const connected = subscription.status === "connected";
+  $("subscription-model-controls").hidden = !connected;
+  const model = subscription.models.find((item) => item.id === subscription.draftModel);
+  const modelOptions = '<option value="">请选择模型</option>' + subscription.models.map((item) => {
+    const label = subscription.models.some((other) => other.id !== item.id && other.display_name === item.display_name) ? `${item.display_name} · ${item.id}` : item.display_name;
+    return `<option value="${escapeHtml(item.id)}">${escapeHtml(label)}</option>`;
+  }).join("");
+  const effortOptions = '<option value="">请选择推理强度</option>' + (model?.reasoning_efforts || []).map((effort) => `<option value="${effort}">${SUBSCRIPTION_EFFORT_LABELS[effort]} · ${effort}</option>`).join("");
+  if ($("subscription-model-select").innerHTML !== modelOptions) $("subscription-model-select").innerHTML = modelOptions;
+  if ($("subscription-effort-select").innerHTML !== effortOptions) $("subscription-effort-select").innerHTML = effortOptions;
+  $("subscription-model-select").value = subscription.draftModel;
+  $("subscription-effort-select").value = subscription.draftEffort;
+  $("subscription-model-select").disabled = Boolean(modelSetupController);
+  $("subscription-effort-select").disabled = Boolean(modelSetupController) || !model;
+  $("subscription-model-name").textContent = connected ? model?.display_name || "选择订阅模型" : "默认 Luna Max";
+  $("subscription-model-detail").textContent = connected ? model ? `${model.id} · ${subscription.draftEffort || "请选择强度"}` : "使用此账号支持的模型与推理强度" : `${SUBSCRIPTION_MODEL} · ${SUBSCRIPTION_EFFORT}`;
+  const saved = state.provider === SUBSCRIPTION_PROVIDER && state.model === subscription.draftModel && state.reasoningEffort === subscription.draftEffort;
+  $("subscription-selection-hint").textContent = subscription.selectionNotice || (saved ? "当前已保存此模型与推理强度。" : "选择会在点击“使用所选模型”后生效。");
+}
 function subscriptionEnabled() {
   const config = state.config?.subscription;
   return config?.enabled === true && config.model === SUBSCRIPTION_MODEL && config.effort === SUBSCRIPTION_EFFORT
-    && config.protocol_version === 1 && state.config?.providers?.some((provider) => provider.provider_id === SUBSCRIPTION_PROVIDER);
+    && [1, 2].includes(config.protocol_version) && state.config?.providers?.some((provider) => provider.provider_id === SUBSCRIPTION_PROVIDER);
 }
 function subscriptionSettingsVisible() {
   return $("settings-dialog").open && !$("settings-panel-models").hidden && state.modelSetupMode === "subscription" && !document.hidden;
@@ -1532,7 +1626,8 @@ function storeSubscriptionCredential() {
   else tabPreferences.removeItem(SUBSCRIPTION_SESSION_KEY);
 }
 function forgetSubscription(status = "disconnected", error = "") {
-  state.subscription = { status, error, credential: "", expiresAt: 0, pairingExpiresAt: 0, pairingCode: "" };
+  const { draftModel, draftEffort } = state.subscription;
+  state.subscription = createSubscriptionState({ status, error, draftModel, draftEffort, selectionInitialized: Boolean(draftModel) });
   tabPreferences.removeItem(SUBSCRIPTION_SESSION_KEY);
   if (state.provider === SUBSCRIPTION_PROVIDER) clearCredential();
 }
@@ -1545,13 +1640,14 @@ function renderSubscriptionSettings() {
   $("model-mode-subscription").setAttribute("aria-pressed", String(selected));
   $("api-model-settings").hidden = selected;
   $("subscription-settings").hidden = !selected;
+  renderSubscriptionModelControls();
   const actions = $("model-session-actions");
   const subscriptionActions = $("subscription-session-actions");
   if (selected && actions.parentElement !== subscriptionActions) subscriptionActions.append(actions);
   else if (!selected && actions.parentElement === subscriptionActions) $("setup-error").after(actions);
   $("clear-credential").hidden = selected;
-  $("save-model").textContent = selected ? "使用 Luna Max" : "保存本次模型会话";
-  $("save-model").disabled = busy || (selected ? !enabled || subscription.status !== "connected" || !subscription.credential : !apiProviders().length);
+  $("save-model").textContent = selected ? "使用所选模型" : "保存本次模型会话";
+  $("save-model").disabled = busy || (selected ? !enabled || subscription.status !== "connected" || !subscription.credential || !subscriptionCombinationSupported(subscription.draftModel, subscription.draftEffort) : !apiProviders().length);
   $("pair-subscription").hidden = !enabled || subscription.status === "connected";
   $("pair-subscription").disabled = busy;
   $("pair-subscription").textContent = subscription.credential ? "重新生成配对码" : "生成配对码";
@@ -1566,7 +1662,7 @@ function renderSubscriptionSettings() {
     disconnected: "尚未连接个人连接器。请按下方教程完成登录和配对。",
     checking: "正在核对个人连接器状态……",
     waiting: "等待本机连接器配对。生成配对码还没有建立连接，完成教程后会自动更新。",
-    connected: "已连接个人连接器 · Luna Max 已核验。可点击“使用 Luna Max”开始聊天。",
+    connected: "已连接个人连接器。请选择模型与推理强度，再保存本次会话。",
   };
   $("subscription-status").dataset.status = !enabled ? "disabled" : subscription.error ? "error" : subscription.status;
   $("subscription-status").textContent = !enabled ? errorMessages.subscription_disabled
@@ -1593,10 +1689,8 @@ async function refreshSubscriptionStatus(signal) {
   const payload = await api("/subscription/status", { signal, timeoutMs: 10000 });
   signal?.throwIfAborted();
   if (payload.status === "connected") {
-    if (payload.model !== SUBSCRIPTION_MODEL || payload.effort !== SUBSCRIPTION_EFFORT) {
-      forgetSubscription("disconnected", "subscription_model_unavailable");
-      throw new Error("subscription_model_unavailable");
-    }
+    try { updateSubscriptionSelection(payload); }
+    catch (error) { forgetSubscription("disconnected", error.message); throw error; }
     const expiresAt = Date.parse(payload.expires_at);
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error("subscription_pairing_expired");
     state.subscription.status = "connected";
@@ -1604,7 +1698,7 @@ async function refreshSubscriptionStatus(signal) {
     state.subscription.pairingCode = "";
     state.subscription.pairingExpiresAt = 0;
     state.subscription.expiresAt = expiresAt;
-    if (state.provider === SUBSCRIPTION_PROVIDER && state.model === SUBSCRIPTION_MODEL) {
+    if (state.provider === SUBSCRIPTION_PROVIDER && state.model) {
       state.credentialExpiresAt = expiresAt;
       saveCredential();
     }
@@ -1649,8 +1743,10 @@ async function pairSubscription() {
     const expiresAt = Date.parse(payload.expires_at);
     const pairingExpiresAt = Date.parse(payload.pairing_expires_at || payload.expires_at);
     if (payload.provider !== SUBSCRIPTION_PROVIDER || !plain(payload.credential) || !plain(payload.pairing_code) || !Number.isFinite(expiresAt) || expiresAt <= Date.now() || !Number.isFinite(pairingExpiresAt) || pairingExpiresAt <= Date.now()) throw new Error("invalid_request");
+    const draftModel = state.subscription.draftModel || (state.provider === SUBSCRIPTION_PROVIDER ? state.model : "");
+    const draftEffort = state.subscription.draftEffort || (state.provider === SUBSCRIPTION_PROVIDER ? state.reasoningEffort : "");
     if (state.provider === SUBSCRIPTION_PROVIDER) clearCredential();
-    state.subscription = { status: "waiting", credential: plain(payload.credential), expiresAt, pairingExpiresAt, pairingCode: plain(payload.pairing_code), error: "" };
+    state.subscription = createSubscriptionState({ status: "waiting", credential: plain(payload.credential), expiresAt, pairingExpiresAt, pairingCode: plain(payload.pairing_code), draftModel, draftEffort, selectionInitialized: Boolean(draftModel) });
     storeSubscriptionCredential();
   });
   renderSubscriptionSettings();
@@ -1750,7 +1846,8 @@ async function loadConfig() {
         state.credential = saved.credential;
         state.credentialExpiresAt = saved.expiresAt;
         state.provider = saved.provider;
-        state.model = saved.provider === SUBSCRIPTION_PROVIDER ? (saved.model === SUBSCRIPTION_MODEL ? SUBSCRIPTION_MODEL : "") : (saved.model || "");
+        state.model = saved.model || "";
+        state.reasoningEffort = saved.provider === SUBSCRIPTION_PROVIDER ? plain(saved.reasoningEffort) || (saved.model === SUBSCRIPTION_MODEL ? SUBSCRIPTION_EFFORT : "") : "";
         if (saved.provider === SUBSCRIPTION_PROVIDER) state.modelSetupMode = "subscription";
         $("provider-select").value = state.provider;
         syncProviderControls(state.provider);
@@ -1763,7 +1860,7 @@ async function loadConfig() {
     const credential = state.provider === SUBSCRIPTION_PROVIDER ? state.credential : plain(pending?.credential);
     const expiresAt = state.provider === SUBSCRIPTION_PROVIDER ? state.credentialExpiresAt : Number(pending?.expiresAt);
     if (subscriptionEnabled() && credential && expiresAt > Date.now()) {
-      state.subscription = { status: "checking", credential, expiresAt, pairingExpiresAt: Number(pending?.pairingExpiresAt) || 0, pairingCode: "", error: "" };
+      state.subscription = createSubscriptionState({ status: "checking", credential, expiresAt, pairingExpiresAt: Number(pending?.pairingExpiresAt) || 0 });
       await refreshSubscriptionStatus();
     } else if (credential) forgetSubscription();
   } catch (error) {
@@ -1931,16 +2028,18 @@ async function saveModelSession() {
       await refreshSubscriptionStatus(signal);
       signal.throwIfAborted();
       if (state.subscription.status !== "connected" || !state.subscription.credential) throw new Error("subscription_not_connected");
+      if (!subscriptionCombinationSupported(state.subscription.draftModel, state.subscription.draftEffort)) throw new Error("subscription_model_unavailable");
       cancelBackgroundSummaries();
       state.provider = SUBSCRIPTION_PROVIDER;
-      state.model = SUBSCRIPTION_MODEL;
+      state.model = state.subscription.draftModel;
+      state.reasoningEffort = state.subscription.draftEffort;
       state.credential = state.subscription.credential;
       state.credentialExpiresAt = state.subscription.expiresAt;
       saveCredential();
       refreshCredentialStatus();
       updateComposerAvailability();
       $("settings-dialog").close();
-      toast("已使用你自己的 Codex 订阅 · Luna Max");
+      toast(`已使用你自己的 Codex 订阅 · ${state.model} · ${state.reasoningEffort}`);
       return;
     }
     const model = $("discovered-models").value.trim() || $("model-id").value.trim();
@@ -1950,6 +2049,7 @@ async function saveModelSession() {
     signal.throwIfAborted();
     state.provider = $("provider-select").value;
     state.model = model;
+    state.reasoningEffort = "";
     saveCredential();
     refreshCredentialStatus();
     updateComposerAvailability();
@@ -4442,6 +4542,7 @@ function compatibleRetrySnapshot(userMessage) {
   if (plain(candidate.payload.communication_channel) !== plain(userMessage.communicationChannel)) return null;
   if (plain(candidate.payload.movement_location_id) !== plain(userMessage.movementLocationId)) return null;
   if (plain(candidate.payload.provider) !== state.provider || plain(candidate.payload.model) !== state.model) return null;
+  if (state.provider === SUBSCRIPTION_PROVIDER && snapshotSubscriptionEffort(candidate.payload) !== state.reasoningEffort) return null;
   return { requestId: candidateRequestId, payload: structuredClone(candidate.payload) };
 }
 
@@ -4453,6 +4554,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     request_id: requestId,
     provider: state.provider,
     model: state.model,
+    ...subscriptionReasoningPayload(),
     character_id: characterId,
     message: userMessage.content,
     communication_channel: userMessage.communicationChannel,
@@ -4702,6 +4804,7 @@ async function retryMessage(messageId) {
   if (snapshot && (
     plain(snapshot.payload?.provider) !== state.provider
     || plain(snapshot.payload?.model) !== state.model
+    || (state.provider === SUBSCRIPTION_PROVIDER && snapshotSubscriptionEffort(snapshot.payload) !== state.reasoningEffort)
   )) {
     state.retrySnapshots.delete(message.id);
     message.requestId = "";
@@ -4767,7 +4870,7 @@ async function runAutoSummary(thread) {
       content_blocks: wireBlocks(message.contentBlocks),
     }));
     const requestPayload = fitPublicRequestPayload(
-      { request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, character_id: thread.characterId, turns, previous_summary: thread.summary || "" },
+      { request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, ...subscriptionReasoningPayload(), character_id: thread.characterId, turns, previous_summary: thread.summary || "" },
       { arrays: [{ key: "turns", minimum: 2 }], texts: ["previous_summary"] },
     );
     const payload = await api("/chat/summarize", { method: "POST", signal: controller.signal, timeoutMs: 20000, body: JSON.stringify(requestPayload) });
@@ -4853,7 +4956,7 @@ async function arriveInPerson() {
       return;
     }
     const arrivalPayload = fitPublicRequestPayload(
-      { arrival_id: arrivalId, provider: state.provider, credential: state.credential, model: state.model, character_id: characterId, recent_history: requestHistory(thread?.messages || [], "", thread?.conversationSegmentId || ""), history_summary: thread?.continuityDecision === "start_today" ? "" : (thread?.summary || ""), state_package: state.worldPackage || "" },
+      { arrival_id: arrivalId, provider: state.provider, credential: state.credential, model: state.model, ...subscriptionReasoningPayload(), character_id: characterId, recent_history: requestHistory(thread?.messages || [], "", thread?.conversationSegmentId || ""), history_summary: thread?.continuityDecision === "start_today" ? "" : (thread?.summary || ""), state_package: state.worldPackage || "" },
       { arrays: [{ key: "recent_history", minimum: 0 }], texts: ["history_summary"] },
     );
     const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify(arrivalPayload) });
@@ -5236,6 +5339,13 @@ $("discover-models").onclick = discoverModels;
 $("save-model").onclick = saveModelSession;
 $("model-mode-api").onclick = () => chooseModelMode("api");
 $("model-mode-subscription").onclick = () => chooseModelMode("subscription");
+$("subscription-model-select").onchange = () => chooseSubscriptionModel($("subscription-model-select").value);
+$("subscription-effort-select").onchange = () => {
+  const effort = $("subscription-effort-select").value;
+  state.subscription.draftEffort = subscriptionCombinationSupported(state.subscription.draftModel, effort) ? effort : "";
+  state.subscription.selectionNotice = "";
+  renderSubscriptionSettings();
+};
 $("pair-subscription").onclick = pairSubscription;
 $("disconnect-subscription").onclick = disconnectSubscription;
 $("copy-subscription-code").onclick = async () => {
