@@ -10,12 +10,12 @@ agree by SHA256. Rejected whole-character redraws remain ineligible.
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
 import json
 import re
-import shutil
-import tempfile
 import sys
+import tempfile
+from contextlib import nullcontext
+from datetime import UTC, datetime
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -26,6 +26,7 @@ from PIL import Image
 
 try:
     from scripts import character_layered_release as layered_release
+    from scripts import verified_media_inputs as verified_inputs
     from scripts.build_avatar_media_release import (
         DEFAULT_ANALYST_SOURCE_ROOT,
         DEFAULT_OUTPUT_ROOT,
@@ -36,6 +37,7 @@ try:
     )
 except ModuleNotFoundError:  # Direct ``python App/scripts/...`` execution.
     import character_layered_release as layered_release
+    import verified_media_inputs as verified_inputs
     from build_avatar_media_release import (  # type: ignore[no-redef]
         DEFAULT_ANALYST_SOURCE_ROOT,
         DEFAULT_OUTPUT_ROOT,
@@ -215,12 +217,282 @@ def _rights_header(path: Path, source_index_sha256: str) -> dict[str, Any]:
         waiver = rights.get("waiver") if isinstance(rights.get("waiver"), dict) else {}
         if waiver.get("granted") is not True or not str(waiver.get("scope") or "").strip():
             raise ValueError("the public expression rights waiver is incomplete")
+        if (
+            rights.get("independent_verification") is not False
+            or rights.get("verification_status") != "not_performed"
+            or rights.get("public_use_authorized") is not True
+        ):
+            raise ValueError("a publication waiver must not claim independent rights verification")
     elif not (
-        rights.get("independent_verification") is True
-        and rights.get("verification_status") == "verified"
+        rights.get("independent_verification") is True and rights.get("verification_status") == "verified"
     ):
         raise ValueError("independent expression rights verification is incomplete")
     return value
+
+
+def _publication_authorization(rights: dict[str, Any], package: Any) -> None:
+    """A new user publication decision binds this exact reviewed private package."""
+    block = rights.get("rights", {})
+    authorization = block.get("publication_authorization", {})
+    required = {
+        "method",
+        "source_thread_id",
+        "source_turn_id",
+        "recorded_at",
+        "statement_sha256",
+        "approval_event_sha256",
+        "authorization_record_sha256",
+        "private_package_manifest_sha256",
+        "private_package_checksums_sha256",
+    }
+    if not isinstance(authorization, dict) or set(authorization) != required:
+        raise ValueError("exact private package publication authorization is required")
+    if authorization["method"] != "user_instruction":
+        raise ValueError("publication authorization must identify the user's instruction")
+    for field in ("source_thread_id", "source_turn_id"):
+        if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", str(authorization[field])):
+            raise ValueError("publication authorization source identity is invalid")
+    try:
+        stamp = datetime.fromisoformat(authorization["recorded_at"].replace("Z", "+00:00"))
+        if stamp.utcoffset() is None:
+            raise ValueError("timezone required")
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError("publication authorization timestamp is invalid") from exc
+    for field in ("statement_sha256", "approval_event_sha256", "authorization_record_sha256"):
+        if not SHA256_PATTERN.fullmatch(str(authorization[field])):
+            raise ValueError("publication authorization hash is invalid")
+    if (
+        authorization["private_package_manifest_sha256"] != package.manifest_sha256
+        or authorization["private_package_checksums_sha256"] != package.checksums_sha256
+        or authorization["approval_event_sha256"] != package.manifest.get("approval_event_sha256")
+    ):
+        raise ValueError("publication authorization belongs to another private package")
+
+
+def _private_expression_manifests(
+    package: Any,
+    rights: dict[str, Any],
+    approved_by_id: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    manifest = package.manifest
+    total = sum(len(row["performances"]) for row in approved_by_id.values())
+    if (
+        manifest.get("schema_version") != "project-snow-private-character-derivatives-1"
+        or manifest.get("publication_status") != "pending_not_public"
+        or manifest.get("public_runtime_eligible") is not False
+        or manifest.get("production_deployed") is not False
+        or manifest.get("character_count") != len(approved_by_id)
+        or manifest.get("base_state_count") != len(approved_by_id) * len(EXPRESSION_STATES)
+        or manifest.get("performance_count") != total
+        or manifest.get("presentation_count") != len(approved_by_id) * len(EXPRESSION_STATES) + total
+    ):
+        raise ValueError("private expression package is not the complete approved delivery")
+    _publication_authorization(rights, package)
+    rows = manifest.get("characters", [])
+    if not isinstance(rows, list) or len(rows) != len(approved_by_id):
+        raise ValueError("private expression package character coverage differs")
+    result = {}
+    referenced = {"manifest.json"}
+    for row in rows:
+        cid = row.get("character_id")
+        if cid not in approved_by_id or cid in result:
+            raise ValueError("private expression package character identity differs")
+        approved = approved_by_id[cid]
+        path = f"expressions/{cid}/manifest.json"
+        if row.get("manifest_path") != path or row.get("manifest_sha256") != package.files.get(path):
+            raise ValueError("private expression manifest binding differs")
+        runtime = verified_inputs.strict_object(package.read(path))
+        _public_runtime_shape(runtime)
+        referenced.add(path)
+        if (
+            runtime.get("schema_version") != EXPRESSION_RUNTIME_SCHEMA
+            or runtime.get("character_id") != cid
+            or runtime.get("publication_status") != "pending_not_public"
+            or runtime.get("source", {}).get("approval_manifest_sha256")
+            != approved["approval_manifest_sha256"]
+            or runtime.get("stage_layout") != approved["stage_layout"]
+            or set(runtime.get("expressions", {})) != set(approved["states"])
+            or set(runtime.get("performances", {})) != set(approved["performances"])
+            or set(runtime.get("presentations", {}))
+            != (
+                {f"expression.{state}" for state in approved["states"]}
+                | {f"performance.{cue}" for cue in approved["performances"]}
+            )
+        ):
+            raise ValueError("private runtime does not bind the exact character approval")
+        for kind, records in (
+            ("expressions", approved["states"]),
+            ("performances", approved["performances"]),
+        ):
+            for key, record in records.items():
+                entry = runtime[kind][key]
+                expected_id = f"{'expression' if kind == 'expressions' else 'performance'}.{key}"
+                if entry.get("presentation_id") != expected_id:
+                    raise ValueError("private presentation identity differs")
+                if any(
+                    entry.get(field) != record[source]
+                    for field, source in (
+                        ("source_sha256", "sha256"),
+                        ("approved_variant", "approved_variant"),
+                        ("approved_round", "approved_round"),
+                    )
+                ):
+                    raise ValueError("private presentation differs from the approved preview")
+                presentation = runtime.get("presentations", {}).get(entry.get("presentation_id"), {})
+                if (
+                    presentation.get("canvas") != record["canvas"]
+                    or presentation.get("stage_layout") != record["stage_layout"]
+                ):
+                    raise ValueError("private presentation canvas or layout differs from its approval")
+                for prefix in ("face", "stage"):
+                    asset_path = entry.get(prefix + "_asset_path", "")
+                    if not asset_path.startswith(f"expressions/{cid}/") or package.files.get(
+                        asset_path
+                    ) != entry.get(prefix + "_asset_sha256"):
+                        raise ValueError("private derivative path or checksum differs")
+                    referenced.add(asset_path)
+                expected_layers = [
+                    {
+                        "asset_path": (
+                            f"expressions/{cid}/layers/{layer['role']}.{layer['asset_sha256'][:16]}.png"
+                        ),
+                        "asset_sha256": layer["asset_sha256"],
+                        "dimensions": layer["dimensions"],
+                        "position": layer["position"],
+                        "composite": "source-over",
+                    }
+                    for layer in record["layers"]
+                ]
+                if presentation.get("layers") != expected_layers:
+                    raise ValueError("private native layers differ from the approved bytes or positions")
+                for layer in expected_layers:
+                    if package.files.get(layer["asset_path"]) != layer["asset_sha256"]:
+                        raise ValueError("private native layer checksum differs")
+                    referenced.add(layer["asset_path"])
+                if kind == "performances" and any(
+                    entry.get(field) != record[field]
+                    for field in ("label", "usage_context", "fallback_expression")
+                ):
+                    raise ValueError("private performance fallback or context differs")
+        result[cid] = runtime
+    if set(package.files) != referenced:
+        raise ValueError("private expression package includes unrelated files")
+    return result
+
+
+def _runtime_static_metadata() -> dict[str, Any]:
+    """Fixed public descriptions shared by the producer and private reuse gate."""
+    return {
+        "presentation_contract": {
+            "schema_version": PRESENTATION_CONTRACT_SCHEMA,
+            "default_render_strategy": ACTIVE_RENDER_STRATEGY,
+            "active_render_strategies": ["single_sprite", "layered_sprite"],
+            "reserved_render_strategies": ["rigged_2d"],
+            "legacy_stage_asset_fallback_required": True,
+            "native_pixel_composition": True,
+            "atomic_surface_commit": True,
+        },
+        "performance_contract": {
+            "schema_version": "project-snow-character-performance-1",
+            "character_scoped": True,
+            "base_expression_states_unchanged": True,
+        },
+        "transforms": {
+            "face": "approved square crop contained in transparent 384x384 canvas",
+            "stage": "approved flattened layer preview; contain_no_padding_height_1024",
+            "layers": "approved_native_dimensions_without_resampling",
+            "format": "original_native_png_layers_with_lossless_webp_derivatives",
+            "body_completion": False,
+            "micro_feature_mask_compositing": False,
+            "partial_limb_compositing": False,
+        },
+    }
+
+
+def _public_runtime_shape(runtime: dict[str, Any]) -> None:
+    """Private metadata cannot become public merely because its package is pinned."""
+
+    def exact(value: object, fields: set[str]) -> None:
+        if not isinstance(value, dict) or set(value) != fields:
+            raise ValueError("private runtime contains fields outside the public metadata contract")
+
+    exact(
+        runtime,
+        {
+            "schema_version",
+            "character_id",
+            "display_name",
+            "expression_state_count",
+            "performance_count",
+            "publication_status",
+            "rights",
+            "source",
+            "stage_layout",
+            "presentation_contract",
+            "performance_contract",
+            "transforms",
+            "expressions",
+            "performances",
+            "presentations",
+        },
+    )
+    # Source and rights are replaced as complete objects by the new public decision.
+    exact(runtime["stage_layout"], {"scale", "focus_x"})
+    for key, expected in _runtime_static_metadata().items():
+        if runtime[key] != expected:
+            raise ValueError("private runtime contains values outside the public metadata contract")
+    expression_fields = {
+        "approved_variant",
+        "approved_round",
+        "source_sha256",
+        "presentation_id",
+        "face_asset_path",
+        "face_asset_sha256",
+        "stage_asset_path",
+        "stage_asset_sha256",
+        "dimensions",
+        "asset_scope",
+        "render_strategy",
+        "stage_layout",
+    }
+    for kind in ("expressions", "performances"):
+        if not isinstance(runtime[kind], dict):
+            raise ValueError("private runtime entries must be objects")
+        for entry in runtime[kind].values():
+            exact(
+                entry,
+                expression_fields
+                | ({"label", "usage_context", "fallback_expression"} if kind == "performances" else set()),
+            )
+            exact(entry["dimensions"], {"face", "stage"})
+            for shape in entry["dimensions"].values():
+                exact(shape, {"width", "height"})
+            exact(entry["stage_layout"], {"scale", "focus_x"})
+    if not isinstance(runtime["presentations"], dict):
+        raise ValueError("private runtime presentations must be an object")
+    for presentation in runtime["presentations"].values():
+        exact(
+            presentation,
+            {
+                "render_strategy",
+                "asset_scope",
+                "stage_asset_path",
+                "stage_asset_sha256",
+                "dimensions",
+                "stage_layout",
+                "canvas",
+                "layers",
+            },
+        )
+        exact(presentation["dimensions"], {"width", "height"})
+        exact(presentation["canvas"], {"width", "height"})
+        exact(presentation["stage_layout"], {"scale", "focus_x"})
+        if not isinstance(presentation["layers"], list):
+            raise ValueError("private runtime layers must be a list")
+        for layer in presentation["layers"]:
+            exact(layer, {"asset_path", "asset_sha256", "dimensions", "position", "composite"})
+            exact(layer["dimensions"], {"width", "height"})
+            exact(layer["position"], {"x", "y"})
 
 
 def _rgba_array(path: Path, label: str) -> tuple[Image.Image, np.ndarray]:
@@ -271,12 +543,18 @@ def _face_crop(
 
 
 def _validate_character_approval(
-    expression_root: Path, source_row: dict[str, Any],
-    *, approval_path: Path | None = None, compositor: Any = None,
+    expression_root: Path,
+    source_row: dict[str, Any],
+    *,
+    approval_path: Path | None = None,
+    compositor: Any = None,
 ) -> dict[str, Any]:
     return layered_release.validate_character(
-        expression_root, source_row, sys.modules[__name__],
-        approval_path=approval_path, compositor=compositor,
+        expression_root,
+        source_row,
+        sys.modules[__name__],
+        approval_path=approval_path,
+        compositor=compositor,
     )
 
 
@@ -424,7 +702,9 @@ def _render_non_mia_assets(
             "render_strategy": ACTIVE_RENDER_STRATEGY,
             "stage_layout": dict(state_approval["stage_layout"]),
             "canvas": dict(state_approval["canvas"]),
-            "layers": layered_release.render_layers(release_root, character_id, state_approval, sys.modules[__name__]),
+            "layers": layered_release.render_layers(
+                release_root, character_id, state_approval, sys.modules[__name__]
+            ),
         }
     return output
 
@@ -465,9 +745,13 @@ def _copy_mia_assets(
 
 
 def _render_runtime_manifest(
-    release_root: Path, character_id: str, display_name: str,
-    approved: dict[str, Any], source: dict[str, Any],
-    publication_status: str, rights: dict[str, Any],
+    release_root: Path,
+    character_id: str,
+    display_name: str,
+    approved: dict[str, Any],
+    source: dict[str, Any],
+    publication_status: str,
+    rights: dict[str, Any],
 ) -> dict[str, Any]:
     records = dict(approved["states"])
     records.update({f"performance.{cue}": row for cue, row in approved["performances"].items()})
@@ -484,11 +768,14 @@ def _render_runtime_manifest(
             "stage_asset_sha256": asset["stage_asset_sha256"],
             "dimensions": dict(asset["dimensions"]["stage"]),
             "stage_layout": dict(asset["stage_layout"]),
-            "canvas": asset["canvas"], "layers": asset["layers"],
+            "canvas": asset["canvas"],
+            "layers": asset["layers"],
         }
         item = {
-            "approved_variant": record["approved_variant"], "approved_round": record["approved_round"],
-            "source_sha256": record["sha256"], "presentation_id": presentation_id,
+            "approved_variant": record["approved_variant"],
+            "approved_round": record["approved_round"],
+            "source_sha256": record["sha256"],
+            "presentation_id": presentation_id,
             **{name: value for name, value in asset.items() if name not in {"canvas", "layers"}},
         }
         if performance:
@@ -498,30 +785,18 @@ def _render_runtime_manifest(
             expressions[key] = item
     return {
         "schema_version": EXPRESSION_RUNTIME_SCHEMA,
-        "character_id": character_id, "display_name": display_name,
-        "expression_state_count": len(EXPRESSION_STATES), "performance_count": len(performances),
-        "publication_status": publication_status, "rights": rights, "source": source,
+        "character_id": character_id,
+        "display_name": display_name,
+        "expression_state_count": len(EXPRESSION_STATES),
+        "performance_count": len(performances),
+        "publication_status": publication_status,
+        "rights": rights,
+        "source": source,
         "stage_layout": approved["stage_layout"],
-        "presentation_contract": {
-            "schema_version": PRESENTATION_CONTRACT_SCHEMA,
-            "default_render_strategy": ACTIVE_RENDER_STRATEGY,
-            "active_render_strategies": ["single_sprite", "layered_sprite"],
-            "reserved_render_strategies": ["rigged_2d"],
-            "legacy_stage_asset_fallback_required": True,
-            "native_pixel_composition": True, "atomic_surface_commit": True,
-        },
-        "performance_contract": {
-            "schema_version": "project-snow-character-performance-1",
-            "character_scoped": True, "base_expression_states_unchanged": True,
-        },
-        "transforms": {
-            "face": "approved square crop contained in transparent 384x384 canvas",
-            "stage": "approved flattened layer preview; contain_no_padding_height_1024",
-            "layers": "approved_native_dimensions_without_resampling",
-            "format": "original_native_png_layers_with_lossless_webp_derivatives", "body_completion": False,
-            "micro_feature_mask_compositing": False, "partial_limb_compositing": False,
-        },
-        "expressions": expressions, "performances": performances, "presentations": presentations,
+        **_runtime_static_metadata(),
+        "expressions": expressions,
+        "performances": performances,
+        "presentations": presentations,
     }
 
 
@@ -535,13 +810,46 @@ def build_release(
     output_root: Path,
     version: str,
     approval_root: Path | None = None,
+    existing_avatar_release_root: Path | None = None,
+    existing_avatar_manifest_sha256: str | None = None,
+    existing_avatar_checksums_sha256: str | None = None,
+    expression_package_root: Path | None = None,
+    expression_package_manifest_sha256: str | None = None,
+    expression_package_checksums_sha256: str | None = None,
+    rights_sha256: str | None = None,
 ) -> Path:
     """Build an immutable v4 package after every private gate passes."""
 
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", version):
+        raise ValueError("media version must be one safe directory name")
+    output_root = output_root.resolve()
+    release_target = output_root / version
+    if release_target.exists():
+        raise FileExistsError(f"release already exists; choose an empty output root: {release_target}")
+    if existing_avatar_release_root is None and any(
+        (existing_avatar_manifest_sha256, existing_avatar_checksums_sha256)
+    ):
+        raise ValueError("avatar package hash pins require an existing avatar release")
+    if expression_package_root is None and any(
+        (expression_package_manifest_sha256, expression_package_checksums_sha256)
+    ):
+        raise ValueError("expression package hash pins require a private expression package")
+    rights_path = verified_inputs.regular_path(rights_path)
+    rights_digest = _digest_path(rights_path)
+    if rights_sha256 is not None and rights_digest != rights_sha256:
+        raise ValueError("rights decision SHA256 mismatch")
+    if expression_package_root is not None and not SHA256_PATTERN.fullmatch(rights_sha256 or ""):
+        raise ValueError("private expression reuse requires an explicit rights SHA256 pin")
     expression_root = expression_root.resolve()
     _, source_by_id, source_index_sha256 = _source_index(expression_root)
     rights_manifest = _rights_header(rights_path.resolve(), source_index_sha256)
     characters = _registry()
+    avatar_package = None
+    if existing_avatar_release_root is not None:
+        avatar_package = verified_inputs.VerifiedPackage(
+            existing_avatar_release_root, existing_avatar_manifest_sha256, existing_avatar_checksums_sha256
+        )
+        verified_inputs.validate_avatar(avatar_package, {str(c["character_id"]) for c in characters})
     approved_by_id: dict[str, dict[str, Any]] = {}
     if approval_root is not None:
         approval_root = approval_root.resolve()
@@ -555,7 +863,8 @@ def build_release(
         for character in characters:
             character_id = str(character["character_id"])
             approved_by_id[character_id] = _validate_character_approval(
-                expression_root, source_by_id[character_id],
+                expression_root,
+                source_by_id[character_id],
                 approval_path=approval_root / f"{character_id}.json" if approval_root else None,
                 compositor=compositor,
             )
@@ -563,65 +872,82 @@ def build_release(
     performance_count = sum(len(row["performances"]) for row in approved_by_id.values())
     if rights_manifest.get("approved_performance_count") != performance_count:
         raise ValueError("expression rights decision must cover all approved character performances")
-
-    output_root = output_root.resolve()
-    release_target = output_root / version
-    if release_target.exists():
-        raise FileExistsError(
-            f"release already exists; choose an empty output root: {release_target}"
+    expression_package = None
+    reused_expressions = {}
+    if expression_package_root is not None:
+        expression_package = verified_inputs.VerifiedPackage(
+            expression_package_root, expression_package_manifest_sha256, expression_package_checksums_sha256
         )
+        reused_expressions = _private_expression_manifests(
+            expression_package, rights_manifest, approved_by_id
+        )
+
     output_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=f".{version}.candidate.", dir=output_root) as temporary:
         temporary_root = Path(temporary)
-        release_root = build_avatar_release(
-            source_root=avatar_source_root.resolve(),
-            analyst_source_root=analyst_source_root.resolve(),
-            output_root=temporary_root,
-            version=version,
-        )
+        if avatar_package is not None:
+            release_root = temporary_root / version
+            manifest = verified_inputs.copy_avatar(avatar_package, release_root, version)
+            manifest["generated_at"] = datetime.now(UTC).isoformat()
+        else:
+            release_root = build_avatar_release(
+                source_root=avatar_source_root.resolve(),
+                analyst_source_root=analyst_source_root.resolve(),
+                output_root=temporary_root,
+                version=version,
+            )
+            manifest = _json_object(release_root / "manifest.json")
         manifest_path = release_root / "manifest.json"
-        manifest = _json_object(manifest_path)
+        if expression_package is not None:
+            for path in expression_package.files:
+                if path != "manifest.json" and not path.endswith("/manifest.json"):
+                    expression_package.copy_file(path, release_root)
         rows = {
-            str(row["character_id"]): row
-            for row in manifest.get("characters") or []
-            if isinstance(row, dict)
+            str(row["character_id"]): row for row in manifest.get("characters") or [] if isinstance(row, dict)
         }
         rights_block = dict(rights_manifest.get("rights") or {})
         publication_status = str(rights_manifest["publication_status"])
         display_names = {
-            str(character["character_id"]): str(character["display_name"])
-            for character in characters
+            str(character["character_id"]): str(character["display_name"]) for character in characters
         }
         for character_id in sorted(source_by_id):
             approved = approved_by_id[character_id]
-            runtime_manifest = _render_runtime_manifest(
-                release_root, character_id, display_names[character_id], approved,
-                {
-                    "original_filename": source_by_id[character_id].get("original_filename"),
-                    "source_sha256": source_by_id[character_id]["source_sha256"],
-                    "source_index_sha256": source_index_sha256,
-                    "approval_manifest_sha256": approved["approval_manifest_sha256"],
-                },
-                publication_status, rights_block,
-            )
-            runtime_manifest_path = (
-                release_root / "expressions" / character_id / "manifest.json"
-            )
+            source = {
+                "original_filename": source_by_id[character_id].get("original_filename"),
+                "source_sha256": source_by_id[character_id]["source_sha256"],
+                "source_index_sha256": source_index_sha256,
+                "approval_manifest_sha256": approved["approval_manifest_sha256"],
+            }
+            if expression_package is not None:
+                runtime_manifest = dict(reused_expressions[character_id])
+                runtime_manifest.update(
+                    {
+                        "display_name": display_names[character_id],
+                        "source": source,
+                        "publication_status": publication_status,
+                        "rights": rights_block,
+                    }
+                )
+            else:
+                runtime_manifest = _render_runtime_manifest(
+                    release_root,
+                    character_id,
+                    display_names[character_id],
+                    approved,
+                    source,
+                    publication_status,
+                    rights_block,
+                )
+            runtime_manifest_path = release_root / "expressions" / character_id / "manifest.json"
             _write_json(runtime_manifest_path, runtime_manifest)
             row = rows[character_id]
-            row["expression_manifest_path"] = (
-                f"expressions/{character_id}/manifest.json"
-            )
+            row["expression_manifest_path"] = f"expressions/{character_id}/manifest.json"
             row["expression_manifest_sha256"] = _digest_path(runtime_manifest_path)
             row["expression_state_count"] = len(EXPRESSION_STATES)
             row["performance_count"] = len(approved["performances"])
-            row["expression_source_sha256"] = source_by_id[character_id][
-                "source_sha256"
-            ]
+            row["expression_source_sha256"] = source_by_id[character_id]["source_sha256"]
             row["expression_source_index_sha256"] = source_index_sha256
-            row["expression_approval_manifest_sha256"] = approved[
-                "approval_manifest_sha256"
-            ]
+            row["expression_approval_manifest_sha256"] = approved["approval_manifest_sha256"]
 
         manifest.update(
             {
@@ -633,16 +959,39 @@ def build_release(
                 "performance_count": performance_count,
                 "performance_asset_count": performance_count * 2,
                 "expression_source_index_sha256": source_index_sha256,
-                "expression_rights_manifest_sha256": _digest_path(rights_path),
+                "expression_rights_manifest_sha256": rights_digest,
                 "expression_rights_status": publication_status,
             }
         )
-        _write_json(manifest_path, manifest)
-        checksums = [
-            path
-            for path in release_root.rglob("*")
-            if path.is_file() and path.name != "SHA256SUMS"
+        comparisons = [
+            record["compositing_validation"]
+            for approved in approved_by_id.values()
+            for record in [*approved["states"].values(), *approved["performances"].values()]
         ]
+        manifest["expression_build_validation"] = {
+            "approved_presentation_count": len(comparisons),
+            "renderers": sorted({comparison["renderer"] for comparison in comparisons}),
+            "browser_versions": sorted(
+                {
+                    comparison["browser_version"]
+                    for comparison in comparisons
+                    if comparison.get("browser_version")
+                }
+            ),
+            "max_different_visible_pixels": max(
+                comparison["different_visible_pixels"] for comparison in comparisons
+            ),
+        }
+        if expression_package is not None:
+            manifest["expression_source_package"] = {
+                "schema_version": expression_package.manifest["schema_version"],
+                "manifest_sha256": expression_package.manifest_sha256,
+                "checksums_sha256": expression_package.checksums_sha256,
+                "approval_event_sha256": expression_package.manifest["approval_event_sha256"],
+                "reuse": "original_approved_png_and_reviewed_webp_bytes_preserved",
+            }
+        _write_json(manifest_path, manifest)
+        checksums = [path for path in release_root.rglob("*") if path.is_file() and path.name != "SHA256SUMS"]
         (release_root / "SHA256SUMS").write_text(
             "\n".join(
                 f"{_digest_path(path)}  {path.relative_to(release_root).as_posix()}"
@@ -651,7 +1000,28 @@ def build_release(
             + "\n",
             encoding="utf-8",
         )
-        shutil.move(str(release_root), str(release_target))
+        status = verified_inputs.PublicMediaCatalog(
+            release_root, version, {str(c["character_id"]) for c in characters}, require_analyst=True
+        ).verify(force=True)
+        if status.get("status") != "ok":
+            raise ValueError(f"combined character media verification failed: {status.get('errors')}")
+        # Validate complete file coverage and immutable inputs once more before publication.
+        verified_inputs.VerifiedPackage(
+            release_root, _digest_path(manifest_path), _digest_path(release_root / "SHA256SUMS")
+        )
+        for package in (avatar_package, expression_package):
+            if package is not None:
+                package.verify()
+        if _digest_path(rights_path) != rights_digest:
+            raise ValueError("rights decision changed during media build")
+        for approval in approved_by_id.values():
+            if _digest_path(approval["approval_manifest_path"]) != approval["approval_manifest_sha256"]:
+                raise ValueError("character approval changed during media build")
+        if _digest_path(expression_root / "source-index.pending.json") != source_index_sha256:
+            raise ValueError("expression source index changed during media build")
+        if release_target.exists():
+            raise FileExistsError("release appeared during build; immutable output was preserved")
+        release_root.rename(release_target)
     return release_target
 
 
@@ -665,7 +1035,16 @@ def main() -> None:
     )
     parser.add_argument("--expression-root", type=Path, default=DEFAULT_EXPRESSION_ROOT)
     parser.add_argument("--rights-path", type=Path, default=DEFAULT_RIGHTS_PATH)
-    parser.add_argument("--approval-root", type=Path, help="Versioned approved manifests; originals stay unchanged")
+    parser.add_argument(
+        "--approval-root", type=Path, help="Versioned approved manifests; originals stay unchanged"
+    )
+    parser.add_argument("--existing-avatar-release-root", type=Path)
+    parser.add_argument("--existing-avatar-manifest-sha256")
+    parser.add_argument("--existing-avatar-checksums-sha256")
+    parser.add_argument("--expression-package-root", type=Path)
+    parser.add_argument("--expression-package-manifest-sha256")
+    parser.add_argument("--expression-package-checksums-sha256")
+    parser.add_argument("--rights-sha256")
     parser.add_argument("--mia-runtime-root", type=Path, default=DEFAULT_MIA_RUNTIME_ROOT)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--version", default=DEFAULT_VERSION)
@@ -679,6 +1058,13 @@ def main() -> None:
         output_root=arguments.output_root,
         version=str(arguments.version),
         approval_root=arguments.approval_root,
+        existing_avatar_release_root=arguments.existing_avatar_release_root,
+        existing_avatar_manifest_sha256=arguments.existing_avatar_manifest_sha256,
+        existing_avatar_checksums_sha256=arguments.existing_avatar_checksums_sha256,
+        expression_package_root=arguments.expression_package_root,
+        expression_package_manifest_sha256=arguments.expression_package_manifest_sha256,
+        expression_package_checksums_sha256=arguments.expression_package_checksums_sha256,
+        rights_sha256=arguments.rights_sha256,
     )
     print(
         json.dumps(
