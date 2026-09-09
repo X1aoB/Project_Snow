@@ -798,6 +798,30 @@ class PublicAPITests(TestCase):
         self.assertEqual(character["aliases"], ["凯茜娅", "凯西娅"])
         self.assertEqual(character["search_tokens"], ["kxy", "kaixiya"])
 
+    def test_characters_exposes_only_catalog_verified_expression_digest(self) -> None:
+        target_id = MVP_CHARACTERS[0].character_id
+        trusted = {
+            "url": f"/media/approved/expressions/{target_id}/manifest.json",
+            "state_count": 18,
+            "sha256": "b" * 64,
+        }
+        with patch.object(
+            self.app.state.chat_service.media,
+            "expression_manifest",
+            side_effect=lambda identifier: trusted if identifier == target_id else None,
+        ):
+            response = self.client.get("/public/v1/characters")
+        self.assertEqual(response.status_code, 200)
+        characters = response.json()["characters"]
+        target = next(item for item in characters if item["character_id"] == target_id)
+        self.assertEqual(target["expression_manifest_url"], trusted["url"])
+        self.assertEqual(target["expression_manifest_sha256"], trusted["sha256"])
+        self.assertEqual(target["expression_state_count"], trusted["state_count"])
+        for item in characters:
+            if item["character_id"] != target_id:
+                self.assertNotIn("expression_manifest_url", item)
+                self.assertNotIn("expression_manifest_sha256", item)
+
     def test_production_readiness_requires_matching_data_release(self) -> None:
         production_settings = replace(
             self.settings,

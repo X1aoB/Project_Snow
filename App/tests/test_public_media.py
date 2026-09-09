@@ -318,8 +318,31 @@ class PublicMediaCatalogTests(TestCase):
                 {
                     "url": f"/media/test-avatar/expressions/{character_id}/manifest.json",
                     "state_count": 18,
+                    "sha256": sha256(
+                        (root / "expressions" / character_id / "manifest.json").read_bytes()
+                    ).hexdigest(),
                 },
             )
+
+    def test_expression_manifest_digest_is_bound_to_verified_release(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            character_id = self._write_character_expression_release(root)
+            catalog = PublicMediaCatalog(root, "test-avatar", (character_id,))
+            self.assertEqual(catalog.verify(force=True)["status"], "ok")
+            trusted = catalog.expression_manifest(character_id)
+            self.assertIsNotNone(trusted)
+            leaf = root / "expressions" / character_id / "manifest.json"
+            original_hash = sha256(leaf.read_bytes()).hexdigest()
+            self.assertEqual(trusted["sha256"], original_hash)
+            leaf.write_bytes(leaf.read_bytes() + b" ")
+            # A modified leaf must never become its own new trust anchor.
+            unforced = catalog.expression_manifest(character_id)
+            if unforced is not None:
+                self.assertEqual(unforced["sha256"], original_hash)
+                self.assertNotEqual(unforced["sha256"], sha256(leaf.read_bytes()).hexdigest())
+            self.assertEqual(catalog.verify(force=True)["status"], "unavailable")
+            self.assertIsNone(catalog.expression_manifest(character_id))
 
     def test_character_media_accepts_v2_single_sprite_presentations(self) -> None:
         with TemporaryDirectory() as directory:

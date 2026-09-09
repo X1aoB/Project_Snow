@@ -92,6 +92,15 @@ class MiaExpressionRuntimeTests(TestCase):
                     self.assertEqual(image.size, expected_size, state)
                     self.assertEqual(image.mode, "RGBA", state)
 
+    def test_bundled_fallback_pins_both_repository_and_windows_manifest_bytes(self) -> None:
+        manifest_bytes = MANIFEST_PATH.read_bytes().replace(b"\r\n", b"\n")
+        pinned = re.search(r"MIA_BUNDLED_EXPRESSION_MANIFEST_HASHES = Object.freeze\(\[(.*?)\]\)", self.javascript, re.S)
+        self.assertIsNotNone(pinned)
+        self.assertEqual(set(re.findall(r'"([a-f0-9]{64})"', pinned.group(1))), {
+            hashlib.sha256(manifest_bytes).hexdigest(),
+            hashlib.sha256(manifest_bytes.replace(b"\n", b"\r\n")).hexdigest(),
+        })
+
     def test_client_loads_the_manifest_without_mia_only_asset_maps(self) -> None:
         for state, record in self.manifest["expressions"].items():
             self.assertNotIn(f'{state}: "{record["face_asset_path"]}"', self.javascript, state)

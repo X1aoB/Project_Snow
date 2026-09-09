@@ -481,14 +481,14 @@ class PublicFrontendReliabilityTests(TestCase):
             self.assertTrue(result["ready"])
             self.assertTrue(result["src"].startswith("blob:"))
             self.assertEqual(result["state"],"neutral")
-            advertised = page.evaluate("""async()=>{
+            advertised = page.evaluate("""async(hash)=>{
               const art=document.querySelector('#stage-character-art');
-              const character={character_id:'25b23cb64398', expression_manifest_url:'/media/fixture/expressions/25b23cb64398/manifest.json'};
+              const character={character_id:'25b23cb64398', expression_manifest_url:'/media/fixture/expressions/25b23cb64398/manifest.json',expression_manifest_sha256:hash};
               const ready=await window.__projectSnowTest.updateStageCharacterArt(art,character,'happy');
               return {ready,src:art.getAttribute('src'),state:art.dataset.expressionState};
-            }""")
+            }""", PublicFrontendHandler._expression_digest("25b23cb64398"))
             self.assertTrue(advertised["ready"])
-            self.assertFalse(advertised["src"].startswith("blob:"))
+            self.assertTrue(advertised["src"].startswith("blob:"))
             self.assertEqual(advertised["state"],"happy")
             tampered[0] = True
             self.open(page)
@@ -516,6 +516,6 @@ class PublicFrontendReliabilityTests(TestCase):
               return {ready,src:art.getAttribute('src'),state:art.dataset.expressionState};
             }""")
             self.assertTrue(bundled["ready"])
-            self.assertIn("/assets/expressions/mia/",bundled["src"])
+            self.assertTrue(bundled["src"].startswith("blob:"))
             self.assertEqual(bundled["state"],"neutral")
             browser.close()

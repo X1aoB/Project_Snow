@@ -814,6 +814,7 @@ class PublicChatService:
                         {
                             "expression_manifest_url": expression_manifest["url"],
                             "expression_state_count": expression_manifest["state_count"],
+                            "expression_manifest_sha256": expression_manifest["sha256"],
                         }
                         if expression_manifest
                         else {}

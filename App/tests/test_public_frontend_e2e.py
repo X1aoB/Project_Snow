@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 import mimetypes
 import os
 import threading
@@ -126,6 +127,21 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    @staticmethod
+    def _expression_manifest(character_id):
+        manifest = json.loads((PUBLIC_ROOT / "assets/expressions/mia/manifest.json").read_text(encoding="utf-8"))
+        manifest["character_id"] = character_id
+        manifest["display_name"] = character_id
+        manifest["stage_layout"] = {
+            "scale": 1.02 if character_id == "25b23cb64398" else 1,
+            "focus_x": 48 if character_id == "25b23cb64398" else 50,
+        }
+        return manifest
+
+    @classmethod
+    def _expression_digest(cls, character_id):
+        return sha256(json.dumps(cls._expression_manifest(character_id), ensure_ascii=False).encode()).hexdigest()
+
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path == "/announcements.json":
@@ -202,6 +218,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                             "search_tokens": ["kxy", "kaixiya"],
                             "avatar": None,
                             "expression_manifest_url": "/media/fixture/expressions/25b23cb64398/manifest.json",
+                            "expression_manifest_sha256": self._expression_digest("25b23cb64398"),
                             "expression_state_count": 18,
                             "license": "fixture",
                         },
@@ -212,6 +229,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                             "search_tokens": ["akxy", "ankaxiya"],
                             "avatar": None,
                             "expression_manifest_url": "/media/fixture/expressions/9f5804761c56/manifest.json",
+                            "expression_manifest_sha256": self._expression_digest("9f5804761c56"),
                             "expression_state_count": 18,
                             "license": "fixture",
                         },
@@ -222,6 +240,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                             "search_tokens": ["my", "miya"],
                             "avatar": None,
                             "expression_manifest_url": "/media/fixture/expressions/702f4375675b/manifest.json",
+                            "expression_manifest_sha256": self._expression_digest("702f4375675b"),
                             "expression_state_count": 18,
                             "license": "fixture",
                         },
@@ -232,6 +251,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                             "search_tokens": ["yqe", "yiqieer"],
                             "avatar": None,
                             "expression_manifest_url": "/media/fixture/expressions/78aa7ab99154/manifest.json",
+                            "expression_manifest_sha256": self._expression_digest("78aa7ab99154"),
                             "expression_state_count": 18,
                             "license": "fixture",
                         },
@@ -241,17 +261,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/media/fixture/expressions/") and path.endswith("/manifest.json"):
             character_id = path.split("/")[-2]
-            manifest = json.loads(
-                (PUBLIC_ROOT / "assets" / "expressions" / "mia" / "manifest.json").read_text(
-                    encoding="utf-8"
-                )
-            )
-            manifest["character_id"] = character_id
-            manifest["display_name"] = character_id
-            manifest["stage_layout"] = {
-                "scale": 1.02 if character_id == "25b23cb64398" else 1,
-                "focus_x": 48 if character_id == "25b23cb64398" else 50,
-            }
+            manifest = self._expression_manifest(character_id)
             self._json(manifest)
             return
         assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
@@ -1229,6 +1239,7 @@ class PublicFrontendE2ETests(TestCase):
                             render_strategy: 'single_sprite',
                             asset_scope: 'complete_character_sprite',
                             stage_asset_path: item.stage_asset_path,
+                            stage_asset_sha256: item.stage_asset_sha256,
                             stage_layout: {scale: 1.08, focus_x: 47},
                         };
                     }
@@ -1324,9 +1335,9 @@ class PublicFrontendE2ETests(TestCase):
                 "render_strategy": "layered_sprite",
                 "canvas": {"width": 6, "height": 8},
                 "layers": [
-                    {"asset_path": "/native-layers/underlay.png", "dimensions": {"width": 6, "height": 8},
+                    {"asset_path": "/native-layers/underlay.png", "asset_sha256": sha256(images["underlay.png"]).hexdigest(), "dimensions": {"width": 6, "height": 8},
                      "position": {"x": 0, "y": 0}, "composite": "source-over"},
-                    {"asset_path": f"/native-layers/{head}.png", "dimensions": {"width": 2, "height": 2},
+                    {"asset_path": f"/native-layers/{head}.png", "asset_sha256": sha256(images[f"{head}.png"]).hexdigest(), "dimensions": {"width": 2, "height": 2},
                      "position": {"x": 2, "y": 1}, "composite": "source-over"},
                 ],
             }
@@ -1355,6 +1366,7 @@ class PublicFrontendE2ETests(TestCase):
             browser = _launch_browser(playwright)
             page = browser.new_page()
             page.route("**/native-layers/*", route_layer)
+            page.add_init_script("window.__slowLayerHash = " + json.dumps(sha256(images["slow.png"]).hexdigest()))
             page.goto(self.base_url, wait_until="networkidle")
             page.locator("#accept-experience-notice").click()
             page.locator('[data-character="702f4375675b"]').click()
@@ -1419,7 +1431,7 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(result["removedArm"], [0, 0, 0, 0])
             self.assertEqual(result["strategy"], "layered_sprite")
             self.assertEqual(result["fallback"]["renderStrategy"], "single_sprite")
-            self.assertIn("/neutral.stage.", result["fallback"]["src"])
+            self.assertTrue(result["fallback"]["src"].startswith("blob:"))
             self.assertEqual(result["sizeFallback"], "single_sprite")
             self.assertEqual(result["abortName"], "AbortError")
             self.assertEqual(result["retainedCues"], [[], ["friendly_greeting"],
@@ -1432,6 +1444,7 @@ class PublicFrontendE2ETests(TestCase):
             for cue in ("quiet_resolve", "shared_memory"):
                 del payload["presentations"][f"performance.{cue}"]
 
+            page.evaluate("hash => { window.__nativeTestCharacter.expression_manifest_sha256 = hash; }", sha256(json.dumps(payload).encode()).hexdigest())
             page.evaluate("""async () => {
                 const hooks = window.__projectSnowTest;
                 const art = document.querySelector('#stage-character-art');
@@ -1440,7 +1453,7 @@ class PublicFrontendE2ETests(TestCase):
                 const decode = HTMLImageElement.prototype.decode;
                 const gate = new Promise((resolve) => { window.__releaseSlowLayer = resolve; });
                 HTMLImageElement.prototype.decode = async function() {
-                    if (this.src.includes('/native-layers/slow.png')) {
+                    if (this.src.startsWith('blob:') && [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join('') === window.__slowLayerHash) {
                         window.__slowLayerWaiting = true;
                         await gate;
                     }
@@ -1475,7 +1488,7 @@ class PublicFrontendE2ETests(TestCase):
                 const gate = new Promise((resolve) => { release = resolve; });
                 const started = new Promise((resolve) => { waiting = resolve; });
                 HTMLImageElement.prototype.decode = async function() {
-                    if (this.src.includes('/native-layers/slow.png')) {
+                    if (this.src.startsWith('blob:') && [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join('') === window.__slowLayerHash) {
                         waiting();
                         await gate;
                     }
@@ -1516,6 +1529,139 @@ class PublicFrontendE2ETests(TestCase):
             self.assertTrue(performed["textStageHidden"])
             browser.close()
 
+    def test_character_media_integrity_rejects_valid_same_size_replacements_and_times_out(self) -> None:
+        from io import BytesIO
+        from PIL import Image
+
+        images = {}
+        for name, size, color, file_format in (
+            ("neutral.webp", (6, 8), (30, 60, 90, 255), "WEBP"),
+            ("angry.webp", (6, 8), (60, 160, 80, 255), "WEBP"),
+            ("substitute.webp", (6, 8), (200, 30, 40, 255), "WEBP"),
+            ("flat.webp", (6, 8), (90, 100, 120, 255), "WEBP"),
+            ("underlay.png", (6, 8), (20, 30, 40, 255), "PNG"),
+            ("head.png", (2, 2), (160, 150, 140, 255), "PNG"),
+            ("substitute.png", (2, 2), (240, 10, 30, 255), "PNG"),
+        ):
+            buffer = BytesIO()
+            Image.new("RGBA", size, color).save(buffer, format=file_format, lossless=True, compress_level=0)
+            images[name] = buffer.getvalue()
+        self.assertEqual(len(images["head.png"]), len(images["substitute.png"]))
+        payload = PublicFrontendHandler._expression_manifest("25b23cb64398")
+        for state, name in (("neutral", "neutral.webp"), ("angry", "angry.webp"), ("happy", "flat.webp")):
+            payload["expressions"][state]["stage_asset_path"] = "/integrity/" + name
+            payload["expressions"][state]["stage_asset_sha256"] = sha256(images[name]).hexdigest()
+        payload["expressions"]["happy"]["presentation_id"] = "expression.happy"
+        payload["presentations"] = {"expression.happy": {
+            "render_strategy": "layered_sprite", "canvas": {"width": 6, "height": 8},
+            "layers": [
+                {"asset_path": "/integrity/underlay.png", "asset_sha256": sha256(images["underlay.png"]).hexdigest(),
+                 "dimensions": {"width": 6, "height": 8}, "position": {"x": 0, "y": 0}, "composite": "source-over"},
+                {"asset_path": "/integrity/head.png", "asset_sha256": sha256(images["head.png"]).hexdigest(),
+                 "dimensions": {"width": 2, "height": 2}, "position": {"x": 2, "y": 1}, "composite": "source-over"},
+            ],
+        }}
+        original_manifest = json.dumps(payload).encode()
+        changed = json.loads(original_manifest)
+        changed["expressions"]["neutral"]["stage_asset_path"] = "/integrity/substitute.webp"
+        changed["expressions"]["neutral"]["stage_asset_sha256"] = sha256(images["substitute.webp"]).hexdigest()
+        requests = []
+
+        def intercept(route):
+            path = urlparse(route.request.url).path
+            requests.append(path)
+            name = path.rsplit("/", 1)[-1]
+            if name == "manifest.json":
+                body, content_type = original_manifest, "application/json"
+            elif name == "changed.json":
+                body, content_type = json.dumps(changed).encode(), "application/json"
+            else:
+                # Both substitutions remain decodable at the declared dimensions.
+                actual = {"angry.webp": "substitute.webp", "head.png": "substitute.png"}.get(name, name)
+                body = images[actual]
+                content_type = "image/png" if name.endswith(".png") else "image/webp"
+            route.fulfill(status=200, content_type=content_type, body=body)
+
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            page.route("**/integrity/*", intercept)
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator('[data-character="25b23cb64398"]').click()
+            result = page.evaluate("""async hash => {
+                const hooks = window.__projectSnowTest;
+                const character = {character_id:'25b23cb64398', expression_manifest_url:'/integrity/manifest.json', expression_manifest_sha256:hash};
+                const art = document.querySelector('#stage-character-art');
+                const digest = async () => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(art.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join('');
+                const nativeDecode = HTMLImageElement.prototype.decode;
+                const decoded = [];
+                HTMLImageElement.prototype.decode = async function() {
+                    if(this.src.startsWith('blob:')) decoded.push([...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join(''));
+                    return nativeDecode.call(this);
+                };
+                try {
+                    const webpReady = await hooks.updateStageCharacterArt(art, character, 'angry');
+                    const webp = {ready:webpReady,state:art.dataset.expressionState,sha256:await digest()};
+                    const pngReady = await hooks.updateStageCharacterArt(art, character, 'happy');
+                    const png = {ready:pngReady,state:art.dataset.expressionState,sha256:await digest(),strategy:art.dataset.renderStrategy};
+                    const tampered = await hooks.updateStageCharacterArt(art,{...character,expression_manifest_url:'/integrity/changed.json'},'neutral');
+                    const tamperedHidden = art.hidden && !art.hasAttribute('src');
+                    const absent = await hooks.updateStageCharacterArt(art,{...character,expression_manifest_sha256:''},'neutral');
+                    const absentHidden = art.hidden && !art.hasAttribute('src');
+                    window.__integrityCharacter = character;
+                    return {webp,png,tampered,tamperedHidden,absent,absentHidden,decoded};
+                } finally { HTMLImageElement.prototype.decode = nativeDecode; }
+            }""", sha256(original_manifest).hexdigest())
+            self.assertEqual(result["webp"], {"ready": True, "state": "neutral", "sha256": sha256(images["neutral.webp"]).hexdigest()})
+            self.assertEqual(result["png"], {"ready": True, "state": "happy", "sha256": sha256(images["flat.webp"]).hexdigest(), "strategy": "single_sprite"})
+            self.assertNotIn(sha256(images["substitute.webp"]).hexdigest(), result["decoded"])
+            self.assertNotIn(sha256(images["substitute.png"]).hexdigest(), result["decoded"])
+            self.assertFalse(result["tampered"])
+            self.assertTrue(result["tamperedHidden"])
+            self.assertFalse(result["absent"])
+            self.assertTrue(result["absentHidden"])
+            self.assertNotIn("/integrity/substitute.webp", requests)
+            self.assertEqual(requests.count("/integrity/manifest.json"), 1)
+            deadline = page.evaluate("""async () => {
+                const hooks = window.__projectSnowTest;
+                const art = document.querySelector('#stage-character-art');
+                const character = window.__integrityCharacter;
+                await hooks.updateStageCharacterArt(art, character, 'neutral');
+                art.dataset.expressionCharacterId = 'another-character';
+                const nativeFetch = window.fetch, later = window.setTimeout;
+                let aborted = false;
+                window.fetch = (url, options) => String(url).endsWith('/integrity/hanging.json')
+                    ? new Promise((resolve, reject) => options.signal.addEventListener('abort', () => {
+                        aborted = true; reject(new DOMException('Aborted', 'AbortError'));
+                    }, {once:true})) : nativeFetch(url, options);
+                window.setTimeout = (callback, ms, ...args) => later(callback, ms === 20000 ? 50 : ms, ...args);
+                try {
+                    const ready = await hooks.updateStageCharacterArt(art, {...character,expression_manifest_url:'/integrity/hanging.json'}, 'neutral');
+                    return {ready,aborted,hidden:art.hidden&&!art.hasAttribute('src')};
+                } finally { window.fetch = nativeFetch; window.setTimeout = later; }
+            }""")
+            self.assertEqual(deadline, {"ready": False, "aborted": True, "hidden": True})
+            decode_deadline = page.evaluate("""async () => {
+                const hooks = window.__projectSnowTest, art = document.querySelector('#stage-character-art');
+                const decode = HTMLImageElement.prototype.decode, later = window.setTimeout;
+                const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+                const live = new Set();
+                HTMLImageElement.prototype.decode = () => new Promise(() => {});
+                URL.createObjectURL = blob => { const value = create(blob); live.add(value); return value; };
+                URL.revokeObjectURL = value => { live.delete(value); revoke(value); };
+                window.setTimeout = (callback, ms, ...args) => later(callback, ms === 8000 ? 30 : ms, ...args);
+                try {
+                    const ready = await hooks.updateStageCharacterArt(art, window.__integrityCharacter, 'happy');
+                    return {ready,hidden:art.hidden&&!art.hasAttribute('src'),unreleased:live.size};
+                } finally {
+                    HTMLImageElement.prototype.decode = decode; window.setTimeout = later;
+                    URL.createObjectURL = create; URL.revokeObjectURL = revoke;
+                }
+            }""")
+            self.assertEqual(decode_deadline, {"ready": False, "hidden": True, "unreleased": 0})
+            browser.close()
+
     def test_mia_stage_art_syncs_all_states_and_actions_stay_out_of_dialogue(self) -> None:
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
@@ -1545,6 +1691,7 @@ class PublicFrontendE2ETests(TestCase):
                         result[state] = {
                             artState: art.dataset.expressionState,
                             artSrc: art.getAttribute('src') || '',
+                            sha256: [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(art.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join(''),
                             hidden: art.hidden,
                         };
                     }
@@ -1554,7 +1701,9 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(len(states), 18)
             for state, values in states.items():
                 self.assertEqual(values["artState"], state)
-                self.assertIn(f"/{state}.stage.", values["artSrc"])
+                self.assertTrue(values["artSrc"].startswith("blob:"))
+                manifest = json.loads((PUBLIC_ROOT / "assets/expressions/mia/manifest.json").read_text(encoding="utf-8"))
+                self.assertEqual(values["sha256"], manifest["expressions"][state]["stage_asset_sha256"])
                 self.assertFalse(values["hidden"])
             self.assertEqual(page.locator("#stage-portrait").count(), 0)
             self.assertEqual(page.locator("#stage-portrait-avatar").count(), 0)
@@ -1609,8 +1758,7 @@ class PublicFrontendE2ETests(TestCase):
                 "() => window.__stageArtTransitions.find((row) => row.incomingCharacterId === '78aa7ab99154')"
             )
             self.assertEqual(transition["outgoingCharacterId"], "702f4375675b")
-            self.assertIn("/assets/expressions/mia/", transition["outgoingSrc"])
-            self.assertIn(".stage.", transition["outgoingSrc"])
+            self.assertTrue(transition["outgoingSrc"].startswith("blob:"))
             page.wait_for_function(
                 "() => document.querySelectorAll('.stage-character-art-outgoing').length === 0"
             )
@@ -1628,11 +1776,12 @@ class PublicFrontendE2ETests(TestCase):
             fallback_state = page.evaluate(
                 """async () => {
                     const NativeImage = window.Image;
+                    let decodeFailures = 1;
                     class FallbackProbe {
                         constructor() { this.complete = false; this.naturalWidth = 0; }
                         set src(value) {
                             queueMicrotask(() => {
-                                if (value.includes('/angry.stage.')) this.onerror?.();
+                                if (decodeFailures-- > 0) this.onerror?.();
                                 else { this.naturalWidth = 620; this.onload?.(); }
                             });
                         }
@@ -1652,7 +1801,7 @@ class PublicFrontendE2ETests(TestCase):
                 }"""
             )
             self.assertEqual(fallback_state["state"], "neutral")
-            self.assertIn("/neutral.stage.", fallback_state["src"])
+            self.assertTrue(fallback_state["src"].startswith("blob:"))
             page.locator("#toggle-stage-ui").click()
             self.assertTrue(page.locator("#stage-character-art").is_visible())
             page.locator("#restore-stage-ui").click()
@@ -1770,6 +1919,15 @@ class PublicFrontendE2ETests(TestCase):
                         && document.querySelectorAll('.stage-character-art-outgoing').length === 0;
                 }"""
             )
+            page.reload(wait_until="networkidle")
+            # Startup selects the first contact; explicitly reopen Mia's saved
+            # in-person history before checking that old cues remain static.
+            page.locator('[data-character="702f4375675b"]').click()
+            page.wait_for_function("() => document.querySelector('#stage-character-art').dataset.expressionCharacterId === '702f4375675b'")
+            art.wait_for(state="visible")
+            self.assertIsNone(art.get_attribute("data-stage-motion-play-count"))
+            self.assertIsNone(art.get_attribute("data-stage-motion"))
+            self.assertEqual(art.evaluate("element => element.getAnimations().length"), 0)
             browser.close()
 
             reduced_browser = _launch_browser(playwright)

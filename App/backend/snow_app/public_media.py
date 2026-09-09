@@ -986,6 +986,7 @@ class PublicMediaCatalog:
             "url": f"/media/{self.version}/"
             + str(item["expression_manifest_path"]).lstrip("/"),
             "state_count": int(item.get("expression_state_count") or 0),
+            "sha256": str(item["expression_manifest_sha256"]),
         }
 
     def performance_catalog(self, character_id: str) -> list[dict[str, str]]:
