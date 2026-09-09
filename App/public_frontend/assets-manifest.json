@@ -7,10 +7,22 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/assets/avatars/longyan-neutral-96.webp",
+      "public_url": "/assets/avatars/longyan-neutral-96.webp",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/assets/avatars/longyan-neutral-200.webp",
+      "public_url": "/assets/avatars/longyan-neutral-200.webp",
+      "required_html": false
+    },
+    {
       "source": "public_frontend/app.js",
       "public_url": "/app.js",
       "dependencies": [
-        "/modules/runtime.js"
+        "/modules/runtime.js",
+        "/assets/avatars/longyan-neutral-96.webp",
+        "/assets/avatars/longyan-neutral-200.webp"
       ]
     },
     {
