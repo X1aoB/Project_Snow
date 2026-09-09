@@ -13,6 +13,16 @@ const SUBSCRIPTION_EFFORT_LABELS = Object.freeze({ none: "无推理", minimal: "
 const SUBSCRIPTION_SESSION_KEY = "project-snow-public:subscription-pair";
 const SCENE_ASSET_URLS = Object.freeze(JSON.parse(document.querySelector('meta[name="snow-scene-assets"]')?.content || "{}"));
 const SCENE_KEYS = new Set(["generic", "quarters", "lounge", "training", "archive", "canteen", "observation", "medical", "corridor"]);
+// Reuse the approved neutral face crop without changing the original media attribution.
+const CHARACTER_AVATAR_OVERRIDES = Object.freeze({
+  "447ed3c401c9": Object.freeze({
+    thumbnail_src: "/assets/avatars/longyan-neutral-96.webp",
+    src: "/assets/avatars/longyan-neutral-200.webp",
+    portrait_focus_x: 50,
+    portrait_focus_y: 50,
+    portrait_scale: 1,
+  }),
+});
 const state = {
   config: null,
   credential: "",
@@ -2087,7 +2097,7 @@ async function ensureContinuityDecision(thread) {
   return true;
 }
 function avatarMarkup(character, { thumbnail = true, priority = false, className = "" } = {}) {
-  const avatar = character?.avatar || null;
+  const avatar = CHARACTER_AVATAR_OVERRIDES[character?.character_id] || character?.avatar || null;
   const src = avatar ? (thumbnail ? avatar.thumbnail_src : avatar.src) : "";
   const focus = avatar ? ` style="--portrait-focus-x:${Number(avatar.portrait_focus_x || 50)}%;--portrait-focus-y:${Number(avatar.portrait_focus_y || 50)}%;--portrait-scale:${Number(avatar.portrait_scale || 1)}"` : "";
   const image = src ? `<img src="${escapeHtml(src)}" alt="" loading="${priority ? "eager" : "lazy"}" decoding="async"${priority ? " fetchpriority=\"high\"" : ""} />` : "";
