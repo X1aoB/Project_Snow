@@ -27,8 +27,9 @@ class ChangeClassifierTests(TestCase):
         self.assertTrue(classify(["App/public_frontend_src/src/runtime.ts"])["app_image"])
 
     def test_browser_reliability_only_change_runs_browser_tier(self):
-        result = classify(["App/tests/test_public_frontend_reliability.py"])
-        self.assertTrue(result["ui"])
+        for path in ("App/tests/test_public_frontend_reliability.py", "App/tests/test_stage_presentation_timing.py"):
+            with self.subTest(path=path):
+                self.assertTrue(classify([path])["ui"])
 
     def test_dot_github_and_real_data_paths_are_classified(self):
         self.assertTrue(classify([".github/workflows/ci.yml"])["deploy"])

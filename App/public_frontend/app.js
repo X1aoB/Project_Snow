@@ -49,6 +49,7 @@ const state = {
   feedbackMessageId: "",
   arrivalPending: false,
   autoSummaryEnabled: true,
+  dayContinuityPreference: "start_today",
   selectionSequence: 0,
   selectionController: null,
   stageArtRequestSequence: 0,
@@ -57,6 +58,10 @@ const state = {
   stageArtPending: null,
   stageArtTransition: null,
   stageArtSurface: null,
+  stagePresentationCache: new Map(),
+  stageRenderSequence: 0,
+  stageSpeechGate: null,
+  stageWarmController: null,
   expressionManifestCache: new Map(),
   expressionBytesCache: new Map(),
   stageMotionRequestSequence: 0,
@@ -68,7 +73,6 @@ const state = {
   summaryControllers: new Map(),
   persistedMessages: new Map(),
   historyEpoch: 0,
-  continuityPrompt: null,
   storageAvailable: true,
   memoryStores: { threads: new Map(), messages: new Map(), app_state: new Map() },
   drafts: new Map(),
@@ -335,6 +339,8 @@ const EXPRESSION_FETCH_TIMEOUT_MS = 12000;
 const EXPRESSION_DECODE_TIMEOUT_MS = 8000;
 const EXPRESSION_UPDATE_TIMEOUT_MS = 20000;
 const EXPRESSION_IMAGE_MAX_BYTES = 64 * 1024 * 1024;
+const STAGE_PRESENTATION_CACHE_LIMIT = 12;
+const STAGE_SPEECH_SYNC_WAIT_MS = 240;
 const EXPRESSION_STATES = new Set([
   "neutral", "gentle_smile", "happy", "amused", "teasing", "relieved",
   "serious", "focused", "thinking", "confused", "skeptical", "concerned",
@@ -424,7 +430,7 @@ function fitPublicRequestPayload(payload, { arrays = [], texts = [], targetBytes
 }
 if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
   Object.defineProperty(window, "__projectSnowTest", {
-    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, normalizeExpressionState, normalizeStageMotion, expressionManifestUrlForCharacter, normalizeExpressionManifest, stagePresentationRenderer, preloadStagePresentation, updateStageCharacterArt, playStageMotion, cancelStageMotion, renderStage }),
+    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, normalizeExpressionState, normalizeStageMotion, expressionManifestUrlForCharacter, normalizeExpressionManifest, stagePresentationRenderer, preloadStagePresentation, clearStagePresentationCache, warmCharacterStage, updateStageCharacterArt, playStageMotion, cancelStageMotion, renderStage }),
     configurable: false,
     writable: false,
   });
@@ -1145,6 +1151,7 @@ async function clearPersistedWorldPackage() {
 async function migrateBrowserState() {
   const preferences = await storeGet("app_state", "preferences");
   state.autoSummaryEnabled = preferences?.autoSummaryEnabled !== false;
+  state.dayContinuityPreference = preferences?.dayContinuityPreference === "continue_previous" ? "continue_previous" : "start_today";
   const uiPreferences = await storeGet("app_state", "ui_preferences");
   state.pinnedCharacters = new Set(Array.isArray(uiPreferences?.pinnedCharacters) ? uiPreferences.pinnedCharacters.map(plain) : []);
   state.favoriteStickerIds = new Set(Array.isArray(uiPreferences?.favoriteStickerIds) ? uiPreferences.favoriteStickerIds.map(plain) : []);
@@ -1188,6 +1195,13 @@ async function storageBytes() {
   return new Blob([JSON.stringify(payload)]).size;
 }
 
+async function saveConversationPreferences() {
+  await storePut("app_state", {
+    key: "preferences",
+    autoSummaryEnabled: state.autoSummaryEnabled,
+    dayContinuityPreference: state.dayContinuityPreference,
+  });
+}
 async function saveUiPreferences() {
   await storePut("app_state", {
     key: "ui_preferences",
@@ -1454,7 +1468,7 @@ async function showExperienceNoticeIfNeeded() {
       if (accepted) {
         localPreferences.setItem(experienceNoticeKey(), "accepted");
         state.autoSummaryEnabled = $("notice-auto-summary").checked;
-        await storePut("app_state", { key: "preferences", autoSummaryEnabled: state.autoSummaryEnabled });
+        await saveConversationPreferences();
       }
       if (dialog.open) dialog.close();
       resolve();
@@ -1729,50 +1743,28 @@ function currentThread() { return state.threads.get(state.selected) || null; }
 async function ensureContinuityDecision(thread) {
   if (!thread) return true;
   const today = localDayKey();
-  if (!thread.localDayKey) {
-    thread.localDayKey = today;
-    thread.lastActiveAt = Date.now();
-    await dbPutThread(thread);
-    return true;
+  if (thread.localDayKey && thread.localDayKey !== today) {
+    thread.continuityDecision = state.dayContinuityPreference;
+    if (thread.continuityDecision === "start_today") {
+      // Keep the local transcript and world state, but retire yesterday's
+      // model context, including any summary that has not finished yet.
+      state.summaryControllers.get(thread.characterId)?.abort();
+      state.summaryControllers.delete(thread.characterId);
+      state.summaryInFlight.delete(thread.characterId);
+      thread.conversationSegmentId = newConversationSegment();
+      thread.summary = "";
+      thread.pendingTopics = [];
+      thread.summaryRequestId = "";
+      thread.summaryCheckpointMessageId = "";
+      thread.summarizedThroughMessageId = "";
+      thread.summarizedThroughTurnCount = 0;
+      thread.summaryUpdatedAt = 0;
+    }
   }
-  if (thread.localDayKey === today) {
-    thread.lastActiveAt = Date.now();
-    await dbPutThread(thread);
-    return true;
-  }
-  const dialog = $("continuity-dialog");
-  if (!dialog.dataset.bound) {
-    dialog.dataset.bound = "1";
-    dialog.addEventListener("close", () => {
-      if (state.continuityPrompt) {
-        const pending = state.continuityPrompt;
-        state.continuityPrompt = null;
-        pending.resolve(false);
-      }
-    });
-  }
-  return new Promise((resolve) => {
-    state.continuityPrompt = { thread, today, resolve };
-    const finish = async (decision) => {
-      if (!state.continuityPrompt) return;
-      thread.continuityDecision = decision;
-      thread.localDayKey = today;
-      // Continuing yesterday keeps the prior segment available for the
-      // bounded recent-history window. Starting today deliberately receives a
-      // fresh segment so no previous transcript can leak into the request.
-      if (decision === "start_today") thread.conversationSegmentId = newConversationSegment();
-      thread.lastActiveAt = Date.now();
-      if (decision === "start_today") thread.pendingTopics = [];
-      await dbPutThread(thread);
-      const pending = state.continuityPrompt;
-      state.continuityPrompt = null;
-      if (dialog.open) dialog.close();
-      pending.resolve(true);
-    };
-    $("continue-yesterday").onclick = () => finish("continue_previous");
-    $("start-today").onclick = () => finish("start_today");
-    dialog.showModal();
-  });
+  thread.localDayKey = today;
+  thread.lastActiveAt = Date.now();
+  await dbPutThread(thread);
+  return true;
 }
 function avatarMarkup(character, { thumbnail = true, priority = false, className = "" } = {}) {
   const avatar = character?.avatar || null;
@@ -2682,10 +2674,17 @@ const STAGE_PRESENTATION_RENDERERS = Object.freeze({
   layered_sprite: Object.freeze({
     async preload(presentation, signal) {
       const layers = [];
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (signal?.aborted) abort();
+      signal?.addEventListener("abort", abort, { once: true });
+      const loading = presentation.layers.map(async (layer, index) => {
+        layers[index] = await verifiedExpressionImage(layer.assetPath, layer.sha256, controller.signal);
+      });
       try {
-        // Every pixel source is verified before decode. Sequential leases keep the
-        // failure path bounded and ensure already decoded image sources are released.
-        for (const layer of presentation.layers) layers.push(await verifiedExpressionImage(layer.assetPath, layer.sha256, signal));
+        // Download and decode independent layers together, retaining manifest order
+        // for composition. Nothing is displayed until every source is verified.
+        await Promise.all(loading);
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const canvas = document.createElement("canvas");
         canvas.width = presentation.canvas.width;
@@ -2702,9 +2701,14 @@ const STAGE_PRESENTATION_RENDERERS = Object.freeze({
           context.drawImage(image, layer.x, layer.y);
         }
         const src = canvas.toDataURL("image/png");
-        await preloadImage(src, signal);
-        return { src, renderStrategy: "layered_sprite" };
-      } finally { for (const layer of layers) layer.dispose(); }
+        const image = await preloadImage(src, signal);
+        return { src, image, renderStrategy: "layered_sprite", dispose: () => image.removeAttribute("src") };
+      } finally {
+        abort();
+        await Promise.allSettled(loading);
+        signal?.removeEventListener("abort", abort);
+        for (const layer of layers) layer?.dispose();
+      }
     },
     commit(node, _presentation, prepared) {
       node.src = prepared.src;
@@ -2715,7 +2719,7 @@ function stagePresentationRenderer(presentation) {
   return STAGE_PRESENTATION_RENDERERS[presentation?.renderStrategy]
     || STAGE_PRESENTATION_RENDERERS.single_sprite;
 }
-async function preloadStagePresentation(presentation, signal) {
+async function prepareStagePresentation(presentation, signal) {
   if (!presentation?.stageAssetPath) throw new Error("expression_manifest_invalid");
   const renderer = stagePresentationRenderer(presentation);
   try {
@@ -2727,6 +2731,92 @@ async function preloadStagePresentation(presentation, signal) {
     const prepared = await fallback.preload(presentation, signal);
     return { renderer: fallback, prepared };
   }
+}
+function trimStagePresentationCache() {
+  const cache = state.stagePresentationCache;
+  let bytes = [...cache.values()].reduce((total, entry) => total + (entry.bytes || 0), 0);
+  for (const [key, entry] of cache) {
+    if (cache.size <= STAGE_PRESENTATION_CACHE_LIMIT && bytes <= EXPRESSION_IMAGE_MAX_BYTES) break;
+    if (!entry.value || entry.waiters) continue;
+    cache.delete(key);
+    bytes -= entry.bytes;
+    entry.value.prepared.dispose?.();
+  }
+}
+function clearStagePresentationCache() {
+  for (const entry of state.stagePresentationCache.values()) {
+    entry.controller.abort();
+    entry.value?.prepared.dispose?.();
+  }
+  state.stagePresentationCache.clear();
+}
+function preloadStagePresentation(presentation, signal) {
+  if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  // Include every pixel/composition input, so a changed digest or layer position
+  // can never borrow a prepared surface from another presentation.
+  const key = JSON.stringify([presentation?.renderStrategy, presentation?.stageAssetPath,
+    presentation?.stageAssetSha256, presentation?.canvas, presentation?.layers]);
+  const cache = state.stagePresentationCache;
+  let entry = cache.get(key);
+  if (!entry) {
+    entry = { controller: new AbortController(), waiters: 0, value: null, bytes: 0, promise: null };
+    cache.set(key, entry);
+    entry.promise = prepareStagePresentation(presentation, entry.controller.signal).then((value) => {
+      if (entry.controller.signal.aborted) {
+        value.prepared.dispose?.();
+        throw new DOMException("Aborted", "AbortError");
+      }
+      entry.value = value;
+      const { src, image } = value.prepared;
+      entry.bytes = src.length * 2 + (image?.naturalWidth || 0) * (image?.naturalHeight || 0) * 4;
+      // A transient layered failure must be retried later, not cached forever as
+      // a flattened fallback. The caller still owns that successful fallback.
+      if (value.prepared.renderStrategy !== presentation.renderStrategy) cache.delete(key);
+      return value;
+    }).catch((error) => {
+      if (cache.get(key) === entry) cache.delete(key);
+      throw error;
+    });
+  } else {
+    cache.delete(key);
+    cache.set(key, entry);
+  }
+  entry.waiters += 1;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", abort);
+      entry.waiters -= 1;
+      if (!entry.value && !entry.waiters) {
+        entry.controller.abort();
+        if (cache.get(key) === entry) cache.delete(key);
+      }
+      callback(value);
+      trimStagePresentationCache();
+      if (entry.value && !entry.waiters && cache.get(key) !== entry) entry.value.prepared.dispose?.();
+    };
+    const abort = () => finish(reject, new DOMException("Aborted", "AbortError"));
+    signal?.addEventListener("abort", abort, { once: true });
+    entry.promise.then((value) => {
+      // The cache owns decoded images; disposing one visible consumer must not
+      // clear a surface being reused by a prewarm or another stage update.
+      finish(resolve, { renderer: value.renderer, prepared: { ...value.prepared, dispose: () => {} } });
+    }, (error) => finish(reject, error));
+  });
+}
+async function warmCharacterStage(character, expressionState = "neutral", performanceId = "", signal) {
+  if (!character || (!expressionManifestUrlForCharacter(character) && !stageReleaseCharacterForExpressions(character))) return false;
+  try {
+    const manifest = await loadExpressionManifest(character, signal);
+    const cue = manifest.performances[normalizePerformanceId(performanceId, "in_person")];
+    const presentation = cue?.presentation
+      || manifest.expressions[normalizeExpressionState(expressionState, "in_person")]?.presentation
+      || manifest.expressions.neutral?.presentation;
+    await preloadStagePresentation(presentation, signal);
+    return true;
+  } catch { return false; /* Foreground rendering keeps its verified fallback path. */ }
 }
 function hideStageCharacterArt(node) {
   if (!node) return;
@@ -2758,7 +2848,7 @@ function cancelStageArtTransition(node = $("stage-character-art")) {
     delete node.dataset.stageArtTransition;
   }
 }
-function crossfadeStageCharacterArt(node) {
+function crossfadeStageCharacterArt(node, duration = 280) {
   cancelStageArtTransition(node);
   if (
     !node?.parentNode
@@ -2780,7 +2870,7 @@ function crossfadeStageCharacterArt(node) {
   node.style.opacity = "1";
   node.dataset.stageArtTransition = "incoming";
   const options = {
-    duration: 280,
+    duration,
     easing: "cubic-bezier(.22,.72,.24,1)",
     fill: "both",
   };
@@ -2906,10 +2996,11 @@ async function updateStageCharacterArt(node, character, expressionState, perform
     }
     const previousCharacterId = plain(node.dataset.expressionCharacterId);
     const shouldCrossfade = previousCharacterId
-      && previousCharacterId !== characterId
+      && node.getAttribute("src") !== loadedSurface.src
       && !node.hidden
       && Boolean(node.getAttribute("src"));
-    const outgoingTransition = shouldCrossfade ? crossfadeStageCharacterArt(node) : null;
+    const outgoingTransition = shouldCrossfade
+      ? crossfadeStageCharacterArt(node, previousCharacterId === characterId ? 160 : 280) : null;
     const previousSurface = state.stageArtSurface;
     loadedRenderer.commit(node, loadedPresentation, loadedSurface);
     state.stageArtSurface = loadedSurface;
@@ -3217,6 +3308,11 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   cancelModeTransition();
   state.selectionController = new AbortController();
   const controller = state.selectionController;
+  state.stageWarmController?.abort();
+  state.stageWarmController = controller;
+  // Start artwork alongside local history and presence resolution, while the
+  // user is still in the contact/transition UI rather than after opening the stage.
+  void warmCharacterStage(characterById(characterId), "neutral", "", controller.signal);
   const previousId = state.selected;
   const previousThread = currentThread();
   const switchingFromStage = Boolean(previousId && previousId !== characterId && previousThread?.channel === "in_person");
@@ -3225,6 +3321,10 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   try {
     const thread = await dbGetThread(characterId);
     if (sequence !== state.selectionSequence) return;
+    const previousReply = [...thread.messages].reverse().find(message => message.role === "assistant" && message.communicationChannel === "in_person");
+    if (previousReply && (expressionStateForMessage(previousReply) !== "neutral" || previousReply.performanceId)) {
+      void warmCharacterStage(characterById(characterId), expressionStateForMessage(previousReply), previousReply.performanceId, controller.signal);
+    }
     if (!(await ensureContinuityDecision(thread)) || sequence !== state.selectionSequence) return;
     thread.lastActiveAt = Date.now();
     await dbPutThread(thread);
@@ -3279,7 +3379,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     state.scene = preparedScene;
     const character = characterById(characterId);
     renderCharacters();
-    $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: false, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
+    $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: true, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
     fillAvatar($("stage-header-avatar"), character, { thumbnail: true, priority: true });
     $("stage-character-name").textContent = character.display_name;
     $("stage-speaker").textContent = character.display_name;
@@ -3632,6 +3732,7 @@ function renderTypewriter(text, key) {
   state.typewriter.timer = window.setTimeout(revealNext, plan.initialDelay);
 }
 function renderStage() {
+  const renderSequence = ++state.stageRenderSequence;
   const character = currentCharacter();
   const assistantMessage = latestInPersonMessage("assistant");
   const expressionState = expressionStateForMessage(assistantMessage);
@@ -3639,17 +3740,42 @@ function renderStage() {
   const livePresentation = presentationFor();
   const motionPresentation = livePresentation?.messageId === assistantMessage?.id ? livePresentation : null;
   const motionRequestSequence = state.stageMotionRequestSequence;
+  let artReady = Promise.resolve(false);
   if ($("chat-app").dataset.channel !== "in_person") {
     cancelStageArt({ hide: true });
   } else {
-    void updateStageCharacterArt(artNode, character, expressionState,
+    artReady = updateStageCharacterArt(artNode, character, expressionState,
       normalizePerformanceId(assistantMessage?.performanceId ?? assistantMessage?.performance_id, assistantMessage?.communicationChannel)
-    ).then((ready) => {
+    );
+    void artReady.then((ready) => {
       if (ready && motionPresentation) {
         playStageMotion(artNode, assistantMessage, motionPresentation, motionRequestSequence);
       }
     });
   }
+  const pending = typingStateFor();
+  const speechKey = assistantMessage ? speechTypewriterKey(assistantMessage) : "";
+  const liveReply = pending?.phase === "presenting" && pending.channel === "in_person"
+    && assistantMessage?.requestId === pending.requestId;
+  if (liveReply && $("chat-app").dataset.channel === "in_person" && state.typewriter.key !== speechKey) {
+    // Repeated renders share one deadline. A stalled image can delay the first
+    // spoken text only briefly, and late completions cannot repaint a new scene.
+    if (state.stageSpeechGate?.key !== speechKey) {
+      state.stageSpeechGate = { key: speechKey, deadline: performance.now() + STAGE_SPEECH_SYNC_WAIT_MS };
+    }
+    const remaining = Math.max(0, state.stageSpeechGate.deadline - performance.now());
+    if (remaining > 0) {
+      void Promise.race([artReady, delay(remaining)]).then(() => {
+        if (renderSequence !== state.stageRenderSequence || currentCharacter()?.character_id !== character?.character_id
+          || $("chat-app").dataset.channel !== "in_person") return;
+        renderStageSpeech(assistantMessage);
+      });
+      return;
+    }
+  }
+  renderStageSpeech(assistantMessage);
+}
+function renderStageSpeech(assistantMessage) {
   const pending = typingStateFor();
   const speechNode = $("stage-speech");
   if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {
@@ -3707,20 +3833,14 @@ function renderScene() {
   const scene = state.scene || {};
   const visualKey = SCENE_KEYS.has(scene.visual_key) ? scene.visual_key : "generic";
   $("in-person-surface").dataset.scene = visualKey;
-  $("scene-backdrop").src = SCENE_ASSET_URLS[visualKey] || `/assets/immersive/scenes/${visualKey}.svg`;
-  const preload = new Image();
-  preload.src = $("scene-backdrop").src;
+  const backdrop = SCENE_ASSET_URLS[visualKey] || `/assets/immersive/scenes/${visualKey}.svg`;
+  if ($("scene-backdrop").getAttribute("src") !== backdrop) $("scene-backdrop").src = backdrop;
   $("stage-location").textContent = scene.character_location || "场景尚未建立";
   $("stage-activity").textContent = scene.character_activity || "选择角色后读取当前位置";
   const presenceLabel = scene.character_location ? `去见她 · ${scene.character_location}` : "去见她";
   $("go-in-person-label").textContent = presenceLabel;
   $("go-in-person").setAttribute("aria-label", presenceLabel);
   $("go-in-person").title = presenceLabel;
-  const character = currentCharacter();
-  if (character?.avatar?.src) {
-    const image = new Image();
-    image.src = character.avatar.src;
-  }
   renderStage();
   renderInfo();
 }
@@ -4215,6 +4335,9 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       }
     }
     if (!result) throw lastError || new Error("stream_disconnected");
+    if (result.returnedChannel === "in_person" && ownsVisibleRequest()) {
+      void warmCharacterStage(characterById(characterId), result.expressionState, result.performanceId, requestController.signal);
+    }
     state.retrySnapshots.delete(userMessage.id);
     userMessage.requestSnapshot = null;
     await userPersistence;
@@ -4361,7 +4484,7 @@ async function retryMessage(messageId) {
   await runChat(thread, message);
 }
 function successfulChatMessages(thread) {
-  return (thread.messages || []).filter((message) => message.role === "assistant" && message.status === "sent" && message.source !== "presence_arrival");
+  return (thread.messages || []).filter((message) => message.conversationSegmentId === thread.conversationSegmentId && message.role === "assistant" && message.status === "sent" && message.source !== "presence_arrival");
 }
 function remainingProviderCallBudget(usage) {
   const used = Number(usage?.provider_calls);
@@ -4411,7 +4534,7 @@ async function runAutoSummary(thread) {
   const requestId = thread.summaryRequestId;
   const epoch = state.historyEpoch;
   try {
-    const turns = thread.messages.filter((message) => message.status === "sent").slice(-24).map((message) => ({
+    const turns = thread.messages.filter((message) => message.conversationSegmentId === thread.conversationSegmentId && message.status === "sent").slice(-24).map((message) => ({
       role: message.role,
       communication_channel: message.communicationChannel,
       content_blocks: wireBlocks(message.contentBlocks),
@@ -4507,6 +4630,9 @@ async function arriveInPerson() {
       { arrays: [{ key: "recent_history", minimum: 0 }], texts: ["history_summary"] },
     );
     const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify(arrivalPayload) });
+    if (result.reaction && ownsVisibleArrival()) {
+      void warmCharacterStage(characterById(characterId), result.reaction.expression_state, result.reaction.performance_id);
+    }
     if (ownsArrival()) await saveWorldPackage(result.state_package);
     if (ownsArrival()) state.sceneByCharacter.set(characterId, result.scene_state || {});
     if (ownsVisibleArrival()) state.scene = result.scene_state;
@@ -4679,6 +4805,7 @@ function openSettings(tab = "models") {
   const activeThread = currentThread();
   $("auto-summary-enabled").checked = state.autoSummaryEnabled;
   $("history-retention").value = String(state.historyRetentionDays);
+  $("day-continuity-preference").value = state.dayContinuityPreference;
   $("summary-last-updated").textContent = activeThread?.summaryUpdatedAt ? `最近更新：${new Date(activeThread.summaryUpdatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}` : "尚未生成摘要";
   $("provider-select").value = state.provider || $("provider-select").value;
   syncProviderControls($("provider-select").value);
@@ -4888,8 +5015,13 @@ $("provider-select").onchange = () => chooseProvider($("provider-select").value)
 $("auto-summary-enabled").onchange = async () => {
   state.autoSummaryEnabled = $("auto-summary-enabled").checked;
   if (!state.autoSummaryEnabled) cancelBackgroundSummaries();
-  await storePut("app_state", { key: "preferences", autoSummaryEnabled: state.autoSummaryEnabled });
+  await saveConversationPreferences();
   if (state.autoSummaryEnabled) toast("将在下一轮仍有模型调用余量时整理连续性摘要");
+};
+$("day-continuity-preference").onchange = async () => {
+  state.dayContinuityPreference = $("day-continuity-preference").value === "continue_previous" ? "continue_previous" : "start_today";
+  await saveConversationPreferences();
+  toast("跨日聊天方式已保存，下次进入新日期时生效");
 };
 $("history-retention").onchange = async () => {
   state.historyRetentionDays = [30, 90].includes(Number($("history-retention").value)) ? Number($("history-retention").value) : 0;
@@ -5209,7 +5341,13 @@ $("apply-build-update").onclick = async () => {
   window.location.reload();
 };
 window.addEventListener("focus", () => { void checkBuildUpdate(); });
-window.addEventListener("pagehide", () => { state.writerRelease?.(); state.writerChannel?.close(); });
+window.addEventListener("pagehide", () => {
+  state.writerRelease?.();
+  state.writerChannel?.close();
+  state.stageWarmController?.abort();
+  cancelStageArt();
+  clearStagePresentationCache();
+});
 
 async function boot() {
   await startTabCoordination();

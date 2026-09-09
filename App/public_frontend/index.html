@@ -164,14 +164,6 @@
       <form method="dialog"><header><div><span class="panel-kicker">场景转换</span><h2>去见她</h2></div><button class="icon-button" type="button" data-close-dialog="presence-dialog">×</button></header><div class="presence-dialog-scene"><div><strong id="presence-dialog-location">正在读取地点</strong><p id="presence-dialog-activity">请稍候。</p></div></div><p class="modal-context">前往后将进入面对面场景，并可能触发一次主动到场反应。</p><div class="modal-actions"><button type="button" class="secondary-button" data-close-dialog="presence-dialog">取消</button><button id="stay-on-communicator" type="button" class="secondary-button">继续通讯</button><button id="confirm-presence-transition" type="button" class="primary-button">前往</button></div></form>
     </dialog>
 
-    <dialog id="continuity-dialog" class="modal continuity-modal">
-      <form method="dialog">
-        <header><div><span class="panel-kicker">新的日期</span><h2>要接着昨天聊吗？</h2></div><button class="icon-button" type="button" data-close-dialog="continuity-dialog">×</button></header>
-        <p class="modal-context">你可以保留昨天的摘要和最近几轮，也可以从今天重新开始。稳定的关系和世界状态会保留。</p>
-        <div class="modal-actions"><button id="start-today" type="button" class="secondary-button">从今天开始</button><button id="continue-yesterday" type="button" class="primary-button">承接昨天</button></div>
-      </form>
-    </dialog>
-
     <dialog id="sticker-picker" class="modal sticker-modal">
       <form method="dialog">
         <header><div><span class="panel-kicker">表情</span><h2>选一个表情</h2></div><button class="icon-button" type="button" data-close-dialog="sticker-picker">×</button></header>
@@ -247,7 +239,18 @@
             <div class="settings-actions"><button id="save-model" class="primary-button" type="button">保存本次模型会话</button><button id="clear-credential" class="danger-button" type="button">清除模型会话</button></div>
           </div>
         </section>
-        <section class="settings-section" data-settings-panel="history" role="tabpanel" id="settings-panel-history" aria-labelledby="settings-tab-history" hidden><p>完整历史只在当前浏览器保存。共享电脑请及时清理。</p><label>自动清理本地历史<select id="history-retention"><option value="0">永不（默认）</option><option value="30">保留 30 天</option><option value="90">保留 90 天</option></select></label><label class="setting-toggle"><span><strong>自动整理连续性</strong><small id="summary-last-updated">尚未生成摘要</small></span><input id="auto-summary-enabled" type="checkbox" checked /></label><p id="storage-usage">正在计算占用空间……</p><div class="settings-actions"><button id="export-history" class="secondary-button" type="button">导出本地备份</button><button id="import-history" class="secondary-button" type="button">导入并合并备份</button><input id="history-import-file" type="file" accept="application/json,.json" hidden /></div><p class="form-hint">备份包含聊天和草稿，请妥善保存；不会包含模型凭证。</p><label>选择角色<select id="history-character"></select></label><div class="settings-actions"><button id="delete-character-history" class="secondary-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部历史</button></div></section>
+        <section class="settings-section" data-settings-panel="history" role="tabpanel" id="settings-panel-history" aria-labelledby="settings-tab-history" hidden>
+          <p>完整历史只在当前浏览器保存。共享电脑请及时清理。</p>
+          <label>新的一天怎么聊<select id="day-continuity-preference" aria-describedby="day-continuity-hint"><option value="start_today">从今天开始（默认）</option><option value="continue_previous">接着昨天聊</option></select></label>
+          <p id="day-continuity-hint" class="form-hint">适用于所有角色，下次进入新日期时自动生效，不再弹窗询问。从今天开始会开启新的对话上下文；接着昨天聊会承接摘要和最近几轮。历史记录、关系和世界状态都会保留。</p>
+          <label>自动清理本地历史<select id="history-retention"><option value="0">永不（默认）</option><option value="30">保留 30 天</option><option value="90">保留 90 天</option></select></label>
+          <label class="setting-toggle"><span><strong>自动整理连续性</strong><small id="summary-last-updated">尚未生成摘要</small></span><input id="auto-summary-enabled" type="checkbox" checked /></label>
+          <p id="storage-usage">正在计算占用空间……</p>
+          <div class="settings-actions"><button id="export-history" class="secondary-button" type="button">导出本地备份</button><button id="import-history" class="secondary-button" type="button">导入并合并备份</button><input id="history-import-file" type="file" accept="application/json,.json" hidden /></div>
+          <p class="form-hint">备份包含聊天和草稿，请妥善保存；不会包含模型凭证。</p>
+          <label>选择角色<select id="history-character"></select></label>
+          <div class="settings-actions"><button id="delete-character-history" class="secondary-button" type="button">删除该角色历史</button><button id="clear-all-history" class="danger-button" type="button">清空全部历史</button></div>
+        </section>
         <section class="settings-section attribution" data-settings-panel="about" role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about" hidden><p>体验说明、反馈保留规则与头像来源统一放在“隐私与素材”页面。</p><div class="source-links"><a href="/privacy/">隐私与素材</a><a id="github-link" href="https://github.com/X1aoB/Project_Snow" rel="noreferrer">小吉终端 源码</a><a id="website-github-link" href="https://github.com/X1aoB/MyWebsite" rel="noreferrer">MyWebsite 源码</a><a id="releases-link" href="https://github.com/X1aoB/Project_Snow/releases" rel="noreferrer">版本发布</a></div></section>
       </form>
     </dialog>
