@@ -17,6 +17,7 @@ alembic>=1.14,<2
 
 # Wiki/source processing and local avatar preparation.
 beautifulsoup4>=4.12,<5
+numpy>=1.26,<3
 pillow>=10,<13
 pypdf>=5.1,<7
 PyMuPDF>=1.24,<2

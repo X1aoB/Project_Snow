@@ -17,6 +17,28 @@ from tests import test_character_media_release as fixtures
 _digest = fixtures._digest
 
 
+class BrowserLaunchContractTests(TestCase):
+    def test_native_compositor_uses_the_configured_allowlisted_browser(self):
+        for channel, options in (("", {}), ("chrome", {"channel": "chrome"})):
+            with self.subTest(channel=channel), patch.dict(
+                os.environ, {"PROJECT_SNOW_PLAYWRIGHT_CHANNEL": channel}, clear=True,
+            ), patch("playwright.sync_api.sync_playwright") as factory:
+                with layered.NativeBrowserCompositor():
+                    factory.return_value.start.return_value.chromium.launch.assert_called_once_with(
+                        headless=True, **options,
+                    )
+                factory.return_value.start.return_value.stop.assert_called_once_with()
+
+    def test_native_compositor_rejects_unknown_channel_before_launch(self):
+        with patch.dict(os.environ, {"PROJECT_SNOW_PLAYWRIGHT_CHANNEL": "msedge"}), patch(
+            "playwright.sync_api.sync_playwright"
+        ) as factory:
+            with self.assertRaisesRegex(ValueError, "must be 'chrome' or empty"):
+                with layered.NativeBrowserCompositor():
+                    self.fail("unsupported browser was launched")
+            factory.assert_not_called()
+
+
 class BrowserCompositingTests(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -31,15 +53,15 @@ class BrowserCompositingTests(TestCase):
     def browser_row(root, approval):
         row = approval["approved_presentations"]["happy"]
         head = row["layers"][1]
-        # Skia premultiplies this source before compositing. This independently
-        # specified browser result differs from Pillow's (80, 120, 160, 255).
+        # 20% red over the fixture's opaque (80, 120, 160) has the exact
+        # integer result (115, 96, 128), independent of Skia rounding versions.
         source = Image.new("RGBA", (6, 6))
-        source.paste((37, 80, 190, 2), (1, 1, 5, 5))
+        source.paste((255, 0, 0, 51), (1, 1, 5, 5))
         source.save(root / head["asset_path"])
         head["asset_sha256"] = _digest(root / head["asset_path"])
         with Image.open(root / row["base_asset_path"]) as base:
             preview = base.copy()
-        preview.paste((79, 120, 159, 255), (4, 3, 8, 7))
+        preview.paste((115, 96, 128, 255), (4, 3, 8, 7))
         preview.save(root / row["asset_path"])
         row["asset_sha256"] = _digest(root / row["asset_path"])
         row["source_reference_sha256"] = row["asset_sha256"]
@@ -55,7 +77,7 @@ class BrowserCompositingTests(TestCase):
             compositor=self.compositor if compositor else None,
         )
 
-    def test_browser_rounding_is_exact_and_pil_mode_still_rejects_it(self):
+    def test_browser_compositing_is_exact_and_legacy_pil_mode_remains_explicit(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             approval = fixtures.CharacterMediaReleaseTests._write_approved_character(root, "a" * 12)
@@ -65,8 +87,7 @@ class BrowserCompositingTests(TestCase):
             self.assertEqual(result["compositing_validation"]["alpha_delta"], 0)
             self.assertEqual(result["compositing_validation"]["premultiplied_rgb_delta"], 0)
             row["preview_compositing"] = "pil_source_over"
-            with self.assertRaisesRegex(ValueError, "flattened preview differs"):
-                self.validate_row(root, approval, row)
+            self.validate_row(root, approval, row, compositor=False)
 
     def test_browser_mode_keeps_hash_geometry_region_and_visible_pixel_gates(self):
         for fault in ("hash", "geometry", "preview", "alpha", "region", "unknown_mode", "no_context"):
@@ -82,7 +103,7 @@ class BrowserCompositingTests(TestCase):
                     path = root / row["asset_path"]
                     with Image.open(path) as im:
                         changed = im.copy()
-                    changed.putpixel((4, 3), (50, 120, 159, 255) if fault == "preview" else (79, 120, 159, 254))
+                    changed.putpixel((4, 3), (116, 96, 128, 255) if fault == "preview" else (115, 96, 128, 254))
                     changed.save(path)
                     row["asset_sha256"] = _digest(path)
                 elif fault == "region":

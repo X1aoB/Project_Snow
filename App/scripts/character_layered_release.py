@@ -48,9 +48,11 @@ class NativeBrowserCompositor:
 
         if self._playwright is not None:
             raise ValueError("native browser compositor is already open")
+        channel = os.environ.get("PROJECT_SNOW_PLAYWRIGHT_CHANNEL", "").strip()
+        if channel not in ("", "chrome"):
+            raise ValueError("PROJECT_SNOW_PLAYWRIGHT_CHANNEL must be 'chrome' or empty")
         self._playwright = sync_playwright().start()
         try:
-            channel = os.environ.get("PROJECT_SNOW_PLAYWRIGHT_CHANNEL", "").strip()
             self._browser = self._playwright.chromium.launch(headless=True, **({"channel": channel} if channel else {}))
             self._page = self._browser.new_page(device_scale_factor=1)
         except BaseException:
