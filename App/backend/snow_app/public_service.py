@@ -51,6 +51,7 @@ from .public_security import (
     verify_state,
 )
 from .public_stickers import PublicStickerCatalog
+from .public_subscription import SubscriptionError, SubscriptionSyncClient
 
 
 class StatelessConversationStore:
@@ -106,9 +107,17 @@ _PUBLIC_NORMALIZATION_ADJUSTMENTS = frozenset({
 })
 
 
-def _public_immersive_thinking_decision(provider: ProviderSpec, max_provider_calls: int = 2) -> dict[str, Any]:
+def _public_immersive_thinking_decision(
+    provider: ProviderSpec, max_provider_calls: int = 2, reasoning_effort: str | None = None,
+) -> dict[str, Any]:
     """Build the complete provider request contract for public dialogue."""
 
+    if provider.provider_id == "codex_subscription":
+        return {"requested": reasoning_effort or "account_default", "effective": reasoning_effort or "account_default",
+                "reason": "personal_codex_subscription", "provider_kind": provider.provider_id,
+                "request_fields": {"reasoning_effort": reasoning_effort} if reasoning_effort is not None else {},
+                "max_provider_http_calls": max(1, min(2, max_provider_calls)),
+                "disable_compatibility_retries": True}
     return {
         "requested": "off",
         "effective": "off",
@@ -596,6 +605,10 @@ class PublicChatService:
             conversation_database_path=ephemeral_database,
             conversation_store=StatelessConversationStore(),
         )
+        if provider_client is not None and getattr(provider_client, "subscription_broker", None) is not None:
+            self.mvp._model_http_client = SubscriptionSyncClient(
+                provider_client.subscription_broker, self.mvp._model_http_client,
+            )
         self.gate = GenerationGate()
         self.engine = DialogueEngine()
         self.media = PublicMediaCatalog(
@@ -1828,11 +1841,18 @@ class PublicChatService:
                         "model_name": request.model,
                         "reason": "public_presence_arrival",
                     },
-                    thinking_decision=_public_immersive_thinking_decision(provider, self.public_settings.max_provider_calls_per_action),
+                    thinking_decision=_public_immersive_thinking_decision(
+                        provider, self.public_settings.max_provider_calls_per_action, request.reasoning_effort,
+                    ),
                     max_tokens_override=1600,
                     persist_exchange=False,
                     remember_session=False,
                     presence_arrival=True,
+                )
+            except SubscriptionError as exc:
+                return self.failed_presence_arrival(
+                    prepared, exc.code, model_called=exc.submitted,
+                    diagnostics=self._diagnostics(total_started, generation_class="rejected", error_stage="provider"),
                 )
             except Exception as exc:
                 from .mvp_service import MVPProviderError
@@ -2178,7 +2198,9 @@ class PublicChatService:
                             "model_name": request.model,
                             "reason": "public_byok",
                         },
-                        thinking_decision=_public_immersive_thinking_decision(provider, budget.max_provider_calls),
+                        thinking_decision=_public_immersive_thinking_decision(
+                            provider, budget.max_provider_calls, request.reasoning_effort,
+                        ),
                         max_tokens_override=1600,
                         persist_exchange=False,
                         remember_session=False,
@@ -2190,6 +2212,8 @@ class PublicChatService:
                         public_state_update_catalog=movement_catalog,
                     )
                 result = self.engine.generate(context, budget, generate).payload
+            except SubscriptionError as exc:
+                return self._terminal_result(request, provider, total_started, code=exc.code, error_stage="provider")
             except Exception as exc:
                 from .mvp_service import MVPProviderError
 
@@ -2709,6 +2733,7 @@ class PublicChatService:
                 user_prompt=prompt,
                 max_tokens=1200,
                 client=self.provider_client,
+                reasoning_effort=request.reasoning_effort,
             )
 
         # Summaries use the same global 4-active/8-queued budget as chat and

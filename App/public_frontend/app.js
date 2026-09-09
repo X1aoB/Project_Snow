@@ -6,6 +6,11 @@ const apiRoot = "/public/v1";
 const publicHttp = createHttpClient(apiRoot);
 const dbName = "project-snow-public";
 const dbVersion = 4;
+const SUBSCRIPTION_PROVIDER = "codex_subscription";
+const SUBSCRIPTION_MODEL = "gpt-5.6-luna";
+const SUBSCRIPTION_EFFORT = "max";
+const SUBSCRIPTION_EFFORT_LABELS = Object.freeze({ none: "无推理", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "更高", max: "极高", ultra: "最高" });
+const SUBSCRIPTION_SESSION_KEY = "project-snow-public:subscription-pair";
 const SCENE_ASSET_URLS = Object.freeze(JSON.parse(document.querySelector('meta[name="snow-scene-assets"]')?.content || "{}"));
 const SCENE_KEYS = new Set(["generic", "quarters", "lounge", "training", "archive", "canteen", "observation", "medical", "corridor"]);
 const state = {
@@ -14,6 +19,10 @@ const state = {
   credentialExpiresAt: 0,
   provider: "",
   model: "",
+  reasoningEffort: "",
+  modelSetupMode: "api",
+  apiProviderChoice: "",
+  subscription: createSubscriptionState(),
   characters: [],
   stickers: [],
   stickerCatalog: new Map(),
@@ -49,6 +58,7 @@ const state = {
   feedbackMessageId: "",
   arrivalPending: false,
   autoSummaryEnabled: true,
+  dayContinuityPreference: "start_today",
   selectionSequence: 0,
   selectionController: null,
   stageArtRequestSequence: 0,
@@ -57,6 +67,10 @@ const state = {
   stageArtPending: null,
   stageArtTransition: null,
   stageArtSurface: null,
+  stagePresentationCache: new Map(),
+  stageRenderSequence: 0,
+  stageSpeechGate: null,
+  stageWarmController: null,
   expressionManifestCache: new Map(),
   expressionBytesCache: new Map(),
   stageMotionRequestSequence: 0,
@@ -68,7 +82,6 @@ const state = {
   summaryControllers: new Map(),
   persistedMessages: new Map(),
   historyEpoch: 0,
-  continuityPrompt: null,
   storageAvailable: true,
   memoryStores: { threads: new Map(), messages: new Map(), app_state: new Map() },
   drafts: new Map(),
@@ -294,6 +307,21 @@ const errorMessages = {
   provider_timeout: "模型厂商响应超时，请稍后重试。",
   provider_rate_limited: "模型厂商触发了频率限制，请稍后重试。",
   provider_request_failed: "模型厂商拒绝了本次请求，请检查模型 ID 和账户权限。",
+  subscription_disabled: "本站尚未启用订阅连接。你仍可阅读教程，或使用 API Key。",
+  subscription_not_connected: "个人连接器尚未连接或已离线。请打开模型设置，重新配对你自己的 Codex 订阅。",
+  subscription_disconnected: "个人连接器已断开，请在模型设置中重新配对。",
+  subscription_pairing_expired: "配对码已过期，请重新生成。",
+  subscription_model_unavailable: "当前账号或连接器不支持所选模型与推理强度，请重新选择；不会自动替换为其他模型。",
+  subscription_effort_unavailable: "当前账号不支持所选推理强度，请在模型设置中重新选择强度并保存。",
+  subscription_result_unknown: "请求已经交给个人连接器，但结果尚未确认。请检查连接器状态，避免重复发送这条消息。",
+  subscription_login_required: "请在自己的电脑上运行 codex login，使用有订阅的 ChatGPT 账号登录，再重新连接。",
+  subscription_rate_limited: "你的 Codex 订阅目前已触发额度或频率限制，请查看自己的账号用量并稍后再试。",
+  subscription_generation_failed: "个人连接器未能生成回复，请查看本机连接器提示。",
+  subscription_protocol_error: "个人连接器版本不兼容，请下载本站提供的连接器并重新配对。",
+  subscription_connector_stopped: "个人连接器已停止，请在本机重新启动并检查连接状态。",
+  subscription_capacity_reached: "本站当前连接数已满，请稍后再配对。",
+  subscription_busy: "个人连接器仍在处理上一条请求，请等待结果，避免重复发送。",
+  subscription_request_too_large: "本轮对话过长，请开始新的连续性段后再试。",
   character_unavailable: "当前角色数据尚未正确发布，请稍后重试。",
   public_database_unavailable: "服务端数据库暂时不可用，请稍后重试。",
   generation_queue_full: "当前生成请求较多，请稍后重试。",
@@ -335,6 +363,8 @@ const EXPRESSION_FETCH_TIMEOUT_MS = 12000;
 const EXPRESSION_DECODE_TIMEOUT_MS = 8000;
 const EXPRESSION_UPDATE_TIMEOUT_MS = 20000;
 const EXPRESSION_IMAGE_MAX_BYTES = 64 * 1024 * 1024;
+const STAGE_PRESENTATION_CACHE_LIMIT = 12;
+const STAGE_SPEECH_SYNC_WAIT_MS = 240;
 const EXPRESSION_STATES = new Set([
   "neutral", "gentle_smile", "happy", "amused", "teasing", "relieved",
   "serious", "focused", "thinking", "confused", "skeptical", "concerned",
@@ -379,6 +409,7 @@ function escapeHtml(value) {
 }
 function displayError(error) {
   const code = error instanceof Error ? error.message : plain(error);
+  if (code === "credential_invalid" && state.provider === SUBSCRIPTION_PROVIDER) return errorMessages.subscription_not_connected;
   return errorMessages[code] || (/^[a-z][a-z0-9_]*$/.test(code) ? errorMessages.request_failed : code);
 }
 
@@ -424,7 +455,7 @@ function fitPublicRequestPayload(payload, { arrays = [], texts = [], targetBytes
 }
 if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
   Object.defineProperty(window, "__projectSnowTest", {
-    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, normalizeExpressionState, normalizeStageMotion, expressionManifestUrlForCharacter, normalizeExpressionManifest, stagePresentationRenderer, preloadStagePresentation, updateStageCharacterArt, playStageMotion, cancelStageMotion, renderStage }),
+    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, normalizeExpressionState, normalizeStageMotion, expressionManifestUrlForCharacter, normalizeExpressionManifest, stagePresentationRenderer, preloadStagePresentation, clearStagePresentationCache, warmCharacterStage, updateStageCharacterArt, playStageMotion, cancelStageMotion, renderStage }),
     configurable: false,
     writable: false,
   });
@@ -1145,6 +1176,7 @@ async function clearPersistedWorldPackage() {
 async function migrateBrowserState() {
   const preferences = await storeGet("app_state", "preferences");
   state.autoSummaryEnabled = preferences?.autoSummaryEnabled !== false;
+  state.dayContinuityPreference = preferences?.dayContinuityPreference === "continue_previous" ? "continue_previous" : "start_today";
   const uiPreferences = await storeGet("app_state", "ui_preferences");
   state.pinnedCharacters = new Set(Array.isArray(uiPreferences?.pinnedCharacters) ? uiPreferences.pinnedCharacters.map(plain) : []);
   state.favoriteStickerIds = new Set(Array.isArray(uiPreferences?.favoriteStickerIds) ? uiPreferences.favoriteStickerIds.map(plain) : []);
@@ -1188,6 +1220,13 @@ async function storageBytes() {
   return new Blob([JSON.stringify(payload)]).size;
 }
 
+async function saveConversationPreferences() {
+  await storePut("app_state", {
+    key: "preferences",
+    autoSummaryEnabled: state.autoSummaryEnabled,
+    dayContinuityPreference: state.dayContinuityPreference,
+  });
+}
 async function saveUiPreferences() {
   await storePut("app_state", {
     key: "ui_preferences",
@@ -1272,18 +1311,20 @@ function restoreDraft() {
 function sessionKey() { return "project-snow-public:byok"; }
 function saveCredential() {
   if (!state.credential || !state.credentialExpiresAt) return;
-  tabPreferences.setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, expiresAt: state.credentialExpiresAt }));
+  tabPreferences.setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, ...(state.provider === SUBSCRIPTION_PROVIDER ? { reasoningEffort: state.reasoningEffort } : {}), expiresAt: state.credentialExpiresAt }));
 }
 function clearCredential() {
   tabPreferences.removeItem(sessionKey());
   state.credential = "";
   state.credentialExpiresAt = 0;
   state.model = "";
+  state.reasoningEffort = "";
   refreshCredentialStatus();
   updateComposerAvailability();
 }
 function configured() {
   if (state.credentialExpiresAt && state.credentialExpiresAt <= Date.now()) clearCredential();
+  if (state.provider === SUBSCRIPTION_PROVIDER && (state.subscription.status !== "connected" || !subscriptionCombinationSupported(state.model, state.reasoningEffort))) return false;
   return Boolean(state.credential && state.provider && state.model);
 }
 function refreshCredentialStatus() {
@@ -1294,7 +1335,9 @@ function refreshCredentialStatus() {
     const expires = localDayKey(expiration) === localDayKey()
       ? expiration.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
       : expiration.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
-    $("credential-status").textContent = `加密凭证有效至 ${expires}；获取模型列表和切换角色无需重新输入 Key。`;
+    $("credential-status").textContent = state.provider === SUBSCRIPTION_PROVIDER
+      ? `个人连接凭证有效至 ${expires}，仅保存在当前标签页。`
+      : `加密凭证有效至 ${expires}；获取模型列表和切换角色无需重新输入 Key。`;
   }
 }
 
@@ -1454,7 +1497,7 @@ async function showExperienceNoticeIfNeeded() {
       if (accepted) {
         localPreferences.setItem(experienceNoticeKey(), "accepted");
         state.autoSummaryEnabled = $("notice-auto-summary").checked;
-        await storePut("app_state", { key: "preferences", autoSummaryEnabled: state.autoSummaryEnabled });
+        await saveConversationPreferences();
       }
       if (dialog.open) dialog.close();
       resolve();
@@ -1468,6 +1511,257 @@ async function showExperienceNoticeIfNeeded() {
   });
 }
 
+let subscriptionPollController = null;
+let subscriptionPollTimer = 0;
+let subscriptionPollSequence = 0;
+function apiProviders() { return (state.config?.providers || []).filter((provider) => provider.provider_id !== SUBSCRIPTION_PROVIDER); }
+function createSubscriptionState(overrides = {}) {
+  return { status: "disconnected", credential: "", expiresAt: 0, pairingExpiresAt: 0, pairingCode: "", error: "", models: [], protocolVersion: 1, draftModel: "", draftEffort: "", selectionInitialized: false, selectionNotice: "", ...overrides };
+}
+function subscriptionCombinationSupported(model, effort) {
+  return Boolean(state.subscription.models.find((item) => item.id === model)?.reasoning_efforts.includes(effort));
+}
+function subscriptionReasoningPayload() {
+  return state.provider === SUBSCRIPTION_PROVIDER ? { reasoning_effort: state.reasoningEffort } : {};
+}
+function snapshotSubscriptionEffort(payload) {
+  if (payload?.provider !== SUBSCRIPTION_PROVIDER) return "";
+  return Object.hasOwn(payload, "reasoning_effort") ? plain(payload.reasoning_effort) : payload.model === SUBSCRIPTION_MODEL ? SUBSCRIPTION_EFFORT : "";
+}
+function subscriptionCatalogue(payload) {
+  const version = Number(payload.protocol_version || 1);
+  if (![1, 2].includes(version)) throw new Error("subscription_protocol_error");
+  if (!Array.isArray(payload.models)) {
+    if (version === 1 && payload.model === SUBSCRIPTION_MODEL && payload.effort === SUBSCRIPTION_EFFORT) {
+      return [{ id: SUBSCRIPTION_MODEL, display_name: "GPT-5.6 Luna", reasoning_efforts: [SUBSCRIPTION_EFFORT], default_reasoning_effort: SUBSCRIPTION_EFFORT }];
+    }
+    throw new Error("subscription_model_unavailable");
+  }
+  const seen = new Set();
+  return payload.models.flatMap((item) => {
+    const model = plain(item?.id).trim();
+    const efforts = [...new Set((Array.isArray(item?.reasoning_efforts) ? item.reasoning_efforts : []).filter((effort) => Object.hasOwn(SUBSCRIPTION_EFFORT_LABELS, effort)))];
+    if (!model || model.length > 200 || seen.has(model) || !efforts.length) return [];
+    if (version === 1 && (model !== SUBSCRIPTION_MODEL || !efforts.includes(SUBSCRIPTION_EFFORT))) return [];
+    seen.add(model);
+    const allowed = version === 1 ? [SUBSCRIPTION_EFFORT] : efforts;
+    return [{ id: model, display_name: plain(item.display_name).trim() || model, reasoning_efforts: allowed,
+      default_reasoning_effort: allowed.includes(item.default_reasoning_effort) ? item.default_reasoning_effort : allowed.length === 1 ? allowed[0] : "" }];
+  });
+}
+function updateSubscriptionSelection(payload) {
+  const subscription = state.subscription;
+  subscription.models = subscriptionCatalogue(payload);
+  subscription.protocolVersion = Number(payload.protocol_version || 1);
+  if (!subscription.selectionInitialized) {
+    subscription.selectionInitialized = true;
+    if (state.provider === SUBSCRIPTION_PROVIDER && state.model) {
+      subscription.draftModel = state.model;
+      subscription.draftEffort = state.reasoningEffort;
+    } else {
+      const luna = subscription.models.find((item) => item.id === SUBSCRIPTION_MODEL);
+      subscription.draftModel = luna?.id || "";
+      subscription.draftEffort = luna?.reasoning_efforts.includes(SUBSCRIPTION_EFFORT) ? SUBSCRIPTION_EFFORT : luna?.default_reasoning_effort || "";
+      subscription.selectionNotice = !luna ? "当前账号没有默认的 Luna Max，请明确选择一个可用模型。"
+        : subscription.draftEffort !== SUBSCRIPTION_EFFORT ? `当前账号的 Luna 不支持 max，请确认所示默认强度 ${subscription.draftEffort || "（请选择）"}。` : "";
+    }
+  }
+  if (subscription.draftModel && !subscriptionCombinationSupported(subscription.draftModel, subscription.draftEffort)) {
+    if (!subscription.models.some((item) => item.id === subscription.draftModel)) subscription.draftModel = "";
+    subscription.draftEffort = "";
+    subscription.selectionNotice = "账号可用模型或推理强度已改变，请重新选择并保存。当前聊天配置不会自动替换。";
+  }
+}
+function chooseSubscriptionModel(model) {
+  const subscription = state.subscription;
+  const selected = subscription.models.find((item) => item.id === model);
+  subscription.draftModel = selected?.id || "";
+  subscription.selectionNotice = "";
+  if (!selected) subscription.draftEffort = "";
+  else if (!selected.reasoning_efforts.includes(subscription.draftEffort)) {
+    subscription.draftEffort = selected.default_reasoning_effort;
+    subscription.selectionNotice = subscription.draftEffort ? `已显示该模型默认推理强度：${SUBSCRIPTION_EFFORT_LABELS[subscription.draftEffort]}（${subscription.draftEffort}）。保存后生效。` : "请为此模型选择推理强度。";
+  }
+  renderSubscriptionSettings();
+}
+function renderSubscriptionModelControls() {
+  const subscription = state.subscription;
+  const connected = subscription.status === "connected";
+  $("subscription-model-controls").hidden = !connected;
+  const model = subscription.models.find((item) => item.id === subscription.draftModel);
+  const modelOptions = '<option value="">请选择模型</option>' + subscription.models.map((item) => {
+    const label = subscription.models.some((other) => other.id !== item.id && other.display_name === item.display_name) ? `${item.display_name} · ${item.id}` : item.display_name;
+    return `<option value="${escapeHtml(item.id)}">${escapeHtml(label)}</option>`;
+  }).join("");
+  const effortOptions = '<option value="">请选择推理强度</option>' + (model?.reasoning_efforts || []).map((effort) => `<option value="${effort}">${SUBSCRIPTION_EFFORT_LABELS[effort]} · ${effort}</option>`).join("");
+  if ($("subscription-model-select").innerHTML !== modelOptions) $("subscription-model-select").innerHTML = modelOptions;
+  if ($("subscription-effort-select").innerHTML !== effortOptions) $("subscription-effort-select").innerHTML = effortOptions;
+  $("subscription-model-select").value = subscription.draftModel;
+  $("subscription-effort-select").value = subscription.draftEffort;
+  $("subscription-model-select").disabled = Boolean(modelSetupController);
+  $("subscription-effort-select").disabled = Boolean(modelSetupController) || !model;
+  $("subscription-model-name").textContent = connected ? model?.display_name || "选择订阅模型" : "默认 Luna Max";
+  $("subscription-model-detail").textContent = connected ? model ? `${model.id} · ${subscription.draftEffort || "请选择强度"}` : "使用此账号支持的模型与推理强度" : `${SUBSCRIPTION_MODEL} · ${SUBSCRIPTION_EFFORT}`;
+  const saved = state.provider === SUBSCRIPTION_PROVIDER && state.model === subscription.draftModel && state.reasoningEffort === subscription.draftEffort;
+  $("subscription-selection-hint").textContent = subscription.selectionNotice || (saved ? "当前已保存此模型与推理强度。" : "选择会在点击“使用所选模型”后生效。");
+}
+function subscriptionEnabled() {
+  const config = state.config?.subscription;
+  return config?.enabled === true && config.model === SUBSCRIPTION_MODEL && config.effort === SUBSCRIPTION_EFFORT
+    && [1, 2].includes(config.protocol_version) && state.config?.providers?.some((provider) => provider.provider_id === SUBSCRIPTION_PROVIDER);
+}
+function subscriptionSettingsVisible() {
+  return $("settings-dialog").open && !$("settings-panel-models").hidden && state.modelSetupMode === "subscription" && !document.hidden;
+}
+function stopSubscriptionPolling() {
+  subscriptionPollSequence += 1;
+  window.clearTimeout(subscriptionPollTimer);
+  subscriptionPollTimer = 0;
+  subscriptionPollController?.abort();
+  subscriptionPollController = null;
+}
+function storeSubscriptionCredential() {
+  const { credential, expiresAt, pairingExpiresAt } = state.subscription;
+  if (credential && expiresAt > Date.now()) tabPreferences.setItem(SUBSCRIPTION_SESSION_KEY, JSON.stringify({ credential, expiresAt, pairingExpiresAt }));
+  else tabPreferences.removeItem(SUBSCRIPTION_SESSION_KEY);
+}
+function forgetSubscription(status = "disconnected", error = "") {
+  const { draftModel, draftEffort } = state.subscription;
+  state.subscription = createSubscriptionState({ status, error, draftModel, draftEffort, selectionInitialized: Boolean(draftModel) });
+  tabPreferences.removeItem(SUBSCRIPTION_SESSION_KEY);
+  if (state.provider === SUBSCRIPTION_PROVIDER) clearCredential();
+}
+function renderSubscriptionSettings() {
+  const selected = state.modelSetupMode === "subscription";
+  const enabled = subscriptionEnabled();
+  const subscription = state.subscription;
+  const busy = Boolean(modelSetupController);
+  $("model-mode-api").setAttribute("aria-pressed", String(!selected));
+  $("model-mode-subscription").setAttribute("aria-pressed", String(selected));
+  $("api-model-settings").hidden = selected;
+  $("subscription-settings").hidden = !selected;
+  renderSubscriptionModelControls();
+  const actions = $("model-session-actions");
+  const subscriptionActions = $("subscription-session-actions");
+  if (selected && actions.parentElement !== subscriptionActions) subscriptionActions.append(actions);
+  else if (!selected && actions.parentElement === subscriptionActions) $("setup-error").after(actions);
+  $("clear-credential").hidden = selected;
+  $("save-model").textContent = selected ? "使用所选模型" : "保存本次模型会话";
+  $("save-model").disabled = busy || (selected ? !enabled || subscription.status !== "connected" || !subscription.credential || !subscriptionCombinationSupported(subscription.draftModel, subscription.draftEffort) : !apiProviders().length);
+  $("pair-subscription").hidden = !enabled || subscription.status === "connected";
+  $("pair-subscription").disabled = busy;
+  $("pair-subscription").textContent = subscription.credential ? "重新生成配对码" : "生成配对码";
+  $("disconnect-subscription").hidden = !enabled || !subscription.credential;
+  $("disconnect-subscription").disabled = busy;
+  $("subscription-pairing").hidden = !subscription.pairingCode || subscription.status !== "waiting";
+  $("subscription-pairing-code").textContent = subscription.pairingCode;
+  $("subscription-pairing-expiry").textContent = subscription.pairingExpiresAt
+    ? `有效至 ${new Date(subscription.pairingExpiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}。配对完成后此页会隐藏配对码。` : "";
+  $("subscription-connect-command").textContent = `node snow-codex-connector.mjs --site ${window.location.origin}`;
+  const statusCopy = {
+    disconnected: "尚未连接个人连接器。请按下方教程完成登录和配对。",
+    checking: "正在核对个人连接器状态……",
+    waiting: "等待本机连接器配对。生成配对码还没有建立连接，完成教程后会自动更新。",
+    connected: "已连接个人连接器。请选择模型与推理强度，再保存本次会话。",
+  };
+  $("subscription-status").dataset.status = !enabled ? "disabled" : subscription.error ? "error" : subscription.status;
+  $("subscription-status").textContent = !enabled ? errorMessages.subscription_disabled
+    : subscription.error ? displayError(subscription.error) : statusCopy[subscription.status] || statusCopy.disconnected;
+}
+function chooseModelMode(mode) {
+  stopSubscriptionPolling();
+  const select = $("provider-select");
+  if (mode === "subscription") {
+    if (select.value && select.value !== SUBSCRIPTION_PROVIDER) state.apiProviderChoice = select.value;
+    state.modelSetupMode = "subscription";
+    if (subscriptionEnabled()) select.value = SUBSCRIPTION_PROVIDER;
+  } else {
+    state.modelSetupMode = "api";
+    select.value = state.apiProviderChoice || (state.provider !== SUBSCRIPTION_PROVIDER ? state.provider : "") || apiProviders()[0]?.provider_id || "";
+  }
+  syncProviderControls(select.value);
+  showError("setup-error", "");
+  renderSubscriptionSettings();
+  if (mode === "subscription") startSubscriptionPolling();
+}
+async function refreshSubscriptionStatus(signal) {
+  if (!subscriptionEnabled() || !state.subscription.credential) return;
+  const payload = await api("/subscription/status", { signal, timeoutMs: 10000 });
+  signal?.throwIfAborted();
+  if (payload.status === "connected") {
+    try { updateSubscriptionSelection(payload); }
+    catch (error) { forgetSubscription("disconnected", error.message); throw error; }
+    const expiresAt = Date.parse(payload.expires_at);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error("subscription_pairing_expired");
+    state.subscription.status = "connected";
+    state.subscription.error = "";
+    state.subscription.pairingCode = "";
+    state.subscription.pairingExpiresAt = 0;
+    state.subscription.expiresAt = expiresAt;
+    if (state.provider === SUBSCRIPTION_PROVIDER && state.model) {
+      state.credentialExpiresAt = expiresAt;
+      saveCredential();
+    }
+    storeSubscriptionCredential();
+  } else if (payload.status === "waiting" && (state.subscription.pairingExpiresAt || state.subscription.expiresAt) > Date.now()) {
+    state.subscription.status = "waiting";
+    state.subscription.error = "";
+  } else {
+    forgetSubscription("disconnected", payload.status === "waiting" ? "subscription_pairing_expired" : "subscription_not_connected");
+  }
+  renderSubscriptionSettings();
+  updateComposerAvailability();
+}
+function startSubscriptionPolling() {
+  stopSubscriptionPolling();
+  if (!subscriptionSettingsVisible() || !subscriptionEnabled() || !state.subscription.credential) return;
+  const sequence = subscriptionPollSequence;
+  const poll = async () => {
+    if (sequence !== subscriptionPollSequence || !subscriptionSettingsVisible()) return;
+    const controller = new AbortController();
+    subscriptionPollController = controller;
+    try { await refreshSubscriptionStatus(controller.signal); }
+    catch (error) {
+      if (controller.signal.aborted) return;
+      state.subscription.error = error?.message === "credential_invalid" ? "subscription_not_connected" : (error?.message || "request_failed");
+      if (["credential_invalid", "subscription_pairing_expired", "subscription_not_connected", "subscription_disconnected", "subscription_disabled"].includes(error?.message)) forgetSubscription("disconnected", state.subscription.error);
+      renderSubscriptionSettings();
+    } finally {
+      if (subscriptionPollController === controller) subscriptionPollController = null;
+      if (sequence === subscriptionPollSequence && subscriptionSettingsVisible() && state.subscription.credential) subscriptionPollTimer = window.setTimeout(poll, state.subscription.error ? 6000 : 3000);
+    }
+  };
+  void poll();
+}
+async function pairSubscription() {
+  stopSubscriptionPolling();
+  await runModelSetup("pair-subscription", async (signal) => {
+    if (!subscriptionEnabled()) throw new Error("subscription_disabled");
+    if (!experienceNoticeAccepted()) throw new Error("experience_notice_required");
+    const payload = await api("/subscription/pair", { method: "POST", signal, timeoutMs: 15000, body: JSON.stringify({ accepted_transit_notice: true, accepted_cost_notice: true, accepted_local_history_notice: true }) });
+    signal.throwIfAborted();
+    const expiresAt = Date.parse(payload.expires_at);
+    const pairingExpiresAt = Date.parse(payload.pairing_expires_at || payload.expires_at);
+    if (payload.provider !== SUBSCRIPTION_PROVIDER || !plain(payload.credential) || !plain(payload.pairing_code) || !Number.isFinite(expiresAt) || expiresAt <= Date.now() || !Number.isFinite(pairingExpiresAt) || pairingExpiresAt <= Date.now()) throw new Error("invalid_request");
+    const draftModel = state.subscription.draftModel || (state.provider === SUBSCRIPTION_PROVIDER ? state.model : "");
+    const draftEffort = state.subscription.draftEffort || (state.provider === SUBSCRIPTION_PROVIDER ? state.reasoningEffort : "");
+    if (state.provider === SUBSCRIPTION_PROVIDER) clearCredential();
+    state.subscription = createSubscriptionState({ status: "waiting", credential: plain(payload.credential), expiresAt, pairingExpiresAt, pairingCode: plain(payload.pairing_code), draftModel, draftEffort, selectionInitialized: Boolean(draftModel) });
+    storeSubscriptionCredential();
+  });
+  renderSubscriptionSettings();
+  startSubscriptionPolling();
+}
+async function disconnectSubscription() {
+  stopSubscriptionPolling();
+  await runModelSetup("disconnect-subscription", async (signal) => {
+    await api("/subscription/disconnect", { method: "POST", signal, timeoutMs: 10000, body: "{}" });
+    signal.throwIfAborted();
+    forgetSubscription();
+    toast("个人连接器已断开");
+  });
+  renderSubscriptionSettings();
+}
 function syncProviderControls(providerId = $("provider-select")?.value || "") {
   const select = $("provider-select");
   if (select) {
@@ -1486,6 +1780,7 @@ function chooseProvider(providerId) {
   const select = $("provider-select");
   const previousChoice = plain(select.dataset.providerChoice || state.provider);
   const changed = Boolean(previousChoice && previousChoice !== value);
+  state.apiProviderChoice = value;
   $("provider-select").value = value;
   syncProviderControls(value);
   if (changed) {
@@ -1496,11 +1791,12 @@ function chooseProvider(providerId) {
     $("discovered-models").hidden = true;
   }
   refreshCredentialStatus();
+  renderSubscriptionSettings();
 }
 function renderMobileProviderOptions() {
   const root = $("provider-options-mobile");
   if (!root) return;
-  root.innerHTML = (state.config?.providers || []).map((provider) => `<button type="button" role="radio" data-provider-option="${escapeHtml(provider.provider_id)}" aria-checked="false" tabindex="-1">${escapeHtml(provider.display_name)}</button>`).join("");
+  root.innerHTML = apiProviders().map((provider) => `<button type="button" role="radio" data-provider-option="${escapeHtml(provider.provider_id)}" aria-checked="false" tabindex="-1">${escapeHtml(provider.display_name)}</button>`).join("");
   root.querySelectorAll("[data-provider-option]").forEach((button) => {
     button.onclick = () => chooseProvider(button.dataset.providerOption);
     button.onkeydown = (event) => {
@@ -1524,7 +1820,7 @@ async function loadConfig() {
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
   $("provider-select").innerHTML = state.config.providers.length
-    ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}">${escapeHtml(provider.display_name)}</option>`).join("")
+    ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}"${provider.provider_id === SUBSCRIPTION_PROVIDER ? " hidden" : ""}>${escapeHtml(provider.display_name)}</option>`).join("")
     : '<option value="">暂未开放模型厂商</option>';
   renderMobileProviderOptions();
   const providerLinks = [];
@@ -1536,7 +1832,7 @@ async function loadConfig() {
   }
   $("provider-doc-links").innerHTML = providerLinks.join("");
   $("provider-doc-links").hidden = !providerLinks.length;
-  $("provider-empty").hidden = Boolean(state.config.providers.length);
+  $("provider-empty").hidden = Boolean(apiProviders().length);
   $("discover-models").disabled = !state.config.providers.length;
   $("save-model").disabled = !state.config.providers.length;
   if (!state.config.providers.length) showError("setup-error", "当前暂未开放可用的模型厂商。");
@@ -1551,14 +1847,30 @@ async function loadConfig() {
         state.credentialExpiresAt = saved.expiresAt;
         state.provider = saved.provider;
         state.model = saved.model || "";
+        state.reasoningEffort = saved.provider === SUBSCRIPTION_PROVIDER ? plain(saved.reasoningEffort) || (saved.model === SUBSCRIPTION_MODEL ? SUBSCRIPTION_EFFORT : "") : "";
+        if (saved.provider === SUBSCRIPTION_PROVIDER) state.modelSetupMode = "subscription";
         $("provider-select").value = state.provider;
         syncProviderControls(state.provider);
         $("model-id").value = state.model;
       } else clearCredential();
     } catch { clearCredential(); }
   }
+  try {
+    const pending = JSON.parse(tabPreferences.getItem(SUBSCRIPTION_SESSION_KEY) || "null");
+    const credential = state.provider === SUBSCRIPTION_PROVIDER ? state.credential : plain(pending?.credential);
+    const expiresAt = state.provider === SUBSCRIPTION_PROVIDER ? state.credentialExpiresAt : Number(pending?.expiresAt);
+    if (subscriptionEnabled() && credential && expiresAt > Date.now()) {
+      state.subscription = createSubscriptionState({ status: "checking", credential, expiresAt, pairingExpiresAt: Number(pending?.pairingExpiresAt) || 0 });
+      await refreshSubscriptionStatus();
+    } else if (credential) forgetSubscription();
+  } catch (error) {
+    state.subscription.status = "disconnected";
+    state.subscription.error = error?.message || "subscription_not_connected";
+  }
+  state.apiProviderChoice = (state.provider !== SUBSCRIPTION_PROVIDER ? state.provider : "") || apiProviders()[0]?.provider_id || "";
   refreshCredentialStatus();
   syncProviderControls($("provider-select").value);
+  renderSubscriptionSettings();
 }
 function normalizeSticker(sticker) {
   if (!sticker?.asset_id) return null;
@@ -1642,7 +1954,7 @@ async function runModelSetup(action, task) {
   const label = button.textContent;
   controls.forEach(([control]) => { control.disabled = true; });
   form.setAttribute("aria-busy", "true");
-  button.textContent = action === "discover-models" ? "正在获取模型列表…" : "正在保存模型会话…";
+  button.textContent = ({ "discover-models": "正在获取模型列表…", "pair-subscription": "正在生成配对码…", "disconnect-subscription": "正在断开连接…" })[action] || "正在保存模型会话…";
   showError("setup-error", "");
   try {
     await task(controller.signal);
@@ -1657,6 +1969,7 @@ async function runModelSetup(action, task) {
     $("model-verification").hidden = true;
     $("model-turnstile").setAttribute("aria-busy", "false");
     modelSetupController = null;
+    renderSubscriptionSettings();
   }
 }
 async function issueCredential(signal) {
@@ -1697,6 +2010,7 @@ async function issueCredential(signal) {
 }
 async function discoverModels() {
   return runModelSetup("discover-models", async (signal) => {
+    if (state.modelSetupMode === "subscription") throw new Error("subscription_model_unavailable");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
     if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential(signal);
     const payload = await api("/byok/models", { method: "POST", signal, timeoutMs: 30000, body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
@@ -1709,6 +2023,25 @@ async function discoverModels() {
 }
 async function saveModelSession() {
   return runModelSetup("save-model", async (signal) => {
+    if (state.modelSetupMode === "subscription") {
+      if (!subscriptionEnabled()) throw new Error("subscription_disabled");
+      await refreshSubscriptionStatus(signal);
+      signal.throwIfAborted();
+      if (state.subscription.status !== "connected" || !state.subscription.credential) throw new Error("subscription_not_connected");
+      if (!subscriptionCombinationSupported(state.subscription.draftModel, state.subscription.draftEffort)) throw new Error("subscription_model_unavailable");
+      cancelBackgroundSummaries();
+      state.provider = SUBSCRIPTION_PROVIDER;
+      state.model = state.subscription.draftModel;
+      state.reasoningEffort = state.subscription.draftEffort;
+      state.credential = state.subscription.credential;
+      state.credentialExpiresAt = state.subscription.expiresAt;
+      saveCredential();
+      refreshCredentialStatus();
+      updateComposerAvailability();
+      $("settings-dialog").close();
+      toast(`已使用你自己的 Codex 订阅 · ${state.model} · ${state.reasoningEffort}`);
+      return;
+    }
     const model = $("discovered-models").value.trim() || $("model-id").value.trim();
     if (!model) throw new Error("请填写或选择模型 ID。");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
@@ -1716,6 +2049,7 @@ async function saveModelSession() {
     signal.throwIfAborted();
     state.provider = $("provider-select").value;
     state.model = model;
+    state.reasoningEffort = "";
     saveCredential();
     refreshCredentialStatus();
     updateComposerAvailability();
@@ -1729,50 +2063,28 @@ function currentThread() { return state.threads.get(state.selected) || null; }
 async function ensureContinuityDecision(thread) {
   if (!thread) return true;
   const today = localDayKey();
-  if (!thread.localDayKey) {
-    thread.localDayKey = today;
-    thread.lastActiveAt = Date.now();
-    await dbPutThread(thread);
-    return true;
+  if (thread.localDayKey && thread.localDayKey !== today) {
+    thread.continuityDecision = state.dayContinuityPreference;
+    if (thread.continuityDecision === "start_today") {
+      // Keep the local transcript and world state, but retire yesterday's
+      // model context, including any summary that has not finished yet.
+      state.summaryControllers.get(thread.characterId)?.abort();
+      state.summaryControllers.delete(thread.characterId);
+      state.summaryInFlight.delete(thread.characterId);
+      thread.conversationSegmentId = newConversationSegment();
+      thread.summary = "";
+      thread.pendingTopics = [];
+      thread.summaryRequestId = "";
+      thread.summaryCheckpointMessageId = "";
+      thread.summarizedThroughMessageId = "";
+      thread.summarizedThroughTurnCount = 0;
+      thread.summaryUpdatedAt = 0;
+    }
   }
-  if (thread.localDayKey === today) {
-    thread.lastActiveAt = Date.now();
-    await dbPutThread(thread);
-    return true;
-  }
-  const dialog = $("continuity-dialog");
-  if (!dialog.dataset.bound) {
-    dialog.dataset.bound = "1";
-    dialog.addEventListener("close", () => {
-      if (state.continuityPrompt) {
-        const pending = state.continuityPrompt;
-        state.continuityPrompt = null;
-        pending.resolve(false);
-      }
-    });
-  }
-  return new Promise((resolve) => {
-    state.continuityPrompt = { thread, today, resolve };
-    const finish = async (decision) => {
-      if (!state.continuityPrompt) return;
-      thread.continuityDecision = decision;
-      thread.localDayKey = today;
-      // Continuing yesterday keeps the prior segment available for the
-      // bounded recent-history window. Starting today deliberately receives a
-      // fresh segment so no previous transcript can leak into the request.
-      if (decision === "start_today") thread.conversationSegmentId = newConversationSegment();
-      thread.lastActiveAt = Date.now();
-      if (decision === "start_today") thread.pendingTopics = [];
-      await dbPutThread(thread);
-      const pending = state.continuityPrompt;
-      state.continuityPrompt = null;
-      if (dialog.open) dialog.close();
-      pending.resolve(true);
-    };
-    $("continue-yesterday").onclick = () => finish("continue_previous");
-    $("start-today").onclick = () => finish("start_today");
-    dialog.showModal();
-  });
+  thread.localDayKey = today;
+  thread.lastActiveAt = Date.now();
+  await dbPutThread(thread);
+  return true;
 }
 function avatarMarkup(character, { thumbnail = true, priority = false, className = "" } = {}) {
   const avatar = character?.avatar || null;
@@ -2682,10 +2994,17 @@ const STAGE_PRESENTATION_RENDERERS = Object.freeze({
   layered_sprite: Object.freeze({
     async preload(presentation, signal) {
       const layers = [];
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (signal?.aborted) abort();
+      signal?.addEventListener("abort", abort, { once: true });
+      const loading = presentation.layers.map(async (layer, index) => {
+        layers[index] = await verifiedExpressionImage(layer.assetPath, layer.sha256, controller.signal);
+      });
       try {
-        // Every pixel source is verified before decode. Sequential leases keep the
-        // failure path bounded and ensure already decoded image sources are released.
-        for (const layer of presentation.layers) layers.push(await verifiedExpressionImage(layer.assetPath, layer.sha256, signal));
+        // Download and decode independent layers together, retaining manifest order
+        // for composition. Nothing is displayed until every source is verified.
+        await Promise.all(loading);
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const canvas = document.createElement("canvas");
         canvas.width = presentation.canvas.width;
@@ -2702,9 +3021,14 @@ const STAGE_PRESENTATION_RENDERERS = Object.freeze({
           context.drawImage(image, layer.x, layer.y);
         }
         const src = canvas.toDataURL("image/png");
-        await preloadImage(src, signal);
-        return { src, renderStrategy: "layered_sprite" };
-      } finally { for (const layer of layers) layer.dispose(); }
+        const image = await preloadImage(src, signal);
+        return { src, image, renderStrategy: "layered_sprite", dispose: () => image.removeAttribute("src") };
+      } finally {
+        abort();
+        await Promise.allSettled(loading);
+        signal?.removeEventListener("abort", abort);
+        for (const layer of layers) layer?.dispose();
+      }
     },
     commit(node, _presentation, prepared) {
       node.src = prepared.src;
@@ -2715,7 +3039,7 @@ function stagePresentationRenderer(presentation) {
   return STAGE_PRESENTATION_RENDERERS[presentation?.renderStrategy]
     || STAGE_PRESENTATION_RENDERERS.single_sprite;
 }
-async function preloadStagePresentation(presentation, signal) {
+async function prepareStagePresentation(presentation, signal) {
   if (!presentation?.stageAssetPath) throw new Error("expression_manifest_invalid");
   const renderer = stagePresentationRenderer(presentation);
   try {
@@ -2727,6 +3051,92 @@ async function preloadStagePresentation(presentation, signal) {
     const prepared = await fallback.preload(presentation, signal);
     return { renderer: fallback, prepared };
   }
+}
+function trimStagePresentationCache() {
+  const cache = state.stagePresentationCache;
+  let bytes = [...cache.values()].reduce((total, entry) => total + (entry.bytes || 0), 0);
+  for (const [key, entry] of cache) {
+    if (cache.size <= STAGE_PRESENTATION_CACHE_LIMIT && bytes <= EXPRESSION_IMAGE_MAX_BYTES) break;
+    if (!entry.value || entry.waiters) continue;
+    cache.delete(key);
+    bytes -= entry.bytes;
+    entry.value.prepared.dispose?.();
+  }
+}
+function clearStagePresentationCache() {
+  for (const entry of state.stagePresentationCache.values()) {
+    entry.controller.abort();
+    entry.value?.prepared.dispose?.();
+  }
+  state.stagePresentationCache.clear();
+}
+function preloadStagePresentation(presentation, signal) {
+  if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  // Include every pixel/composition input, so a changed digest or layer position
+  // can never borrow a prepared surface from another presentation.
+  const key = JSON.stringify([presentation?.renderStrategy, presentation?.stageAssetPath,
+    presentation?.stageAssetSha256, presentation?.canvas, presentation?.layers]);
+  const cache = state.stagePresentationCache;
+  let entry = cache.get(key);
+  if (!entry) {
+    entry = { controller: new AbortController(), waiters: 0, value: null, bytes: 0, promise: null };
+    cache.set(key, entry);
+    entry.promise = prepareStagePresentation(presentation, entry.controller.signal).then((value) => {
+      if (entry.controller.signal.aborted) {
+        value.prepared.dispose?.();
+        throw new DOMException("Aborted", "AbortError");
+      }
+      entry.value = value;
+      const { src, image } = value.prepared;
+      entry.bytes = src.length * 2 + (image?.naturalWidth || 0) * (image?.naturalHeight || 0) * 4;
+      // A transient layered failure must be retried later, not cached forever as
+      // a flattened fallback. The caller still owns that successful fallback.
+      if (value.prepared.renderStrategy !== presentation.renderStrategy) cache.delete(key);
+      return value;
+    }).catch((error) => {
+      if (cache.get(key) === entry) cache.delete(key);
+      throw error;
+    });
+  } else {
+    cache.delete(key);
+    cache.set(key, entry);
+  }
+  entry.waiters += 1;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", abort);
+      entry.waiters -= 1;
+      if (!entry.value && !entry.waiters) {
+        entry.controller.abort();
+        if (cache.get(key) === entry) cache.delete(key);
+      }
+      callback(value);
+      trimStagePresentationCache();
+      if (entry.value && !entry.waiters && cache.get(key) !== entry) entry.value.prepared.dispose?.();
+    };
+    const abort = () => finish(reject, new DOMException("Aborted", "AbortError"));
+    signal?.addEventListener("abort", abort, { once: true });
+    entry.promise.then((value) => {
+      // The cache owns decoded images; disposing one visible consumer must not
+      // clear a surface being reused by a prewarm or another stage update.
+      finish(resolve, { renderer: value.renderer, prepared: { ...value.prepared, dispose: () => {} } });
+    }, (error) => finish(reject, error));
+  });
+}
+async function warmCharacterStage(character, expressionState = "neutral", performanceId = "", signal) {
+  if (!character || (!expressionManifestUrlForCharacter(character) && !stageReleaseCharacterForExpressions(character))) return false;
+  try {
+    const manifest = await loadExpressionManifest(character, signal);
+    const cue = manifest.performances[normalizePerformanceId(performanceId, "in_person")];
+    const presentation = cue?.presentation
+      || manifest.expressions[normalizeExpressionState(expressionState, "in_person")]?.presentation
+      || manifest.expressions.neutral?.presentation;
+    await preloadStagePresentation(presentation, signal);
+    return true;
+  } catch { return false; /* Foreground rendering keeps its verified fallback path. */ }
 }
 function hideStageCharacterArt(node) {
   if (!node) return;
@@ -2758,7 +3168,7 @@ function cancelStageArtTransition(node = $("stage-character-art")) {
     delete node.dataset.stageArtTransition;
   }
 }
-function crossfadeStageCharacterArt(node) {
+function crossfadeStageCharacterArt(node, duration = 280) {
   cancelStageArtTransition(node);
   if (
     !node?.parentNode
@@ -2780,7 +3190,7 @@ function crossfadeStageCharacterArt(node) {
   node.style.opacity = "1";
   node.dataset.stageArtTransition = "incoming";
   const options = {
-    duration: 280,
+    duration,
     easing: "cubic-bezier(.22,.72,.24,1)",
     fill: "both",
   };
@@ -2906,10 +3316,11 @@ async function updateStageCharacterArt(node, character, expressionState, perform
     }
     const previousCharacterId = plain(node.dataset.expressionCharacterId);
     const shouldCrossfade = previousCharacterId
-      && previousCharacterId !== characterId
+      && node.getAttribute("src") !== loadedSurface.src
       && !node.hidden
       && Boolean(node.getAttribute("src"));
-    const outgoingTransition = shouldCrossfade ? crossfadeStageCharacterArt(node) : null;
+    const outgoingTransition = shouldCrossfade
+      ? crossfadeStageCharacterArt(node, previousCharacterId === characterId ? 160 : 280) : null;
     const previousSurface = state.stageArtSurface;
     loadedRenderer.commit(node, loadedPresentation, loadedSurface);
     state.stageArtSurface = loadedSurface;
@@ -3217,6 +3628,11 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   cancelModeTransition();
   state.selectionController = new AbortController();
   const controller = state.selectionController;
+  state.stageWarmController?.abort();
+  state.stageWarmController = controller;
+  // Start artwork alongside local history and presence resolution, while the
+  // user is still in the contact/transition UI rather than after opening the stage.
+  void warmCharacterStage(characterById(characterId), "neutral", "", controller.signal);
   const previousId = state.selected;
   const previousThread = currentThread();
   const switchingFromStage = Boolean(previousId && previousId !== characterId && previousThread?.channel === "in_person");
@@ -3225,6 +3641,10 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   try {
     const thread = await dbGetThread(characterId);
     if (sequence !== state.selectionSequence) return;
+    const previousReply = [...thread.messages].reverse().find(message => message.role === "assistant" && message.communicationChannel === "in_person");
+    if (previousReply && (expressionStateForMessage(previousReply) !== "neutral" || previousReply.performanceId)) {
+      void warmCharacterStage(characterById(characterId), expressionStateForMessage(previousReply), previousReply.performanceId, controller.signal);
+    }
     if (!(await ensureContinuityDecision(thread)) || sequence !== state.selectionSequence) return;
     thread.lastActiveAt = Date.now();
     await dbPutThread(thread);
@@ -3279,7 +3699,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     state.scene = preparedScene;
     const character = characterById(characterId);
     renderCharacters();
-    $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: false, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
+    $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: true, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
     fillAvatar($("stage-header-avatar"), character, { thumbnail: true, priority: true });
     $("stage-character-name").textContent = character.display_name;
     $("stage-speaker").textContent = character.display_name;
@@ -3468,7 +3888,9 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     const failed = message.status === "failed";
     const presenting = message.role === "assistant" && presentationFor()?.messageId === message.id;
     const tools = failed
-      ? `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
+      ? message.errorCode === "subscription_result_unknown"
+        ? '<span class="message-recovery-note">结果尚未确认，请先检查个人连接器，避免重复发送。</span>'
+        : `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
       : message.role === "assistant" && !presenting ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
     const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
@@ -3632,6 +4054,7 @@ function renderTypewriter(text, key) {
   state.typewriter.timer = window.setTimeout(revealNext, plan.initialDelay);
 }
 function renderStage() {
+  const renderSequence = ++state.stageRenderSequence;
   const character = currentCharacter();
   const assistantMessage = latestInPersonMessage("assistant");
   const expressionState = expressionStateForMessage(assistantMessage);
@@ -3639,17 +4062,42 @@ function renderStage() {
   const livePresentation = presentationFor();
   const motionPresentation = livePresentation?.messageId === assistantMessage?.id ? livePresentation : null;
   const motionRequestSequence = state.stageMotionRequestSequence;
+  let artReady = Promise.resolve(false);
   if ($("chat-app").dataset.channel !== "in_person") {
     cancelStageArt({ hide: true });
   } else {
-    void updateStageCharacterArt(artNode, character, expressionState,
+    artReady = updateStageCharacterArt(artNode, character, expressionState,
       normalizePerformanceId(assistantMessage?.performanceId ?? assistantMessage?.performance_id, assistantMessage?.communicationChannel)
-    ).then((ready) => {
+    );
+    void artReady.then((ready) => {
       if (ready && motionPresentation) {
         playStageMotion(artNode, assistantMessage, motionPresentation, motionRequestSequence);
       }
     });
   }
+  const pending = typingStateFor();
+  const speechKey = assistantMessage ? speechTypewriterKey(assistantMessage) : "";
+  const liveReply = pending?.phase === "presenting" && pending.channel === "in_person"
+    && assistantMessage?.requestId === pending.requestId;
+  if (liveReply && $("chat-app").dataset.channel === "in_person" && state.typewriter.key !== speechKey) {
+    // Repeated renders share one deadline. A stalled image can delay the first
+    // spoken text only briefly, and late completions cannot repaint a new scene.
+    if (state.stageSpeechGate?.key !== speechKey) {
+      state.stageSpeechGate = { key: speechKey, deadline: performance.now() + STAGE_SPEECH_SYNC_WAIT_MS };
+    }
+    const remaining = Math.max(0, state.stageSpeechGate.deadline - performance.now());
+    if (remaining > 0) {
+      void Promise.race([artReady, delay(remaining)]).then(() => {
+        if (renderSequence !== state.stageRenderSequence || currentCharacter()?.character_id !== character?.character_id
+          || $("chat-app").dataset.channel !== "in_person") return;
+        renderStageSpeech(assistantMessage);
+      });
+      return;
+    }
+  }
+  renderStageSpeech(assistantMessage);
+}
+function renderStageSpeech(assistantMessage) {
   const pending = typingStateFor();
   const speechNode = $("stage-speech");
   if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {
@@ -3707,20 +4155,14 @@ function renderScene() {
   const scene = state.scene || {};
   const visualKey = SCENE_KEYS.has(scene.visual_key) ? scene.visual_key : "generic";
   $("in-person-surface").dataset.scene = visualKey;
-  $("scene-backdrop").src = SCENE_ASSET_URLS[visualKey] || `/assets/immersive/scenes/${visualKey}.svg`;
-  const preload = new Image();
-  preload.src = $("scene-backdrop").src;
+  const backdrop = SCENE_ASSET_URLS[visualKey] || `/assets/immersive/scenes/${visualKey}.svg`;
+  if ($("scene-backdrop").getAttribute("src") !== backdrop) $("scene-backdrop").src = backdrop;
   $("stage-location").textContent = scene.character_location || "场景尚未建立";
   $("stage-activity").textContent = scene.character_activity || "选择角色后读取当前位置";
   const presenceLabel = scene.character_location ? `去见她 · ${scene.character_location}` : "去见她";
   $("go-in-person-label").textContent = presenceLabel;
   $("go-in-person").setAttribute("aria-label", presenceLabel);
   $("go-in-person").title = presenceLabel;
-  const character = currentCharacter();
-  if (character?.avatar?.src) {
-    const image = new Image();
-    image.src = character.avatar.src;
-  }
   renderStage();
   renderInfo();
 }
@@ -4082,6 +4524,7 @@ function shouldReuseChatRequest(error) {
     "provider_network_error",
     "provider_timeout",
     "request_cancelled",
+    "subscription_result_unknown",
   ].includes(code);
 }
 
@@ -4099,6 +4542,7 @@ function compatibleRetrySnapshot(userMessage) {
   if (plain(candidate.payload.communication_channel) !== plain(userMessage.communicationChannel)) return null;
   if (plain(candidate.payload.movement_location_id) !== plain(userMessage.movementLocationId)) return null;
   if (plain(candidate.payload.provider) !== state.provider || plain(candidate.payload.model) !== state.model) return null;
+  if (state.provider === SUBSCRIPTION_PROVIDER && snapshotSubscriptionEffort(candidate.payload) !== state.reasoningEffort) return null;
   return { requestId: candidateRequestId, payload: structuredClone(candidate.payload) };
 }
 
@@ -4110,6 +4554,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     request_id: requestId,
     provider: state.provider,
     model: state.model,
+    ...subscriptionReasoningPayload(),
     character_id: characterId,
     message: userMessage.content,
     communication_channel: userMessage.communicationChannel,
@@ -4192,7 +4637,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   try {
     let result = null;
     let lastError = null;
-    const backoffs = [0, 1000, 2000, 4000];
+    const backoffs = requestSnapshot.provider === SUBSCRIPTION_PROVIDER ? [0] : [0, 1000, 2000, 4000];
     for (let attempt = 0; attempt < backoffs.length; attempt += 1) {
       if (attempt > 0) {
         if (!recoverableChatError(lastError) || requestController.signal.aborted) throw lastError;
@@ -4215,6 +4660,9 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       }
     }
     if (!result) throw lastError || new Error("stream_disconnected");
+    if (result.returnedChannel === "in_person" && ownsVisibleRequest()) {
+      void warmCharacterStage(characterById(characterId), result.expressionState, result.performanceId, requestController.signal);
+    }
     state.retrySnapshots.delete(userMessage.id);
     userMessage.requestSnapshot = null;
     await userPersistence;
@@ -4255,7 +4703,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   } catch (caught) {
     await userPersistence.catch(() => {});
     const error = caught?.name === "AbortError" ? new Error(requestTimedOut ? "provider_timeout" : "request_cancelled") : caught;
-    if (stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
+    if (requestSnapshot.provider !== SUBSCRIPTION_PROVIDER && stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
       cancelPresentationQueue(characterId, requestId);
       state.retrySnapshots.delete(userMessage.id);
       await clearPersistedWorldPackage();
@@ -4269,6 +4717,10 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     cancelPresentationQueue(characterId, requestId);
     userMessage.status = "failed";
     userMessage.errorCode = error instanceof Error ? error.message : "chat_failed";
+    if (requestSnapshot.provider === SUBSCRIPTION_PROVIDER && ["subscription_not_connected", "subscription_disconnected", "credential_invalid"].includes(userMessage.errorCode)) {
+      forgetSubscription("disconnected", "subscription_not_connected");
+      renderSubscriptionSettings();
+    }
     if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode });
     await dbPutThread(thread);
     if (ownsVisibleRequest()) renderAll();
@@ -4352,6 +4804,7 @@ async function retryMessage(messageId) {
   if (snapshot && (
     plain(snapshot.payload?.provider) !== state.provider
     || plain(snapshot.payload?.model) !== state.model
+    || (state.provider === SUBSCRIPTION_PROVIDER && snapshotSubscriptionEffort(snapshot.payload) !== state.reasoningEffort)
   )) {
     state.retrySnapshots.delete(message.id);
     message.requestId = "";
@@ -4361,7 +4814,7 @@ async function retryMessage(messageId) {
   await runChat(thread, message);
 }
 function successfulChatMessages(thread) {
-  return (thread.messages || []).filter((message) => message.role === "assistant" && message.status === "sent" && message.source !== "presence_arrival");
+  return (thread.messages || []).filter((message) => message.conversationSegmentId === thread.conversationSegmentId && message.role === "assistant" && message.status === "sent" && message.source !== "presence_arrival");
 }
 function remainingProviderCallBudget(usage) {
   const used = Number(usage?.provider_calls);
@@ -4373,7 +4826,7 @@ function remainingProviderCallBudget(usage) {
   return Math.max(0, limit - used);
 }
 function scheduleAutoSummary(thread, chatUsage = null) {
-  if (!state.autoSummaryEnabled || !configured()) return;
+  if (state.provider === SUBSCRIPTION_PROVIDER || !state.autoSummaryEnabled || !configured()) return;
   // A summary is another provider operation belonging to the current user
   // action. Never start it when validation/rewriting already consumed both
   // calls, or when an older server omitted the auditable call count.
@@ -4403,7 +4856,7 @@ function cancelBackgroundSummaries() {
   state.summaryInFlight.clear();
 }
 async function runAutoSummary(thread) {
-  if (!thread.summaryRequestId || !state.autoSummaryEnabled || !configured() || state.summaryInFlight.has(thread.characterId) || globalRequestBusy()) return;
+  if (state.provider === SUBSCRIPTION_PROVIDER || !thread.summaryRequestId || !state.autoSummaryEnabled || !configured() || state.summaryInFlight.has(thread.characterId) || globalRequestBusy()) return;
   state.summaryInFlight.add(thread.characterId);
   const controller = new AbortController();
   state.summaryControllers.set(thread.characterId, controller);
@@ -4411,13 +4864,13 @@ async function runAutoSummary(thread) {
   const requestId = thread.summaryRequestId;
   const epoch = state.historyEpoch;
   try {
-    const turns = thread.messages.filter((message) => message.status === "sent").slice(-24).map((message) => ({
+    const turns = thread.messages.filter((message) => message.conversationSegmentId === thread.conversationSegmentId && message.status === "sent").slice(-24).map((message) => ({
       role: message.role,
       communication_channel: message.communicationChannel,
       content_blocks: wireBlocks(message.contentBlocks),
     }));
     const requestPayload = fitPublicRequestPayload(
-      { request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, character_id: thread.characterId, turns, previous_summary: thread.summary || "" },
+      { request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, ...subscriptionReasoningPayload(), character_id: thread.characterId, turns, previous_summary: thread.summary || "" },
       { arrays: [{ key: "turns", minimum: 2 }], texts: ["previous_summary"] },
     );
     const payload = await api("/chat/summarize", { method: "POST", signal: controller.signal, timeoutMs: 20000, body: JSON.stringify(requestPayload) });
@@ -4503,10 +4956,13 @@ async function arriveInPerson() {
       return;
     }
     const arrivalPayload = fitPublicRequestPayload(
-      { arrival_id: arrivalId, provider: state.provider, credential: state.credential, model: state.model, character_id: characterId, recent_history: requestHistory(thread?.messages || [], "", thread?.conversationSegmentId || ""), history_summary: thread?.continuityDecision === "start_today" ? "" : (thread?.summary || ""), state_package: state.worldPackage || "" },
+      { arrival_id: arrivalId, provider: state.provider, credential: state.credential, model: state.model, ...subscriptionReasoningPayload(), character_id: characterId, recent_history: requestHistory(thread?.messages || [], "", thread?.conversationSegmentId || ""), history_summary: thread?.continuityDecision === "start_today" ? "" : (thread?.summary || ""), state_package: state.worldPackage || "" },
       { arrays: [{ key: "recent_history", minimum: 0 }], texts: ["history_summary"] },
     );
     const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify(arrivalPayload) });
+    if (result.reaction && ownsVisibleArrival()) {
+      void warmCharacterStage(characterById(characterId), result.reaction.expression_state, result.reaction.performance_id);
+    }
     if (ownsArrival()) await saveWorldPackage(result.state_package);
     if (ownsArrival()) state.sceneByCharacter.set(characterId, result.scene_state || {});
     if (ownsVisibleArrival()) state.scene = result.scene_state;
@@ -4667,7 +5123,7 @@ function toggleContacts({ mobileOpen = false } = {}) {
   return expanded;
 }
 function openSettings(tab = "models") {
-  if (tab !== "models") modelSetupController?.abort();
+  if (tab !== "models") { modelSetupController?.abort(); stopSubscriptionPolling(); }
   document.querySelectorAll("[data-settings-tab]").forEach((button) => {
     const selected = button.dataset.settingsTab === tab;
     button.classList.toggle("active", selected);
@@ -4678,13 +5134,18 @@ function openSettings(tab = "models") {
   if (tab === "history") storageBytes().then((bytes) => { $("storage-usage").textContent = `当前浏览器记录约占 ${formatBytes(bytes)}。`; });
   const activeThread = currentThread();
   $("auto-summary-enabled").checked = state.autoSummaryEnabled;
+  $("subscription-summary-hint").hidden = state.provider !== SUBSCRIPTION_PROVIDER;
   $("history-retention").value = String(state.historyRetentionDays);
+  $("day-continuity-preference").value = state.dayContinuityPreference;
   $("summary-last-updated").textContent = activeThread?.summaryUpdatedAt ? `最近更新：${new Date(activeThread.summaryUpdatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}` : "尚未生成摘要";
-  $("provider-select").value = state.provider || $("provider-select").value;
+  $("provider-select").value = state.modelSetupMode === "subscription" && subscriptionEnabled()
+    ? SUBSCRIPTION_PROVIDER : state.apiProviderChoice || state.provider || $("provider-select").value;
   syncProviderControls($("provider-select").value);
   $("model-id").value = state.model || $("model-id").value;
   refreshCredentialStatus();
   if (!$("settings-dialog").open) $("settings-dialog").showModal();
+  renderSubscriptionSettings();
+  if (tab === "models") startSubscriptionPolling();
 }
 function openFeedback(messageId = "") {
   state.feedbackMessageId = messageId;
@@ -4876,8 +5337,24 @@ $("stage-toggle-ui").onclick = () => { $("stage-menu").open = false; $("in-perso
 $("stage-open-feedback").onclick = () => { const messageId = $("stage-open-feedback").dataset.messageId || ""; if (!messageId) return; $("stage-menu").open = false; openFeedback(messageId); };
 $("discover-models").onclick = discoverModels;
 $("save-model").onclick = saveModelSession;
+$("model-mode-api").onclick = () => chooseModelMode("api");
+$("model-mode-subscription").onclick = () => chooseModelMode("subscription");
+$("subscription-model-select").onchange = () => chooseSubscriptionModel($("subscription-model-select").value);
+$("subscription-effort-select").onchange = () => {
+  const effort = $("subscription-effort-select").value;
+  state.subscription.draftEffort = subscriptionCombinationSupported(state.subscription.draftModel, effort) ? effort : "";
+  state.subscription.selectionNotice = "";
+  renderSubscriptionSettings();
+};
+$("pair-subscription").onclick = pairSubscription;
+$("disconnect-subscription").onclick = disconnectSubscription;
+$("copy-subscription-code").onclick = async () => {
+  if (!state.subscription.pairingCode) return;
+  try { await navigator.clipboard.writeText(state.subscription.pairingCode); toast("配对码已复制，请只输入到你自己的连接器"); }
+  catch { toast("无法自动复制，请选中配对码后手动复制"); }
+};
 $("clear-credential").onclick = () => { clearCredential(); $("api-key").focus(); toast("当前标签页的模型凭证已清除"); };
-$("discovered-models").onchange = () => { if ($("discovered-models").value) { $("model-id").value = $("discovered-models").value; state.model = $("discovered-models").value; saveCredential(); } };
+$("discovered-models").onchange = () => { if (state.modelSetupMode !== "subscription" && $("discovered-models").value) { $("model-id").value = $("discovered-models").value; state.model = $("discovered-models").value; saveCredential(); } };
 $("toggle-advanced-model").onclick = () => {
   const panel = $("advanced-model-panel");
   const expanded = panel.hidden;
@@ -4888,8 +5365,13 @@ $("provider-select").onchange = () => chooseProvider($("provider-select").value)
 $("auto-summary-enabled").onchange = async () => {
   state.autoSummaryEnabled = $("auto-summary-enabled").checked;
   if (!state.autoSummaryEnabled) cancelBackgroundSummaries();
-  await storePut("app_state", { key: "preferences", autoSummaryEnabled: state.autoSummaryEnabled });
+  await saveConversationPreferences();
   if (state.autoSummaryEnabled) toast("将在下一轮仍有模型调用余量时整理连续性摘要");
+};
+$("day-continuity-preference").onchange = async () => {
+  state.dayContinuityPreference = $("day-continuity-preference").value === "continue_previous" ? "continue_previous" : "start_today";
+  await saveConversationPreferences();
+  toast("跨日聊天方式已保存，下次进入新日期时生效");
 };
 $("history-retention").onchange = async () => {
   state.historyRetentionDays = [30, 90].includes(Number($("history-retention").value)) ? Number($("history-retention").value) : 0;
@@ -4921,8 +5403,9 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   };
 });
 $("feedback-dialog").addEventListener("close", () => prepareFeedbackVerification({ cancelPending: true }));
-$("settings-dialog").addEventListener("close", () => modelSetupController?.abort());
-$("settings-dialog").addEventListener("cancel", () => modelSetupController?.abort());
+$("settings-dialog").addEventListener("close", () => { modelSetupController?.abort(); stopSubscriptionPolling(); });
+$("settings-dialog").addEventListener("cancel", () => { modelSetupController?.abort(); stopSubscriptionPolling(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopSubscriptionPolling(); else startSubscriptionPolling(); });
 $("sticker-picker").addEventListener("close", () => $("toggle-sticker").setAttribute("aria-expanded", "false"));
 window.addEventListener("keydown", (event) => {
   if (document.querySelector("dialog[open]")) return;
@@ -5209,7 +5692,14 @@ $("apply-build-update").onclick = async () => {
   window.location.reload();
 };
 window.addEventListener("focus", () => { void checkBuildUpdate(); });
-window.addEventListener("pagehide", () => { state.writerRelease?.(); state.writerChannel?.close(); });
+window.addEventListener("pagehide", () => {
+  stopSubscriptionPolling();
+  state.writerRelease?.();
+  state.writerChannel?.close();
+  state.stageWarmController?.abort();
+  cancelStageArt();
+  clearStagePresentationCache();
+});
 
 async function boot() {
   await startTabCoordination();

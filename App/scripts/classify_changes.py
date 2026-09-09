@@ -42,6 +42,9 @@ UI_PATTERNS = (
     "App/tsconfig*.json",
     "App/tests/test_ui_*.py",
     "App/tests/test_public_frontend*.py",
+    "App/tests/test_stage_presentation_timing.py",
+    "App/tests/test_public_subscription_frontend_e2e.py",
+    "App/tests/subscription_connector.test.mjs",
 )
 
 API_PATTERNS = (
@@ -101,6 +104,7 @@ DEPLOY_PATTERNS = (
     "App/scripts/release_manifest.py",
     "App/scripts/validate_shared_design.py",
     "App/tests/test_deployment_contracts.py",
+    "App/tests/test_subscription_deployment.py",
     "App/tests/test_shared_design.py",
 )
 

@@ -27,8 +27,9 @@ class ChangeClassifierTests(TestCase):
         self.assertTrue(classify(["App/public_frontend_src/src/runtime.ts"])["app_image"])
 
     def test_browser_reliability_only_change_runs_browser_tier(self):
-        result = classify(["App/tests/test_public_frontend_reliability.py"])
-        self.assertTrue(result["ui"])
+        for path in ("App/tests/test_public_frontend_reliability.py", "App/tests/test_stage_presentation_timing.py"):
+            with self.subTest(path=path):
+                self.assertTrue(classify([path])["ui"])
 
     def test_dot_github_and_real_data_paths_are_classified(self):
         self.assertTrue(classify([".github/workflows/ci.yml"])["deploy"])
@@ -107,9 +108,11 @@ class ChangeClassifierTests(TestCase):
         self.assertFalse(result["app_image"])
 
     def test_deployment_change_runs_deploy_contracts(self) -> None:
-        result = classify(["App/ops/deploy.sh"])
-        self.assertTrue(result["deploy"])
-        self.assertFalse(result["app_image"])
+        for path in ("App/ops/deploy.sh", "App/tests/test_subscription_deployment.py"):
+            with self.subTest(path=path):
+                result = classify([path])
+                self.assertTrue(result["deploy"])
+                self.assertFalse(result["app_image"])
 
     def test_release_artifact_digest_index_is_a_deployment_change(self) -> None:
         result = classify(["App/config/public_release_artifacts.json"])

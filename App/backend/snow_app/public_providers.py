@@ -17,7 +17,8 @@ class ProviderHTTPPool:
     workers normally keep one loop for their entire lifetime.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, subscription_broker=None) -> None:
+        self.subscription_broker = subscription_broker
         self._client: httpx.AsyncClient | None = None
         self._loop: Any | None = None
         self._lock = asyncio.Lock()
@@ -44,10 +45,25 @@ class ProviderHTTPPool:
             return self._client
 
     async def get(self, url: str, **kwargs: Any) -> httpx.Response:
+        if str(url).startswith("https://codex-subscription.invalid"):
+            from .public_subscription import BASE_URL, SubscriptionError, relay_authorization
+            if url != BASE_URL + "/models" or self.subscription_broker is None:
+                raise SubscriptionError("subscription_disabled", 404)
+            catalogue = self.subscription_broker.catalogue(relay_authorization(kwargs.get("headers")))
+            return httpx.Response(200, json={"data": [{"id": item["id"]} for item in catalogue]},
+                                  request=httpx.Request("GET", url))
         client = await self._for_current_loop()
         return await client.get(url, **kwargs)
 
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
+        if str(url).startswith("https://codex-subscription.invalid"):
+            from .public_subscription import BASE_URL, SubscriptionError, relay_authorization
+            if url != BASE_URL + "/chat/completions" or self.subscription_broker is None:
+                raise SubscriptionError("subscription_disabled", 404)
+            payload = await self.subscription_broker.complete_async(
+                relay_authorization(kwargs.get("headers")), kwargs.get("json") or {}, kwargs.get("timeout", 180),
+            )
+            return httpx.Response(200, json=payload, request=httpx.Request("POST", url))
         client = await self._for_current_loop()
         return await client.post(url, **kwargs)
 
@@ -69,6 +85,10 @@ class ProviderSpec:
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
+    "codex_subscription": ProviderSpec(
+        "codex_subscription", "Codex 订阅", "https://codex-subscription.invalid/v1",
+        "https://developers.openai.com/codex/app-server/", "https://openai.com/policies/privacy-policy/",
+    ),
     "openai": ProviderSpec(
         "openai",
         "OpenAI",
@@ -134,6 +154,8 @@ async def discover_models(
     *,
     client: ProviderHTTPPool | None = None,
 ) -> list[str]:
+    if spec.provider_id == "codex_subscription" and client is None:
+        raise ProviderRequestError("subscription_not_connected", 409)
     try:
         if client is not None:
             response = await client.get(
@@ -183,7 +205,10 @@ async def simple_completion(
     max_tokens: int = 800,
     timeout: float = 120,
     client: ProviderHTTPPool | None = None,
+    reasoning_effort: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    if spec.provider_id == "codex_subscription" and client is None:
+        raise ProviderRequestError("subscription_not_connected", 409)
     body = {
         "model": model,
         "messages": [
@@ -193,6 +218,8 @@ async def simple_completion(
         "temperature": 0.2,
         "max_tokens": max_tokens,
     }
+    if spec.provider_id == "codex_subscription" and reasoning_effort is not None:
+        body["reasoning_effort"] = reasoning_effort
     try:
         if client is not None:
             response = await client.post(

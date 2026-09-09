@@ -119,6 +119,164 @@ class PublicFrontendReliabilityTests(TestCase):
             self.assertEqual(errors, [])
             browser.close()
 
+    @staticmethod
+    def seed_day_history(page, *, day="2026-09-08", current_turns=0):
+        page.evaluate("""async ({day, currentTurns}) => {
+          const db=await new Promise(resolve=>{const r=indexedDB.open('project-snow-public',4);r.onsuccess=()=>resolve(r.result)});
+          await new Promise((resolve,reject)=>{
+            const tx=db.transaction(['threads','messages'],'readwrite');
+            for (const characterId of ['25b23cb64398','9f5804761c56']) {
+              const segment=`current-${characterId}`;
+              tx.objectStore('threads').put({characterId,channel:'text',localDayKey:day,
+                conversationSegmentId:segment,summary:currentTurns ? '' : '昨天的摘要',
+                pendingTopics:currentTurns ? [] : ['昨天的话题'],
+                summaryUpdatedAt:currentTurns ? 0 : Date.now()-86400000,
+                turnCount:12+currentTurns,messageCount:12+currentTurns});
+              for (let i=0;i<12+currentTurns;i++) {
+                const previous=currentTurns && i<12;
+                const text=i<12 ? `昨天的消息 ${i}` : `今天的消息 ${i-12}`;
+                tx.objectStore('messages').put({id:`${characterId}-${i}`,characterId,role:'assistant',
+                  content:text,contentBlocks:[{type:'message',text}],communicationChannel:'text',
+                  status:'sent',conversationSegmentId:previous ? `old-${characterId}` : segment,
+                  createdAt:Date.now()-(i<12 ? 86400000 : 1000)+i});
+              }
+            }
+            tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+          });db.close();
+        }""", {"day": day, "currentTurns": current_turns})
+
+    @staticmethod
+    def route_day_chat(page):
+        requests = []
+
+        def stream(route):
+            requests.append(route.request.post_data_json)
+            result = {
+                "communication_channel": "text",
+                "content_blocks": [{"type": "message", "text": f"今天的新回复 {len(requests)}"}],
+                "usage": {"provider_calls": 1},
+            }
+            route.fulfill(status=200, content_type="text/event-stream",
+                          body="event: done\ndata: " + json.dumps(result, ensure_ascii=False) + "\n\n")
+
+        page.route("**/public/v1/chat/stream", stream)
+        return requests
+
+    def test_day_continuity_defaults_to_fresh_context_without_character_switch_prompts(self):
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            page.add_init_script("Date.now=()=>Date.parse('2026-09-09T05:00:00Z')")
+            self.open(page)
+            self.seed_day_history(page)
+            self.open(page)
+            first = self.read_record(page, "threads", "25b23cb64398")
+            self.assertEqual(first["continuityDecision"], "start_today")
+            self.assertEqual(first["localDayKey"], "2026-09-09")
+            self.assertNotEqual(first["conversationSegmentId"], "current-25b23cb64398")
+            self.assertEqual(first["summary"], "")
+            self.assertEqual(first["pendingTopics"], [])
+            self.assertEqual(self.stored_count(page), 24)
+            self.assertEqual(page.locator("#continuity-dialog").count(), 0)
+            page.locator('[data-character="9f5804761c56"]').click()
+            page.locator("#active-character h1", has_text="安卡希雅").wait_for()
+            second = self.read_record(page, "threads", "9f5804761c56")
+            self.assertEqual(second["continuityDecision"], "start_today")
+            self.assertNotEqual(second["conversationSegmentId"], "current-9f5804761c56")
+            page.locator('[data-character="25b23cb64398"]').click()
+            page.locator("#active-character h1", has_text="凯茜娅").wait_for()
+            self.assertEqual(self.read_record(page, "threads", "25b23cb64398")["conversationSegmentId"], first["conversationSegmentId"])
+            frontend_fixture.PublicFrontendE2ETests._configure_model(page)
+            requests = self.route_day_chat(page)
+            summaries = []
+            page.on("request", lambda request: summaries.append(request.url) if request.url.endswith('/chat/summarize') else None)
+            for index in range(2):
+                page.locator("#message-input").fill(f"今天的新消息 {index}")
+                page.locator("#send-message").click()
+                page.locator("#timeline").get_by_text(f"今天的新回复 {index + 1}").wait_for()
+                page.wait_for_function("!document.querySelector('#send-message').disabled")
+            self.assertEqual(len(requests), 2)
+            for payload in requests:
+                self.assertEqual(payload["history_summary"], "")
+                self.assertNotIn("昨天", json.dumps(payload["recent_history"], ensure_ascii=False))
+            self.assertEqual(requests[0]["continuity_decision"], "start_today")
+            self.assertEqual(requests[1]["continuity_decision"], "")
+            self.assertEqual(summaries, [])
+            browser.close()
+
+    def test_day_continuity_preference_persists_and_continues_each_characters_history(self):
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            page.add_init_script("Date.now=()=>Date.parse('2026-09-09T05:00:00Z')")
+            self.open(page)
+            page.locator("#open-settings").click()
+            page.locator('[data-settings-tab="history"]').click()
+            self.assertEqual(page.locator("#day-continuity-preference").input_value(), "start_today")
+            page.locator("#day-continuity-preference").select_option("continue_previous")
+            page.locator("#auto-summary-enabled").uncheck()
+            self.assertEqual(self.read_record(page, "app_state", "preferences"), {
+                "key": "preferences", "autoSummaryEnabled": False,
+                "dayContinuityPreference": "continue_previous",
+            })
+            self.seed_day_history(page)
+            self.open(page)
+            first = self.read_record(page, "threads", "25b23cb64398")
+            self.assertEqual(first["continuityDecision"], "continue_previous")
+            self.assertEqual(first["conversationSegmentId"], "current-25b23cb64398")
+            self.assertEqual(first["summary"], "昨天的摘要")
+            page.locator('[data-character="9f5804761c56"]').click()
+            page.locator("#active-character h1", has_text="安卡希雅").wait_for()
+            self.assertEqual(self.read_record(page, "threads", "9f5804761c56")["continuityDecision"], "continue_previous")
+            self.assertEqual(page.locator("#continuity-dialog").count(), 0)
+            frontend_fixture.PublicFrontendE2ETests._configure_model(page)
+            page.locator("#message-input").fill("接着聊")
+            page.locator("#send-message").click()
+            page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for()
+            payload = PublicFrontendHandler.chat_payloads[-1]
+            self.assertEqual(payload["continuity_decision"], "continue_previous")
+            self.assertIn("昨天的摘要", payload["history_summary"])
+            self.assertIn("昨天的话题", payload["history_summary"])
+            self.assertIn("昨天的消息", json.dumps(payload["recent_history"], ensure_ascii=False))
+            page.locator("#open-settings").click()
+            page.locator('[data-settings-tab="history"]').click()
+            self.assertEqual(page.locator("#day-continuity-preference").input_value(), "continue_previous")
+            self.assertFalse(page.locator("#auto-summary-enabled").is_checked())
+            page.locator("#day-continuity-preference").select_option("start_today")
+            self.open(page)
+            # A settings change applies on the next date, preserving today's conversation.
+            self.assertEqual(self.read_record(page, "threads", "25b23cb64398")["conversationSegmentId"], "current-25b23cb64398")
+            browser.close()
+
+    def test_day_continuity_summarizes_only_the_active_conversation_segment(self):
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            page.add_init_script("Date.now=()=>Date.parse('2026-09-09T05:00:00Z')")
+            self.open(page)
+            self.seed_day_history(page, day="2026-09-09", current_turns=11)
+            self.open(page)
+            frontend_fixture.PublicFrontendE2ETests._configure_model(page)
+            self.route_day_chat(page)
+            summaries = []
+
+            def summarize(route):
+                summaries.append(route.request.post_data_json)
+                route.fulfill(status=200, content_type="application/json", body=json.dumps({"summary": "今天的新摘要", "pending_topics": []}))
+
+            page.route("**/public/v1/chat/summarize", summarize)
+            page.locator("#message-input").fill("完成今天的第十二轮")
+            with page.expect_response("**/public/v1/chat/summarize"):
+                page.locator("#send-message").click()
+                page.locator("#timeline").get_by_text("今天的新回复 1").wait_for()
+                page.wait_for_function("!document.querySelector('#send-message').disabled")
+            self.assertEqual(len(summaries), 1)
+            self.assertEqual(summaries[0]["previous_summary"], "")
+            self.assertNotIn("昨天", json.dumps(summaries[0]["turns"], ensure_ascii=False))
+            self.assertIn("今天", json.dumps(summaries[0]["turns"], ensure_ascii=False))
+            self.assertEqual(len(summaries[0]["turns"]), 13)
+            browser.close()
+
     def test_equal_timestamp_pagination_has_no_missing_messages(self):
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
@@ -568,9 +726,12 @@ class PublicFrontendReliabilityTests(TestCase):
                     const loaded = {src:prepared.src.startsWith('data:image/png;base64,'),width:prepared.image.naturalWidth};
                     const verifiedHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256',
                         await (await fetch(prepared.src)).arrayBuffer()))].map(value=>value.toString(16).padStart(2,'0')).join('');
+                    const completedDecodes = decodes;
                     prepared.dispose();
+                    const {prepared: reused} = await hooks.preloadStagePresentation(presentation);
                     return {cancelled,timedOut,aborts,cleaned,rejectedDecodes,loaded,verifiedHash,
-                        disposed:!prepared.image.hasAttribute('src')};
+                        reusable:reused.image.naturalWidth === 1 && reused.image.hasAttribute('src'),
+                        sameSource:prepared.src === reused.src, noExtraDecode:decodes === completedDecodes};
                 } finally {
                     window.FileReader = originalReader;
                     HTMLImageElement.prototype.decode = nativeDecode;
@@ -584,7 +745,9 @@ class PublicFrontendReliabilityTests(TestCase):
             self.assertEqual(result["rejectedDecodes"], 0)
             self.assertEqual(result["loaded"], {"src": True, "width": 1})
             self.assertEqual(result["verifiedHash"], image_hash)
-            self.assertTrue(result["disposed"])
+            self.assertTrue(result["reusable"])
+            self.assertTrue(result["sameSource"])
+            self.assertTrue(result["noExtraDecode"])
             self.assertEqual(len(requests), 1)
             self.assertEqual(PublicFrontendHandler.chat_payloads, [])
             browser.close()

@@ -11,6 +11,7 @@ import os
 import secrets
 import time
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -68,6 +69,16 @@ from .public_store import (
     PublicStore,
     PublicStoreUnavailable,
     RateLimitExceeded,
+)
+from .public_subscription import (
+    EFFORT as SUBSCRIPTION_EFFORT,
+    MODEL as SUBSCRIPTION_MODEL,
+    PROTOCOL_VERSION as SUBSCRIPTION_PROTOCOL_VERSION,
+    PROVIDER as SUBSCRIPTION_PROVIDER,
+    SubscriptionBroker,
+    SubscriptionError,
+    SubscriptionSyncClient,
+    install_subscription_routes,
 )
 
 # Minimal production images do not necessarily ship a mime.types entry for
@@ -252,6 +263,15 @@ def _request_hash(payload: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _model_request_body(payload: ChatRequest | PresenceArrivalRequest | SummarizeRequest) -> dict[str, Any]:
+    body = payload.model_dump(mode="json", exclude={"credential"})
+    # Preserve hashes of request snapshots created before effort selection was
+    # introduced. Explicit efforts remain part of the idempotency contract.
+    if body.get("reasoning_effort") is None:
+        body.pop("reasoning_effort", None)
+    return body
+
+
 def _feedback_blocks(blocks: list[Any], limit: int) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     remaining = limit
@@ -300,13 +320,20 @@ def create_app(
     chat_service: PublicChatService | None = None,
 ) -> FastAPI:
     public_settings = public_settings or PublicSettings.from_environment()
+    subscription_broker = SubscriptionBroker(public_settings.subscription_enabled)
+    enabled_providers = tuple(provider for provider in public_settings.enabled_providers
+                              if provider != SUBSCRIPTION_PROVIDER)
+    if subscription_broker.enabled:
+        enabled_providers += (SUBSCRIPTION_PROVIDER,)
+    public_settings = replace(public_settings, enabled_providers=enabled_providers,
+                              subscription_enabled=subscription_broker.enabled)
     internal_settings = internal_settings or Settings.from_environment()
     image_revision = os.getenv("APP_REVISION", "").strip()
     revision = os.getenv("APP_REVISION", os.getenv("GIT_SHA", "")).strip()
     build_time = os.getenv("APP_BUILD_TIME", "").strip()
     frontend_identity = read_frontend_identity(required=bool(image_revision))
     store = store or PublicStore(public_settings.database_url)
-    provider_http = ProviderHTTPPool()
+    provider_http = ProviderHTTPPool(subscription_broker)
     async_store = AsyncPublicStore(store)
     chat_service = chat_service or PublicChatService(
         internal_settings,
@@ -315,6 +342,10 @@ def create_app(
     )
     if chat_service is not None and getattr(chat_service, "provider_client", None) is None:
         chat_service.provider_client = provider_http
+    if not isinstance(chat_service.mvp._model_http_client, SubscriptionSyncClient):
+        chat_service.mvp._model_http_client = SubscriptionSyncClient(
+            subscription_broker, chat_service.mvp._model_http_client,
+        )
     # Verify immutable packages before any URL is mounted.  Subsequent calls
     # return the in-memory snapshot and never re-hash runtime media.
     media_startup_status = chat_service.media.verify(force=True)
@@ -383,6 +414,7 @@ def create_app(
             renewal.cancel()
             await asyncio.gather(renewal, return_exceptions=True)
             try:
+                subscription_broker.close()
                 await asyncio.to_thread(chat_service.close)
             finally:
                 try:
@@ -402,8 +434,10 @@ def create_app(
     app.state.public_store = store
     app.state.chat_service = chat_service
     app.state.provider_http = provider_http
+    app.state.subscription_broker = subscription_broker
     app.state.async_store = async_store
     app.state.draining = False
+    install_subscription_routes(app, public_settings, subscription_broker, async_store)
     chat_jobs: dict[str, asyncio.Task[dict[str, Any]]] = {}
     active_request_leases: dict[str, asyncio.Task[Any]] = {}
     active_subject_requests: dict[str, str] = {}
@@ -564,7 +598,26 @@ def create_app(
             # Cache only the bounded content so they do not consume the stream.
             request._body = b"".join(chunks)  # type: ignore[attr-defined]
             ip_subject = daily_ip_fingerprint(public_settings, _client_ip(request))
-            if path == "/public/v1/feedback":
+            if path in {"/public/v1/subscription/connector/poll", "/public/v1/subscription/connector/result"}:
+                try:
+                    body = json.loads(request._body)
+                    token = body.get("connector_token") if isinstance(body, dict) else None
+                    if not isinstance(token, str) or len(token) != 43:
+                        raise SubscriptionError("credential_invalid", 401)
+                    connector_hash = subscription_broker.authenticate(token)
+                except (ValueError, SubscriptionError) as exc:
+                    code = exc.code if isinstance(exc, SubscriptionError) else "invalid_request"
+                    status = exc.status_code if isinstance(exc, SubscriptionError) else 422
+                    return JSONResponse(status_code=status, content={"detail": {"code": code}})
+                # Authenticate before granting the heartbeat allowance. A personal
+                # connector never drains the website's ordinary IP/chat buckets.
+                ip_subject = "subscription-connector:" + connector_hash
+                ip_limits = [("subscription_connector_hour", "hour", 1800),
+                             ("subscription_connector_day", "day", 43200)]
+            elif path.startswith("/public/v1/subscription/"):
+                ip_limits = [("subscription_setup_ip_hour", "hour", 60),
+                             ("subscription_setup_ip_day", "day", 300)]
+            elif path == "/public/v1/feedback":
                 ip_limits = [("feedback_ip_hour", "hour", 20), ("feedback_ip_day", "day", 50)]
             elif path.startswith("/public/v1/byok/"):
                 ip_limits = [("byok_ip_hour", "hour", 30), ("byok_ip_day", "day", 100)]
@@ -587,6 +640,8 @@ def create_app(
                     headers={"Retry-After": "60"},
                 )
         response = await call_next(request)
+        if path.startswith("/public/v1/subscription/"):
+            response.headers["Cache-Control"] = "no-store"
         if new_cookie and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             response.set_cookie(
                 cookie_name,
@@ -663,6 +718,8 @@ def create_app(
             "data_version": public_settings.data_version,
             "language": "zh-CN",
             "providers": enabled,
+            "subscription": {"enabled": subscription_broker.enabled, "model": SUBSCRIPTION_MODEL,
+                             "effort": SUBSCRIPTION_EFFORT, "protocol_version": SUBSCRIPTION_PROTOCOL_VERSION},
             "turnstile_site_key": public_settings.turnstile_site_key,
             "limits": {
                 "input_characters": 2000,
@@ -812,6 +869,8 @@ def create_app(
         ):
             raise _error("byok_notices_required", 422)
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        if spec.provider_id == SUBSCRIPTION_PROVIDER:
+            raise _error("subscription_pairing_required", 422)
         await async_store.call("consume_limits",
             request.state.subject_hash,
             [("byok_session_hour", "hour", 10), ("byok_session_day", "day", 30)],
@@ -859,7 +918,8 @@ def create_app(
             )
         except ProviderRequestError as exc:
             raise _error(exc.code, exc.status_code) from exc
-        return {"provider": spec.provider_id, "models": discovered, "manual_model_allowed": True}
+        return {"provider": spec.provider_id, "models": discovered,
+                "manual_model_allowed": spec.provider_id != SUBSCRIPTION_PROVIDER}
 
     @app.post("/public/v1/presence/resolve")
     def presence_resolve(request: Request, payload: PresenceResolveRequest) -> dict[str, Any]:
@@ -910,6 +970,8 @@ def create_app(
     @app.post("/public/v1/presence/arrival")
     async def presence_arrival(request: Request, payload: PresenceArrivalRequest) -> dict[str, Any]:
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
+            raise _error("reasoning_effort_not_supported", 422)
         claims = open_byok_credential(
             public_settings,
             anonymous_id=request.state.anonymous_id,
@@ -917,7 +979,7 @@ def create_app(
             expected_provider=spec.provider_id,
         )
         cache_id = "presence-arrival:" + str(payload.arrival_id)
-        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        request_body = _model_request_body(payload)
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
@@ -944,6 +1006,10 @@ def create_app(
             if prepared["decision"] == "unnoticed":
                 result = {key: value for key, value in prepared.items() if key != "state"}
             else:
+                if spec.provider_id == SUBSCRIPTION_PROVIDER:
+                    payload.reasoning_effort = subscription_broker.preflight(
+                        str(claims["api_key"]), payload.model, payload.reasoning_effort,
+                    )
                 try:
                     await async_store.call("consume_limits",
                         request.state.subject_hash,
@@ -1001,6 +1067,8 @@ def create_app(
     @app.post("/public/v1/chat/stream")
     async def chat_stream(request: Request, payload: ChatRequest):
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
+            raise _error("reasoning_effort_not_supported", 422)
         public_model = redact_sensitive_text(payload.model, 200)
         chat_service.ensure_character_available(payload.character_id)
         try:
@@ -1026,7 +1094,7 @@ def create_app(
             token=payload.credential,
             expected_provider=spec.provider_id,
         )
-        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        request_body = _model_request_body(payload)
         request_id = str(payload.request_id)
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, request_id)
@@ -1064,6 +1132,10 @@ def create_app(
                 raise _error("request_in_progress", 409)
         else:
             try:
+                if spec.provider_id == SUBSCRIPTION_PROVIDER:
+                    payload.reasoning_effort = subscription_broker.preflight(
+                        str(claims["api_key"]), payload.model, payload.reasoning_effort,
+                    )
                 await async_store.call("consume_limits",
                     request.state.subject_hash,
                     [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
@@ -1444,6 +1516,8 @@ def create_app(
     @app.post("/public/v1/chat/summarize")
     async def summarize(request: Request, payload: SummarizeRequest) -> dict[str, Any]:
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
+            raise _error("reasoning_effort_not_supported", 422)
         claims = open_byok_credential(
             public_settings,
             anonymous_id=request.state.anonymous_id,
@@ -1451,7 +1525,7 @@ def create_app(
             expected_provider=spec.provider_id,
         )
         cache_id = "chat-summary:" + str(payload.request_id)
-        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        request_body = _model_request_body(payload)
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
@@ -1475,6 +1549,10 @@ def create_app(
                 if cached.get("terminal_error"):
                     raise _error(str(cached["terminal_error"]), 409)
                 return {**cached, "idempotent_replay": True}
+            if spec.provider_id == SUBSCRIPTION_PROVIDER:
+                payload.reasoning_effort = subscription_broker.preflight(
+                    str(claims["api_key"]), payload.model, payload.reasoning_effort,
+                )
             # Summaries are extra model calls and therefore consume the same
             # daily 200-call budget as chat, but deliberately do not touch the
             # hourly 50-round bucket.
@@ -1483,6 +1561,10 @@ def create_app(
             if summary_control is not None:
                 summary_control["task"] = generation
             started = time.monotonic()
+            interrupted_code = (
+                "subscription_result_unknown" if spec.provider_id == SUBSCRIPTION_PROVIDER
+                else "generation_interrupted"
+            )
             try:
                 while not generation.done():
                     if (
@@ -1493,8 +1575,8 @@ def create_app(
                         generation.cancel()
                         await asyncio.gather(generation, return_exceptions=True)
                         request_claimed = False
-                        await complete_owned_request(cache_id, {"terminal_error": "generation_interrupted"})
-                        raise _error("generation_interrupted", 409)
+                        await complete_owned_request(cache_id, {"terminal_error": interrupted_code})
+                        raise _error(interrupted_code, 409)
                     await asyncio.wait({generation}, timeout=0.25)
                 result = await generation
             except BaseException as exc:
@@ -1502,9 +1584,10 @@ def create_app(
                 await asyncio.gather(generation, return_exceptions=True)
                 if request_claimed:
                     request_claimed = False
-                    await complete_owned_request(cache_id, {"terminal_error": "generation_interrupted"})
+                    terminal_code = exc.code if isinstance(exc, SubscriptionError) else interrupted_code
+                    await complete_owned_request(cache_id, {"terminal_error": terminal_code})
                 if isinstance(exc, asyncio.CancelledError) and not asyncio.current_task().cancelling():
-                    raise _error("generation_interrupted", 409) from exc
+                    raise _error(interrupted_code, 409) from exc
                 raise
             request_claimed = False
             await complete_owned_request(cache_id, result)

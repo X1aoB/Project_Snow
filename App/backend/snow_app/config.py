@@ -188,6 +188,7 @@ class PublicSettings:
     attribution_url: str = "/public/v1/attributions"
     max_provider_calls_per_action: int = 2
     byok_lifetime_hours: int = 12
+    subscription_enabled: bool = False
 
     @classmethod
     def from_environment(cls) -> "PublicSettings":
@@ -233,7 +234,7 @@ class PublicSettings:
         except (TypeError, ValueError):
             byok_lifetime_hours = 12
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "0.10.0-rc.3"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "1.0.0"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_public_database_url(),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),
@@ -293,6 +294,7 @@ class PublicSettings:
             # environment knob bounded so a deployment cannot silently turn
             # a tab-scoped convenience token into a long-lived credential.
             byok_lifetime_hours=max(1, min(12, byok_lifetime_hours)),
+            subscription_enabled=os.getenv("PUBLIC_SUBSCRIPTION_ENABLED", "false").casefold() == "true",
         )
 
     @property

@@ -1840,6 +1840,7 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(deadline, {"ready": False, "aborted": True, "hidden": True})
             decode_deadline = page.evaluate("""async () => {
                 const hooks = window.__projectSnowTest, art = document.querySelector('#stage-character-art');
+                hooks.clearStagePresentationCache();
                 const decode = HTMLImageElement.prototype.decode, later = window.setTimeout;
                 const preloaded = [];
                 HTMLImageElement.prototype.decode = function() {
@@ -1972,6 +1973,7 @@ class PublicFrontendE2ETests(TestCase):
             )
             fallback_state = page.evaluate(
                 """async () => {
+                    window.__projectSnowTest.clearStagePresentationCache();
                     const NativeImage = window.Image;
                     let decodeFailures = 1;
                     class FallbackProbe {
