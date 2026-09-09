@@ -3448,32 +3448,55 @@ seal_configuration_snapshot "$seal_root"
         self.assertIn("python ./scripts/prepare_public_frontend.py --verify --output /app", dockerfile)
         self.assertNotIn("RUN python ./scripts/fingerprint_public_frontend.py", dockerfile)
         self.assertIn("pip install --no-cache-dir --require-hashes", dockerfile)
-        self.assertIn('href="/app.css?v=0.10.0-rc.1"', public_html)
-        self.assertIn('src="/app.js?v=0.10.0-rc.1"', public_html)
+        self.assertIn('href="/app.css?v=0.10.0-rc.2"', public_html)
+        self.assertIn('src="/app.js?v=0.10.0-rc.2"', public_html)
         self.assertIn('href="/shared/immersive.css?v=0.9.2"', public_html)
         self.assertIn('src="/privacy/privacy.js?v=0.9.2"', privacy_html)
         self.assertIn('experience_notice_version || "0.9.2"', public_javascript)
-        self.assertIn("PUBLIC_APP_VERSION=0.10.0-rc.1", public_env)
+        self.assertIn("PUBLIC_APP_VERSION=0.10.0-rc.2", public_env)
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", public_env)
         self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=0.9.2", public_env)
         self.assertIn("PUBLIC_BYOK_LIFETIME_HOURS=12", public_env)
-        self.assertIn("PUBLIC_MEDIA_VERSION=2026.08.19.avatar.1", public_env)
+        self.assertIn("PUBLIC_MEDIA_VERSION=2026.09.09.character.1", public_env)
         self.assertIn("PUBLIC_STICKER_VERSION=2026.08.19.sticker.1", public_env)
         self.assertIn("@versioned_media path /media/*", caddyfile)
 
     def test_browser_ci_uses_preinstalled_allowlisted_chrome(self) -> None:
+        import re
+        import yaml
+
         workflow = (self.app_root.parent / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
         frontend_tests = self.read("tests/test_public_frontend_e2e.py")
         self.assertNotIn("python -m playwright install", workflow)
-        self.assertEqual(
-            workflow.count("PROJECT_SNOW_PLAYWRIGHT_CHANNEL: chrome"),
-            2,
-        )
+        jobs = yaml.safe_load(workflow)["jobs"]
+        for job_name in ("ui", "full-validation"):
+            job = jobs[job_name]
+            browser_steps = [step for step in job["steps"] if "pytest" in step.get("run", "") and (
+                "test_public_frontend" in step["run"] or "test_character_" in step["run"]
+                or re.search(r"\bpytest\s+tests(?:\s|$)", step["run"])
+            )]
+            self.assertTrue(browser_steps, job_name)
+            for step in browser_steps:
+                with self.subTest(job=job_name, step=step.get("name")):
+                    effective_env = {**job.get("env", {}), **step.get("env", {})}
+                    self.assertEqual(effective_env.get("PROJECT_SNOW_PLAYWRIGHT_CHANNEL"), "chrome")
         self.assertEqual(workflow.count("google-chrome --version"), 2)
         self.assertNotIn("playwright.chromium.launch()", frontend_tests)
         self.assertEqual(frontend_tests.count("playwright.chromium.launch("), 1)
+
+    def test_native_media_ci_declares_direct_image_dependencies(self) -> None:
+        import yaml
+
+        requirements = self.read("requirements.txt").splitlines()
+        for dependency in ("numpy", "pillow", "playwright"):
+            self.assertTrue(any(line.lower().startswith(dependency + ">=") for line in requirements), dependency)
+        workflow = yaml.safe_load((self.app_root.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+        installs = " ".join(step.get("run", "") for step in workflow["jobs"]["ui"]["steps"]
+                            if "pip install" in step.get("run", ""))
+        for dependency in ("numpy", "pillow", "playwright"):
+            self.assertIn(dependency, installs.split())
 
 
 class OriginRetentionTests(TestCase):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 import mimetypes
 import os
 import threading
@@ -53,6 +54,45 @@ END_CARET_VISIBLE = """() => {
   return Number.isFinite(top) && top >= input.scrollTop-2
     && bottom <= input.scrollTop+input.clientHeight+2;
 }"""
+
+
+def _announcement_test_feed() -> dict[str, object]:
+    """Fixed clock/calendar inputs, independent of published release notices.
+
+    Return fresh nested values because revision and shared-birthday scenarios
+    intentionally mutate their feed. The links are synthetic and never opened.
+    """
+    birthday_rows = (
+        ("伊切尔", 11, 29), ("克罗瑞娜", 3, 13), ("凯茜娅", 11, 8),
+        ("卜卜", 1, 31), ("奈莉德", 12, 31), ("妮塔", 5, 5),
+        ("安卡希雅", 12, 20), ("恩雅", 1, 19), ("晴", 8, 20),
+        ("猫汐尔", 10, 10), ("琴诺", 2, 27), ("瑟瑞斯", 7, 19),
+        ("米娅", 8, 15), ("肴", 12, 23), ("胧嫣", 2, 1),
+        ("芙提雅", 4, 23), ("芬妮", 7, 30), ("苔丝", 9, 16),
+        ("茉莉安", 9, 5), ("薇蒂雅", 6, 14), ("辰星", 11, 5),
+        ("里芙", 3, 21),
+    )
+    return {
+        "schema_version": 1,
+        "timezone": "Asia/Shanghai",
+        "updates": [{
+            "id": "fixture-announcement",
+            "published_at": "2026-09-05T13:00:00+08:00",
+            "title": "公告与生日提醒上线",
+            "summary": "固定的公告行为测试内容。",
+            "items": ["查看公告与角色生日。", "已读公告不重复自动提示。"],
+        }],
+        "birthdays": [
+            {
+                "character_id": f"fixture-birthday-{index}",
+                "display_name": name,
+                "month": month,
+                "day": day,
+                "source_url": f"https://example.test/birthdays/{index}?oldid=1",
+            }
+            for index, (name, month, day) in enumerate(birthday_rows)
+        ],
+    }
 
 
 def _browser_launch_kwargs() -> dict[str, str]:
@@ -126,6 +166,21 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    @staticmethod
+    def _expression_manifest(character_id):
+        manifest = json.loads((PUBLIC_ROOT / "assets/expressions/mia/manifest.json").read_text(encoding="utf-8"))
+        manifest["character_id"] = character_id
+        manifest["display_name"] = character_id
+        manifest["stage_layout"] = {
+            "scale": 1.02 if character_id == "25b23cb64398" else 1,
+            "focus_x": 48 if character_id == "25b23cb64398" else 50,
+        }
+        return manifest
+
+    @classmethod
+    def _expression_digest(cls, character_id):
+        return sha256(json.dumps(cls._expression_manifest(character_id), ensure_ascii=False).encode()).hexdigest()
+
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path == "/announcements.json":
@@ -193,7 +248,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
         if path == "/public/v1/characters":
             self._json(
                 {
-                    "count": 3,
+                    "count": 4,
                     "characters": [
                         {
                             "character_id": "25b23cb64398",
@@ -201,6 +256,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                             "aliases": ["凯茜娅", "凯西娅"],
                             "search_tokens": ["kxy", "kaixiya"],
                             "avatar": None,
+                            "expression_manifest_url": "/media/fixture/expressions/25b23cb64398/manifest.json",
+                            "expression_manifest_sha256": self._expression_digest("25b23cb64398"),
+                            "expression_state_count": 18,
                             "license": "fixture",
                         },
                         {
@@ -209,6 +267,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                             "aliases": ["安卡希雅"],
                             "search_tokens": ["akxy", "ankaxiya"],
                             "avatar": None,
+                            "expression_manifest_url": "/media/fixture/expressions/9f5804761c56/manifest.json",
+                            "expression_manifest_sha256": self._expression_digest("9f5804761c56"),
+                            "expression_state_count": 18,
                             "license": "fixture",
                         },
                         {
@@ -217,11 +278,30 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                             "aliases": ["米娅"],
                             "search_tokens": ["my", "miya"],
                             "avatar": None,
+                            "expression_manifest_url": "/media/fixture/expressions/702f4375675b/manifest.json",
+                            "expression_manifest_sha256": self._expression_digest("702f4375675b"),
+                            "expression_state_count": 18,
+                            "license": "fixture",
+                        },
+                        {
+                            "character_id": "78aa7ab99154",
+                            "display_name": "伊切尔",
+                            "aliases": ["伊切尔"],
+                            "search_tokens": ["yqe", "yiqieer"],
+                            "avatar": None,
+                            "expression_manifest_url": "/media/fixture/expressions/78aa7ab99154/manifest.json",
+                            "expression_manifest_sha256": self._expression_digest("78aa7ab99154"),
+                            "expression_state_count": 18,
                             "license": "fixture",
                         },
                     ],
                 }
             )
+            return
+        if path.startswith("/media/fixture/expressions/") and path.endswith("/manifest.json"):
+            character_id = path.split("/")[-2]
+            manifest = self._expression_manifest(character_id)
+            self._json(manifest)
             return
         assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
         if path.startswith("/modules/") and path.endswith(".js"):
@@ -386,6 +466,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     if terminal_error
                     else {
                         "message_id": "arrival-e2e-message",
+                        "expression_state": "neutral",
                         "stage_motion": "none",
                         "content_blocks": [
                             {"type": "action", "text": "凯茜娅转过身看向你。"},
@@ -469,6 +550,12 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                     "第二次演出测试": "startle",
                     "颤动切换测试": "tremble",
                 }[payload["message"]]
+                expression_state = {
+                    "演出靠近测试": "surprised",
+                    "动作无演出测试": "neutral",
+                    "第二次演出测试": "happy",
+                    "颤动切换测试": "concerned",
+                }[payload["message"]]
                 blocks = (
                     [
                         {"type": "action", "text": "米娅轻轻抬起手。"},
@@ -500,7 +587,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                             for index, block in enumerate(blocks)
                         ),
                         'event: state\ndata: {"state_package":"fixture-state.signature"}\n\n',
-                        f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks, "stage_motion": motion}, ensure_ascii=False)}\n\n',
+                        f'event: done\ndata: {json.dumps({"truncated": False, "communication_channel": channel, "content_blocks": blocks, "expression_state": expression_state, "stage_motion": motion}, ensure_ascii=False)}\n\n',
                     )
                 ).encode()
             elif payload.get("message") == "多段测试":
@@ -713,7 +800,7 @@ class PublicFrontendE2ETests(TestCase):
             page.screenshot(path=str(path / f"{name}.png"), full_page=True)
 
     def test_announcements_auto_once_reopen_and_notify_revised_content(self):
-        PublicFrontendHandler.announcement_payload = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        PublicFrontendHandler.announcement_payload = _announcement_test_feed()
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
             page = browser.new_page(viewport={"width": 1280, "height": 900}, timezone_id="America/Los_Angeles")
@@ -757,7 +844,7 @@ class PublicFrontendE2ETests(TestCase):
             browser.close()
 
     def test_announcements_birthday_changes_at_beijing_midnight_and_next_year(self):
-        PublicFrontendHandler.announcement_payload = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        PublicFrontendHandler.announcement_payload = _announcement_test_feed()
         PublicFrontendHandler.announcement_payload["updates"] = []
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
@@ -778,7 +865,7 @@ class PublicFrontendE2ETests(TestCase):
             browser.close()
 
     def test_announcements_calendar_handles_year_boundary_leap_year_and_shared_birthdays(self):
-        feed = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        feed = _announcement_test_feed()
         feed["updates"] = []
         PublicFrontendHandler.announcement_payload = feed
         with sync_playwright() as playwright:
@@ -809,7 +896,7 @@ class PublicFrontendE2ETests(TestCase):
             browser.close()
 
     def test_announcements_loading_retry_storage_fallback_and_safe_text(self):
-        feed = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        feed = _announcement_test_feed()
         feed["updates"][0]["title"] = '<img src=x onerror="window.injected=true">公告'
         PublicFrontendHandler.announcement_payload = feed
         PublicFrontendHandler.announcement_failures = 2
@@ -837,7 +924,7 @@ class PublicFrontendE2ETests(TestCase):
             browser.close()
 
     def test_announcements_wait_for_settings_and_do_not_publish_future_updates(self):
-        feed = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        feed = _announcement_test_feed()
         feed["birthdays"] = []
         feed["updates"][0]["published_at"] = "2026-09-05T14:00:00+08:00"
         PublicFrontendHandler.announcement_payload = feed
@@ -869,7 +956,7 @@ class PublicFrontendE2ETests(TestCase):
             browser.close()
 
     def test_announcements_mobile_button_and_dialog_fit_both_surfaces(self):
-        PublicFrontendHandler.announcement_payload = json.loads((PUBLIC_ROOT / "announcements.json").read_text(encoding="utf-8"))
+        PublicFrontendHandler.announcement_payload = _announcement_test_feed()
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
             for width, height in ((390, 844), (320, 568)):
@@ -1166,44 +1253,54 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(PublicFrontendHandler.request_paths.count("/public/v1/byok/session"), 1)
             browser.close()
 
-    def test_mia_expression_classifier_and_assets_cover_all_approved_states(self) -> None:
+    def test_expression_metadata_is_explicit_and_mia_assets_cover_all_states(self) -> None:
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
             page = browser.new_page()
             page.goto(self.base_url, wait_until="networkidle")
-            samples = {
-                "neutral": "今天的风很轻。",
-                "gentle_smile": "她微笑着看向你。",
-                "happy": "她看起来很开心。",
-                "amused": "她忍俊不禁。",
-                "teasing": "她带着坏笑打趣你。",
-                "relieved": "她松了口气。",
-                "serious": "她严肃地开口。",
-                "focused": "她专注地看着屏幕。",
-                "thinking": "她想了想。",
-                "confused": "她疑惑地歪头。",
-                "skeptical": "她半信半疑地挑眉。",
-                "concerned": "她担心地问你还好吗。",
-                "surprised": "她没想到会这样，愣住了。",
-                "embarrassed": "她有些脸红，不好意思。",
-                "sad": "她看起来很难过。",
-                "disappointed": "她失望地叹了口气。",
-                "annoyed": "她不耐烦地皱眉。",
-                "angry": "她生气地咬牙。",
-            }
             result = page.evaluate(
-                """async (samples) => {
+                """async () => {
                     const hooks = window.__projectSnowTest;
-                    const classified = Object.fromEntries(
-                        Object.entries(samples).map(([state, text]) => [
-                            state,
-                            hooks.expressionStateForMessage({contentBlocks: [{type: 'action', text}]}),
-                        ]),
-                    );
+                    const character = {character_id: '702f4375675b', display_name: '米娅'};
+                    const manifestUrl = hooks.expressionManifestUrlForCharacter(character);
+                    const manifest = await (await fetch(manifestUrl)).json();
+                    const v2Expressions = {};
+                    const presentations = {};
+                    for (const [state, item] of Object.entries(manifest.expressions)) {
+                        const presentationId = `expression.${state}`;
+                        v2Expressions[state] = {
+                            ...item,
+                            presentation_id: presentationId,
+                            render_strategy: 'single_sprite',
+                            asset_scope: 'complete_character_sprite',
+                        };
+                        presentations[presentationId] = {
+                            render_strategy: 'single_sprite',
+                            asset_scope: 'complete_character_sprite',
+                            stage_asset_path: item.stage_asset_path,
+                            stage_asset_sha256: item.stage_asset_sha256,
+                            stage_layout: {scale: 1.08, focus_x: 47},
+                        };
+                    }
+                    const normalizedV2 = hooks.normalizeExpressionManifest({
+                        ...manifest,
+                        schema_version: 'project-snow-character-expression-runtime-2',
+                        expressions: v2Expressions,
+                        presentations,
+                    }, character, manifestUrl);
+                    const futureFallbackExpressions = structuredClone(v2Expressions);
+                    const futureFallbackPresentations = structuredClone(presentations);
+                    futureFallbackExpressions.happy.render_strategy = 'layered_sprite';
+                    futureFallbackPresentations['expression.happy'].render_strategy = 'layered_sprite';
+                    const normalizedFutureFallback = hooks.normalizeExpressionManifest({
+                        ...manifest,
+                        expressions: futureFallbackExpressions,
+                        presentations: futureFallbackPresentations,
+                    }, character, manifestUrl);
                     const assetResponses = await Promise.all(
-                        Object.entries(hooks.miaExpressionAssets).flatMap(([state, faceUrl]) => [
-                            [state, 'face', faceUrl],
-                            [state, 'stage', hooks.miaStageExpressionAssets[state]],
+                        Object.entries(manifest.expressions).flatMap(([state, item]) => [
+                            [state, 'face', item.face_asset_path],
+                            [state, 'stage', item.stage_asset_path],
                         ]).map(async ([state, kind, url]) => {
                             const response = await fetch(url);
                             return [state, kind, response.status, response.headers.get('content-type') || ''];
@@ -1211,20 +1308,397 @@ class PublicFrontendE2ETests(TestCase):
                     );
                     const explicit = hooks.expressionStateForMessage({
                         expressionState: 'surprised',
+                        communicationChannel: 'in_person',
                         contentBlocks: [{type: 'action', text: '她生气地咬牙。'}],
                     });
-                    return {classified, assetResponses, explicit};
+                    const noSemanticFallback = hooks.expressionStateForMessage({
+                        communicationChannel: 'in_person',
+                        contentBlocks: [{type: 'action', text: '她生气地咬牙。'}],
+                    });
+                    const wrongCase = hooks.normalizeExpressionState('HAPPY', 'in_person');
+                    const textForcedNeutral = hooks.normalizeExpressionState('happy', 'text');
+                    return {
+                        states: Object.keys(manifest.expressions), assetResponses, explicit,
+                        noSemanticFallback, wrongCase, textForcedNeutral,
+                        v2Happy: normalizedV2.expressions.happy.presentation,
+                        futureFallback: normalizedFutureFallback.expressions.happy.presentation,
+                    };
                 }""",
-                samples,
             )
-            self.assertEqual(result["classified"], {state: state for state in samples})
+            self.assertEqual(len(result["states"]), 18)
             self.assertEqual(result["explicit"], "surprised")
+            self.assertEqual(result["noSemanticFallback"], "neutral")
+            self.assertEqual(result["wrongCase"], "neutral")
+            self.assertEqual(result["textForcedNeutral"], "neutral")
+            self.assertEqual(result["v2Happy"]["id"], "expression.happy")
+            self.assertEqual(result["v2Happy"]["renderStrategy"], "single_sprite")
+            self.assertEqual(result["v2Happy"]["layout"], {"scale": 1.08, "focusX": 47})
+            self.assertFalse(result["v2Happy"]["usesLegacyFallback"])
+            self.assertEqual(result["futureFallback"]["declaredRenderStrategy"], "layered_sprite")
+            self.assertEqual(result["futureFallback"]["renderStrategy"], "single_sprite")
+            self.assertTrue(result["futureFallback"]["usesLegacyFallback"])
             self.assertEqual(len(result["assetResponses"]), 36)
             for state, kind, status, content_type in result["assetResponses"]:
-                self.assertIn(state, samples)
+                self.assertIn(state, result["states"])
                 self.assertIn(kind, {"face", "stage"})
                 self.assertEqual(status, 200, f"{state}/{kind}")
                 self.assertEqual(content_type, "image/webp", f"{state}/{kind}")
+            browser.close()
+
+    def test_layered_stage_uses_native_pixels_complete_fallback_and_latest_request(self) -> None:
+        from io import BytesIO
+        from PIL import Image
+
+        images = {}
+        for name, size, color in (
+            ("underlay", (6, 8), (40, 60, 80, 255)),
+            ("head", (2, 2), (200, 160, 120, 255)),
+            ("slow", (2, 2), (230, 50, 40, 255)),
+            ("happy", (2, 2), (30, 130, 220, 255)),
+        ):
+            image = Image.new("RGBA", size, color)
+            if name == "underlay":
+                image.putpixel((1, 5), (0, 0, 0, 0))
+                image.putpixel((1, 4), (90, 40, 210, 81))
+            elif name == "head":
+                image.putpixel((1, 1), (140, 200, 180, 71))
+            buffer = BytesIO()
+            image.save(buffer, format="PNG")
+            images[f"{name}.png"] = buffer.getvalue()
+        payload = json.loads((PUBLIC_ROOT / "assets/expressions/mia/manifest.json").read_text(encoding="utf-8"))
+        payload["presentations"] = {}
+        for state, head in (("neutral", "head"), ("thinking", "slow"), ("happy", "happy")):
+            presentation_id = f"expression.{state}"
+            payload["expressions"][state]["presentation_id"] = presentation_id
+            payload["presentations"][presentation_id] = {
+                "render_strategy": "layered_sprite",
+                "canvas": {"width": 6, "height": 8},
+                "layers": [
+                    {"asset_path": "/native-layers/underlay.png", "asset_sha256": sha256(images["underlay.png"]).hexdigest(), "dimensions": {"width": 6, "height": 8},
+                     "position": {"x": 0, "y": 0}, "composite": "source-over"},
+                    {"asset_path": f"/native-layers/{head}.png", "asset_sha256": sha256(images[f"{head}.png"]).hexdigest(), "dimensions": {"width": 2, "height": 2},
+                     "position": {"x": 2, "y": 1}, "composite": "source-over"},
+                ],
+            }
+
+        def route_layer(route):
+            name = urlparse(route.request.url).path.rsplit("/", 1)[-1]
+            if name == "manifest.json":
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
+            elif name in images:
+                route.fulfill(status=200, content_type="image/png", body=images[name])
+            else:
+                route.fulfill(status=503, body="unavailable")
+
+        payload["performance_contract"] = {
+            "schema_version": "project-snow-character-performance-1", "character_scoped": True,
+            "base_expression_states_unchanged": True,
+        }
+        payload["performance_count"] = 3
+        payload["performances"] = {}
+        for cue in ("friendly_greeting", "quiet_resolve", "shared_memory"):
+            payload["performances"][cue] = {**payload["expressions"]["happy"],
+                "presentation_id": f"performance.{cue}", "fallback_expression": "happy"}
+            payload["presentations"][f"performance.{cue}"] = dict(payload["presentations"]["expression.happy"])
+
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            page.route("**/native-layers/*", route_layer)
+            page.add_init_script("window.__slowLayerHash = " + json.dumps(sha256(images["slow.png"]).hexdigest()))
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator('[data-character="702f4375675b"]').click()
+            result = page.evaluate("""async (payload) => {
+                const hooks = window.__projectSnowTest;
+                const character = {character_id: '702f4375675b', expression_manifest_url: '/native-layers/manifest.json'};
+                const manifest = hooks.normalizeExpressionManifest(payload, character, character.expression_manifest_url);
+                const retainedCues = [0, 1, 2, 3].map((count) => {
+                    const trimmed = {...payload, performance_count: count,
+                        performances: Object.fromEntries(Object.entries(payload.performances).slice(0, count))};
+                    return Object.keys(hooks.normalizeExpressionManifest(trimmed, character, character.expression_manifest_url).performances);
+                });
+                const presentation = manifest.expressions.neutral.presentation;
+                const ready = await hooks.preloadStagePresentation(presentation);
+                const image = new Image();
+                ready.renderer.commit(image, presentation, ready.prepared);
+                await image.decode();
+                const canvas = document.createElement('canvas');
+                canvas.width = image.naturalWidth;
+                canvas.height = image.naturalHeight;
+                const context = canvas.getContext('2d');
+                context.drawImage(image, 0, 0);
+                const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data];
+                const reference = document.createElement('canvas');
+                reference.width = 6; reference.height = 8;
+                const referenceContext = reference.getContext('2d');
+                const layerContentTypes = [];
+                for (const layer of presentation.layers) {
+                    const response = await fetch(layer.assetPath);
+                    layerContentTypes.push(response.headers.get('content-type'));
+                    const original = await createImageBitmap(await response.blob());
+                    referenceContext.drawImage(original, layer.x, layer.y);
+                    original.close();
+                }
+                const referencePixels = referenceContext.getImageData(0, 0, 6, 8).data;
+                const renderedPixels = context.getImageData(0, 0, 6, 8).data;
+                const changedChannels = renderedPixels.reduce((count, value, index) =>
+                    count + Number(value !== referencePixels[index]), 0);
+                const missing = structuredClone(presentation);
+                missing.layers[1].assetPath = '/native-layers/missing.png';
+                const fallback = await hooks.preloadStagePresentation(missing);
+                const incorrectSize = structuredClone(presentation);
+                incorrectSize.layers[1].width = 3;
+                const sizeFallback = await hooks.preloadStagePresentation(incorrectSize);
+                const controller = new AbortController();
+                controller.abort();
+                let abortName = '';
+                try { await hooks.preloadStagePresentation(presentation, controller.signal); }
+                catch (error) { abortName = error.name; }
+                window.__nativeTestCharacter = character;
+                return {size: [image.naturalWidth, image.naturalHeight], base: pixel(0, 0),
+                    head: pixel(2, 1), edge: pixel(4, 1), removedArm: pixel(1, 5),
+                    strategy: ready.prepared.renderStrategy, fallback: fallback.prepared,
+                    sizeFallback: sizeFallback.prepared.renderStrategy, abortName, retainedCues, changedChannels, layerContentTypes};
+            }""", payload)
+            self.assertEqual(result["size"], [6, 8])
+            self.assertEqual(result["layerContentTypes"], ["image/png", "image/png"])
+            self.assertEqual(result["changedChannels"], 0)
+            self.assertEqual(result["base"], [40, 60, 80, 255])
+            self.assertEqual(result["head"], [200, 160, 120, 255])
+            self.assertEqual(result["edge"], [40, 60, 80, 255])
+            self.assertEqual(result["removedArm"], [0, 0, 0, 0])
+            self.assertEqual(result["strategy"], "layered_sprite")
+            self.assertEqual(result["fallback"]["renderStrategy"], "single_sprite")
+            self.assertTrue(result["fallback"]["src"].startswith("blob:"))
+            self.assertEqual(result["sizeFallback"], "single_sprite")
+            self.assertEqual(result["abortName"], "AbortError")
+            self.assertEqual(result["retainedCues"], [[], ["friendly_greeting"],
+                ["friendly_greeting", "quiet_resolve"],
+                ["friendly_greeting", "quiet_resolve", "shared_memory"]])
+
+            # Simulate the release after two cues were removed by review.
+            payload["performance_count"] = 1
+            payload["performances"] = {"friendly_greeting": payload["performances"]["friendly_greeting"]}
+            for cue in ("quiet_resolve", "shared_memory"):
+                del payload["presentations"][f"performance.{cue}"]
+
+            page.evaluate("hash => { window.__nativeTestCharacter.expression_manifest_sha256 = hash; }", sha256(json.dumps(payload).encode()).hexdigest())
+            page.evaluate("""async () => {
+                const hooks = window.__projectSnowTest;
+                const art = document.querySelector('#stage-character-art');
+                await hooks.updateStageCharacterArt(art, window.__nativeTestCharacter, 'neutral');
+                window.__neutralSurface = art.src;
+                const decode = HTMLImageElement.prototype.decode;
+                const gate = new Promise((resolve) => { window.__releaseSlowLayer = resolve; });
+                HTMLImageElement.prototype.decode = async function() {
+                    if (this.src.startsWith('blob:') && [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join('') === window.__slowLayerHash) {
+                        window.__slowLayerWaiting = true;
+                        await gate;
+                    }
+                    return decode.call(this);
+                };
+                window.__restoreImageDecode = () => { HTMLImageElement.prototype.decode = decode; };
+                window.__slowStageUpdate = hooks.updateStageCharacterArt(art, window.__nativeTestCharacter, 'thinking');
+            }""")
+            page.wait_for_function("() => window.__slowLayerWaiting === true")
+            self.assertTrue(page.evaluate("() => document.querySelector('#stage-character-art').src === window.__neutralSurface"))
+            raced = page.evaluate("""async () => {
+                const art = document.querySelector('#stage-character-art');
+                const latest = await window.__projectSnowTest.updateStageCharacterArt(art, window.__nativeTestCharacter, 'happy');
+                const happySurface = art.src;
+                window.__releaseSlowLayer();
+                const stale = await window.__slowStageUpdate;
+                window.__restoreImageDecode();
+                return {latest, stale, state: art.dataset.expressionState,
+                    strategy: art.dataset.renderStrategy, same: art.src === happySurface};
+            }""")
+            self.assertTrue(raced["latest"])
+            self.assertFalse(raced["stale"])
+            self.assertEqual(raced["state"], "happy")
+            self.assertEqual(raced["strategy"], "layered_sprite")
+            self.assertTrue(raced["same"])
+            restored = page.evaluate("""async () => {
+                const art = document.querySelector('#stage-character-art');
+                const hooks = window.__projectSnowTest;
+                const previousSurface = art.src;
+                const decode = HTMLImageElement.prototype.decode;
+                let release, waiting;
+                const gate = new Promise((resolve) => { release = resolve; });
+                const started = new Promise((resolve) => { waiting = resolve; });
+                HTMLImageElement.prototype.decode = async function() {
+                    if (this.src.startsWith('blob:') && [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join('') === window.__slowLayerHash) {
+                        waiting();
+                        await gate;
+                    }
+                    return decode.call(this);
+                };
+                try {
+                    const slow = hooks.updateStageCharacterArt(art, window.__nativeTestCharacter, 'thinking');
+                    await started;
+                    const restored = await hooks.updateStageCharacterArt(art, window.__nativeTestCharacter, 'happy');
+                    release();
+                    const stale = await slow;
+                    return {restored, stale, state: art.dataset.expressionState, same: art.src === previousSurface};
+                } finally {
+                    release();
+                    HTMLImageElement.prototype.decode = decode;
+                }
+            }""")
+            self.assertEqual(restored, {"restored": True, "stale": False, "state": "happy", "same": True})
+            performed = page.evaluate("""async () => {
+                const art = document.querySelector('#stage-character-art');
+                const hooks = window.__projectSnowTest;
+                await hooks.updateStageCharacterArt(art, window.__nativeTestCharacter, 'neutral', 'friendly_greeting');
+                const selected = {id: art.dataset.presentationId, cue: art.dataset.performanceId,
+                    state: art.dataset.expressionState, width: art.naturalWidth};
+                await hooks.updateStageCharacterArt(art, window.__nativeTestCharacter, 'happy', 'quiet_resolve');
+                const removedCue = art.dataset.performanceId;
+                await hooks.updateStageCharacterArt(art, window.__nativeTestCharacter, 'happy', 'another_characters_cue');
+                const result = {selected, removedCue, fallbackId: art.dataset.presentationId, fallbackCue: art.dataset.performanceId};
+                // Rendering the inactive stage must not restart a cancelled image load.
+                hooks.renderStage();
+                result.textStageHidden = art.hidden && !art.getAttribute('src');
+                return result;
+            }""")
+            self.assertEqual(performed["selected"], {"id": "performance.friendly_greeting", "cue": "friendly_greeting", "state": "neutral", "width": 6})
+            self.assertEqual(performed["fallbackId"], "expression.happy")
+            self.assertEqual(performed["fallbackCue"], "")
+            self.assertEqual(performed["removedCue"], "")
+            self.assertTrue(performed["textStageHidden"])
+            browser.close()
+
+    def test_character_media_integrity_rejects_valid_same_size_replacements_and_times_out(self) -> None:
+        from io import BytesIO
+        from PIL import Image
+
+        images = {}
+        for name, size, color, file_format in (
+            ("neutral.webp", (6, 8), (30, 60, 90, 255), "WEBP"),
+            ("angry.webp", (6, 8), (60, 160, 80, 255), "WEBP"),
+            ("substitute.webp", (6, 8), (200, 30, 40, 255), "WEBP"),
+            ("flat.webp", (6, 8), (90, 100, 120, 255), "WEBP"),
+            ("underlay.png", (6, 8), (20, 30, 40, 255), "PNG"),
+            ("head.png", (2, 2), (160, 150, 140, 255), "PNG"),
+            ("substitute.png", (2, 2), (240, 10, 30, 255), "PNG"),
+        ):
+            buffer = BytesIO()
+            Image.new("RGBA", size, color).save(buffer, format=file_format, lossless=True, compress_level=0)
+            images[name] = buffer.getvalue()
+        self.assertEqual(len(images["head.png"]), len(images["substitute.png"]))
+        payload = PublicFrontendHandler._expression_manifest("25b23cb64398")
+        for state, name in (("neutral", "neutral.webp"), ("angry", "angry.webp"), ("happy", "flat.webp")):
+            payload["expressions"][state]["stage_asset_path"] = "/integrity/" + name
+            payload["expressions"][state]["stage_asset_sha256"] = sha256(images[name]).hexdigest()
+        payload["expressions"]["happy"]["presentation_id"] = "expression.happy"
+        payload["presentations"] = {"expression.happy": {
+            "render_strategy": "layered_sprite", "canvas": {"width": 6, "height": 8},
+            "layers": [
+                {"asset_path": "/integrity/underlay.png", "asset_sha256": sha256(images["underlay.png"]).hexdigest(),
+                 "dimensions": {"width": 6, "height": 8}, "position": {"x": 0, "y": 0}, "composite": "source-over"},
+                {"asset_path": "/integrity/head.png", "asset_sha256": sha256(images["head.png"]).hexdigest(),
+                 "dimensions": {"width": 2, "height": 2}, "position": {"x": 2, "y": 1}, "composite": "source-over"},
+            ],
+        }}
+        original_manifest = json.dumps(payload).encode()
+        changed = json.loads(original_manifest)
+        changed["expressions"]["neutral"]["stage_asset_path"] = "/integrity/substitute.webp"
+        changed["expressions"]["neutral"]["stage_asset_sha256"] = sha256(images["substitute.webp"]).hexdigest()
+        requests = []
+
+        def intercept(route):
+            path = urlparse(route.request.url).path
+            requests.append(path)
+            name = path.rsplit("/", 1)[-1]
+            if name == "manifest.json":
+                body, content_type = original_manifest, "application/json"
+            elif name == "changed.json":
+                body, content_type = json.dumps(changed).encode(), "application/json"
+            else:
+                # Both substitutions remain decodable at the declared dimensions.
+                actual = {"angry.webp": "substitute.webp", "head.png": "substitute.png"}.get(name, name)
+                body = images[actual]
+                content_type = "image/png" if name.endswith(".png") else "image/webp"
+            route.fulfill(status=200, content_type=content_type, body=body)
+
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            page.route("**/integrity/*", intercept)
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator('[data-character="25b23cb64398"]').click()
+            result = page.evaluate("""async hash => {
+                const hooks = window.__projectSnowTest;
+                const character = {character_id:'25b23cb64398', expression_manifest_url:'/integrity/manifest.json', expression_manifest_sha256:hash};
+                const art = document.querySelector('#stage-character-art');
+                const digest = async () => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(art.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join('');
+                const nativeDecode = HTMLImageElement.prototype.decode;
+                const decoded = [];
+                HTMLImageElement.prototype.decode = async function() {
+                    if(this.src.startsWith('blob:')) decoded.push([...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(this.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join(''));
+                    return nativeDecode.call(this);
+                };
+                try {
+                    const webpReady = await hooks.updateStageCharacterArt(art, character, 'angry');
+                    const webp = {ready:webpReady,state:art.dataset.expressionState,sha256:await digest()};
+                    const pngReady = await hooks.updateStageCharacterArt(art, character, 'happy');
+                    const png = {ready:pngReady,state:art.dataset.expressionState,sha256:await digest(),strategy:art.dataset.renderStrategy};
+                    const tampered = await hooks.updateStageCharacterArt(art,{...character,expression_manifest_url:'/integrity/changed.json'},'neutral');
+                    const tamperedHidden = art.hidden && !art.hasAttribute('src');
+                    const absent = await hooks.updateStageCharacterArt(art,{...character,expression_manifest_sha256:''},'neutral');
+                    const absentHidden = art.hidden && !art.hasAttribute('src');
+                    window.__integrityCharacter = character;
+                    return {webp,png,tampered,tamperedHidden,absent,absentHidden,decoded};
+                } finally { HTMLImageElement.prototype.decode = nativeDecode; }
+            }""", sha256(original_manifest).hexdigest())
+            self.assertEqual(result["webp"], {"ready": True, "state": "neutral", "sha256": sha256(images["neutral.webp"]).hexdigest()})
+            self.assertEqual(result["png"], {"ready": True, "state": "happy", "sha256": sha256(images["flat.webp"]).hexdigest(), "strategy": "single_sprite"})
+            self.assertNotIn(sha256(images["substitute.webp"]).hexdigest(), result["decoded"])
+            self.assertNotIn(sha256(images["substitute.png"]).hexdigest(), result["decoded"])
+            self.assertFalse(result["tampered"])
+            self.assertTrue(result["tamperedHidden"])
+            self.assertFalse(result["absent"])
+            self.assertTrue(result["absentHidden"])
+            self.assertNotIn("/integrity/substitute.webp", requests)
+            self.assertEqual(requests.count("/integrity/manifest.json"), 1)
+            deadline = page.evaluate("""async () => {
+                const hooks = window.__projectSnowTest;
+                const art = document.querySelector('#stage-character-art');
+                const character = window.__integrityCharacter;
+                await hooks.updateStageCharacterArt(art, character, 'neutral');
+                art.dataset.expressionCharacterId = 'another-character';
+                const nativeFetch = window.fetch, later = window.setTimeout;
+                let aborted = false;
+                window.fetch = (url, options) => String(url).endsWith('/integrity/hanging.json')
+                    ? new Promise((resolve, reject) => options.signal.addEventListener('abort', () => {
+                        aborted = true; reject(new DOMException('Aborted', 'AbortError'));
+                    }, {once:true})) : nativeFetch(url, options);
+                window.setTimeout = (callback, ms, ...args) => later(callback, ms === 20000 ? 50 : ms, ...args);
+                try {
+                    const ready = await hooks.updateStageCharacterArt(art, {...character,expression_manifest_url:'/integrity/hanging.json'}, 'neutral');
+                    return {ready,aborted,hidden:art.hidden&&!art.hasAttribute('src')};
+                } finally { window.fetch = nativeFetch; window.setTimeout = later; }
+            }""")
+            self.assertEqual(deadline, {"ready": False, "aborted": True, "hidden": True})
+            decode_deadline = page.evaluate("""async () => {
+                const hooks = window.__projectSnowTest, art = document.querySelector('#stage-character-art');
+                const decode = HTMLImageElement.prototype.decode, later = window.setTimeout;
+                const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+                const live = new Set();
+                HTMLImageElement.prototype.decode = () => new Promise(() => {});
+                URL.createObjectURL = blob => { const value = create(blob); live.add(value); return value; };
+                URL.revokeObjectURL = value => { live.delete(value); revoke(value); };
+                window.setTimeout = (callback, ms, ...args) => later(callback, ms === 8000 ? 30 : ms, ...args);
+                try {
+                    const ready = await hooks.updateStageCharacterArt(art, window.__integrityCharacter, 'happy');
+                    return {ready,hidden:art.hidden&&!art.hasAttribute('src'),unreleased:live.size};
+                } finally {
+                    HTMLImageElement.prototype.decode = decode; window.setTimeout = later;
+                    URL.createObjectURL = create; URL.revokeObjectURL = revoke;
+                }
+            }""")
+            self.assertEqual(decode_deadline, {"ready": False, "hidden": True, "unreleased": 0})
             browser.close()
 
     def test_mia_stage_art_syncs_all_states_and_actions_stay_out_of_dialogue(self) -> None:
@@ -1248,13 +1722,15 @@ class PublicFrontendE2ETests(TestCase):
                 """async () => {
                     const hooks = window.__projectSnowTest;
                     const character = {character_id: '702f4375675b', display_name: '米娅', avatar: null};
+                    const manifest = await (await fetch(hooks.expressionManifestUrlForCharacter(character))).json();
                     const art = document.querySelector('#stage-character-art');
                     const result = {};
-                    for (const state of Object.keys(hooks.miaExpressionAssets)) {
+                    for (const state of Object.keys(manifest.expressions)) {
                         await hooks.updateStageCharacterArt(art, character, state);
                         result[state] = {
                             artState: art.dataset.expressionState,
                             artSrc: art.getAttribute('src') || '',
+                            sha256: [...new Uint8Array(await crypto.subtle.digest('SHA-256', await (await fetch(art.src)).arrayBuffer()))].map(value => value.toString(16).padStart(2,'0')).join(''),
                             hidden: art.hidden,
                         };
                     }
@@ -1264,24 +1740,71 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(len(states), 18)
             for state, values in states.items():
                 self.assertEqual(values["artState"], state)
-                self.assertIn(f"/{state}.stage.", values["artSrc"])
+                self.assertTrue(values["artSrc"].startswith("blob:"))
+                manifest = json.loads((PUBLIC_ROOT / "assets/expressions/mia/manifest.json").read_text(encoding="utf-8"))
+                self.assertEqual(values["sha256"], manifest["expressions"][state]["stage_asset_sha256"])
                 self.assertFalse(values["hidden"])
             self.assertEqual(page.locator("#stage-portrait").count(), 0)
             self.assertEqual(page.locator("#stage-portrait-avatar").count(), 0)
 
-            non_mia_hidden = page.evaluate(
-                """async () => {
-                    const hooks = window.__projectSnowTest;
-                    const art = document.querySelector('#stage-character-art');
-                    await hooks.updateStageCharacterArt(
-                        art,
-                        {character_id: '25b23cb64398', display_name: '凯茜娅', avatar: null},
-                        'neutral',
+            page.evaluate(
+                """() => {
+                    window.__stageArtTransitions = [];
+                    window.__stageArtTransitionObserver?.disconnect();
+                    window.__stageArtTransitionObserver = new MutationObserver((records) => {
+                        for (const record of records) {
+                            for (const added of record.addedNodes) {
+                                if (!(added instanceof HTMLImageElement) || !added.classList.contains('stage-character-art-outgoing')) continue;
+                                const incoming = document.querySelector('#stage-character-art');
+                                window.__stageArtTransitions.push({
+                                    outgoingSrc: added.getAttribute('src') || '',
+                                    outgoingCharacterId: added.dataset.expressionCharacterId || '',
+                                    incomingCharacterId: incoming?.dataset.expressionCharacterId || '',
+                                });
+                            }
+                        }
+                    });
+                    window.__stageArtTransitionObserver.observe(
+                        document.querySelector('#scene-stage'),
+                        {childList: true},
                     );
-                    return art.hidden && !art.hasAttribute('src');
                 }"""
             )
-            self.assertTrue(non_mia_hidden)
+            page.locator('[data-character="78aa7ab99154"]').click()
+            page.locator("#stage-character-name", has_text="伊切尔").wait_for(state="visible")
+            page.wait_for_function(
+                "() => document.querySelector('#stage-character-art')?.dataset.expressionCharacterId === '78aa7ab99154'"
+            )
+            non_mia_loaded = page.evaluate(
+                """() => {
+                    const art = document.querySelector('#stage-character-art');
+                    return {
+                        visible: !art.hidden && art.hasAttribute('src'),
+                        characterId: art.dataset.expressionCharacterId,
+                        scale: art.style.getPropertyValue('--stage-character-scale'),
+                        focus: art.style.getPropertyValue('--stage-character-focus-x'),
+                    };
+                }"""
+            )
+            self.assertTrue(non_mia_loaded["visible"])
+            self.assertEqual(non_mia_loaded["characterId"], "78aa7ab99154")
+            self.assertEqual(non_mia_loaded["scale"], "1")
+            self.assertEqual(non_mia_loaded["focus"], "50%")
+            page.wait_for_function(
+                "() => window.__stageArtTransitions.some((row) => row.incomingCharacterId === '78aa7ab99154')"
+            )
+            transition = page.evaluate(
+                "() => window.__stageArtTransitions.find((row) => row.incomingCharacterId === '78aa7ab99154')"
+            )
+            self.assertEqual(transition["outgoingCharacterId"], "702f4375675b")
+            self.assertTrue(transition["outgoingSrc"].startswith("blob:"))
+            page.wait_for_function(
+                "() => document.querySelectorAll('.stage-character-art-outgoing').length === 0"
+            )
+            page.evaluate("() => document.querySelector('#presence-dialog')?.close()")
+            page.locator('[data-character="702f4375675b"]').click()
+            page.locator("#stage-character-name", has_text="米娅").wait_for(state="visible")
+            page.evaluate("() => document.querySelector('#presence-dialog')?.close()")
             page.evaluate(
                 """async () => window.__projectSnowTest.updateStageCharacterArt(
                     document.querySelector('#stage-character-art'),
@@ -1292,11 +1815,12 @@ class PublicFrontendE2ETests(TestCase):
             fallback_state = page.evaluate(
                 """async () => {
                     const NativeImage = window.Image;
+                    let decodeFailures = 1;
                     class FallbackProbe {
                         constructor() { this.complete = false; this.naturalWidth = 0; }
                         set src(value) {
                             queueMicrotask(() => {
-                                if (value.includes('/angry.stage.')) this.onerror?.();
+                                if (decodeFailures-- > 0) this.onerror?.();
                                 else { this.naturalWidth = 620; this.onload?.(); }
                             });
                         }
@@ -1316,7 +1840,7 @@ class PublicFrontendE2ETests(TestCase):
                 }"""
             )
             self.assertEqual(fallback_state["state"], "neutral")
-            self.assertIn("/neutral.stage.", fallback_state["src"])
+            self.assertTrue(fallback_state["src"].startswith("blob:"))
             page.locator("#toggle-stage-ui").click()
             self.assertTrue(page.locator("#stage-character-art").is_visible())
             page.locator("#restore-stage-ui").click()
@@ -1390,6 +1914,7 @@ class PublicFrontendE2ETests(TestCase):
                 timeout=12000,
             )
             self.assertTrue((art.get_attribute("data-stage-motion-key") or "").endswith(":lean_in"))
+            self.assertEqual(art.get_attribute("data-expression-state"), "surprised")
             self.assertEqual(page.locator("#stage-narration").inner_text(), "正在看雪")
             self.assertNotIn("stage_motion", page.locator("#stage-speech").inner_text())
             page.evaluate("() => { window.__projectSnowTest.renderStage(); window.__projectSnowTest.renderStage(); }")
@@ -1401,6 +1926,7 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#send-message").click()
             page.locator("#stage-speech").get_by_text("动作文字不会自动触发演出。").wait_for(state="visible", timeout=8000)
             self.assertIn("米娅轻轻抬起手。", page.locator("#stage-narration").inner_text())
+            self.assertEqual(art.get_attribute("data-expression-state"), "neutral")
             self.assertEqual(art.get_attribute("data-stage-motion-play-count"), "1")
 
             page.wait_for_function("() => !document.querySelector('#send-message').disabled")
@@ -1421,7 +1947,25 @@ class PublicFrontendE2ETests(TestCase):
             )
             page.locator('[data-character="25b23cb64398"]').click()
             page.locator("#stage-character-name", has_text="凯茜娅").wait_for(state="visible")
-            self.assertTrue(art.is_hidden())
+            art.wait_for(state="visible")
+            self.assertEqual(art.get_attribute("data-expression-character-id"), "25b23cb64398")
+            self.assertIsNone(art.get_attribute("data-stage-motion"))
+            page.wait_for_function(
+                """() => {
+                    const art = document.querySelector('#stage-character-art');
+                    return art.getAnimations().length === 0
+                        && !art.dataset.stageArtTransition
+                        && document.querySelectorAll('.stage-character-art-outgoing').length === 0;
+                }"""
+            )
+            page.reload(wait_until="networkidle")
+            # Startup selects the first contact; explicitly reopen Mia's saved
+            # in-person history before checking that old cues remain static.
+            page.locator('[data-character="702f4375675b"]').click()
+            page.wait_for_function("() => document.querySelector('#stage-character-art').dataset.expressionCharacterId === '702f4375675b'")
+            art.wait_for(state="visible")
+            self.assertIsNone(art.get_attribute("data-stage-motion-play-count"))
+            self.assertIsNone(art.get_attribute("data-stage-motion"))
             self.assertEqual(art.evaluate("element => element.getAnimations().length"), 0)
             browser.close()
 

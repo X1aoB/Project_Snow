@@ -23,6 +23,8 @@ from .dialogue_core import GenerationBusy as GenerationBusy
 from .mvp_policy import MVP_CHARACTERS, scene_visual_key
 from .mvp_service import (
     MVPService,
+    _normalize_expression_state,
+    _normalize_performance_id,
     _normalize_stage_motion,
 )
 from .provider_registry import ProviderRegistry
@@ -798,6 +800,7 @@ class PublicChatService:
             # can render its neutral placeholder while readiness blocks the
             # candidate from promotion.
             avatar = self.media.avatar(character.character_id)
+            expression_manifest = self.media.expression_manifest(character.character_id)
             result.append(
                 {
                     "character_id": character.character_id,
@@ -807,6 +810,15 @@ class PublicChatService:
                     # The package is mounted separately from the GPL image and
                     # is verified before any URL is advertised to a client.
                     "avatar": avatar,
+                    **(
+                        {
+                            "expression_manifest_url": expression_manifest["url"],
+                            "expression_state_count": expression_manifest["state_count"],
+                            "expression_manifest_sha256": expression_manifest["sha256"],
+                        }
+                        if expression_manifest
+                        else {}
+                    ),
                 }
             )
         return result
@@ -1916,6 +1928,10 @@ class PublicChatService:
             ).hexdigest()[:16],
             "character_id": request.character_id,
             "communication_channel": "in_person",
+            "expression_state": _normalize_expression_state(
+                result.get("expression_state"),
+                "in_person",
+            ),
             "stage_motion": _normalize_stage_motion(
                 result.get("stage_motion"),
                 "in_person",
@@ -2051,6 +2067,7 @@ class PublicChatService:
             "model": redact_sensitive_text(request.model, 200),
             "answer": answer,
             "communication_channel": request.communication_channel,
+            "expression_state": "neutral",
             "stage_motion": "none",
             "content_blocks": [
                 {
@@ -2166,6 +2183,7 @@ class PublicChatService:
                         persist_exchange=False,
                         remember_session=False,
                         public_sticker_candidates=sticker_candidates,
+                        public_performance_candidates=self.media.performance_catalog(request.character_id),
                         # Do not ask the model to invent movement. The catalog is
                         # exposed only after the server has resolved an eligible
                         # current invitation or bounded-history continuation.
@@ -2339,6 +2357,14 @@ class PublicChatService:
                 "model": redact_sensitive_text(request.model, 200),
                 "answer": answer,
                 "communication_channel": request.communication_channel,
+                "expression_state": _normalize_expression_state(
+                    result.get("expression_state"),
+                    request.communication_channel,
+                ),
+                "performance_id": _normalize_performance_id(
+                    result.get("performance_id"), request.communication_channel,
+                    self.media.performance_catalog(request.character_id),
+                ),
                 "stage_motion": _normalize_stage_motion(
                     result.get("stage_motion"),
                     request.communication_channel,
@@ -2577,6 +2603,8 @@ class PublicChatService:
             "model": redact_sensitive_text(request.model, 200),
             "answer": "",
             "communication_channel": request.communication_channel,
+            "expression_state": "neutral",
+            "stage_motion": "none",
             "content_blocks": [],
             "truncated": False,
             "state_package": request.state_package,

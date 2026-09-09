@@ -23,6 +23,7 @@ from backend.snow_app.mvp_service import (
     MVPProviderError,
     MVPRequestInProgress,
     MVPService,
+    _normalize_expression_state,
     _normalize_stage_motion,
     _parse_model_json,
 )
@@ -2785,6 +2786,7 @@ class ApplicationLayerTests(unittest.TestCase):
         rewritten = json.dumps(
             {
                 "answer": "如果你没有特别想看的，我就和平时一样。衣服会让心情有些不同，但我不会因此变成另一个人。",
+                "expression_state": "gentle_smile",
                 "stage_motion": "lean_in",
                 "confidence": "medium",
                 "used_document_ids": [],
@@ -2805,6 +2807,7 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertEqual(call_model.call_count, 2)
         self.assertIn("answer_guardrail_retry", result["response_adjustments"])
         self.assertNotIn("immersive_boundary_fallback", result["response_adjustments"])
+        self.assertEqual(result["expression_state"], "gentle_smile")
         self.assertEqual(result["stage_motion"], "lean_in")
         for forbidden in ("本体设定", "对应语境", "改变语气", "资料库", "提示词"):
             self.assertNotIn(forbidden, result["answer"])
@@ -2816,6 +2819,7 @@ class ApplicationLayerTests(unittest.TestCase):
         leaking = json.dumps(
             {
                 "answer": "系统会读取时装语境并保持角色设定。",
+                "expression_state": "angry",
                 "stage_motion": "tremble",
                 "confidence": "low",
                 "used_document_ids": [],
@@ -2830,6 +2834,7 @@ class ApplicationLayerTests(unittest.TestCase):
             result = service.chat("ca0144ccd81b", question, session_id="meta-boundary-fallback")
 
         self.assertIn("immersive_boundary_fallback", result["response_adjustments"])
+        self.assertEqual(result["expression_state"], "neutral")
         self.assertEqual(result["stage_motion"], "none")
         self.assertEqual(result["citations"], [])
         for forbidden in ("系统", "设定", "语境", "模型", "检索"):
@@ -2840,6 +2845,7 @@ class ApplicationLayerTests(unittest.TestCase):
         answer: str = "收到。",
         block_type: str = "speech",
         block_text: str | None = None,
+        expression_state: object = "neutral",
         stage_motion: object = "none",
     ) -> str:
         return json.dumps(
@@ -2848,6 +2854,7 @@ class ApplicationLayerTests(unittest.TestCase):
                 "content_blocks": [
                     {"type": block_type, "text": block_text or answer}
                 ],
+                "expression_state": expression_state,
                 "stage_motion": stage_motion,
                 "confidence": "medium",
                 "used_document_ids": [],
@@ -2863,6 +2870,21 @@ class ApplicationLayerTests(unittest.TestCase):
             self.assertEqual(_normalize_stage_motion(invalid, "in_person"), "none")
         self.assertEqual(_normalize_stage_motion("lean_in", "text"), "none")
 
+    def test_expression_state_normalization_is_strict_and_channel_scoped(self) -> None:
+        expressions = (
+            "neutral", "gentle_smile", "happy", "amused", "teasing", "relieved",
+            "serious", "focused", "thinking", "confused", "skeptical", "concerned",
+            "surprised", "embarrassed", "sad", "disappointed", "annoyed", "angry",
+        )
+        for expression_state in expressions:
+            self.assertEqual(
+                _normalize_expression_state(expression_state, "in_person"),
+                expression_state,
+            )
+        for invalid in (None, True, 1, [], {}, "HAPPY", "unknown", ""):
+            self.assertEqual(_normalize_expression_state(invalid, "in_person"), "neutral")
+        self.assertEqual(_normalize_expression_state("happy", "text"), "neutral")
+
     def test_mvp_system_prompt_keeps_stage_motion_independent_and_sparse(self) -> None:
         service = MVPService(self.settings, self.repository)
         character = next(item for item in MVP_CHARACTERS if item.character_id == "ca0144ccd81b")
@@ -2872,14 +2894,17 @@ class ApplicationLayerTests(unittest.TestCase):
             communication_channel="in_person",
         )
         self.assertIn('"stage_motion":"none|lean_in|tremble|recoil|startle"', in_person)
+        self.assertIn('"expression_state":"neutral|gentle_smile|happy|amused|teasing|relieved|serious|focused|thinking|confused|skeptical|concerned|surprised|embarrassed|sad|disappointed|annoyed|angry"', in_person)
         self.assertIn("大多数普通回复必须使用 none", in_person)
         self.assertIn("不得为了证明演出合理而刻意增加 action", in_person)
+        self.assertIn("表情与 stage_motion 相互独立", in_person)
         text_prompt = service._system_prompt(
             character,
             None,
             communication_channel="text",
         )
         self.assertIn('stage_motion 必须返回 "none"', text_prompt)
+        self.assertIn('expression_state 必须返回 "neutral"', text_prompt)
 
     def test_mvp_communication_channel_defaults_and_retains_turn_blocks(self) -> None:
         service = MVPService(self.settings, self.repository)
@@ -2921,6 +2946,70 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertTrue(replay["idempotent_replay"])
         self.assertEqual(call_model.call_count, 1)
 
+    def test_mvp_chat_preserves_expression_and_motion_independently_on_replay(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        payload = self._communication_model_payload(
+            answer="只是换一个表情。",
+            expression_state="happy",
+            stage_motion="none",
+        )
+        request_id = "expression-idempotent"
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", return_value=(payload, {})
+        ) as call_model:
+            first = service.chat(
+                "ca0144ccd81b",
+                "你好",
+                session_id="expression-session",
+                client_message_id=request_id,
+            )
+            replay = service.chat(
+                "ca0144ccd81b",
+                "你好",
+                session_id="expression-session",
+                client_message_id=request_id,
+            )
+        self.assertEqual(first["expression_state"], "happy")
+        self.assertEqual(first["stage_motion"], "none")
+        self.assertEqual(replay["expression_state"], "happy")
+        self.assertTrue(replay["idempotent_replay"])
+        self.assertEqual(call_model.call_count, 1)
+
+    def test_performance_selection_is_approved_character_scoped_and_replay_safe(self) -> None:
+        from backend.snow_app.mvp_service import _normalize_performance_id
+
+        cid = "ca0144ccd81b"
+        catalog = [{"character_id": cid, "performance_id": cue, "label": cue, "usage_context": "Reviewed context"}
+                   for cue in ("friendly_greeting", "quiet_resolve", "shared_memory")]
+        self.assertEqual(_normalize_performance_id("friendly_greeting", "text", catalog), "")
+        self.assertEqual(_normalize_performance_id("unknown", "in_person", catalog), "")
+        self.assertEqual(_normalize_performance_id("friendly_greeting", "in_person", []), "")
+        for approved_character, count in ((cid, 1), (cid, 2), (cid, 3), ("another-character", 3)):
+            service = MVPService(self.settings, self.repository)
+            candidates = [{**row, "character_id": approved_character} for row in catalog[:count]]
+            envelope = json.loads(self._communication_model_payload(expression_state="happy", stage_motion="none"))
+            envelope["performance_id"] = "friendly_greeting"
+            request_id = f"performance-{approved_character}-{count}"
+            with patch.object(service, "chat_enabled", return_value=True), patch.object(
+                service, "_call_model", return_value=(json.dumps(envelope, ensure_ascii=False), {})
+            ) as call_model:
+                first = service.chat(cid, "你好", session_id=request_id, client_message_id=request_id,
+                                     public_performance_candidates=candidates)
+                replay = service.chat(cid, "你好", session_id=request_id, client_message_id=request_id,
+                                      public_performance_candidates=candidates)
+                removed_replay = service.chat(
+                    cid, "你好", session_id=request_id, client_message_id=request_id,
+                    public_performance_candidates=candidates[1:],
+                )
+            expected = "friendly_greeting" if approved_character == cid else ""
+            self.assertEqual(first["performance_id"], expected)
+            self.assertEqual(replay["performance_id"], expected)
+            self.assertEqual(removed_replay["performance_id"], "")
+            self.assertEqual(removed_replay["answer"], first["answer"])
+            self.assertEqual(first["expression_state"], "happy")
+            self.assertEqual(first["stage_motion"], "none")
+            self.assertEqual(call_model.call_count, 1)
+
     def test_mvp_text_channel_bypasses_location_and_accepts_message_blocks(self) -> None:
         service = MVPService(self.settings, self.repository)
         payload = self._communication_model_payload(
@@ -2939,6 +3028,7 @@ class ApplicationLayerTests(unittest.TestCase):
                 world_session_id="channel-text-world",
             )
         self.assertEqual(result["communication_channel"], "text")
+        self.assertEqual(result["expression_state"], "neutral")
         self.assertEqual(result["stage_motion"], "none")
         self.assertEqual(result["content_blocks"][0]["type"], "message")
         self.assertFalse(result["scene_state"]["co_located"])

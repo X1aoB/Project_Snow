@@ -16,6 +16,8 @@ _MODEL_ENVELOPE_KEYS = frozenset(
         "answer",
         "content_blocks",
         "stage_motion",
+        "expression_state",
+        "performance_id",
         "confidence",
         "used_document_ids",
         "narrative_scope",

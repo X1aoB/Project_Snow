@@ -1,4 +1,4 @@
-import { loadStageRelease, verifiedStageImage, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup } from "/modules/runtime.js";
+import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup } from "/modules/runtime.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
@@ -53,6 +53,12 @@ const state = {
   selectionController: null,
   stageArtRequestSequence: 0,
   stageRelease: null,
+  stageArtController: null,
+  stageArtPending: null,
+  stageArtTransition: null,
+  stageArtSurface: null,
+  expressionManifestCache: new Map(),
+  expressionBytesCache: new Map(),
   stageMotionRequestSequence: 0,
   stageMotionAnimation: null,
   stageMotionCharacterId: "",
@@ -318,71 +324,41 @@ const errorMessages = {
 
 const STATE_PACKAGE_RECOVERY_CODES = new Set(["state_subject_mismatch", "state_invalid"]);
 const MIA_CHARACTER_ID = "702f4375675b";
-const MIA_EXPRESSION_ASSETS = Object.freeze({
-  neutral: "/assets/expressions/mia/neutral.208818121225b3d1.webp",
-  gentle_smile: "/assets/expressions/mia/gentle_smile.4ad4764940e683e9.webp",
-  happy: "/assets/expressions/mia/happy.1b3a1ba7d49cbde9.webp",
-  amused: "/assets/expressions/mia/amused.6235b0f7cff6fb0e.webp",
-  teasing: "/assets/expressions/mia/teasing.033f5b38d32b6718.webp",
-  relieved: "/assets/expressions/mia/relieved.fc684841c1ed6b73.webp",
-  serious: "/assets/expressions/mia/serious.6252a05c60ec1fe9.webp",
-  focused: "/assets/expressions/mia/focused.a7da8d4656ca141c.webp",
-  thinking: "/assets/expressions/mia/thinking.b50e58c4c787f54b.webp",
-  confused: "/assets/expressions/mia/confused.a99f0aab911e22c5.webp",
-  skeptical: "/assets/expressions/mia/skeptical.01e31836c2656e6c.webp",
-  concerned: "/assets/expressions/mia/concerned.715d5da0c6c009fa.webp",
-  surprised: "/assets/expressions/mia/surprised.cf52252f798e900e.webp",
-  embarrassed: "/assets/expressions/mia/embarrassed.d6946cb29cc560eb.webp",
-  sad: "/assets/expressions/mia/sad.89f4b7099edd6343.webp",
-  disappointed: "/assets/expressions/mia/disappointed.52c6af53a6f40798.webp",
-  annoyed: "/assets/expressions/mia/annoyed.db1a9cb01af07381.webp",
-  angry: "/assets/expressions/mia/angry.d30e58bcf8885d08.webp",
-});
-const MIA_STAGE_EXPRESSION_ASSETS = Object.freeze({
-  neutral: "/assets/expressions/mia/neutral.stage.1e407adfc93e1803.webp",
-  gentle_smile: "/assets/expressions/mia/gentle_smile.stage.ba1b5f87cb0d2fe7.webp",
-  happy: "/assets/expressions/mia/happy.stage.75ba817720ebe113.webp",
-  amused: "/assets/expressions/mia/amused.stage.e469e7049030c2d8.webp",
-  teasing: "/assets/expressions/mia/teasing.stage.e8cedef547992a63.webp",
-  relieved: "/assets/expressions/mia/relieved.stage.823f23dadac37909.webp",
-  serious: "/assets/expressions/mia/serious.stage.234218ddd8872f08.webp",
-  focused: "/assets/expressions/mia/focused.stage.2af00a3b3550b4b6.webp",
-  thinking: "/assets/expressions/mia/thinking.stage.656d6837cdcd8528.webp",
-  confused: "/assets/expressions/mia/confused.stage.d60c119eb51c833b.webp",
-  skeptical: "/assets/expressions/mia/skeptical.stage.c72ca6c8753be88b.webp",
-  concerned: "/assets/expressions/mia/concerned.stage.b01ac02cef7ccc76.webp",
-  surprised: "/assets/expressions/mia/surprised.stage.68c69038701dc824.webp",
-  embarrassed: "/assets/expressions/mia/embarrassed.stage.6321a8285c2f502b.webp",
-  sad: "/assets/expressions/mia/sad.stage.92cccf0885f090b9.webp",
-  disappointed: "/assets/expressions/mia/disappointed.stage.1bf71d0ecfdafeef.webp",
-  annoyed: "/assets/expressions/mia/annoyed.stage.2c07b11ff1b9736d.webp",
-  angry: "/assets/expressions/mia/angry.stage.01f3b6eb3d2de00e.webp",
-});
-const MIA_EXPRESSION_RULES = Object.freeze([
-  ["angry", /(?:愤怒|大怒|暴怒|怒火|生气|咬牙|厉声|拍桌|喝道|angry|furious)/iu],
-  ["annoyed", /(?:不耐烦|烦躁|恼火|皱眉|啧|抱怨|annoyed|irritated)/iu],
-  ["disappointed", /(?:失望|落空|垂下眼|垂下目光|叹了口气|叹气|disappointed)/iu],
-  ["sad", /(?:难过|悲伤|低落|眼眶|哭泣|哭了|sad|sorrowful)/iu],
-  ["embarrassed", /(?:害羞|脸红|不好意思|尴尬|embarrassed|blush)/iu],
-  ["surprised", /(?:惊讶|愕然|一怔|愣住|睁大|没想到|surprised|startled)/iu],
-  ["concerned", /(?:担心|关切|紧张|还好吗|没事吧|concerned|worried)/iu],
-  ["skeptical", /(?:怀疑|质疑|挑眉|半信半疑|skeptical|doubtful)/iu],
-  ["confused", /(?:困惑|疑惑|不解|歪头|confused|puzzled)/iu],
-  ["thinking", /(?:想了想|沉吟|思索|思考|让我想想|thinking|thoughtful)/iu],
-  ["focused", /(?:专注|凝神|集中注意|目不转睛|focused|concentrating)/iu],
-  ["serious", /(?:严肃|郑重|正色|认真地说|serious|solemn)/iu],
-  ["relieved", /(?:松了口气|松一口气|放心|终于|如释重负|relieved|with relief)/iu],
-  ["teasing", /(?:调侃|打趣|坏笑|逗你|戏谑|开玩笑|teasing|playfully)/iu],
-  ["amused", /(?:莞尔|忍俊不禁|轻笑|觉得有趣|amused|chuckle)/iu],
-  ["happy", /(?:开心|高兴|太好了|笑起来|欢快|喜悦|happy|delighted)/iu],
-  ["gentle_smile", /(?:温柔地?笑|轻轻地?笑|微微一笑|微笑|嘴角.{0,8}(?:扬|弯)|gentle smile|smiling softly)/iu],
+const MIA_BUNDLED_EXPRESSION_MANIFEST = "/assets/expressions/mia/manifest.json";
+// The same approved bundled JSON in Git/LF and a Windows/CRLF checkout.
+// Advertised release manifests always use their one exact catalogue digest.
+const MIA_BUNDLED_EXPRESSION_MANIFEST_HASHES = Object.freeze([
+  "89bb5eac7185dc24bb3af84d1f97200fdbe6037d4f7d97111866c8447d13c1aa",
+  "2593b7b1f8a519b7eae7189fd1779099afc7a9e4f220d5f7dad1653d88c29023",
+]);
+const EXPRESSION_FETCH_TIMEOUT_MS = 12000;
+const EXPRESSION_DECODE_TIMEOUT_MS = 8000;
+const EXPRESSION_UPDATE_TIMEOUT_MS = 20000;
+const EXPRESSION_IMAGE_MAX_BYTES = 64 * 1024 * 1024;
+const EXPRESSION_STATES = new Set([
+  "neutral", "gentle_smile", "happy", "amused", "teasing", "relieved",
+  "serious", "focused", "thinking", "confused", "skeptical", "concerned",
+  "surprised", "embarrassed", "sad", "disappointed", "annoyed", "angry",
 ]);
 const STAGE_MOTIONS = new Set(["none", "lean_in", "tremble", "recoil", "startle"]);
+const ACTIVE_STAGE_RENDER_STRATEGIES = new Set(["single_sprite", "layered_sprite"]);
+
+function normalizeExpressionState(value, communicationChannel = "text") {
+  if (communicationChannel !== "in_person" || typeof value !== "string") return "neutral";
+  const normalized = value.trim();
+  return EXPRESSION_STATES.has(normalized) ? normalized : "neutral";
+}
 
 function normalizeStageMotion(value, communicationChannel = "text") {
   if (communicationChannel !== "in_person" || typeof value !== "string") return "none";
   const normalized = value.trim();
   return STAGE_MOTIONS.has(normalized) ? normalized : "none";
+}
+
+function normalizePerformanceId(value, communicationChannel = "text") {
+  if (communicationChannel !== "in_person" || typeof value !== "string") return "";
+  const cue = value.trim();
+  return /^[a-z][a-z0-9_]{0,79}$/.test(cue) ? cue : "";
 }
 
 function id() {
@@ -448,7 +424,7 @@ function fitPublicRequestPayload(payload, { arrays = [], texts = [], targetBytes
 }
 if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
   Object.defineProperty(window, "__projectSnowTest", {
-    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, normalizeStageMotion, updateStageCharacterArt, playStageMotion, cancelStageMotion, renderStage, miaExpressionAssets: MIA_EXPRESSION_ASSETS, miaStageExpressionAssets: MIA_STAGE_EXPRESSION_ASSETS }),
+    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, normalizeExpressionState, normalizeStageMotion, expressionManifestUrlForCharacter, normalizeExpressionManifest, stagePresentationRenderer, preloadStagePresentation, updateStageCharacterArt, playStageMotion, cancelStageMotion, renderStage }),
     configurable: false,
     writable: false,
   });
@@ -926,7 +902,12 @@ function normalizeMessage(message) {
     contentBlocks: blocks,
     displayBlocks,
     communicationChannel: channel,
+    expressionState: normalizeExpressionState(
+      message.expressionState ?? message.expression_state,
+      channel,
+    ),
     stageMotion: normalizeStageMotion(message.stageMotion ?? message.stage_motion, channel),
+    performanceId: normalizePerformanceId(message.performanceId ?? message.performance_id, channel),
     createdAt: hasCreatedAt ? parsedCreatedAt : Date.now(),
     createdAtEstimated: Boolean(message.createdAtEstimated || message.created_at_estimated || !hasCreatedAt),
     status: ["sent", "pending", "failed"].includes(message.status) ? message.status : "sent",
@@ -2347,87 +2328,589 @@ function fillAvatar(node, character, { thumbnail = true, priority = false } = {}
   bindAvatarImages(node.parentElement || node);
 }
 function expressionStateForMessage(message) {
-  const explicitState = plain(message?.expressionState || message?.expression_state).trim().toLocaleLowerCase("en-US");
-  if (Object.hasOwn(MIA_EXPRESSION_ASSETS, explicitState)) return explicitState;
-  const blocks = message?.contentBlocks?.length ? message.contentBlocks : message?.displayBlocks || [];
-  const text = blocks.map((block) => plain(block?.text)).join("\n");
-  for (const [expressionState, pattern] of MIA_EXPRESSION_RULES) {
-    if (pattern.test(text)) return expressionState;
-  }
-  return "neutral";
+  return normalizeExpressionState(
+    message?.expressionState ?? message?.expression_state,
+    message?.communicationChannel || message?.communication_channel || "in_person",
+  );
 }
-function preloadImage(src) {
+function expressionManifestUrlForCharacter(character) {
+  const advertised = plain(character?.expression_manifest_url || character?.expressionManifestUrl).trim();
+  const candidate = advertised || (character?.character_id === MIA_CHARACTER_ID ? MIA_BUNDLED_EXPRESSION_MANIFEST : "");
+  if (!candidate) return "";
+  try {
+    const parsed = new URL(candidate, window.location.origin);
+    if (parsed.origin !== window.location.origin) return "";
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return "";
+  }
+}
+function expressionAssetUrl(value, manifestUrl) {
+  const candidate = plain(value).trim();
+  if (!candidate) return "";
+  try {
+    const manifestAbsolute = new URL(manifestUrl, window.location.origin);
+    const expressionMarker = manifestAbsolute.pathname.indexOf("/expressions/");
+    const packageBase = expressionMarker >= 0
+      ? new URL(`${manifestAbsolute.pathname.slice(0, expressionMarker + 1)}`, window.location.origin)
+      : manifestAbsolute;
+    const parsed = new URL(candidate, candidate.startsWith("expressions/") ? packageBase : manifestAbsolute);
+    if (parsed.origin !== window.location.origin) return "";
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return "";
+  }
+}
+function expressionHash(value) {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value) ? value : "";
+}
+function expressionManifestHashes(character, manifestUrl) {
+  if (manifestUrl === MIA_BUNDLED_EXPRESSION_MANIFEST && character?.character_id === MIA_CHARACTER_ID) {
+    return MIA_BUNDLED_EXPRESSION_MANIFEST_HASHES;
+  }
+  return [expressionHash(character?.expression_manifest_sha256 || character?.expressionManifestSha256)];
+}
+async function verifiedExpressionBytes(url, expectedHashes, maximum, signal) {
+  const hashes = Array.isArray(expectedHashes) ? expectedHashes : [expectedHashes];
+  if (!hashes.length || hashes.some(value => !expressionHash(value))) throw new Error("expression_digest_missing");
+  const target = new URL(url, window.location.origin);
+  if (target.origin !== window.location.origin || target.username || target.password) throw new Error("expression_asset_invalid");
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const cacheKey = `${target.href}:${hashes.join(":")}`;
+  const cached = state.expressionBytesCache.get(cacheKey);
+  if (cached) {
+    if (cached.byteLength > maximum) throw new Error("expression_asset_too_large");
+    state.expressionBytesCache.delete(cacheKey);
+    state.expressionBytesCache.set(cacheKey, cached);
+    return cached;
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; abort(); }, EXPRESSION_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(target.href, {
+      signal: controller.signal, credentials: "omit", redirect: "error", cache: "force-cache",
+    });
+    if (!response.ok || Number(response.headers.get("content-length")) > maximum || !response.body) throw new Error("expression_asset_unavailable");
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maximum) throw new Error("expression_asset_too_large");
+        chunks.push(value);
+      }
+    } catch (error) {
+      void reader.cancel().catch(() => {});
+      throw error;
+    } finally { reader.releaseLock(); }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), value => value.toString(16).padStart(2, "0")).join("");
+    if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
+    if (!hashes.includes(digest)) throw new Error("expression_asset_hash_mismatch");
+    state.expressionBytesCache.set(cacheKey, bytes);
+    let retained = [...state.expressionBytesCache.values()].reduce((size, value) => size + value.byteLength, 0);
+    while (state.expressionBytesCache.size > 32 || retained > EXPRESSION_IMAGE_MAX_BYTES) {
+      const oldestKey = state.expressionBytesCache.keys().next().value;
+      retained -= state.expressionBytesCache.get(oldestKey).byteLength;
+      state.expressionBytesCache.delete(oldestKey);
+    }
+    return bytes;
+  } catch (error) {
+    if (timedOut && !signal?.aborted) throw new Error("expression_asset_timeout");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+async function verifiedExpressionImage(assetPath, sha256, signal) {
+  const bytes = await verifiedExpressionBytes(assetPath, sha256, EXPRESSION_IMAGE_MAX_BYTES, signal);
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const png = bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71;
+  const webp = new TextDecoder().decode(bytes.subarray(0, 4)) === "RIFF" && new TextDecoder().decode(bytes.subarray(8, 12)) === "WEBP";
+  if (!png && !webp) throw new Error("expression_image_invalid");
+  const src = URL.createObjectURL(new Blob([bytes], { type: png ? "image/png" : "image/webp" }));
+  try {
+    const image = await preloadImage(src, signal);
+    return { src, image, dispose: () => URL.revokeObjectURL(src) };
+  } catch (error) { URL.revokeObjectURL(src); throw error; }
+}
+function normalizePresentationLayers(presentation, manifestUrl) {
+  const canvas = presentation.canvas;
+  const validSize = (size) => size && Number.isInteger(size.width) && Number.isInteger(size.height)
+    && size.width > 0 && size.height > 0 && size.width <= 4096 && size.height <= 4096;
+  if (!validSize(canvas) || !Array.isArray(presentation.layers)
+    || presentation.layers.length < 1 || presentation.layers.length > 8) return null;
+  let pixels = 0;
+  const layers = [];
+  for (const layer of presentation.layers) {
+    const size = layer?.dimensions;
+    const position = layer?.position;
+    const assetPath = expressionAssetUrl(layer?.asset_path, manifestUrl);
+    const sha256 = expressionHash(layer?.asset_sha256);
+    if (!assetPath || !sha256 || !validSize(size) || layer.composite !== "source-over"
+      || !position || !Number.isInteger(position.x) || !Number.isInteger(position.y)
+      || position.x < 0 || position.y < 0
+      || position.x + size.width > canvas.width || position.y + size.height > canvas.height) return null;
+    pixels += size.width * size.height;
+    if (pixels > canvas.width * canvas.height * 4) return null;
+    layers.push({ assetPath, sha256, width: size.width, height: size.height, x: position.x, y: position.y });
+  }
+  return { canvas: { width: canvas.width, height: canvas.height }, layers };
+}
+function normalizeExpressionManifest(payload, character, manifestUrl) {
+  if (!payload || typeof payload !== "object" || plain(payload.character_id) !== plain(character?.character_id)) throw new Error("expression_manifest_invalid");
+  const rawExpressions = payload.expressions && typeof payload.expressions === "object" ? payload.expressions : {};
+  const rawPresentations = payload.presentations && typeof payload.presentations === "object" ? payload.presentations : {};
+  if (Number(payload.expression_state_count || 0) !== EXPRESSION_STATES.size) throw new Error("expression_manifest_invalid");
+  const expressions = {};
+  const performances = {};
+  const presentations = {};
+  const rawLayout = payload.stage_layout && typeof payload.stage_layout === "object"
+    ? payload.stage_layout
+    : payload.layout && typeof payload.layout === "object"
+      ? payload.layout
+      : {};
+  const normalizeLayout = (value = rawLayout) => {
+    const source = value && typeof value === "object" ? value : rawLayout;
+    const requestedScale = Number(source.scale ?? source.stage_scale ?? rawLayout.scale ?? rawLayout.stage_scale ?? 1);
+    const requestedFocusX = Number(source.focus_x ?? source.horizontal_focus ?? rawLayout.focus_x ?? rawLayout.horizontal_focus ?? 50);
+    return {
+      scale: Number.isFinite(requestedScale) ? Math.min(1.4, Math.max(.7, requestedScale)) : 1,
+      focusX: Number.isFinite(requestedFocusX) ? Math.min(100, Math.max(0, requestedFocusX)) : 50,
+    };
+  };
+  const performanceContract = payload.performance_contract;
+  const rawPerformances = performanceContract?.schema_version === "project-snow-character-performance-1"
+    && performanceContract.character_scoped === true && performanceContract.base_expression_states_unchanged === true
+    && payload.performances && typeof payload.performances === "object" ? payload.performances : {};
+  const performanceEntries = Object.entries(rawPerformances);
+  const validPerformances = performanceEntries.length <= 6
+    && payload.performance_count === performanceEntries.length ? performanceEntries.filter(([cue, item]) =>
+      normalizePerformanceId(cue, "in_person") === cue && item?.presentation_id === `performance.${cue}`
+      && EXPRESSION_STATES.has(item?.fallback_expression)) : [];
+  const rows = [...[...EXPRESSION_STATES].map((key) => [key, rawExpressions[key], false]),
+    ...validPerformances.map(([key, item]) => [key, item, true])];
+  for (const [expressionState, item, isPerformance] of rows) {
+    const legacyStageAssetPath = expressionAssetUrl(item?.stage_asset_path, manifestUrl);
+    const faceAssetPath = expressionAssetUrl(item?.face_asset_path, manifestUrl);
+    const legacyStageSha256 = expressionHash(item?.stage_asset_sha256);
+    if (!legacyStageAssetPath || !faceAssetPath || !legacyStageSha256) throw new Error("expression_manifest_invalid");
+    const presentationId = plain(item?.presentation_id).trim() || `legacy.expression.${expressionState}`;
+    const declaredPresentation = rawPresentations[presentationId] && typeof rawPresentations[presentationId] === "object"
+      ? rawPresentations[presentationId]
+      : {};
+    const declaredRenderStrategy = plain(declaredPresentation.render_strategy || item?.render_strategy || "single_sprite").trim();
+    const nativeLayers = declaredRenderStrategy === "layered_sprite"
+      ? normalizePresentationLayers(declaredPresentation, manifestUrl) : null;
+    // Incomplete or unsupported presentations use the approved flattened asset.
+    const supported = ACTIVE_STAGE_RENDER_STRATEGIES.has(declaredRenderStrategy)
+      && (declaredRenderStrategy !== "layered_sprite" || Boolean(nativeLayers));
+    const renderStrategy = supported
+      ? declaredRenderStrategy
+      : "single_sprite";
+    const presentationStageAssetPath = expressionAssetUrl(declaredPresentation.stage_asset_path, manifestUrl);
+    const stageAssetPath = supported
+      ? presentationStageAssetPath || legacyStageAssetPath
+      : legacyStageAssetPath;
+    const stageAssetSha256 = supported && presentationStageAssetPath
+      ? expressionHash(declaredPresentation.stage_asset_sha256) : legacyStageSha256;
+    if (!stageAssetSha256) throw new Error("expression_manifest_invalid");
+    const presentation = {
+      id: presentationId,
+      renderStrategy,
+      declaredRenderStrategy,
+      stageAssetPath,
+      stageAssetSha256,
+      ...(nativeLayers && supported ? nativeLayers : {}),
+      layout: normalizeLayout(declaredPresentation.stage_layout || item?.stage_layout || rawLayout),
+      usesLegacyFallback: !supported,
+    };
+    presentations[presentationId] = presentation;
+    const entry = {
+      stageAssetPath,
+      stageAssetSha256,
+      faceAssetPath,
+      presentationId,
+      renderStrategy,
+      presentation,
+    };
+    if (isPerformance) performances[expressionState] = { ...entry, fallbackExpression: item.fallback_expression };
+    else expressions[expressionState] = entry;
+  }
+  return {
+    characterId: plain(character.character_id),
+    manifestUrl,
+    expressions,
+    performances,
+    presentations,
+    layout: normalizeLayout(rawLayout),
+  };
+}
+async function loadExpressionManifest(character, signal) {
+  const releaseCharacter = stageReleaseCharacterForExpressions(character);
+  if (releaseCharacter) {
+    const expressions = {};
+    for (const [key, asset] of Object.entries(releaseCharacter.states)) {
+      expressions[key] = { presentation: {
+        id: `release.expression.${key}`,
+        stageAssetPath: asset.url,
+        stageAssetSha256: asset.sha256,
+        verifiedAsset: asset,
+        renderStrategy: "single_sprite",
+        declaredRenderStrategy: "single_sprite",
+        layout: { scale: 1, focusX: 50 },
+      } };
+    }
+    return { expressions, performances: {}, fromStageRelease: true };
+  }
+  const manifestUrl = expressionManifestUrlForCharacter(character);
+  try { return await fetchExpressionManifest(character, manifestUrl, signal); }
+  catch (error) {
+    if (error?.name === "AbortError" || signal?.aborted || character?.character_id !== MIA_CHARACTER_ID
+      || manifestUrl === MIA_BUNDLED_EXPRESSION_MANIFEST) throw error;
+    const bundled = await fetchExpressionManifest(character, MIA_BUNDLED_EXPRESSION_MANIFEST, signal);
+    return { expressions: { neutral: bundled.expressions.neutral }, performances: {} };
+  }
+}
+function stageReleaseCharacterForExpressions(character) {
+  // A character-scoped release is authoritative when the server advertises it.
+  if (plain(character?.expression_manifest_url || character?.expressionManifestUrl).trim()) return null;
+  return state.stageRelease?.characters.find(item => item.character_id === character?.character_id) || null;
+}
+async function fetchExpressionManifest(character, manifestUrl, signal) {
+  if (!manifestUrl) throw new Error("expression_manifest_unavailable");
+  const expectedHashes = expressionManifestHashes(character, manifestUrl);
+  const cacheKey = `${plain(character.character_id)}:${manifestUrl}:${expectedHashes.join(":")}`;
+  const cached = state.expressionManifestCache.get(cacheKey);
+  if (cached) return cached;
+  const bytes = await verifiedExpressionBytes(manifestUrl, expectedHashes, 2 * 1024 * 1024, signal);
+  const manifest = normalizeExpressionManifest(JSON.parse(new TextDecoder().decode(bytes)), character, manifestUrl);
+  state.expressionManifestCache.set(cacheKey, manifest);
+  return manifest;
+}
+function preloadImage(src, signal) {
   return new Promise((resolve, reject) => {
     const image = new Image();
+    let settled = false;
+    let timer = null;
     image.decoding = "async";
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      image.onload = null;
+      image.onerror = null;
+      callback(value);
+    };
+    const abort = () => {
+      image.src = "";
+      finish(reject, new DOMException("Aborted", "AbortError"));
+    };
     const decoded = async () => {
       try {
         if (image.decode) await image.decode();
-        resolve(src);
+        finish(resolve, image);
       } catch {
-        reject(new Error("image_decode_failed"));
+        finish(reject, new Error("image_decode_failed"));
       }
     };
     image.onload = decoded;
-    image.onerror = () => reject(new Error("image_load_failed"));
+    image.onerror = () => finish(reject, new Error("image_load_failed"));
+    if (signal?.aborted) return abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    timer = setTimeout(() => {
+      finish(reject, new Error("image_decode_timeout"));
+      image.src = "";
+    }, EXPRESSION_DECODE_TIMEOUT_MS);
     image.src = src;
     if (image.complete && image.naturalWidth > 0) void decoded();
   });
 }
-async function updateStageCharacterArt(node, character, expressionState) {
+const STAGE_PRESENTATION_RENDERERS = Object.freeze({
+  single_sprite: Object.freeze({
+    async preload(presentation, signal) {
+      const prepared = await verifiedExpressionImage(presentation.stageAssetPath, presentation.stageAssetSha256, signal);
+      return { ...prepared, renderStrategy: "single_sprite" };
+    },
+    commit(node, _presentation, prepared) {
+      if (!prepared?.src) throw new Error("expression_surface_unavailable");
+      node.src = prepared.src;
+    },
+  }),
+  layered_sprite: Object.freeze({
+    async preload(presentation, signal) {
+      const layers = [];
+      try {
+        // Every pixel source is verified before decode. Sequential leases keep the
+        // failure path bounded and ensure already decoded blob URLs are released.
+        for (const layer of presentation.layers) layers.push(await verifiedExpressionImage(layer.assetPath, layer.sha256, signal));
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const canvas = document.createElement("canvas");
+        canvas.width = presentation.canvas.width;
+        canvas.height = presentation.canvas.height;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("layer_composition_unavailable");
+        context.imageSmoothingEnabled = false;
+        for (const [index, layer] of presentation.layers.entries()) {
+          const image = layers[index].image;
+          if (image.naturalWidth !== layer.width || image.naturalHeight !== layer.height) {
+            throw new Error("layer_dimensions_mismatch");
+          }
+          // Native pixels only: no per-layer scaling, warping, or partial DOM commit.
+          context.drawImage(image, layer.x, layer.y);
+        }
+        const src = canvas.toDataURL("image/png");
+        await preloadImage(src, signal);
+        return { src, renderStrategy: "layered_sprite" };
+      } finally { for (const layer of layers) layer.dispose(); }
+    },
+    commit(node, _presentation, prepared) {
+      node.src = prepared.src;
+    },
+  }),
+});
+function stagePresentationRenderer(presentation) {
+  return STAGE_PRESENTATION_RENDERERS[presentation?.renderStrategy]
+    || STAGE_PRESENTATION_RENDERERS.single_sprite;
+}
+async function preloadStagePresentation(presentation, signal) {
+  if (!presentation?.stageAssetPath) throw new Error("expression_manifest_invalid");
+  const renderer = stagePresentationRenderer(presentation);
+  try {
+    const prepared = await renderer.preload(presentation, signal);
+    return { renderer, prepared };
+  } catch (error) {
+    if (error?.name === "AbortError" || signal?.aborted || presentation.renderStrategy !== "layered_sprite") throw error;
+    const fallback = STAGE_PRESENTATION_RENDERERS.single_sprite;
+    const prepared = await fallback.preload(presentation, signal);
+    return { renderer: fallback, prepared };
+  }
+}
+function hideStageCharacterArt(node) {
+  if (!node) return;
+  cancelStageArtTransition(node);
+  node.hidden = true;
+  node.removeAttribute("src");
+  state.stageArtSurface?.dispose?.();
+  state.stageArtSurface = null;
+  node.style.removeProperty("--stage-character-scale");
+  node.style.removeProperty("--stage-character-focus-x");
+  delete node.dataset.stageArtKey;
+  delete node.dataset.stageArtFailedKey;
+  delete node.dataset.stageArtFailedAt;
+  delete node.dataset.expressionState;
+  delete node.dataset.expressionCharacterId;
+  delete node.dataset.presentationId;
+  delete node.dataset.performanceId;
+  delete node.dataset.renderStrategy;
+  delete node.dataset.declaredRenderStrategy;
+}
+function cancelStageArtTransition(node = $("stage-character-art")) {
+  const transition = state.stageArtTransition;
+  state.stageArtTransition = null;
+  for (const animation of transition?.animations || []) animation.cancel();
+  transition?.outgoing?.remove();
+  transition?.dispose?.();
+  if (node) {
+    node.style.removeProperty("opacity");
+    delete node.dataset.stageArtTransition;
+  }
+}
+function crossfadeStageCharacterArt(node) {
+  cancelStageArtTransition(node);
+  if (
+    !node?.parentNode
+    || node.hidden
+    || !node.getAttribute("src")
+    || typeof node.animate !== "function"
+    || reducedMotion()
+    || document.hidden
+  ) return null;
+  const outgoing = node.cloneNode(false);
+  outgoing.removeAttribute("id");
+  outgoing.classList.add("stage-character-art-outgoing");
+  outgoing.hidden = false;
+  delete outgoing.dataset.stageArtTransition;
+  delete outgoing.dataset.stageMotion;
+  delete outgoing.dataset.stageMotionKey;
+  delete outgoing.dataset.stageMotionPlayCount;
+  node.parentNode.insertBefore(outgoing, node);
+  node.style.opacity = "1";
+  node.dataset.stageArtTransition = "incoming";
+  const options = {
+    duration: 280,
+    easing: "cubic-bezier(.22,.72,.24,1)",
+    fill: "both",
+  };
+  const transition = {
+    outgoing,
+    dispose: state.stageArtSurface?.dispose,
+    animations: [
+      outgoing.animate([{ opacity: 1 }, { opacity: 0 }], options),
+      node.animate([{ opacity: 0 }, { opacity: 1 }], options),
+    ],
+  };
+  state.stageArtTransition = transition;
+  state.stageArtSurface = null;
+  void Promise.allSettled(transition.animations.map((animation) => animation.finished)).then(() => {
+    if (state.stageArtTransition !== transition) return;
+    state.stageArtTransition = null;
+    for (const animation of transition.animations) animation.cancel();
+    outgoing.remove();
+    transition.dispose?.();
+    node.style.removeProperty("opacity");
+    delete node.dataset.stageArtTransition;
+  });
+  return transition;
+}
+function cancelStageArt({ hide = false } = {}) {
+  state.stageArtRequestSequence += 1;
+  state.stageArtController?.abort();
+  state.stageArtController = null;
+  state.stageArtPending = null;
+  cancelStageArtTransition();
+  if (hide) hideStageCharacterArt($("stage-character-art"));
+}
+async function updateStageCharacterArt(node, character, expressionState, performanceId = "") {
   if (!node) return false;
   const characterId = plain(character?.character_id);
-  const releaseCharacter = state.stageRelease?.characters.find(item => item.character_id === characterId);
-  const assets = releaseCharacter?.states || (characterId === MIA_CHARACTER_ID ? MIA_STAGE_EXPRESSION_ASSETS : null);
-  if (!assets) {
-    state.stageArtRequestSequence += 1;
-    node.hidden = true;
-    node.removeAttribute("src");
-    delete node.dataset.stageArtKey;
-    delete node.dataset.stageArtFailedKey;
-    delete node.dataset.expressionState;
+  const manifestUrl = expressionManifestUrlForCharacter(character);
+  const releaseCharacter = stageReleaseCharacterForExpressions(character);
+  const requestedState = normalizeExpressionState(expressionState, "in_person");
+  const requestedPerformance = normalizePerformanceId(performanceId, "in_person");
+  const sourceKey = releaseCharacter ? `stage-release:${state.stageRelease.version}`
+    : manifestUrl ? `${manifestUrl}:${expressionManifestHashes(character, manifestUrl).join(":")}` : "";
+  const stageArtKey = `${characterId}:${requestedState}:${requestedPerformance}:${sourceKey}`;
+  // Returning to the already displayed surface still supersedes an in-flight decode.
+  if (state.stageArtPending && state.stageArtPending.key !== stageArtKey) cancelStageArt();
+  if (node.dataset.stageArtKey === stageArtKey && node.getAttribute("src") && !node.hidden) return true;
+  if (!characterId || !sourceKey) {
+    cancelStageArt({ hide: true });
     return false;
   }
-  const requestedState = Object.hasOwn(assets, expressionState) ? expressionState : "neutral";
-  const stageArtKey = `${state.stageRelease?.version || "legacy"}:${characterId}:${requestedState}`;
-  if (node.dataset.stageArtKey === stageArtKey && node.getAttribute("src") && !node.hidden) return true;
-  if (node.dataset.stageArtFailedKey === stageArtKey) return false;
+  const failedAt = Number(node.dataset.stageArtFailedAt || 0);
+  if (node.dataset.stageArtFailedKey === stageArtKey && Date.now() - failedAt < 5000) return false;
+  if (state.stageArtPending?.key === stageArtKey) return state.stageArtPending.promise;
   const requestSequence = ++state.stageArtRequestSequence;
-  const candidates = requestedState === "neutral" ? ["neutral"] : [requestedState, "neutral"];
-  let loadedState = "";
-  let loadedUrl = "";
-  for (const candidate of candidates) {
+  state.stageArtController?.abort();
+  const controller = new AbortController();
+  state.stageArtController = controller;
+  let timedOut = false;
+  const deadline = setTimeout(() => { timedOut = true; controller.abort(); }, EXPRESSION_UPDATE_TIMEOUT_MS);
+  const pending = { key: stageArtKey, controller, promise: null };
+  const operation = (async () => {
+    let manifest;
     try {
-      const asset = assets[candidate];
-      const source = typeof asset === "string" ? asset : await verifiedStageImage(asset);
-      await preloadImage(source);
-      loadedState = candidate;
-      loadedUrl = source;
-      break;
-    } catch { /* A missing or altered expression falls back to the approved neutral. */ }
-  }
-  if (requestSequence !== state.stageArtRequestSequence || currentCharacter()?.character_id !== characterId) return false;
-  if (!loadedState) {
-    // Keep the existing approved Mia pack available when a new release fails.
-    if (releaseCharacter && characterId === MIA_CHARACTER_ID) {
-      try { loadedUrl = await preloadImage(MIA_STAGE_EXPRESSION_ASSETS.neutral); loadedState = "neutral"; } catch { /* static stage remains available */ }
-      if (requestSequence !== state.stageArtRequestSequence || currentCharacter()?.character_id !== characterId) return false;
-    }
-    if (!loadedState) {
-      node.hidden = true;
-      node.removeAttribute("src");
-      node.dataset.stageArtFailedKey = stageArtKey;
-      delete node.dataset.stageArtKey;
-      delete node.dataset.expressionState;
+      manifest = await loadExpressionManifest(character, controller.signal);
+    } catch (error) {
+      if (error?.name === "AbortError" || requestSequence !== state.stageArtRequestSequence) return false;
+      if (currentCharacter()?.character_id === characterId) {
+        hideStageCharacterArt(node);
+        node.dataset.stageArtFailedKey = stageArtKey;
+        node.dataset.stageArtFailedAt = String(Date.now());
+      }
       return false;
     }
+    const performance = manifest.performances[requestedPerformance];
+    const baseStates = [...new Set([...(performance ? [performance.fallbackExpression] : []), requestedState, "neutral"])];
+    const candidates = [
+      ...(performance ? [{ state: requestedState, presentation: performance.presentation, performanceId: requestedPerformance }] : []),
+      ...baseStates.map((candidate) => ({ state: candidate, presentation: manifest.expressions[candidate]?.presentation, performanceId: "" })),
+    ];
+    let loadedState = "";
+    let loadedPresentation = null;
+    let loadedRenderer = null;
+    let loadedSurface = null;
+    let loadedPerformance = "";
+    for (const candidate of candidates) {
+      try {
+        const presentation = candidate.presentation;
+        if (!presentation) continue;
+        const { renderer, prepared } = await preloadStagePresentation(presentation, controller.signal);
+        loadedState = candidate.state;
+        loadedPerformance = candidate.performanceId;
+        loadedPresentation = presentation;
+        loadedRenderer = renderer;
+        loadedSurface = prepared;
+        break;
+      } catch (error) {
+        if (error?.name === "AbortError") return false;
+        // The neutral derivative is the final fallback below.
+      }
+    }
+    if (!loadedState && manifest.fromStageRelease && characterId === MIA_CHARACTER_ID && !controller.signal.aborted) {
+      // The bundled approved neutral remains available if the optional release fails verification.
+      try {
+        const bundled = await fetchExpressionManifest(character, MIA_BUNDLED_EXPRESSION_MANIFEST, controller.signal);
+        const presentation = bundled.expressions.neutral.presentation;
+        const { renderer, prepared } = await preloadStagePresentation(presentation, controller.signal);
+        loadedState = "neutral";
+        loadedPresentation = presentation;
+        loadedRenderer = renderer;
+        loadedSurface = prepared;
+      } catch (error) {
+        if (error?.name === "AbortError") return false;
+      }
+    }
+    if (requestSequence !== state.stageArtRequestSequence || currentCharacter()?.character_id !== characterId) {
+      loadedSurface?.dispose?.();
+      return false;
+    }
+    if (!loadedState || !loadedPresentation || !loadedRenderer) {
+      hideStageCharacterArt(node);
+      node.dataset.stageArtFailedKey = stageArtKey;
+      node.dataset.stageArtFailedAt = String(Date.now());
+      return false;
+    }
+    const previousCharacterId = plain(node.dataset.expressionCharacterId);
+    const shouldCrossfade = previousCharacterId
+      && previousCharacterId !== characterId
+      && !node.hidden
+      && Boolean(node.getAttribute("src"));
+    const outgoingTransition = shouldCrossfade ? crossfadeStageCharacterArt(node) : null;
+    const previousSurface = state.stageArtSurface;
+    loadedRenderer.commit(node, loadedPresentation, loadedSurface);
+    state.stageArtSurface = loadedSurface;
+    previousSurface?.dispose?.();
+    node.dataset.stageArtKey = stageArtKey;
+    node.dataset.expressionState = loadedState;
+    node.dataset.expressionCharacterId = characterId;
+    node.dataset.presentationId = loadedPresentation.id;
+    node.dataset.performanceId = loadedPerformance;
+    node.dataset.renderStrategy = loadedSurface.renderStrategy;
+    node.dataset.declaredRenderStrategy = loadedPresentation.declaredRenderStrategy;
+    node.style.setProperty("--stage-character-scale", String(loadedPresentation.layout.scale));
+    node.style.setProperty("--stage-character-focus-x", `${loadedPresentation.layout.focusX}%`);
+    delete node.dataset.stageArtFailedKey;
+    delete node.dataset.stageArtFailedAt;
+    node.hidden = false;
+    if (!outgoingTransition) cancelStageArtTransition(node);
+    return true;
+  })();
+  pending.promise = operation;
+  state.stageArtPending = pending;
+  try {
+    return await operation;
+  } finally {
+    clearTimeout(deadline);
+    if (timedOut && requestSequence === state.stageArtRequestSequence) {
+      hideStageCharacterArt(node);
+      node.dataset.stageArtFailedKey = stageArtKey;
+      node.dataset.stageArtFailedAt = String(Date.now());
+    }
+    if (state.stageArtPending === pending) state.stageArtPending = null;
+    if (state.stageArtController === controller) state.stageArtController = null;
   }
-  node.src = loadedUrl;
-  node.dataset.stageArtKey = stageArtKey;
-  node.dataset.expressionState = loadedState;
-  delete node.dataset.stageArtFailedKey;
-  node.hidden = false;
-  return true;
 }
 
 function cancelStageMotion(characterId = "") {
@@ -2485,7 +2968,7 @@ function playStageMotion(node, message, presentation, requestSequence = state.st
   if (requestSequence !== state.stageMotionRequestSequence) return false;
   if (message?.id !== presentation.messageId || message?.id !== latestInPersonMessage("assistant")?.id) return false;
   if (message?.characterId !== state.selected || node.hidden || !node.getAttribute("src")) return false;
-  const releaseCharacter = state.stageRelease?.characters.find(item => item.character_id === message.characterId);
+  const releaseCharacter = stageReleaseCharacterForExpressions(currentCharacter());
   if (releaseCharacter && !releaseCharacter.motions.includes(stageMotion)) return false;
   const playKey = `${plain(message.id)}:${stageMotion}`;
   if (state.playedStageMotionKeys.has(playKey)) return false;
@@ -2706,6 +3189,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   const previousThread = currentThread();
   const switchingFromStage = Boolean(previousId && previousId !== characterId && previousThread?.channel === "in_person");
   cancelPresentationQueue(previousId);
+  if (previousId && previousId !== characterId) cancelStageArt();
   try {
     const thread = await dbGetThread(characterId);
     if (sequence !== state.selectionSequence) return;
@@ -3123,11 +3607,17 @@ function renderStage() {
   const livePresentation = presentationFor();
   const motionPresentation = livePresentation?.messageId === assistantMessage?.id ? livePresentation : null;
   const motionRequestSequence = state.stageMotionRequestSequence;
-  void updateStageCharacterArt(artNode, character, expressionState).then((ready) => {
-    if (ready && motionPresentation) {
-      playStageMotion(artNode, assistantMessage, motionPresentation, motionRequestSequence);
-    }
-  });
+  if ($("chat-app").dataset.channel !== "in_person") {
+    cancelStageArt({ hide: true });
+  } else {
+    void updateStageCharacterArt(artNode, character, expressionState,
+      normalizePerformanceId(assistantMessage?.performanceId ?? assistantMessage?.performance_id, assistantMessage?.communicationChannel)
+    ).then((ready) => {
+      if (ready && motionPresentation) {
+        playStageMotion(artNode, assistantMessage, motionPresentation, motionRequestSequence);
+      }
+    });
+  }
   const pending = typingStateFor();
   const speechNode = $("stage-speech");
   if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {
@@ -3312,6 +3802,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   const composerChanged = state.composerDraftKey !== draftKey(state.selected, channel);
   if (composerChanged) state.actionComposerOpen = false;
   if (channel === "in_person") state.selectedSticker = null;
+  else cancelStageArt({ hide: true });
   $("chat-app").dataset.channel = channel;
   $("text-surface").hidden = channel === "in_person";
   $("in-person-surface").hidden = channel !== "in_person";
@@ -3485,7 +3976,9 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
   let pendingStateEvent = null;
   let movementStatus = null;
   let recoveryAction = "none";
+  let expressionState = "neutral";
   let stageMotion = "none";
+  let performanceId = "";
   const handlePacket = async (packet) => {
     const event = (packet.match(/^event: (.+)$/m) || [])[1];
     const data = (packet.match(/^data: (.+)$/m) || [])[1];
@@ -3522,7 +4015,9 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       movementStatus = payload.movement_status && typeof payload.movement_status === "object" ? payload.movement_status : null;
       recoveryAction = plain(payload.recovery_action || "none");
       returnedChannel = payload.communication_channel || returnedChannel;
+      expressionState = normalizeExpressionState(payload.expression_state, returnedChannel);
       stageMotion = normalizeStageMotion(payload.stage_motion, returnedChannel);
+      performanceId = normalizePerformanceId(payload.performance_id, returnedChannel);
       contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
     }
     if (event === "error") throw new Error(payload.code || "chat_failed");
@@ -3539,7 +4034,7 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
   if (!completed) throw new Error("stream_disconnected");
   if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, renderBlocksText([...streamedBlocks.values()]));
   if (!contentBlocks.length) throw new Error("upstream_invalid_response");
-  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction, stageMotion };
+  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction, expressionState, stageMotion, performanceId };
 }
 
 function recoverableChatError(error) {
@@ -3697,7 +4192,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       if (visibleFor < 1200) await abortableDelay(1200 - visibleFor, requestController.signal);
     }
     userMessage.status = "sent";
-    const assistantMessage = normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, communicationChannel: result.returnedChannel, stageMotion: result.stageMotion, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
+    const assistantMessage = normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, communicationChannel: result.returnedChannel, expressionState: result.expressionState, stageMotion: result.stageMotion, performanceId: result.performanceId, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
     thread.messages.push(assistantMessage);
     thread.messageCount = Number(thread.messageCount || 0) + 1;
     thread.turnCount += 1;
@@ -3985,7 +4480,7 @@ async function arriveInPerson() {
     if (ownsVisibleArrival()) state.scene = result.scene_state;
     if (thread) thread.channel = "in_person";
     if (thread && result.reaction) {
-      arrivalMessage = normalizeMessage({ id: result.reaction.message_id || id(), characterId, role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", stageMotion: result.reaction.stage_motion, createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId });
+      arrivalMessage = normalizeMessage({ id: result.reaction.message_id || id(), characterId, role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", expressionState: result.reaction.expression_state, stageMotion: result.reaction.stage_motion, performanceId: result.reaction.performance_id, createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId });
       thread.messages.push(arrivalMessage);
       thread.messageCount = Number(thread.messageCount || 0) + 1;
     }
@@ -4436,9 +4931,9 @@ const messageInputResizeObserver = new ResizeObserver(([entry]) => {
 });
 messageInputResizeObserver.observe($("message-input"));
 document.fonts?.ready.then(scheduleMessageInputResize);
-window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", event => { if (event.matches) { cancelStageMotion(); renderStage(); } });
+window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", event => { if (event.matches) { cancelStageMotion(); cancelStageArtTransition(); renderStage(); } });
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { void saveDraftNow(); cancelBackgroundSummaries(); cancelStageMotion(); }
+  if (document.hidden) { void saveDraftNow(); cancelBackgroundSummaries(); cancelStageMotion(); cancelStageArtTransition(); }
 });
 
 const WRITER_LOCK_NAME = "project-snow-public:writer:v1";

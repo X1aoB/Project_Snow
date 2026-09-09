@@ -174,7 +174,7 @@ def test_docker_copies_only_selected_ui_and_verifies_final_bytes():
     ("edition", "expected_track", "expected_version"),
     [
         ("compat-096", "compat", "compat-096-r1"),
-        ("current", "current", "0.10.0-rc.1"),
+        ("current", "current", "0.10.0-rc.2"),
     ],
 )
 def test_real_committed_bundle_and_host_manifest_reconstruction_agree(

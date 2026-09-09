@@ -8,7 +8,6 @@ from unittest import TestCase
 
 from PIL import Image
 
-
 APP_ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOT = APP_ROOT / "public_frontend"
 ASSET_ROOT = PUBLIC_ROOT / "assets" / "expressions" / "mia"
@@ -44,9 +43,7 @@ class MiaExpressionRuntimeTests(TestCase):
     def setUpClass(cls) -> None:
         cls.manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
         cls.javascript = (PUBLIC_ROOT / "app.js").read_text(encoding="utf-8")
-        cls.privacy_html = (PUBLIC_ROOT / "privacy" / "index.html").read_text(
-            encoding="utf-8"
-        )
+        cls.privacy_html = (PUBLIC_ROOT / "privacy" / "index.html").read_text(encoding="utf-8")
 
     def test_manifest_records_approval_and_explicit_unverified_waiver(self) -> None:
         self.assertEqual(
@@ -95,22 +92,56 @@ class MiaExpressionRuntimeTests(TestCase):
                     self.assertEqual(image.size, expected_size, state)
                     self.assertEqual(image.mode, "RGBA", state)
 
-    def test_client_maps_every_legacy_asset_and_keeps_mia_fallback(self) -> None:
+    def test_bundled_fallback_pins_both_repository_and_windows_manifest_bytes(self) -> None:
+        manifest_bytes = MANIFEST_PATH.read_bytes().replace(b"\r\n", b"\n")
+        pinned = re.search(r"MIA_BUNDLED_EXPRESSION_MANIFEST_HASHES = Object.freeze\(\[(.*?)\]\)", self.javascript, re.S)
+        self.assertIsNotNone(pinned)
+        self.assertEqual(set(re.findall(r'"([a-f0-9]{64})"', pinned.group(1))), {
+            hashlib.sha256(manifest_bytes).hexdigest(),
+            hashlib.sha256(manifest_bytes.replace(b"\n", b"\r\n")).hexdigest(),
+        })
+
+    def test_client_loads_the_manifest_without_mia_only_asset_maps(self) -> None:
         for state, record in self.manifest["expressions"].items():
-            self.assertIn(f'{state}: "{record["face_asset_path"]}"', self.javascript, state)
-            self.assertIn(f'{state}: "{record["stage_asset_path"]}"', self.javascript, state)
+            self.assertNotIn(f'{state}: "{record["face_asset_path"]}"', self.javascript, state)
+            self.assertNotIn(f'{state}: "{record["stage_asset_path"]}"', self.javascript, state)
         self.assertIn('const MIA_CHARACTER_ID = "702f4375675b"', self.javascript)
-        self.assertIn("function expressionStateForMessage(message)", self.javascript)
-        self.assertIn("function updateStageCharacterArt(node, character, expressionState)", self.javascript)
-        self.assertIn('const candidates = requestedState === "neutral" ? ["neutral"] : [requestedState, "neutral"]', self.javascript)
         self.assertIn(
-            "(characterId === MIA_CHARACTER_ID ? MIA_STAGE_EXPRESSION_ASSETS : null)",
+            'const MIA_BUNDLED_EXPRESSION_MANIFEST = "/assets/expressions/mia/manifest.json"',
             self.javascript,
         )
+        self.assertIn("function expressionStateForMessage(message)", self.javascript)
+        self.assertIn("function loadExpressionManifest(character, signal)", self.javascript)
+        self.assertIn(
+            "function normalizeExpressionManifest(payload, character, manifestUrl)", self.javascript
+        )
+        self.assertIn("function updateStageCharacterArt(node, character, expressionState, performanceId = \"\")", self.javascript)
+        self.assertIn("const STAGE_PRESENTATION_RENDERERS = Object.freeze", self.javascript)
+        self.assertIn("function stagePresentationRenderer(presentation)", self.javascript)
+        self.assertIn("async function preloadStagePresentation(presentation, signal)", self.javascript)
+        self.assertIn(
+            'requestedState, "neutral"',
+            self.javascript,
+        )
+        self.assertNotIn("if (character?.character_id !== MIA_CHARACTER_ID)", self.javascript)
         self.assertIn('const artNode = $("stage-character-art")', self.javascript)
-        self.assertIn("updateStageCharacterArt(artNode, character, expressionState)", self.javascript)
+        self.assertIn("updateStageCharacterArt(artNode, character, expressionState,", self.javascript)
         self.assertNotIn("stage-portrait-avatar", self.javascript)
         self.assertNotIn("function fillStagePortrait", self.javascript)
+
+    def test_character_switch_keeps_a_decoded_outgoing_layer_for_crossfade(self) -> None:
+        stylesheet = (PUBLIC_ROOT / "app.css").read_text(encoding="utf-8")
+        self.assertIn("function crossfadeStageCharacterArt(node)", self.javascript)
+        self.assertIn("previousCharacterId !== characterId", self.javascript)
+        self.assertIn("duration: 280", self.javascript)
+        self.assertIn("Promise.allSettled", self.javascript)
+        self.assertIn(".stage-character-art-outgoing", stylesheet)
+        self.assertIn('data-stage-art-transition="incoming"', stylesheet)
+        self.assertIn("if (previousId && previousId !== characterId) cancelStageArt();", self.javascript)
+        self.assertNotIn(
+            "if (previousId && previousId !== characterId) cancelStageArt({ hide: true });",
+            self.javascript,
+        )
 
     def test_public_materials_page_discloses_the_waiver_and_manifest(self) -> None:
         self.assertIn("米娅舞台表情（0.9.5）", self.privacy_html)
