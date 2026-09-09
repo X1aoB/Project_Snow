@@ -222,8 +222,10 @@
       <form method="dialog"><header><div><span class="panel-kicker">小吉终端</span><h2>体验设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog">×</button></header><nav class="settings-tabs" role="tablist" aria-label="设置分类"><button type="button" class="active" data-settings-tab="models" role="tab" id="settings-tab-models" aria-controls="settings-panel-models" aria-selected="true" tabindex="0">模型</button><button type="button" data-settings-tab="history" role="tab" id="settings-tab-history" aria-controls="settings-panel-history" aria-selected="false" tabindex="-1">记录</button><button type="button" data-settings-tab="about" role="tab" id="settings-tab-about" aria-controls="settings-panel-about" aria-selected="false" tabindex="-1">关于</button></nav>
         <section class="settings-section" data-settings-panel="models" role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models">
           <div id="provider-doc-links" class="provider-doc-links" aria-label="模型厂商官方文档"></div>
-          <p>选择你已有的模型服务。加密凭证只保存在当前标签页，最长有效 12 小时；获取模型列表后不会清除凭证。</p>
+          <p>选择你已有的模型服务。模型凭证只保存在当前标签页；每位使用者连接自己的账号。</p>
           <div class="provider-form" aria-busy="false">
+            <div class="model-connection-modes" role="group" aria-label="模型连接方式"><button id="model-mode-api" class="secondary-button" type="button" aria-pressed="true">API Key</button><button id="model-mode-subscription" class="secondary-button" type="button" aria-pressed="false">Codex 订阅</button></div>
+            <div id="api-model-settings" class="api-model-settings">
             <label class="provider-select-field"><span>模型厂商</span><select id="provider-select"><option value="">正在读取可用厂商</option></select></label>
             <div id="provider-options-mobile" class="provider-options-mobile" role="radiogroup" aria-label="模型厂商"></div>
             <p id="provider-empty" class="form-hint" hidden>当前暂未开放可用的模型厂商，请稍后再试。</p>
@@ -231,12 +233,33 @@
             <p id="credential-status" class="form-hint" hidden></p>
             <div class="advanced-model-settings"><button id="toggle-advanced-model" class="secondary-button" type="button" aria-expanded="false">高级设置：手工填写模型 ID</button><div id="advanced-model-panel" hidden><label>模型 ID<input id="model-id" maxlength="200" placeholder="厂商未提供列表时填写" /></label></div></div>
             <div class="settings-actions"><button id="discover-models" class="secondary-button" type="button">获取模型列表</button><select id="discovered-models" hidden aria-label="已发现模型"></select></div>
+            </div>
+            <section id="subscription-settings" class="subscription-settings" aria-label="Codex 订阅连接" hidden>
+              <div class="subscription-model"><strong>Luna Max</strong><span>gpt-5.6-luna · max</span></div>
+              <p>使用你自己的 ChatGPT 订阅额度，不走 API 账单。对话经网站转交个人连接器，完整历史仍保存在浏览器。连接器会核验 Luna Max 权限，不支持时停止。</p>
+              <p id="subscription-status" class="subscription-status" role="status" aria-live="polite">尚未连接个人连接器。</p>
+              <div id="subscription-session-actions"></div>
+              <div id="subscription-pairing" class="subscription-pairing" hidden><span>在本机连接器的提示中输入配对码</span><div><code id="subscription-pairing-code"></code><button id="copy-subscription-code" class="secondary-button" type="button">复制配对码</button></div><small id="subscription-pairing-expiry"></small></div>
+              <div class="settings-actions"><button id="pair-subscription" class="secondary-button" type="button" hidden>生成配对码</button><button id="disconnect-subscription" class="danger-button" type="button" hidden>断开连接</button></div>
+              <details id="subscription-tutorial" class="subscription-tutorial"><summary>首次使用：连接我的 Codex 订阅</summary>
+                <ol>
+                  <li><strong>安装官方 Codex CLI 并登录。</strong><p>需要 Node.js 22 或更高版本，以及 Codex 0.153.4 或更新版本。Codex CLI 0.151 不支持此连接方式，请先升级。在本机终端运行：</p><pre><code>npm install -g @openai/codex@latest
+codex login</code></pre><p>在浏览器中登录你已有 ChatGPT 订阅的账号，选择 ChatGPT 登录方式。若 npm 安装的 CLI 无法正常运行，连接器也会尝试使用官方桌面版中符合版本要求的 Codex；请先将桌面版更新到最新版本。</p></li>
+                  <li><strong>下载个人连接器。</strong><p><a href="/downloads/snow-codex-connector.mjs" download>下载 snow-codex-connector.mjs</a>，保存到电脑上的文件夹。</p></li>
+                  <li><strong>在此页生成配对码，然后启动连接器。</strong><p>在下载文件所在的文件夹打开终端，运行：</p><pre><code id="subscription-connect-command"></code></pre><p>连接器会交互提示输入上方配对码。只在提示中输入，不把配对码写入网址或命令参数。配对码仅用于本次个人连接，请勿分享。</p></li>
+                  <li><strong>等待网页显示已连接，再点击“使用 Luna Max”。</strong><p>聊天期间保持本机和连接器运行。停止连接器或点击“断开连接”即可停止连接；每位访客都需要配对自己的订阅。</p></li>
+                </ol>
+                <p>额度与频率限制由你自己的订阅计划决定。模型支持以当前账号列表和连接器核验结果为准；max 可能等待更久。请勿向网站或他人提供 Cookie、auth.json、登录密码或登录凭据。</p>
+                <p>订阅连接时暂停自动摘要，避免与下一条消息争用连接；切回 API Key 后会按你原来的偏好恢复。</p>
+                <p><a href="https://learn.chatgpt.com/docs/auth" target="_blank" rel="noreferrer">官方登录说明</a> · <a href="https://learn.chatgpt.com/docs/app-server" target="_blank" rel="noreferrer">官方 App Server 文档</a></p>
+              </details>
+            </section>
             <section id="model-verification" class="model-verification" aria-label="人机验证" hidden>
               <p id="model-verification-status" role="status" aria-live="polite"></p>
               <div id="model-turnstile" class="model-turnstile" aria-busy="false"></div>
             </section>
             <p id="setup-error" class="form-error" role="alert"></p>
-            <div class="settings-actions"><button id="save-model" class="primary-button" type="button">保存本次模型会话</button><button id="clear-credential" class="danger-button" type="button">清除模型会话</button></div>
+            <div id="model-session-actions" class="settings-actions"><button id="save-model" class="primary-button" type="button">保存本次模型会话</button><button id="clear-credential" class="danger-button" type="button">清除模型会话</button></div>
           </div>
         </section>
         <section class="settings-section" data-settings-panel="history" role="tabpanel" id="settings-panel-history" aria-labelledby="settings-tab-history" hidden>
@@ -245,6 +268,7 @@
           <p id="day-continuity-hint" class="form-hint">适用于所有角色，下次进入新日期时自动生效，不再弹窗询问。从今天开始会开启新的对话上下文；接着昨天聊会承接摘要和最近几轮。历史记录、关系和世界状态都会保留。</p>
           <label>自动清理本地历史<select id="history-retention"><option value="0">永不（默认）</option><option value="30">保留 30 天</option><option value="90">保留 90 天</option></select></label>
           <label class="setting-toggle"><span><strong>自动整理连续性</strong><small id="summary-last-updated">尚未生成摘要</small></span><input id="auto-summary-enabled" type="checkbox" checked /></label>
+          <p id="subscription-summary-hint" class="form-hint" hidden>订阅连接时暂停自动摘要，避免与下一条消息争用连接。你的偏好会保留，切回 API Key 后恢复生效。</p>
           <p id="storage-usage">正在计算占用空间……</p>
           <div class="settings-actions"><button id="export-history" class="secondary-button" type="button">导出本地备份</button><button id="import-history" class="secondary-button" type="button">导入并合并备份</button><input id="history-import-file" type="file" accept="application/json,.json" hidden /></div>
           <p class="form-hint">备份包含聊天和草稿，请妥善保存；不会包含模型凭证。</p>

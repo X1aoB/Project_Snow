@@ -6,6 +6,10 @@ const apiRoot = "/public/v1";
 const publicHttp = createHttpClient(apiRoot);
 const dbName = "project-snow-public";
 const dbVersion = 4;
+const SUBSCRIPTION_PROVIDER = "codex_subscription";
+const SUBSCRIPTION_MODEL = "gpt-5.6-luna";
+const SUBSCRIPTION_EFFORT = "max";
+const SUBSCRIPTION_SESSION_KEY = "project-snow-public:subscription-pair";
 const SCENE_ASSET_URLS = Object.freeze(JSON.parse(document.querySelector('meta[name="snow-scene-assets"]')?.content || "{}"));
 const SCENE_KEYS = new Set(["generic", "quarters", "lounge", "training", "archive", "canteen", "observation", "medical", "corridor"]);
 const state = {
@@ -14,6 +18,9 @@ const state = {
   credentialExpiresAt: 0,
   provider: "",
   model: "",
+  modelSetupMode: "api",
+  apiProviderChoice: "",
+  subscription: { status: "disconnected", credential: "", expiresAt: 0, pairingExpiresAt: 0, pairingCode: "", error: "" },
   characters: [],
   stickers: [],
   stickerCatalog: new Map(),
@@ -298,6 +305,20 @@ const errorMessages = {
   provider_timeout: "模型厂商响应超时，请稍后重试。",
   provider_rate_limited: "模型厂商触发了频率限制，请稍后重试。",
   provider_request_failed: "模型厂商拒绝了本次请求，请检查模型 ID 和账户权限。",
+  subscription_disabled: "本站尚未启用订阅连接。你仍可阅读教程，或使用 API Key。",
+  subscription_not_connected: "个人连接器尚未连接或已离线。请打开模型设置，重新配对你自己的 Codex 订阅。",
+  subscription_disconnected: "个人连接器已断开，请在模型设置中重新配对。",
+  subscription_pairing_expired: "配对码已过期，请重新生成。",
+  subscription_model_unavailable: "当前账号或连接器不支持 Luna Max（gpt-5.6-luna · max），请检查本机 Codex 的模型列表。不会替换为其他模型。",
+  subscription_result_unknown: "请求已经交给个人连接器，但结果尚未确认。请检查连接器状态，避免重复发送这条消息。",
+  subscription_login_required: "请在自己的电脑上运行 codex login，使用有订阅的 ChatGPT 账号登录，再重新连接。",
+  subscription_rate_limited: "你的 Codex 订阅目前已触发额度或频率限制，请查看自己的账号用量并稍后再试。",
+  subscription_generation_failed: "个人连接器未能生成回复，请查看本机连接器提示。",
+  subscription_protocol_error: "个人连接器版本不兼容，请下载本站提供的连接器并重新配对。",
+  subscription_connector_stopped: "个人连接器已停止，请在本机重新启动并检查连接状态。",
+  subscription_capacity_reached: "本站当前连接数已满，请稍后再配对。",
+  subscription_busy: "个人连接器仍在处理上一条请求，请等待结果，避免重复发送。",
+  subscription_request_too_large: "本轮对话过长，请开始新的连续性段后再试。",
   character_unavailable: "当前角色数据尚未正确发布，请稍后重试。",
   public_database_unavailable: "服务端数据库暂时不可用，请稍后重试。",
   generation_queue_full: "当前生成请求较多，请稍后重试。",
@@ -385,6 +406,7 @@ function escapeHtml(value) {
 }
 function displayError(error) {
   const code = error instanceof Error ? error.message : plain(error);
+  if (code === "credential_invalid" && state.provider === SUBSCRIPTION_PROVIDER) return errorMessages.subscription_not_connected;
   return errorMessages[code] || (/^[a-z][a-z0-9_]*$/.test(code) ? errorMessages.request_failed : code);
 }
 
@@ -1298,6 +1320,7 @@ function clearCredential() {
 }
 function configured() {
   if (state.credentialExpiresAt && state.credentialExpiresAt <= Date.now()) clearCredential();
+  if (state.provider === SUBSCRIPTION_PROVIDER && (state.subscription.status !== "connected" || state.model !== SUBSCRIPTION_MODEL)) return false;
   return Boolean(state.credential && state.provider && state.model);
 }
 function refreshCredentialStatus() {
@@ -1308,7 +1331,9 @@ function refreshCredentialStatus() {
     const expires = localDayKey(expiration) === localDayKey()
       ? expiration.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
       : expiration.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
-    $("credential-status").textContent = `加密凭证有效至 ${expires}；获取模型列表和切换角色无需重新输入 Key。`;
+    $("credential-status").textContent = state.provider === SUBSCRIPTION_PROVIDER
+      ? `个人连接凭证有效至 ${expires}，仅保存在当前标签页。`
+      : `加密凭证有效至 ${expires}；获取模型列表和切换角色无需重新输入 Key。`;
   }
 }
 
@@ -1482,6 +1507,165 @@ async function showExperienceNoticeIfNeeded() {
   });
 }
 
+let subscriptionPollController = null;
+let subscriptionPollTimer = 0;
+let subscriptionPollSequence = 0;
+function apiProviders() { return (state.config?.providers || []).filter((provider) => provider.provider_id !== SUBSCRIPTION_PROVIDER); }
+function subscriptionEnabled() {
+  const config = state.config?.subscription;
+  return config?.enabled === true && config.model === SUBSCRIPTION_MODEL && config.effort === SUBSCRIPTION_EFFORT
+    && config.protocol_version === 1 && state.config?.providers?.some((provider) => provider.provider_id === SUBSCRIPTION_PROVIDER);
+}
+function subscriptionSettingsVisible() {
+  return $("settings-dialog").open && !$("settings-panel-models").hidden && state.modelSetupMode === "subscription" && !document.hidden;
+}
+function stopSubscriptionPolling() {
+  subscriptionPollSequence += 1;
+  window.clearTimeout(subscriptionPollTimer);
+  subscriptionPollTimer = 0;
+  subscriptionPollController?.abort();
+  subscriptionPollController = null;
+}
+function storeSubscriptionCredential() {
+  const { credential, expiresAt, pairingExpiresAt } = state.subscription;
+  if (credential && expiresAt > Date.now()) tabPreferences.setItem(SUBSCRIPTION_SESSION_KEY, JSON.stringify({ credential, expiresAt, pairingExpiresAt }));
+  else tabPreferences.removeItem(SUBSCRIPTION_SESSION_KEY);
+}
+function forgetSubscription(status = "disconnected", error = "") {
+  state.subscription = { status, error, credential: "", expiresAt: 0, pairingExpiresAt: 0, pairingCode: "" };
+  tabPreferences.removeItem(SUBSCRIPTION_SESSION_KEY);
+  if (state.provider === SUBSCRIPTION_PROVIDER) clearCredential();
+}
+function renderSubscriptionSettings() {
+  const selected = state.modelSetupMode === "subscription";
+  const enabled = subscriptionEnabled();
+  const subscription = state.subscription;
+  const busy = Boolean(modelSetupController);
+  $("model-mode-api").setAttribute("aria-pressed", String(!selected));
+  $("model-mode-subscription").setAttribute("aria-pressed", String(selected));
+  $("api-model-settings").hidden = selected;
+  $("subscription-settings").hidden = !selected;
+  const actions = $("model-session-actions");
+  const subscriptionActions = $("subscription-session-actions");
+  if (selected && actions.parentElement !== subscriptionActions) subscriptionActions.append(actions);
+  else if (!selected && actions.parentElement === subscriptionActions) $("setup-error").after(actions);
+  $("clear-credential").hidden = selected;
+  $("save-model").textContent = selected ? "使用 Luna Max" : "保存本次模型会话";
+  $("save-model").disabled = busy || (selected ? !enabled || subscription.status !== "connected" || !subscription.credential : !apiProviders().length);
+  $("pair-subscription").hidden = !enabled || subscription.status === "connected";
+  $("pair-subscription").disabled = busy;
+  $("pair-subscription").textContent = subscription.credential ? "重新生成配对码" : "生成配对码";
+  $("disconnect-subscription").hidden = !enabled || !subscription.credential;
+  $("disconnect-subscription").disabled = busy;
+  $("subscription-pairing").hidden = !subscription.pairingCode || subscription.status !== "waiting";
+  $("subscription-pairing-code").textContent = subscription.pairingCode;
+  $("subscription-pairing-expiry").textContent = subscription.pairingExpiresAt
+    ? `有效至 ${new Date(subscription.pairingExpiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}。配对完成后此页会隐藏配对码。` : "";
+  $("subscription-connect-command").textContent = `node snow-codex-connector.mjs --site ${window.location.origin}`;
+  const statusCopy = {
+    disconnected: "尚未连接个人连接器。请按下方教程完成登录和配对。",
+    checking: "正在核对个人连接器状态……",
+    waiting: "等待本机连接器配对。生成配对码还没有建立连接，完成教程后会自动更新。",
+    connected: "已连接个人连接器 · Luna Max 已核验。可点击“使用 Luna Max”开始聊天。",
+  };
+  $("subscription-status").dataset.status = !enabled ? "disabled" : subscription.error ? "error" : subscription.status;
+  $("subscription-status").textContent = !enabled ? errorMessages.subscription_disabled
+    : subscription.error ? displayError(subscription.error) : statusCopy[subscription.status] || statusCopy.disconnected;
+}
+function chooseModelMode(mode) {
+  stopSubscriptionPolling();
+  const select = $("provider-select");
+  if (mode === "subscription") {
+    if (select.value && select.value !== SUBSCRIPTION_PROVIDER) state.apiProviderChoice = select.value;
+    state.modelSetupMode = "subscription";
+    if (subscriptionEnabled()) select.value = SUBSCRIPTION_PROVIDER;
+  } else {
+    state.modelSetupMode = "api";
+    select.value = state.apiProviderChoice || (state.provider !== SUBSCRIPTION_PROVIDER ? state.provider : "") || apiProviders()[0]?.provider_id || "";
+  }
+  syncProviderControls(select.value);
+  showError("setup-error", "");
+  renderSubscriptionSettings();
+  if (mode === "subscription") startSubscriptionPolling();
+}
+async function refreshSubscriptionStatus(signal) {
+  if (!subscriptionEnabled() || !state.subscription.credential) return;
+  const payload = await api("/subscription/status", { signal, timeoutMs: 10000 });
+  signal?.throwIfAborted();
+  if (payload.status === "connected") {
+    if (payload.model !== SUBSCRIPTION_MODEL || payload.effort !== SUBSCRIPTION_EFFORT) {
+      forgetSubscription("disconnected", "subscription_model_unavailable");
+      throw new Error("subscription_model_unavailable");
+    }
+    const expiresAt = Date.parse(payload.expires_at);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error("subscription_pairing_expired");
+    state.subscription.status = "connected";
+    state.subscription.error = "";
+    state.subscription.pairingCode = "";
+    state.subscription.pairingExpiresAt = 0;
+    state.subscription.expiresAt = expiresAt;
+    if (state.provider === SUBSCRIPTION_PROVIDER && state.model === SUBSCRIPTION_MODEL) {
+      state.credentialExpiresAt = expiresAt;
+      saveCredential();
+    }
+    storeSubscriptionCredential();
+  } else if (payload.status === "waiting" && (state.subscription.pairingExpiresAt || state.subscription.expiresAt) > Date.now()) {
+    state.subscription.status = "waiting";
+    state.subscription.error = "";
+  } else {
+    forgetSubscription("disconnected", payload.status === "waiting" ? "subscription_pairing_expired" : "subscription_not_connected");
+  }
+  renderSubscriptionSettings();
+  updateComposerAvailability();
+}
+function startSubscriptionPolling() {
+  stopSubscriptionPolling();
+  if (!subscriptionSettingsVisible() || !subscriptionEnabled() || !state.subscription.credential) return;
+  const sequence = subscriptionPollSequence;
+  const poll = async () => {
+    if (sequence !== subscriptionPollSequence || !subscriptionSettingsVisible()) return;
+    const controller = new AbortController();
+    subscriptionPollController = controller;
+    try { await refreshSubscriptionStatus(controller.signal); }
+    catch (error) {
+      if (controller.signal.aborted) return;
+      state.subscription.error = error?.message === "credential_invalid" ? "subscription_not_connected" : (error?.message || "request_failed");
+      if (["credential_invalid", "subscription_pairing_expired", "subscription_not_connected", "subscription_disconnected", "subscription_disabled"].includes(error?.message)) forgetSubscription("disconnected", state.subscription.error);
+      renderSubscriptionSettings();
+    } finally {
+      if (subscriptionPollController === controller) subscriptionPollController = null;
+      if (sequence === subscriptionPollSequence && subscriptionSettingsVisible() && state.subscription.credential) subscriptionPollTimer = window.setTimeout(poll, state.subscription.error ? 6000 : 3000);
+    }
+  };
+  void poll();
+}
+async function pairSubscription() {
+  stopSubscriptionPolling();
+  await runModelSetup("pair-subscription", async (signal) => {
+    if (!subscriptionEnabled()) throw new Error("subscription_disabled");
+    if (!experienceNoticeAccepted()) throw new Error("experience_notice_required");
+    const payload = await api("/subscription/pair", { method: "POST", signal, timeoutMs: 15000, body: JSON.stringify({ accepted_transit_notice: true, accepted_cost_notice: true, accepted_local_history_notice: true }) });
+    signal.throwIfAborted();
+    const expiresAt = Date.parse(payload.expires_at);
+    const pairingExpiresAt = Date.parse(payload.pairing_expires_at || payload.expires_at);
+    if (payload.provider !== SUBSCRIPTION_PROVIDER || !plain(payload.credential) || !plain(payload.pairing_code) || !Number.isFinite(expiresAt) || expiresAt <= Date.now() || !Number.isFinite(pairingExpiresAt) || pairingExpiresAt <= Date.now()) throw new Error("invalid_request");
+    if (state.provider === SUBSCRIPTION_PROVIDER) clearCredential();
+    state.subscription = { status: "waiting", credential: plain(payload.credential), expiresAt, pairingExpiresAt, pairingCode: plain(payload.pairing_code), error: "" };
+    storeSubscriptionCredential();
+  });
+  renderSubscriptionSettings();
+  startSubscriptionPolling();
+}
+async function disconnectSubscription() {
+  stopSubscriptionPolling();
+  await runModelSetup("disconnect-subscription", async (signal) => {
+    await api("/subscription/disconnect", { method: "POST", signal, timeoutMs: 10000, body: "{}" });
+    signal.throwIfAborted();
+    forgetSubscription();
+    toast("个人连接器已断开");
+  });
+  renderSubscriptionSettings();
+}
 function syncProviderControls(providerId = $("provider-select")?.value || "") {
   const select = $("provider-select");
   if (select) {
@@ -1500,6 +1684,7 @@ function chooseProvider(providerId) {
   const select = $("provider-select");
   const previousChoice = plain(select.dataset.providerChoice || state.provider);
   const changed = Boolean(previousChoice && previousChoice !== value);
+  state.apiProviderChoice = value;
   $("provider-select").value = value;
   syncProviderControls(value);
   if (changed) {
@@ -1510,11 +1695,12 @@ function chooseProvider(providerId) {
     $("discovered-models").hidden = true;
   }
   refreshCredentialStatus();
+  renderSubscriptionSettings();
 }
 function renderMobileProviderOptions() {
   const root = $("provider-options-mobile");
   if (!root) return;
-  root.innerHTML = (state.config?.providers || []).map((provider) => `<button type="button" role="radio" data-provider-option="${escapeHtml(provider.provider_id)}" aria-checked="false" tabindex="-1">${escapeHtml(provider.display_name)}</button>`).join("");
+  root.innerHTML = apiProviders().map((provider) => `<button type="button" role="radio" data-provider-option="${escapeHtml(provider.provider_id)}" aria-checked="false" tabindex="-1">${escapeHtml(provider.display_name)}</button>`).join("");
   root.querySelectorAll("[data-provider-option]").forEach((button) => {
     button.onclick = () => chooseProvider(button.dataset.providerOption);
     button.onkeydown = (event) => {
@@ -1538,7 +1724,7 @@ async function loadConfig() {
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
   $("provider-select").innerHTML = state.config.providers.length
-    ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}">${escapeHtml(provider.display_name)}</option>`).join("")
+    ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}"${provider.provider_id === SUBSCRIPTION_PROVIDER ? " hidden" : ""}>${escapeHtml(provider.display_name)}</option>`).join("")
     : '<option value="">暂未开放模型厂商</option>';
   renderMobileProviderOptions();
   const providerLinks = [];
@@ -1550,7 +1736,7 @@ async function loadConfig() {
   }
   $("provider-doc-links").innerHTML = providerLinks.join("");
   $("provider-doc-links").hidden = !providerLinks.length;
-  $("provider-empty").hidden = Boolean(state.config.providers.length);
+  $("provider-empty").hidden = Boolean(apiProviders().length);
   $("discover-models").disabled = !state.config.providers.length;
   $("save-model").disabled = !state.config.providers.length;
   if (!state.config.providers.length) showError("setup-error", "当前暂未开放可用的模型厂商。");
@@ -1564,15 +1750,30 @@ async function loadConfig() {
         state.credential = saved.credential;
         state.credentialExpiresAt = saved.expiresAt;
         state.provider = saved.provider;
-        state.model = saved.model || "";
+        state.model = saved.provider === SUBSCRIPTION_PROVIDER ? (saved.model === SUBSCRIPTION_MODEL ? SUBSCRIPTION_MODEL : "") : (saved.model || "");
+        if (saved.provider === SUBSCRIPTION_PROVIDER) state.modelSetupMode = "subscription";
         $("provider-select").value = state.provider;
         syncProviderControls(state.provider);
         $("model-id").value = state.model;
       } else clearCredential();
     } catch { clearCredential(); }
   }
+  try {
+    const pending = JSON.parse(tabPreferences.getItem(SUBSCRIPTION_SESSION_KEY) || "null");
+    const credential = state.provider === SUBSCRIPTION_PROVIDER ? state.credential : plain(pending?.credential);
+    const expiresAt = state.provider === SUBSCRIPTION_PROVIDER ? state.credentialExpiresAt : Number(pending?.expiresAt);
+    if (subscriptionEnabled() && credential && expiresAt > Date.now()) {
+      state.subscription = { status: "checking", credential, expiresAt, pairingExpiresAt: Number(pending?.pairingExpiresAt) || 0, pairingCode: "", error: "" };
+      await refreshSubscriptionStatus();
+    } else if (credential) forgetSubscription();
+  } catch (error) {
+    state.subscription.status = "disconnected";
+    state.subscription.error = error?.message || "subscription_not_connected";
+  }
+  state.apiProviderChoice = (state.provider !== SUBSCRIPTION_PROVIDER ? state.provider : "") || apiProviders()[0]?.provider_id || "";
   refreshCredentialStatus();
   syncProviderControls($("provider-select").value);
+  renderSubscriptionSettings();
 }
 function normalizeSticker(sticker) {
   if (!sticker?.asset_id) return null;
@@ -1656,7 +1857,7 @@ async function runModelSetup(action, task) {
   const label = button.textContent;
   controls.forEach(([control]) => { control.disabled = true; });
   form.setAttribute("aria-busy", "true");
-  button.textContent = action === "discover-models" ? "正在获取模型列表…" : "正在保存模型会话…";
+  button.textContent = ({ "discover-models": "正在获取模型列表…", "pair-subscription": "正在生成配对码…", "disconnect-subscription": "正在断开连接…" })[action] || "正在保存模型会话…";
   showError("setup-error", "");
   try {
     await task(controller.signal);
@@ -1671,6 +1872,7 @@ async function runModelSetup(action, task) {
     $("model-verification").hidden = true;
     $("model-turnstile").setAttribute("aria-busy", "false");
     modelSetupController = null;
+    renderSubscriptionSettings();
   }
 }
 async function issueCredential(signal) {
@@ -1711,6 +1913,7 @@ async function issueCredential(signal) {
 }
 async function discoverModels() {
   return runModelSetup("discover-models", async (signal) => {
+    if (state.modelSetupMode === "subscription") throw new Error("subscription_model_unavailable");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
     if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential(signal);
     const payload = await api("/byok/models", { method: "POST", signal, timeoutMs: 30000, body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
@@ -1723,6 +1926,23 @@ async function discoverModels() {
 }
 async function saveModelSession() {
   return runModelSetup("save-model", async (signal) => {
+    if (state.modelSetupMode === "subscription") {
+      if (!subscriptionEnabled()) throw new Error("subscription_disabled");
+      await refreshSubscriptionStatus(signal);
+      signal.throwIfAborted();
+      if (state.subscription.status !== "connected" || !state.subscription.credential) throw new Error("subscription_not_connected");
+      cancelBackgroundSummaries();
+      state.provider = SUBSCRIPTION_PROVIDER;
+      state.model = SUBSCRIPTION_MODEL;
+      state.credential = state.subscription.credential;
+      state.credentialExpiresAt = state.subscription.expiresAt;
+      saveCredential();
+      refreshCredentialStatus();
+      updateComposerAvailability();
+      $("settings-dialog").close();
+      toast("已使用你自己的 Codex 订阅 · Luna Max");
+      return;
+    }
     const model = $("discovered-models").value.trim() || $("model-id").value.trim();
     if (!model) throw new Error("请填写或选择模型 ID。");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
@@ -3568,7 +3788,9 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     const failed = message.status === "failed";
     const presenting = message.role === "assistant" && presentationFor()?.messageId === message.id;
     const tools = failed
-      ? `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
+      ? message.errorCode === "subscription_result_unknown"
+        ? '<span class="message-recovery-note">结果尚未确认，请先检查个人连接器，避免重复发送。</span>'
+        : `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
       : message.role === "assistant" && !presenting ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
     const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
@@ -4202,6 +4424,7 @@ function shouldReuseChatRequest(error) {
     "provider_network_error",
     "provider_timeout",
     "request_cancelled",
+    "subscription_result_unknown",
   ].includes(code);
 }
 
@@ -4312,7 +4535,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   try {
     let result = null;
     let lastError = null;
-    const backoffs = [0, 1000, 2000, 4000];
+    const backoffs = requestSnapshot.provider === SUBSCRIPTION_PROVIDER ? [0] : [0, 1000, 2000, 4000];
     for (let attempt = 0; attempt < backoffs.length; attempt += 1) {
       if (attempt > 0) {
         if (!recoverableChatError(lastError) || requestController.signal.aborted) throw lastError;
@@ -4378,7 +4601,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   } catch (caught) {
     await userPersistence.catch(() => {});
     const error = caught?.name === "AbortError" ? new Error(requestTimedOut ? "provider_timeout" : "request_cancelled") : caught;
-    if (stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
+    if (requestSnapshot.provider !== SUBSCRIPTION_PROVIDER && stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
       cancelPresentationQueue(characterId, requestId);
       state.retrySnapshots.delete(userMessage.id);
       await clearPersistedWorldPackage();
@@ -4392,6 +4615,10 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     cancelPresentationQueue(characterId, requestId);
     userMessage.status = "failed";
     userMessage.errorCode = error instanceof Error ? error.message : "chat_failed";
+    if (requestSnapshot.provider === SUBSCRIPTION_PROVIDER && ["subscription_not_connected", "subscription_disconnected", "credential_invalid"].includes(userMessage.errorCode)) {
+      forgetSubscription("disconnected", "subscription_not_connected");
+      renderSubscriptionSettings();
+    }
     if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode });
     await dbPutThread(thread);
     if (ownsVisibleRequest()) renderAll();
@@ -4496,7 +4723,7 @@ function remainingProviderCallBudget(usage) {
   return Math.max(0, limit - used);
 }
 function scheduleAutoSummary(thread, chatUsage = null) {
-  if (!state.autoSummaryEnabled || !configured()) return;
+  if (state.provider === SUBSCRIPTION_PROVIDER || !state.autoSummaryEnabled || !configured()) return;
   // A summary is another provider operation belonging to the current user
   // action. Never start it when validation/rewriting already consumed both
   // calls, or when an older server omitted the auditable call count.
@@ -4526,7 +4753,7 @@ function cancelBackgroundSummaries() {
   state.summaryInFlight.clear();
 }
 async function runAutoSummary(thread) {
-  if (!thread.summaryRequestId || !state.autoSummaryEnabled || !configured() || state.summaryInFlight.has(thread.characterId) || globalRequestBusy()) return;
+  if (state.provider === SUBSCRIPTION_PROVIDER || !thread.summaryRequestId || !state.autoSummaryEnabled || !configured() || state.summaryInFlight.has(thread.characterId) || globalRequestBusy()) return;
   state.summaryInFlight.add(thread.characterId);
   const controller = new AbortController();
   state.summaryControllers.set(thread.characterId, controller);
@@ -4793,7 +5020,7 @@ function toggleContacts({ mobileOpen = false } = {}) {
   return expanded;
 }
 function openSettings(tab = "models") {
-  if (tab !== "models") modelSetupController?.abort();
+  if (tab !== "models") { modelSetupController?.abort(); stopSubscriptionPolling(); }
   document.querySelectorAll("[data-settings-tab]").forEach((button) => {
     const selected = button.dataset.settingsTab === tab;
     button.classList.toggle("active", selected);
@@ -4804,14 +5031,18 @@ function openSettings(tab = "models") {
   if (tab === "history") storageBytes().then((bytes) => { $("storage-usage").textContent = `当前浏览器记录约占 ${formatBytes(bytes)}。`; });
   const activeThread = currentThread();
   $("auto-summary-enabled").checked = state.autoSummaryEnabled;
+  $("subscription-summary-hint").hidden = state.provider !== SUBSCRIPTION_PROVIDER;
   $("history-retention").value = String(state.historyRetentionDays);
   $("day-continuity-preference").value = state.dayContinuityPreference;
   $("summary-last-updated").textContent = activeThread?.summaryUpdatedAt ? `最近更新：${new Date(activeThread.summaryUpdatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}` : "尚未生成摘要";
-  $("provider-select").value = state.provider || $("provider-select").value;
+  $("provider-select").value = state.modelSetupMode === "subscription" && subscriptionEnabled()
+    ? SUBSCRIPTION_PROVIDER : state.apiProviderChoice || state.provider || $("provider-select").value;
   syncProviderControls($("provider-select").value);
   $("model-id").value = state.model || $("model-id").value;
   refreshCredentialStatus();
   if (!$("settings-dialog").open) $("settings-dialog").showModal();
+  renderSubscriptionSettings();
+  if (tab === "models") startSubscriptionPolling();
 }
 function openFeedback(messageId = "") {
   state.feedbackMessageId = messageId;
@@ -5003,8 +5234,17 @@ $("stage-toggle-ui").onclick = () => { $("stage-menu").open = false; $("in-perso
 $("stage-open-feedback").onclick = () => { const messageId = $("stage-open-feedback").dataset.messageId || ""; if (!messageId) return; $("stage-menu").open = false; openFeedback(messageId); };
 $("discover-models").onclick = discoverModels;
 $("save-model").onclick = saveModelSession;
+$("model-mode-api").onclick = () => chooseModelMode("api");
+$("model-mode-subscription").onclick = () => chooseModelMode("subscription");
+$("pair-subscription").onclick = pairSubscription;
+$("disconnect-subscription").onclick = disconnectSubscription;
+$("copy-subscription-code").onclick = async () => {
+  if (!state.subscription.pairingCode) return;
+  try { await navigator.clipboard.writeText(state.subscription.pairingCode); toast("配对码已复制，请只输入到你自己的连接器"); }
+  catch { toast("无法自动复制，请选中配对码后手动复制"); }
+};
 $("clear-credential").onclick = () => { clearCredential(); $("api-key").focus(); toast("当前标签页的模型凭证已清除"); };
-$("discovered-models").onchange = () => { if ($("discovered-models").value) { $("model-id").value = $("discovered-models").value; state.model = $("discovered-models").value; saveCredential(); } };
+$("discovered-models").onchange = () => { if (state.modelSetupMode !== "subscription" && $("discovered-models").value) { $("model-id").value = $("discovered-models").value; state.model = $("discovered-models").value; saveCredential(); } };
 $("toggle-advanced-model").onclick = () => {
   const panel = $("advanced-model-panel");
   const expanded = panel.hidden;
@@ -5053,8 +5293,9 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   };
 });
 $("feedback-dialog").addEventListener("close", () => prepareFeedbackVerification({ cancelPending: true }));
-$("settings-dialog").addEventListener("close", () => modelSetupController?.abort());
-$("settings-dialog").addEventListener("cancel", () => modelSetupController?.abort());
+$("settings-dialog").addEventListener("close", () => { modelSetupController?.abort(); stopSubscriptionPolling(); });
+$("settings-dialog").addEventListener("cancel", () => { modelSetupController?.abort(); stopSubscriptionPolling(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopSubscriptionPolling(); else startSubscriptionPolling(); });
 $("sticker-picker").addEventListener("close", () => $("toggle-sticker").setAttribute("aria-expanded", "false"));
 window.addEventListener("keydown", (event) => {
   if (document.querySelector("dialog[open]")) return;
@@ -5342,6 +5583,7 @@ $("apply-build-update").onclick = async () => {
 };
 window.addEventListener("focus", () => { void checkBuildUpdate(); });
 window.addEventListener("pagehide", () => {
+  stopSubscriptionPolling();
   state.writerRelease?.();
   state.writerChannel?.close();
   state.stageWarmController?.abort();

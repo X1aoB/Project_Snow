@@ -188,6 +188,7 @@ class PublicSettings:
     attribution_url: str = "/public/v1/attributions"
     max_provider_calls_per_action: int = 2
     byok_lifetime_hours: int = 12
+    subscription_enabled: bool = False
 
     @classmethod
     def from_environment(cls) -> "PublicSettings":
@@ -293,6 +294,7 @@ class PublicSettings:
             # environment knob bounded so a deployment cannot silently turn
             # a tab-scoped convenience token into a long-lived credential.
             byok_lifetime_hours=max(1, min(12, byok_lifetime_hours)),
+            subscription_enabled=os.getenv("PUBLIC_SUBSCRIPTION_ENABLED", "false").casefold() == "true",
         )
 
     @property

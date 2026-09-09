@@ -86,6 +86,7 @@ textarea { resize: none; }
 .message-tools button { min-height: 32px; padding: 5px 9px; border-radius: 8px; color: #567589; background: transparent; font-size: .75rem; }
 .message-tools button:hover { background: #e9f1f5; }
 .message-usage { align-self: center; margin-left: auto; color: #8296a3; font-size: .72rem; overflow-wrap: anywhere; }
+.message-recovery-note { color: var(--snow-muted); font-size: .75rem; line-height: 1.6; overflow-wrap: anywhere; }
 .rendezvous-card { display: grid; gap: 10px; width: min(100%, 520px); margin-top: 10px; padding: 13px; border: 1px solid #9eb8c7; border-radius: 14px; background: linear-gradient(145deg,#f8fcfe,#e7f1f6); box-shadow: 0 9px 22px rgba(53,85,103,.11); }
 .rendezvous-card > div:first-child { display: grid; gap: 4px; }
 .rendezvous-card strong { color: #315c73; font-size: .9rem; }
@@ -294,6 +295,26 @@ textarea { resize: none; }
 .form-error { min-height: 18px; color: var(--snow-danger); font-size: .66rem; }
 .form-hint { padding: 8px 10px; border-radius: 8px; color: #426b57; background: #e9f4ed; font-size: .64rem; }
 .provider-form { display: grid; gap: 12px; }
+.api-model-settings { display: grid; min-width: 0; gap: 12px; }
+.model-connection-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.model-connection-modes button[aria-pressed="true"] { color: #fff; background: var(--snow-blue-strong); border-color: var(--snow-blue-strong); }
+.subscription-settings { display: grid; min-width: 0; gap: 12px; }
+.subscription-settings p { margin: 0; font-size: .875rem; line-height: 1.7; color: var(--snow-muted); overflow-wrap: anywhere; }
+.subscription-model { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 14px; border: 1px solid var(--snow-line); border-radius: 12px; background: #edf5f9; }
+.subscription-model strong { font-size: 1.1rem; }.subscription-model span { color: var(--snow-muted); font-size: .82rem; }
+.subscription-settings .subscription-status { padding: 11px 13px; border-radius: 10px; background: #eef3f6; color: #466477; }
+.subscription-status[data-status="connected"] { background: #e9f4ed; color: #426b57; }
+.subscription-status[data-status="error"] { background: #fff1f3; color: var(--snow-danger); }
+.subscription-pairing { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--snow-line); border-radius: 10px; background: #fff; font-size: .8rem; }
+.subscription-pairing > div { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.subscription-pairing code { font-size: 1.35rem; letter-spacing: .1em; overflow-wrap: anywhere; user-select: all; }
+.subscription-pairing small { color: var(--snow-muted); line-height: 1.6; }
+.subscription-tutorial { min-width: 0; padding: 12px; border: 1px solid var(--snow-line-soft); border-radius: 10px; background: #f9fcfe; }
+.subscription-tutorial summary { cursor: pointer; color: var(--snow-blue-strong); font-size: .88rem; line-height: 1.5; }
+.subscription-tutorial ol { margin: 14px 0; padding-left: 22px; }.subscription-tutorial li { margin-bottom: 16px; font-size: .875rem; line-height: 1.7; }
+.subscription-tutorial li p, .subscription-tutorial > p { margin-top: 8px; }
+.subscription-tutorial pre { margin: 8px 0; padding: 10px; border-radius: 8px; background: #eaf1f5; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; line-height: 1.65; }
+.subscription-tutorial a { text-decoration: underline; text-underline-offset: 3px; }
 .model-verification { display: grid; gap: 8px; min-width: 0; padding: 10px 11px; border: 1px solid var(--snow-line-soft); border-radius: 10px; color: var(--snow-muted); background: #fff; }
 .model-verification p { margin: 0; font-size: var(--ui-body-size); line-height: 1.5; }
 .model-turnstile { width: 100%; min-width: 0; }

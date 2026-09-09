@@ -19,7 +19,8 @@
       <section class="privacy-hero"><span class="panel-kicker">隐私版本 0.9.2 · 素材说明 2026-09-07 更新</span><h1>隐私、模型调用与素材来源</h1><p>小吉终端 是非官方、非商业的 AI 角色互动实验。模型回答可能出错或偏离原作，请勿输入真实密码、证件、财务或其他敏感信息。</p></section>
       <div class="privacy-grid">
         <article><h2>API Key 与模型供应商</h2><p>Key 会经过 小吉终端 服务器内存并发送给你选择的官方模型接口，但不写入数据库、磁盘、反馈或日志。服务器签发的凭证只保存在当前标签页，采用固定绝对期限且最长有效 12 小时，不会滑动续期；它由服务器加密，并非端到端加密。关闭标签页或清除会话存储即可移除。</p><div id="provider-privacy-links" class="source-links"></div></article>
-        <article><h2>发送给模型的内容</h2><p>一次对话最多携带当前消息、最近 24 条消息、连续性摘要、角色系统指令和检索到的公开剧情资料。每次用户操作最多发起两次模型请求，可能包括一次受控重写；到场反应和每 12 轮一次的可关闭摘要也会消耗你的模型额度。</p></article>
+        <article><h2>Codex 个人订阅连接</h2><p>选择 Codex 订阅时，网站通过一次性配对码连接你自己电脑上的个人连接器。请求内容经过本站服务器，再由本机官方 Codex App Server 使用你的订阅生成；OpenAI 登录凭据留在本机，不上传本站。配对凭证只保存在当前标签页，最长有效 12 小时。连接器在运行期间保留请求结果以防重复调用，退出后清除；断开连接会撤销本站的配对。每位使用者须连接自己的账号，具体模型权限和额度以 OpenAI 当前计划为准。</p></article>
+        <article><h2>发送给模型的内容</h2><p>一次对话最多携带当前消息、最近 24 条消息、连续性摘要、角色系统指令和检索到的公开剧情资料。每次用户操作最多发起两次模型请求，可能包括一次受控重写；到场反应和每 12 轮一次的可关闭摘要也会消耗你选择的 API 或订阅额度。</p></article>
         <article><h2>浏览器本地历史</h2><p>聊天、摘要、草稿和收藏以明文保存在当前浏览器 IndexedDB，不会自动跨设备同步。可选择永不自动清理、保留 30 天或 90 天，并可删除单个角色或全部本地数据。存储不可用时将退化为“本次不会保存”。</p></article>
         <article><h2>Cookie、缓存与滥用防护</h2><p>首次进行写操作时建立一个 30 天的 <code>__Host-snow_anon</code> 匿名 Cookie。幂等请求结果最多缓存 10 分钟。原始 IP 不写入业务数据库；限流只使用每日轮换的 HMAC-IP 指纹，最长保留 48 小时。</p></article>
         <article><h2>Cloudflare</h2><p>站点通过 Cloudflare Tunnel/CDN 提供，并使用 Turnstile 防止自动滥用。Cloudflare 可能处理 IP、浏览器和挑战信号；详见 <a href="https://www.cloudflare.com/turnstile-privacy-policy/" rel="noreferrer">Turnstile 隐私补充说明</a>。本站不接入第三方内容分析或广告统计。</p></article>

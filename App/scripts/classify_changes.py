@@ -43,6 +43,8 @@ UI_PATTERNS = (
     "App/tests/test_ui_*.py",
     "App/tests/test_public_frontend*.py",
     "App/tests/test_stage_presentation_timing.py",
+    "App/tests/test_public_subscription_frontend_e2e.py",
+    "App/tests/subscription_connector.test.mjs",
 )
 
 API_PATTERNS = (

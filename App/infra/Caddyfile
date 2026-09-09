@@ -41,8 +41,13 @@
 	header @versioned_media Cache-Control "public, max-age=31536000, immutable"
 	@catalog path /public/v1/characters /public/v1/stickers /public/v1/attributions /public/v1/attributions/data
 	header @catalog Cache-Control "public, max-age=300, stale-while-revalidate=60"
-	@private_response path /public/v1/build-info /public/v1/config /public/v1/byok/* /public/v1/chat/* /public/v1/presence/* /public/v1/feedback
+	@private_response path /public/v1/build-info /public/v1/config /public/v1/byok/* /public/v1/subscription/* /public/v1/chat/* /public/v1/presence/* /public/v1/feedback
 	header @private_response Cache-Control "no-store, max-age=0"
+	@subscription_download path /downloads/snow-codex-connector.mjs
+	header @subscription_download {
+		Content-Disposition "attachment; filename=snow-codex-connector.mjs"
+		Cache-Control "no-store, max-age=0"
+	}
 	header {
 		-Server
 		X-Content-Type-Options nosniff
