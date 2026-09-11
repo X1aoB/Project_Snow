@@ -4,10 +4,11 @@
 export function createAnalytics(config, env = globalThis) {
   const inert = Object.freeze({ active: false, track() {}, stop() {}, jump(url) { return url; } });
   if (!config?.enabled || !config?.consent || !["mywebsite", "project_snow"].includes(config.app)) return inert;
+  if (typeof config.endpoint !== "string" || !config.endpoint.trim()) return inert;
   try {
     if (env.navigator?.globalPrivacyControl || env.navigator?.doNotTrack === "1") return inert;
     const endpoint = new URL(config.endpoint, env.location.href);
-    if (endpoint.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(endpoint.hostname)) return inert;
+    if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && ["localhost", "127.0.0.1"].includes(endpoint.hostname))) return inert;
     const ns = `snow.statistics.v1.${config.app}.`;
     const uuid = () => env.crypto.randomUUID();
     let anonymous = null, session = null, stopped = false, queue = [], inFlight = false;
