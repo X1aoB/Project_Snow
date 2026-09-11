@@ -87,7 +87,9 @@ export function createAnalytics(config, env = globalThis) {
       try {
         if (stopped || config.app !== "mywebsite") return url;
         const target = new URL(url, env.location.href);
-        if (target.origin !== "https://snow.xiaob.dev" || target.hash) return url;
+        // A link may retain our own fragment after a back/forward-cache return.
+        // Every new click needs a new attribution token; preserve business anchors.
+        if (target.origin !== "https://snow.xiaob.dev" || (target.hash && !/^#snow_jump=[0-9a-f-]{36}$/i.test(target.hash))) return url;
         const jump = uuid();
         track("entry_click", { jump_id: jump, channel: "portfolio" });
         // Fragment avoids logging an attribution ID in the destination request URL.
