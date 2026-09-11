@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /public/v1/
+Disallow: /api/
+Disallow: /workspace/
+
+Sitemap: https://snow.xiaob.dev/sitemap.xml

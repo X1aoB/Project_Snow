@@ -1,5 +1,21 @@
 # Public immersive deployment
 
+## Search discovery
+
+The public home page uses the title `小吉终端`, a canonical URL and descriptive
+search/social metadata. `/robots.txt` advertises `/sitemap.xml`; the sitemap
+contains only the home page and privacy document. API and workspace paths are
+excluded from crawling. Cloudflare may prepend its managed crawler policy.
+
+The public `1b19b4ec1e454d5780120c8fa287c623.txt` file proves host ownership for
+IndexNow submissions. Keep it deployed while the key is in use. After a release,
+submit changed public URLs to `https://api.indexnow.org/indexnow` with this key,
+the host `snow.xiaob.dev`, and its root key-file URL as `keyLocation`. Submit the
+sitemap separately in Google Search Console after ownership verification.
+Submission acknowledges discovery; it does not guarantee indexing or a date.
+
+## Public runtime
+
 The public process exposes only `/public/v1` and the static immersive client. The existing internal `/api/v1`, attachments, voice, agents and workspace are not mounted by `public_main.py`.
 
 The 0.9.6 client uses IndexedDB v4: messages and conversation metadata are stored separately, the first 60 messages are loaded eagerly and older history is paged in 40-message batches. Deterministic `displayBlocks` and optional whitelisted `stageMotion` metadata are stored with assistant messages. Stage motion is presented only for the live response and is never replayed by history rendering, character switching or reload. Drafts, pins, recent characters and sticker favourites remain browser-local. If IndexedDB is unavailable, the client falls back to a non-persistent in-memory session instead of blocking chat.
