@@ -299,10 +299,6 @@ codex login</code></pre><p>在浏览器中登录你已有 ChatGPT 订阅的账�
     <dialog id="history-import-dialog" class="modal" aria-labelledby="history-import-title"><header><h2 id="history-import-title">合并本地备份</h2><button class="icon-button" type="button" data-close-dialog="history-import-dialog" aria-label="取消导入">×</button></header><p id="history-import-preview"></p><p>现有消息和草稿优先保留。模型凭证与世界状态不会导入；未完成的请求需由你明确重试。</p><p id="history-import-error" role="alert"></p><div class="settings-actions"><button id="confirm-history-import" class="primary-button" type="button">确认合并</button></div></dialog>
     <div id="toast" class="toast" role="status" hidden></div>
     <script type="module" src="/app.js?v=1.0.0"></script>
-    <script type="module">
-      import config from "/statistics/config.mjs";
-      import { installAnalytics } from "/statistics/bootstrap.mjs";
-      installAnalytics(config);
-    </script>
+    <script type="module" src="/statistics/start.mjs"></script>
   </body>
 </html>
