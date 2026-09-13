@@ -4611,6 +4611,10 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   requestSnapshot = { ...boundedRequest };
   delete requestSnapshot.credential;
   const requestBody = JSON.stringify(boundedRequest);
+  // Optional, isolated analytics signal: identifiers only; never inspect requestBody.
+  try {
+    window.snowStatisticsRequest?.(requestId);
+  } catch { /* Analytics must not affect chat submission. */ }
   const ownsRequest = () => ownsTypingState(characterId, requestId);
   const ownsVisibleRequest = () => ownsRequest() && state.selected === characterId;
   cancelPresentationQueue(characterId);

@@ -798,6 +798,45 @@ printf '%s\n' "$build_status"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "0")
 
+    def test_statistics_public_environment_is_optional_and_exact_opt_in(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        start = deploy.index("build_candidate_public_env() {")
+        end = deploy.index('\n}\n\nif [ ! -r "$static_env" ]', start) + 2
+        harness = r'''
+set -u
+test_root=$1
+flag=$2
+source_file="$test_root/public.env"
+output_file="$test_root/candidate.env"
+printf '%s\n' 'PUBLIC_ENABLED_PROVIDERS=openai' 'TURNSTILE_SITE_KEY=fixture-key' > "$source_file"
+if [ "$flag" != absent ]; then
+  printf 'PUBLIC_STATISTICS_ENABLED=%s\n' "$flag" >> "$source_file"
+fi
+candidate_app_version=1.0.0
+candidate_data_version=synthetic-data
+candidate_media_version=synthetic-media
+candidate_media_root=/synthetic-media
+candidate_sticker_version=synthetic-stickers
+candidate_sticker_root=/synthetic-stickers
+stat() {
+  case "$2" in
+    %u) printf '%s\n' 0 ;;
+    %a) printf '%s\n' 600 ;;
+    %h) printf '%s\n' 1 ;;
+    *) command stat "$@" ;;
+  esac
+}
+''' + deploy[start:end] + r'''
+build_candidate_public_env "$source_file" "$output_file" || exit 1
+grep '^PUBLIC_STATISTICS_ENABLED=' "$output_file"
+'''
+        for flag in ("absent", "false", "true", "True", "1", " true", "true ", ""):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as temporary_root:
+                result = self.run_posix_shell(harness, Path(temporary_root).as_posix(), flag)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            expected = "true" if flag == "true" else "false"
+            self.assertEqual(result.stdout.strip(), f"PUBLIC_STATISTICS_ENABLED={expected}")
+
     def test_compose_allows_a_colour_to_pin_verified_media(self) -> None:
         compose = self.read("compose.prod.yml")
         self.assertIn(

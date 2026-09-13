@@ -1,0 +1,27 @@
+.snow-statistics-notice {
+  position: fixed; z-index: 900; inset: auto 1rem 1rem auto;
+  box-sizing: border-box; width: min(36rem, calc(100vw - 2rem));
+  max-height: min(70vh, 40rem); display: flex; flex-direction: column; overflow: hidden;
+  padding: 1rem 1.25rem; border: 1px solid #627487; border-radius: .8rem;
+  background: #f5f8fb; color: #172534; box-shadow: 0 .5rem 2rem #0003;
+  font: 400 .875rem/1.6 system-ui, sans-serif;
+}
+.snow-statistics-notice[hidden] { display: none !important; }
+.snow-statistics-copy { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.snow-statistics-notice h2 { color: inherit; font: 600 1.05rem/1.4 system-ui, sans-serif; margin: 0 0 .65rem; }
+.snow-statistics-notice p { color: inherit; margin: .55rem 0; }
+.snow-statistics-notice a { color: #174f82; text-decoration: underline; }
+.snow-statistics-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: .5rem; margin-top: .8rem; }
+.snow-statistics-actions button, .snow-statistics-settings {
+  min-height: 2.75rem; padding: .45rem .65rem; border: 1px solid #627487;
+  border-radius: .35rem; background: #f5f8fb; color: #172534; font: inherit; cursor: pointer;
+}
+.snow-statistics-settings { font: 400 .75rem/1.4 system-ui, sans-serif; }
+.contact-footer > .snow-statistics-settings { grid-column: 1 / -1; width: 100%; margin-top: .35rem; }
+.snow-statistics-actions button:disabled { opacity: .6; cursor: default; }
+.snow-statistics-actions button:focus-visible, .snow-statistics-settings:focus-visible, .snow-statistics-notice a:focus-visible {
+  outline: 3px solid #1b73b2; outline-offset: 3px;
+}
+@media (max-width: 640px) {
+  .snow-statistics-notice { inset: auto 1rem 1rem; max-height: 60vh; }
+}

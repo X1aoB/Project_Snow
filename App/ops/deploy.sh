@@ -832,6 +832,7 @@ build_candidate_public_env() {
   # Older recovery/settings files predate personal subscriptions. Only an
   # explicit opt-in enables the new candidate, and the relay is single-worker.
   public_subscription_enabled=false
+  public_statistics_enabled=false
   public_web_concurrency=1
   carriage_return="$(printf '\r')"
   while IFS= read -r public_line || [ -n "$public_line" ]; do
@@ -853,7 +854,7 @@ build_candidate_public_env() {
     case "$public_key" in
       PUBLIC_ORIGIN|PUBLIC_DEVELOPMENT_ORIGINS|PUBLIC_ALLOW_INSECURE_DEV|\
       PUBLIC_AUTO_CREATE_SCHEMA|PUBLIC_TRUST_PROXY_HEADERS|PUBLIC_ENABLED_PROVIDERS|\
-      PUBLIC_SUBSCRIPTION_ENABLED|WEB_CONCURRENCY|\
+      PUBLIC_SUBSCRIPTION_ENABLED|PUBLIC_STATISTICS_ENABLED|WEB_CONCURRENCY|\
       PUBLIC_APP_VERSION|PUBLIC_DATA_VERSION|PUBLIC_MEDIA_VERSION|PUBLIC_MEDIA_ROOT|\
       PUBLIC_EXPERIENCE_NOTICE_VERSION|PUBLIC_ARRIVAL_PROBABILITY|\
       PUBLIC_STICKER_VERSION|PUBLIC_STICKER_ROOT|TURNSTILE_SITE_KEY|\
@@ -889,6 +890,10 @@ build_candidate_public_env() {
       PUBLIC_STATE_KEY_ID) public_source_state_key_id="$public_value" ;;
       PUBLIC_STATE_PREVIOUS_KEY_ID) public_source_previous_key_id="$public_value" ;;
       PUBLIC_SUBSCRIPTION_ENABLED) public_subscription_enabled="$public_value" ;;
+      PUBLIC_STATISTICS_ENABLED)
+        # Optional collection is enabled only by the exact reviewed opt-in.
+        [ "$public_value" != true ] || public_statistics_enabled=true
+        ;;
       WEB_CONCURRENCY) public_web_concurrency="$public_value" ;;
     esac
   done < "$source_file"
@@ -941,6 +946,7 @@ build_candidate_public_env() {
       'PUBLIC_AUTO_CREATE_SCHEMA=false' \
       'PUBLIC_TRUST_PROXY_HEADERS=true' || return 1
     printf 'PUBLIC_ENABLED_PROVIDERS=%s\n' "$public_enabled_providers" || return 1
+    printf 'PUBLIC_STATISTICS_ENABLED=%s\n' "$public_statistics_enabled" || return 1
     printf 'PUBLIC_SUBSCRIPTION_ENABLED=%s\nWEB_CONCURRENCY=1\n' \
       "$public_subscription_enabled" || return 1
     printf 'PUBLIC_APP_VERSION=%s\nPUBLIC_DATA_VERSION=%s\n' \

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
 import mimetypes
 import os
 import secrets
@@ -27,6 +26,8 @@ from pydantic import ValidationError
 from .async_store import AsyncPublicStore
 from .config import PublicSettings, Settings
 from .frontend_identity import read_frontend_identity
+from .public_logging import configure_public_logger
+from .public_statistics import install_statistics_config
 from .mvp_service import MVPProviderError, _normalize_expression_state, _normalize_stage_motion
 from .public_contracts import (
     ByokSessionRequest,
@@ -90,7 +91,7 @@ ANONYMOUS_COOKIE = "__Host-snow_anon"
 DEVELOPMENT_ANONYMOUS_COOKIE = "snow_anon_dev"
 MAX_BODY_BYTES = 64 * 1024
 REQUEST_BODY_TIMEOUT_SECONDS = 10
-LOGGER = logging.getLogger("snow.public")
+LOGGER = configure_public_logger()
 
 def _anonymous_cookie_name(settings: PublicSettings) -> str:
     return DEVELOPMENT_ANONYMOUS_COOKIE if settings.allow_insecure_dev else ANONYMOUS_COOKIE
@@ -1830,6 +1831,7 @@ def create_app(
 
     app_root = Path(__file__).resolve().parents[2]
     frontend_path = app_root / "public_frontend"
+    install_statistics_config(app, frontend_path)
     shared_design_path = app_root / "frontend" / "shared"
     immersive_assets_path = app_root / "frontend" / "assets" / "immersive"
     if public_settings.media_root.is_dir() and media_startup_status.get("status") == "ok":

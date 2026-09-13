@@ -25,6 +25,7 @@
     <link rel="apple-touch-icon" sizes="192x192" href="/shared/brand/xiaoji-icon-192.png" />
     <link rel="stylesheet" href="/shared/immersive.css?v=0.9.2" />
     <link rel="stylesheet" href="/app.css?v=1.0.0" />
+    <link rel="stylesheet" href="/statistics/notice.css" />
   </head>
   <body>
     <noscript><p>小吉终端是基于《尘白禁区》角色资料的开源 AI 角色互动应用。启用 JavaScript 后可使用文字通讯和面对面互动；也可阅读<a href="https://xiaob.dev/projects/project-snow/">项目介绍</a>及<a href="/privacy/">隐私与素材说明</a>。</p></noscript>
@@ -215,6 +216,7 @@
         <div class="notice-list">
           <p>API Key 只会短暂经过服务器内存，模型费用由你的 API 账户承担。</p>
           <p>聊天记录明文保存在当前浏览器，共享设备使用后请及时清理。</p>
+          <p>访问统计由你另行选择，拒绝不影响聊天。脱敏生成完成日志独立用于服务质量统计，不带访问统计标识；详见隐私说明。</p>
           <p>一次操作最多调用模型两次；到场反应和每 12 轮的连续性整理都可能使用其中的调用并计入额度。</p>
         </div>
         <label class="notice-choice"><input id="notice-auto-summary" type="checkbox" checked />自动整理连续性</label>
@@ -299,5 +301,6 @@ codex login</code></pre><p>在浏览器中登录你已有 ChatGPT 订阅的账�
     <dialog id="history-import-dialog" class="modal" aria-labelledby="history-import-title"><header><h2 id="history-import-title">合并本地备份</h2><button class="icon-button" type="button" data-close-dialog="history-import-dialog" aria-label="取消导入">×</button></header><p id="history-import-preview"></p><p>现有消息和草稿优先保留。模型凭证与世界状态不会导入；未完成的请求需由你明确重试。</p><p id="history-import-error" role="alert"></p><div class="settings-actions"><button id="confirm-history-import" class="primary-button" type="button">确认合并</button></div></dialog>
     <div id="toast" class="toast" role="status" hidden></div>
     <script type="module" src="/app.js?v=1.0.0"></script>
+    <script type="module" src="/statistics/start.mjs"></script>
   </body>
 </html>
