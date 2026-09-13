@@ -93,6 +93,18 @@ class PublicAPITests(TestCase):
         self.assertEqual(response.json()["state_schema"], "public-state-2")
         self.assertEqual(response.json()["generation_limits"]["max_provider_calls"], 2)
 
+    def test_optional_statistics_config_precedes_static_mount_without_business_state(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "public_frontend/statistics/config.mjs").read_bytes()
+        with patch.dict("os.environ", {"PUBLIC_STATISTICS_ENABLED": "true"}):
+            enabled = self.client.get("/statistics/config.mjs")
+        with patch.dict("os.environ", {"PUBLIC_STATISTICS_ENABLED": "false"}):
+            disabled = self.client.get("/statistics/config.mjs")
+        self.assertEqual(enabled.content, source.replace(b"  enabled: false,", b"  enabled: true,"))
+        self.assertEqual(disabled.content, source)
+        self.assertEqual(disabled.headers["cache-control"], "no-store, max-age=0")
+        self.assertNotIn("set-cookie", enabled.headers)
+        self.assertEqual(self.client.get("/public/v1/build-info").json()["state_schema"], "public-state-2")
+
     def test_full_health_exposes_only_aggregate_generation_counts(self) -> None:
         with patch.object(self.app.state.chat_service.repository, "dependency_health", return_value={}):
             response = self.client.get("/public/v1/health/full")

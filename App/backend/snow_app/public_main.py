@@ -27,6 +27,7 @@ from .async_store import AsyncPublicStore
 from .config import PublicSettings, Settings
 from .frontend_identity import read_frontend_identity
 from .public_logging import configure_public_logger
+from .public_statistics import install_statistics_config
 from .mvp_service import MVPProviderError, _normalize_expression_state, _normalize_stage_motion
 from .public_contracts import (
     ByokSessionRequest,
@@ -1830,6 +1831,7 @@ def create_app(
 
     app_root = Path(__file__).resolve().parents[2]
     frontend_path = app_root / "public_frontend"
+    install_statistics_config(app, frontend_path)
     shared_design_path = app_root / "frontend" / "shared"
     immersive_assets_path = app_root / "frontend" / "assets" / "immersive"
     if public_settings.media_root.is_dir() and media_startup_status.get("status") == "ok":
