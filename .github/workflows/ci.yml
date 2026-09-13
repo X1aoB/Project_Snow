@@ -175,6 +175,7 @@ jobs:
         run: >-
           python -m pytest
           tests/test_public_api.py
+          tests/test_public_logging.py
           tests/test_public_subscription.py
           tests/test_deployment_contracts.py -q
       - name: Validate Alembic offline migration

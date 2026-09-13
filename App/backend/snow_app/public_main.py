@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
 import mimetypes
 import os
 import secrets
@@ -27,6 +26,7 @@ from pydantic import ValidationError
 from .async_store import AsyncPublicStore
 from .config import PublicSettings, Settings
 from .frontend_identity import read_frontend_identity
+from .public_logging import configure_public_logger
 from .mvp_service import MVPProviderError, _normalize_expression_state, _normalize_stage_motion
 from .public_contracts import (
     ByokSessionRequest,
@@ -90,7 +90,7 @@ ANONYMOUS_COOKIE = "__Host-snow_anon"
 DEVELOPMENT_ANONYMOUS_COOKIE = "snow_anon_dev"
 MAX_BODY_BYTES = 64 * 1024
 REQUEST_BODY_TIMEOUT_SECONDS = 10
-LOGGER = logging.getLogger("snow.public")
+LOGGER = configure_public_logger()
 
 def _anonymous_cookie_name(settings: PublicSettings) -> str:
     return DEVELOPMENT_ANONYMOUS_COOKIE if settings.allow_insecure_dev else ANONYMOUS_COOKIE
