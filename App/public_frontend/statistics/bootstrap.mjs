@@ -63,7 +63,15 @@ export function installAnalytics(config, env = globalThis) {
       adapter = mounted.active ? mounted : null;
     };
     const stop = () => { adapter?.stop(); adapter = null; clearIdentifiers(config.app, env); discardEntry(env); };
+    const returnNoticeFocus = () => {
+      const defaultTrigger = document.getElementById("contact-panel")?.getAttribute("aria-hidden") === "true" ? "open-contacts" : "open-settings";
+      const returnTo = panel.classList.contains("snow-statistics-inline") ? settings : document.getElementById(defaultTrigger) || settings;
+      returnTo.focus();
+    };
     const choose = accepted => {
+      // Snapshot before start()/render() disables the focused Allow button.
+      // An external revoke must leave focus in the user's current task.
+      const restoreFocus = panel.contains(document.activeElement);
       failure = false;
       if (accepted && privacyBlocked(env)) { stop(); render(); return; }
       if (!accepted) stop();
@@ -75,13 +83,12 @@ export function installAnalytics(config, env = globalThis) {
         panel.hidden = true;
       } catch { failure = true; stop(); }
       render();
+      if (restoreFocus && panel.hidden) returnNoticeFocus();
     };
     allow.addEventListener("click", () => choose(true)); decline.addEventListener("click", () => choose(false));
     const closeNotice = () => {
       panel.hidden = true; render();
-      const defaultTrigger = document.getElementById("contact-panel")?.getAttribute("aria-hidden") === "true" ? "open-contacts" : "open-settings";
-      const returnTo = panel.classList.contains("snow-statistics-inline") ? settings : document.getElementById(defaultTrigger) || settings;
-      returnTo.focus();
+      returnNoticeFocus();
     };
     close.addEventListener("click", closeNotice);
     settings.addEventListener("click", () => {
