@@ -806,6 +806,15 @@ class PublicFrontendE2ETests(TestCase):
         self._configure_model(page)
         page.locator("#message-input").fill("统计隔离测试正文")
 
+    @staticmethod
+    def _open_statistics_settings(page):
+        if not page.locator("#settings-dialog").is_visible():
+            if page.locator("#contact-panel").get_attribute("aria-hidden") == "true":
+                page.locator("#open-contacts").click()
+            page.locator("#open-settings").click()
+        page.locator('[data-settings-tab="privacy"]').click()
+        page.locator("#settings-panel-privacy #snow-statistics-settings").click()
+
     def test_statistics_disabled_leaves_chat_and_storage_independent(self):
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
@@ -862,7 +871,7 @@ class PublicFrontendE2ETests(TestCase):
                         self.assertNotIn("sk-e2e-only-not-real", payload)
                         self.assertNotIn("request_complete", payload)
                         self.assertEqual(page.evaluate("window.__statisticsCsp"), [])
-                        page.locator("#snow-statistics-settings").click()
+                        self._open_statistics_settings(page)
                         page.get_by_role("button", name="关闭访问统计", exact=True).click()
                         self.assertEqual(page.evaluate("typeof window.snowStatisticsRequest"), "undefined")
                         self.assertEqual(page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('snow.statistics.'))"),
@@ -893,8 +902,10 @@ class PublicFrontendE2ETests(TestCase):
                 first, second = context.new_page(), context.new_page()
                 first.goto(self.base_url, wait_until="networkidle")
                 first.locator("#accept-experience-notice").click()
-                first.get_by_role("heading", name="可选访问统计，由你选择").wait_for(state="visible")
-                self.assertIn("不受此访问统计选择影响", first.locator("#snow-statistics-notice").inner_text())
+                first.get_by_role("heading", name="允许访问统计吗？").wait_for(state="visible")
+                self.assertIn("不受此开关影响", first.locator("#snow-statistics-notice").inner_text())
+                self.assertEqual(first.locator(".contact-footer #snow-statistics-settings").count(), 0)
+                self.assertEqual(first.locator('#snow-statistics-notice a[href="/privacy/"]').count(), 1)
                 self.assertEqual(sent, [])
                 self._assert_no_horizontal_overflow(first)
                 evidence = os.getenv("SNOW_STATISTICS_SCREENSHOT_DIR")
@@ -910,13 +921,25 @@ class PublicFrontendE2ETests(TestCase):
                 first.get_by_role("button", name="暂不允许", exact=True).click()
                 second.goto(self.base_url, wait_until="networkidle")
                 self.assertEqual(second.evaluate("typeof window.snowStatisticsRequest"), "undefined")
-                first.locator("#open-contacts").click()
-                first.locator("#snow-statistics-settings").click()
+                self._open_statistics_settings(first)
+                self.assertTrue(first.locator("#settings-dialog #snow-statistics-notice").is_visible())
+                self._assert_no_horizontal_overflow(first)
+                if evidence:
+                    first.screenshot(path=str(target / "snow-statistics-settings-mobile390.png"), animations="disabled")
+                    first.set_viewport_size({"width": 1440, "height": 1000})
+                    first.screenshot(path=str(target / "snow-statistics-settings-desktop1440.png"), animations="disabled")
+                    first.set_viewport_size({"width": 390, "height": 844})
+                first.locator("#snow-statistics-notice button").last.focus()
+                first.keyboard.press("Escape")
+                self.assertTrue(first.locator("#settings-dialog").is_visible())
+                self.assertFalse(first.locator("#snow-statistics-notice").is_visible())
+                self.assertEqual(first.evaluate("document.activeElement.id"), "snow-statistics-settings")
+                self._open_statistics_settings(first)
                 first.get_by_role("button", name="允许访问统计", exact=True).click()
                 self.assertEqual(first.evaluate("typeof window.snowStatisticsRequest"), "function")
                 second.reload(wait_until="networkidle")
                 self.assertEqual(second.evaluate("typeof window.snowStatisticsRequest"), "function")
-                first.locator("#snow-statistics-settings").click()
+                self._open_statistics_settings(first)
                 first.get_by_role("button", name="关闭访问统计", exact=True).click()
                 second.wait_for_function("typeof window.snowStatisticsRequest === 'undefined'")
                 self.assertEqual(second.evaluate("Object.keys(localStorage).filter(k => /snow.statistics.*(anonymous|session)$/.test(k))"), [])

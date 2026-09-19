@@ -2,12 +2,12 @@ import { clearIdentifiers, consentExpiry, discardEntry, mountAnalytics, privacyB
 
 const COPY = {
   zh: {
-    title: "可选访问统计，由你选择", allow: "允许访问统计", decline: "暂不允许", withdraw: "关闭访问统计", close: "收起说明",
-    settings: "访问统计设置", on: "访问统计已开启", off: "访问统计已关闭", detail: "完整数据与隐私说明",
+    title: "允许访问统计吗？", allow: "允许访问统计", decline: "暂不允许", withdraw: "关闭访问统计", close: "收起说明",
+    settings: "访问统计设置", on: "访问统计已开启", off: "访问统计已关闭", detail: "查看隐私说明",
     web: "允许后，仅记录允许页面的访问和试玩入口点击，用于改进本站。不会读取工具输入、聊天内容或密钥。",
-    snow: "允许后，仅记录页面访问、公开角色选择和请求编号，用于了解使用与入口转化。不会读取聊天正文、密钥、反馈或聊天数据库。",
-    quality: "独立的服务质量统计：小吉终端已有的脱敏生成完成日志会用于计算已记录生成请求的数量、结果与耗时，不带访问统计标识；不受此访问统计选择影响。",
-    retention: "两个网站各自使用最多30天的统计标识与同意偏好。撤销立即停止后续访问统计并清除本来源的统计标识；已接收事件仍按7天目标、匿名辅助记录最多30天、日聚合最多90天处理。公开页只显示延迟汇总，并保护小样本。",
+    snow: "记录页面访问、角色选择和请求编号，帮助改进体验。不收集聊天内容或密钥。",
+    quality: "另行统计已记录生成请求的结果和耗时，不含聊天内容，不受此开关影响。",
+    retention: "可随时在“设置 → 隐私”中关闭；拒绝不影响聊天。",
     blocked: "浏览器隐私信号已阻止访问统计。", unavailable: "浏览器无法保存统计偏好，访问统计保持关闭。",
   },
   en: {
@@ -28,6 +28,8 @@ export function installAnalytics(config, env = globalThis) {
     const key = `snow.statistics.v1.${config.app}.consent`, now = () => env.Date?.now() ?? Date.now();
     const document = env.document;
     if (document.getElementById?.("snow-statistics-settings")) return;
+    const settingsHost = config.app === "project_snow" ? document.getElementById("snow-statistics-settings-host") : null;
+    if (config.app === "project_snow" && !settingsHost) return;
     const make = (tag, parent) => { const node = document.createElement(tag); parent?.append(node); return node; };
     const panel = make("section"), settings = make("button");
     panel.id = "snow-statistics-notice"; panel.className = "snow-statistics-notice";
@@ -75,9 +77,26 @@ export function installAnalytics(config, env = globalThis) {
       render();
     };
     allow.addEventListener("click", () => choose(true)); decline.addEventListener("click", () => choose(false));
-    close.addEventListener("click", () => { panel.hidden = true; render(); settings.focus(); });
-    settings.addEventListener("click", () => { panel.hidden = !panel.hidden; render(); if (!panel.hidden) close.focus(); });
-    panel.addEventListener("keydown", event => { if (event.key === "Escape") { panel.hidden = true; render(); settings.focus(); } });
+    const closeNotice = () => {
+      panel.hidden = true; render();
+      const defaultTrigger = document.getElementById("contact-panel")?.getAttribute("aria-hidden") === "true" ? "open-contacts" : "open-settings";
+      const returnTo = panel.classList.contains("snow-statistics-inline") ? settings : document.getElementById(defaultTrigger) || settings;
+      returnTo.focus();
+    };
+    close.addEventListener("click", closeNotice);
+    settings.addEventListener("click", () => {
+      const inline = panel.classList.contains("snow-statistics-inline");
+      if (settingsHost) { settingsHost.append(panel); panel.classList.add("snow-statistics-inline"); }
+      panel.hidden = settingsHost && !inline ? false : !panel.hidden;
+      render(); if (!panel.hidden) close.focus();
+    });
+    panel.addEventListener("keydown", event => {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeNotice(); }
+    });
+    if (settingsHost) document.getElementById("settings-dialog")?.addEventListener("close", () => {
+      if (!panel.classList.contains("snow-statistics-inline")) return;
+      panel.hidden = true; panel.classList.remove("snow-statistics-inline"); document.body.append(panel); render();
+    });
     // A grant in another tab applies on a future page load; withdrawal is immediate.
     env.addEventListener("storage", event => {
       if (event.key !== null && event.key !== key) return;
@@ -95,7 +114,8 @@ export function installAnalytics(config, env = globalThis) {
       if (config.app === "project_snow") discardEntry(env);
     }
     render();
-    (document.querySelector("footer") || document.body).append(settings);
+    (settingsHost || document.querySelector("footer") || document.body).append(settings);
+    if (settingsHost) document.getElementById("snow-statistics-disabled").hidden = true;
     document.body.append(panel);
     return Object.freeze({ stop: () => choose(false) });
   } catch { /* Missing DOM/storage must never break the host application. */ }
