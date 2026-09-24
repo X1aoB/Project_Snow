@@ -360,6 +360,64 @@ const errorMessages = {
   state_invalid: "本地场景状态仍然无效，请重新发送本条消息。",
 };
 
+const PUBLIC_ERROR_STAGES = new Set([
+  "content_validation",
+  "state_validation",
+  "character_data",
+  "generation_queue",
+  "retrieval",
+  "provider",
+  "generation_validation",
+  "idempotency_store",
+  "transport",
+  "unknown",
+]);
+const errorStageMessages = {
+  content_validation: "请求内容无法通过校验，请检查动作和对白后重试。",
+  state_validation: "本地场景状态已变化，请重新发送本条消息。",
+  character_data: "当前角色资料暂时不可用，请稍后重试。",
+  generation_queue: "当前生成请求较多，请稍后重试。",
+  retrieval: "角色资料暂时无法读取，请稍后重试。",
+  provider: "模型厂商暂时无法响应，请稍后重试。",
+  generation_validation: "角色回复未通过校验，请稍后重试。",
+  idempotency_store: "请求状态暂时无法保存，请稍后重试。",
+  transport: "连接暂时中断，请稍后重试。",
+  unknown: "请求失败，请稍后重试。",
+};
+const errorStageByCode = {
+  invalid_request: "content_validation",
+  sticker_unavailable: "content_validation",
+  invalid_movement_location: "content_validation",
+  invalid_presence_request: "content_validation",
+  request_too_large: "content_validation",
+  request_read_timeout: "transport",
+  request_timeout: "transport",
+  request_failed: "transport",
+  stream_disconnected: "transport",
+  service_draining: "generation_queue",
+  subject_generation_busy: "generation_queue",
+  generation_queue_full: "generation_queue",
+  generation_queue_timeout: "generation_queue",
+  generation_interrupted: "unknown",
+  generation_failed: "unknown",
+  provider_not_enabled: "provider",
+  provider_credential_rejected: "provider",
+  provider_model_discovery_failed: "provider",
+  provider_network_error: "provider",
+  provider_timeout: "provider",
+  provider_rate_limited: "provider",
+  provider_request_failed: "provider",
+  upstream_invalid_response: "generation_validation",
+  role_guard_rejected: "generation_validation",
+  public_database_unavailable: "idempotency_store",
+  request_id_conflict: "idempotency_store",
+  request_in_progress: "idempotency_store",
+  state_invalid: "state_validation",
+  state_subject_mismatch: "state_validation",
+  invalid_presence_transition: "state_validation",
+  character_unavailable: "character_data",
+};
+
 const STATE_PACKAGE_RECOVERY_CODES = new Set(["state_subject_mismatch", "state_invalid"]);
 const MIA_CHARACTER_ID = "702f4375675b";
 const MIA_BUNDLED_EXPRESSION_MANIFEST = "/assets/expressions/mia/manifest.json";
@@ -417,9 +475,33 @@ function escapeHtml(value) {
   span.textContent = plain(value);
   return span.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+function normalizedErrorStage(value) {
+  const candidate = plain(value).trim();
+  return PUBLIC_ERROR_STAGES.has(candidate) ? candidate : "";
+}
+function _errorStageForClientCode(code) {
+  return errorStageByCode[plain(code)] || "unknown";
+}
+function chatError(code = "request_failed", detail = {}, status = 0) {
+  const error = new Error(plain(code) || "request_failed");
+  const payload = detail && typeof detail === "object" ? detail : {};
+  error.requestId = plain(payload.request_id);
+  error.errorStage = normalizedErrorStage(payload.stage);
+  error.retryable = typeof payload.retryable === "boolean" ? payload.retryable : null;
+  const retryAfter = Number(payload.retry_after_seconds);
+  error.retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0
+    ? Math.min(300, Math.floor(retryAfter))
+    : 0;
+  error.httpStatus = Number(status) || 0;
+  return error;
+}
 function displayError(error) {
   const code = error instanceof Error ? error.message : plain(error);
   if (code === "credential_invalid" && state.provider === SUBSCRIPTION_PROVIDER) return errorMessages.subscription_not_connected;
+  const stage = normalizedErrorStage(error instanceof Error ? error.errorStage : "");
+  if (stage && ["request_failed", "chat_failed", "generation_failed"].includes(code)) {
+    return errorStageMessages[stage] || errorMessages.request_failed;
+  }
   return errorMessages[code] || (/^[a-z][a-z0-9_]*$/.test(code) ? errorMessages.request_failed : code);
 }
 
@@ -958,6 +1040,7 @@ function normalizeMessage(message) {
       ? structuredClone(message.requestSnapshot)
       : null,
     errorCode: message.errorCode || "",
+    errorStage: normalizedErrorStage(message.errorStage || message.error_stage),
     source: message.source || "chat",
     conversationSegmentId: plain(message.conversationSegmentId || message.conversation_segment_id),
     usage: message.usage && typeof message.usage === "object" ? { ...message.usage } : null,
@@ -2404,6 +2487,25 @@ function renderRequestStatus() {
       }
     };
     target.append(" ", refresh);
+  }
+  // The face-to-face surface intentionally hides the text timeline. Keep the
+  // same retry action reachable from its status row when the last user turn
+  // failed, so the preserved action/speech draft is not the only recovery
+  // path. Text mode already renders this action beside the failed message.
+  if (!pending && currentThread()?.channel === "in_person") {
+    const failedMessage = [...(currentThread()?.messages || [])]
+      .reverse()
+      .find((message) => message.role === "user" && message.status === "failed");
+    if (failedMessage) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "request-retry";
+      retry.dataset.retryMessage = failedMessage.id;
+      retry.textContent = "重试";
+      retry.disabled = globalRequestBusy();
+      retry.onclick = () => retryMessage(failedMessage.id);
+      target.append(" ", retry);
+    }
   }
   const stop = $("stop-waiting");
   if (stop) stop.hidden = !pending || ["arrival", "presenting"].includes(pending.phase);
@@ -4504,7 +4606,7 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       performanceId = normalizePerformanceId(payload.performance_id, returnedChannel);
       contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
     }
-    if (event === "error") throw new Error(payload.code || "chat_failed");
+    if (event === "error") throw chatError(payload.code || "chat_failed", payload);
   };
   while (true) {
     const { value, done } = await reader.read();
@@ -4523,18 +4625,35 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
 
 function recoverableChatError(error) {
   const code = error instanceof Error ? error.message : plain(error);
-  return error instanceof TypeError || ["stream_disconnected", "request_in_progress", "provider_network_error", "request_failed"].includes(code);
-}
-
-function shouldReuseChatRequest(error) {
-  const code = error instanceof Error ? error.message : plain(error);
+  if (error instanceof Error && error.retryable === false) return false;
   return error instanceof TypeError || [
     "stream_disconnected",
     "request_in_progress",
     "provider_network_error",
     "provider_timeout",
+    "request_timeout",
+    "request_failed",
+    "generation_queue_full",
+    "generation_queue_timeout",
+    "subject_generation_busy",
+  ].includes(code);
+}
+
+function shouldReuseChatRequest(error) {
+  const code = error instanceof Error ? error.message : plain(error);
+  if (error instanceof Error && error.retryable === false) return false;
+  return error instanceof TypeError || [
+    "stream_disconnected",
+    "request_in_progress",
+    "request_failed",
+    "provider_network_error",
+    "provider_timeout",
+    "request_timeout",
     "request_cancelled",
     "subscription_result_unknown",
+    "generation_queue_full",
+    "generation_queue_timeout",
+    "subject_generation_busy",
   ].includes(code);
 }
 
@@ -4599,7 +4718,8 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     userMessage.requestSnapshot = null;
     userMessage.status = "failed";
     userMessage.errorCode = error instanceof Error ? error.message : "request_too_large";
-    state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode });
+    userMessage.errorStage = "content_validation";
+    state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode, errorStage: userMessage.errorStage });
     await dbPutThread(thread);
     if (state.selected === characterId) {
       renderAll();
@@ -4630,6 +4750,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   userMessage.conversationSegmentId = thread.conversationSegmentId;
   userMessage.status = "pending";
   userMessage.errorCode = "";
+  userMessage.errorStage = "";
   if (state.selected === characterId) renderAll();
   setTypingState({ characterId, requestId, channel: userMessage.communicationChannel, phase: "waiting" });
   setRequestStatus(characterId, "", requestId);
@@ -4656,14 +4777,23 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       if (attempt > 0) {
         if (!recoverableChatError(lastError) || requestController.signal.aborted) throw lastError;
         setRequestStatus(characterId, `连接中断，正在恢复（${attempt}/3）……`, requestId);
-        await abortableDelay(backoffs[attempt], requestController.signal);
+        const retryAfterMs = Number(lastError?.retryAfterSeconds || 0) * 1000;
+        await abortableDelay(Math.max(backoffs[attempt], retryAfterMs), requestController.signal);
       }
       try {
         const response = await fetch(`${apiRoot}/chat/stream`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, signal: requestController.signal, body: requestBody });
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));
-          const serverCode = plain(payload?.detail?.code);
-          const error = new Error(serverCode || ([502, 503, 504].includes(response.status) ? "provider_network_error" : "chat_failed"));
+          const detail = payload?.detail && typeof payload.detail === "object" ? payload.detail : {};
+          const serverCode = plain(detail.code);
+          const fallbackCode = [502, 503, 504].includes(response.status) ? "provider_network_error" : "chat_failed";
+          const error = chatError(serverCode || fallbackCode, detail, response.status);
+          if (!error.retryAfterSeconds) {
+            const headerRetryAfter = Number(response.headers.get("Retry-After"));
+            if (Number.isFinite(headerRetryAfter) && headerRetryAfter > 0) {
+              error.retryAfterSeconds = Math.min(300, Math.floor(headerRetryAfter));
+            }
+          }
           throw error;
         }
         result = await consumeChatStream(response, { characterId, requestId, fallbackChannel: userMessage.communicationChannel });
@@ -4692,7 +4822,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     thread.turnCount += 1;
     thread.continuityDecision = "";
     thread.lastActiveAt = Date.now();
-    if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: "", usage: result.usage });
+    if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: "", errorStage: "", usage: result.usage });
     await dbPutThread(thread);
     updateTypingPhase(characterId, requestId, "presenting");
     await presentAssistantTurn(characterId, requestId, assistantMessage);
@@ -4735,7 +4865,8 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       forgetSubscription("disconnected", "subscription_not_connected");
       renderSubscriptionSettings();
     }
-    if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode });
+    userMessage.errorStage = normalizedErrorStage(error instanceof Error ? error.errorStage : "") || _errorStageForClientCode(userMessage.errorCode);
+    if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode, errorStage: userMessage.errorStage });
     await dbPutThread(thread);
     if (ownsVisibleRequest()) renderAll();
     if (ownsRequest()) {
@@ -5209,7 +5340,7 @@ async function submitFeedback(event) {
   const includeContext = $("feedback-include-context").checked;
   const assistantSpeech = renderBlocksText(assistantBlocks.filter((block) => block.type !== "action"));
   try {
-    const contextual = includeContext ? { chat_request_id: chatRequestId || null, character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: assistantSpeech, user_content_blocks: userBlocks, assistant_content_blocks: assistantBlocks, error_code: latest.errorCode || userMessage.errorCode || "" } : {};
+    const contextual = includeContext ? { chat_request_id: chatRequestId || null, character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: assistantSpeech, user_content_blocks: userBlocks, assistant_content_blocks: assistantBlocks, error_code: latest.errorCode || userMessage.errorCode || "", error_stage: latest.errorStage || userMessage.errorStage || "" } : {};
     const payload = await api("/feedback", { method: "POST", timeoutMs: 20000, body: JSON.stringify({ request_id: id(), body: $("feedback-body").value, qq: $("feedback-qq").value, turnstile_token: await tokenForFeedback(), include_conversation_context: includeContext, request_stage: target?.communicationChannel || thread.channel || "immersive-web", ui_surface: "immersive-web", ...contextual }) });
     $("feedback-dialog").close();
     $("feedback-form").reset();

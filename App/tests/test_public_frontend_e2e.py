@@ -151,6 +151,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
     turnstile_site_key = ""
     chat_payloads: list[dict[str, object]] = []
     chat_attempts: dict[str, int] = {}
+    chat_failure_mode = "success"
     presence_resolve_count = 0
     arrival_mode = "success"
     transition_mode = "success"
@@ -490,6 +491,24 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 f'event: meta\ndata: {json.dumps({"request_id": payload.get("request_id"), "character_id": payload.get("character_id"), "provider": "openai", "model": "gpt-e2e", "communication_channel": channel}, ensure_ascii=False)}\n\n'
             ).encode()
             request_id = str(payload.get("request_id") or "")
+            if type(self).chat_failure_mode in {"request_failed", "request_failed_twice"}:
+                attempts = type(self).chat_attempts
+                attempts[request_id] = attempts.get(request_id, 0) + 1
+                failure_limit = 4 if type(self).chat_failure_mode == "request_failed" else 2
+                if attempts[request_id] <= failure_limit:
+                    self._json(
+                        {
+                            "detail": {
+                                "code": "request_failed",
+                                "request_id": request_id,
+                                "retryable": True,
+                                "stage": "transport",
+                                "retry_after_seconds": 0,
+                            }
+                        },
+                        status=503,
+                    )
+                    return
             if payload.get("message") == "取消重连测试":
                 attempts = type(self).chat_attempts
                 attempts[request_id] = attempts.get(request_id, 0) + 1
@@ -769,6 +788,7 @@ class PublicFrontendE2ETests(TestCase):
         PublicFrontendHandler.turnstile_site_key = ""
         PublicFrontendHandler.chat_payloads = []
         PublicFrontendHandler.chat_attempts = {}
+        PublicFrontendHandler.chat_failure_mode = "success"
         PublicFrontendHandler.presence_resolve_count = 0
         PublicFrontendHandler.arrival_mode = "success"
         PublicFrontendHandler.transition_mode = "success"
@@ -3146,6 +3166,91 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(next(iter(PublicFrontendHandler.chat_attempts.values())), 2)
             self.assertEqual(page.locator("#timeline .message.user").count(), 1)
             self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
+            browser.close()
+
+    def test_in_person_action_and_speech_retries_uncertain_request_with_same_id(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#stage-speech").get_by_text("你来了。").wait_for(state="visible")
+            page.locator("#presence-arrival-loading").wait_for(state="hidden")
+
+            PublicFrontendHandler.chat_failure_mode = "request_failed_twice"
+            action = "牵着凯西娅向她的房间走去"
+            speech = "偷偷跑当然是你相对于其他姑娘们来说的，至于特训嘛，我可没说具体是特训什么"
+            page.locator("#toggle-action").click()
+            page.locator("#action-input").fill(action)
+            page.locator("#message-input").fill(speech)
+            page.locator("#send-message").click()
+            page.locator("#stage-speech").get_by_text("晚上好，分析员。").wait_for(state="visible", timeout=12000)
+
+            self.assertEqual(len(PublicFrontendHandler.chat_payloads), 3)
+            request_ids = {payload.get("request_id") for payload in PublicFrontendHandler.chat_payloads}
+            self.assertEqual(len(request_ids), 1)
+            for payload in PublicFrontendHandler.chat_payloads:
+                self.assertEqual(
+                    payload.get("content_blocks"),
+                    [{"type": "action", "text": action}, {"type": "speech", "text": speech}],
+                )
+                self.assertEqual(payload.get("communication_channel"), "in_person")
+            stored_users = page.evaluate(
+                """async () => {
+                    const request = indexedDB.open('project-snow-public', 4);
+                    const db = await new Promise((resolve, reject) => {
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                    const tx = db.transaction('messages', 'readonly');
+                    const rows = await new Promise((resolve, reject) => {
+                        const values = [];
+                        const cursor = tx.objectStore('messages').openCursor();
+                        cursor.onsuccess = () => {
+                            const item = cursor.result;
+                            if (!item) return resolve(values);
+                            if (item.value.role === 'user') values.push(item.value);
+                            item.continue();
+                        };
+                        cursor.onerror = () => reject(cursor.error);
+                    });
+                    db.close();
+                    return rows;
+                }"""
+            )
+            self.assertEqual(len(stored_users), 1)
+            self.assertEqual(page.locator("#action-input").input_value(), "")
+            self.assertEqual(page.locator("#message-input").input_value(), "")
+            browser.close()
+
+    def test_failed_in_person_action_and_speech_keeps_both_drafts_for_retry(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#stage-speech").get_by_text("你来了。").wait_for(state="visible")
+            page.locator("#presence-arrival-loading").wait_for(state="hidden")
+
+            PublicFrontendHandler.chat_failure_mode = "request_failed"
+            action = "牵着凯西娅向她的房间走去"
+            speech = "偷偷跑当然是你相对于其他姑娘们来说的，至于特训嘛，我可没说具体是特训什么"
+            page.locator("#toggle-action").click()
+            page.locator("#action-input").fill(action)
+            page.locator("#message-input").fill(speech)
+            page.locator("#send-message").click()
+            page.locator("#request-status").get_by_text("连接暂时中断，请稍后重试。").wait_for(state="visible", timeout=12000)
+
+            self.assertEqual(page.locator("#action-input").input_value(), action)
+            self.assertEqual(page.locator("#message-input").input_value(), speech)
+            self.assertEqual(sum(PublicFrontendHandler.chat_attempts.values()), 4)
+            self.assertTrue(page.locator("[data-retry-message]").count())
             browser.close()
 
     def test_stop_waiting_cancels_reconnect_backoff(self) -> None:

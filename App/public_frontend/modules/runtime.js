@@ -23,17 +23,31 @@ function createHttpClient(root, fetcher = fetch) {
             payload = await response.json();
           } catch (error) {
             if (controller.signal.aborted) throw error;
-            throw new Error(response.ok ? "invalid_response" : "request_failed");
+            const failure = new Error(response.ok ? "invalid_response" : "request_failed");
+            failure.errorStage = "transport";
+            failure.httpStatus = response.status;
+            throw failure;
           }
         }
         if (!response.ok) {
           const detail = payload?.detail;
-          throw new Error(typeof detail?.code === "string" ? detail.code : "request_failed");
+          const failure = new Error(typeof detail?.code === "string" ? detail.code : "request_failed");
+          failure.requestId = typeof detail?.request_id === "string" ? detail.request_id : "";
+          failure.errorStage = typeof detail?.stage === "string" ? detail.stage : "";
+          failure.retryable = typeof detail?.retryable === "boolean" ? detail.retryable : null;
+          const retryAfter = Number(detail?.retry_after_seconds);
+          failure.retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(300, Math.floor(retryAfter)) : 0;
+          failure.httpStatus = response.status;
+          throw failure;
         }
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("invalid_response");
         return payload;
       } catch (error) {
-        if (controller.signal.aborted && !callerSignal?.aborted && timeoutMs > 0) throw new Error("request_timeout");
+        if (controller.signal.aborted && !callerSignal?.aborted && timeoutMs > 0) {
+          const failure = new Error("request_timeout");
+          failure.errorStage = "transport";
+          throw failure;
+        }
         throw error;
       } finally {
         if (timeout !== null) clearTimeout(timeout);

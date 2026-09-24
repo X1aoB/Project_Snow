@@ -5728,6 +5728,7 @@ class MVPService:
         mode: str = "immersive",
         world_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        retrieval_started = time.perf_counter()
         mode = self._normalize_mode(mode)
         dialogue_boundary = self._dialogue_boundary(message, mode)
         mentioned_characters = self._resolve_character_mentions(message)
@@ -6027,6 +6028,48 @@ class MVPService:
                 )
         elif live_scene and live_scene.get("status") == "ambiguous":
             response_contract = "用户同时提到了多名少女。自然询问分析员具体想问哪一位，不要猜测或合并她们的位置。"
+        source_type_counts: dict[str, int] = {}
+        source_layer_counts: dict[str, int] = {}
+        for hit in filtered:
+            citation = hit.get("citation") if isinstance(hit, dict) else {}
+            source_type = str((citation or {}).get("source_type") or "unknown")
+            metadata = (
+                hit.get("metadata")
+                if isinstance(hit, dict) and isinstance(hit.get("metadata"), dict)
+                else {}
+            )
+            layer = source_layer(
+                source_type,
+                bool((metadata or {}).get("requires_costume_context")),
+            )
+            source_type_counts[source_type] = source_type_counts.get(source_type, 0) + 1
+            source_layer_counts[layer] = source_layer_counts.get(layer, 0) + 1
+        graph_status = str((graph_context or {}).get("status") or "not_requested")
+        if graph_status not in {"not_requested", "ok", "degraded"}:
+            graph_status = "unknown"
+        live_scene_status = str((live_scene or {}).get("status") or "none")
+        if live_scene_status not in {"none", "active", "ambiguous"}:
+            live_scene_status = "unknown"
+        degraded_services = []
+        if not vector_available:
+            degraded_services.append("vector")
+        if graph_status == "degraded":
+            degraded_services.append("graph")
+        retrieval_diagnostics = {
+            "fusion": "rrf" if vector_available else "lexical_only",
+            "vector_available": bool(vector_available),
+            "returned_documents": len(filtered),
+            "source_type_counts": dict(sorted(source_type_counts.items())),
+            "source_layer_counts": dict(sorted(source_layer_counts.items())),
+            "graph_status": graph_status,
+            "live_scene_status": live_scene_status,
+            "degraded_services": degraded_services,
+            "retrieval_latency_ms": max(0, int((time.perf_counter() - retrieval_started) * 1000)),
+            "query_intents": list(query_intents),
+            "question_focus": question_focus,
+            "cross_character_hits": len(cross_character_story_hits),
+            "provisional_relation_count": len(provisional),
+        }
         return {
             "character": character,
             "view": view,
@@ -6052,6 +6095,7 @@ class MVPService:
             "graph_context": graph_context,
             "dialogue_profile": self._dialogue_profiles().get(character.character_id),
             "session_context": session_context or self._empty_session_context(),
+            "retrieval_diagnostics": retrieval_diagnostics,
         }
 
     def _system_prompt(
@@ -10365,6 +10409,14 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
                 "commit": str(item.get("commit") or "")[:16],
             })
             break
+        retrieval_diagnostics = {
+            **(context.get("retrieval_diagnostics") or {}),
+            "evidence_hit": bool(used_document_ids),
+            "guard_fallback": bool(guardrail_fallback or deterministic_fallback),
+            "guard_resolution": guard_resolution,
+            "guard_violation_count": len(guardrail_violations),
+            "final_guard_violation_count": len(final_guardrail_violations),
+        }
         result = {
             "message_id": "mvp_message_" + sha256(
                 f"{resolved_session}\x1f{request_key or _utc_now()}\x1f{message}".encode()
@@ -10413,6 +10465,7 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
                 "vector_available": context["vector_available"],
                 "returned_documents": len(context["hits"]),
                 "dialogue_style_profile_id": (context.get("dialogue_profile") or {}).get("profile_id"),
+                "diagnostics": retrieval_diagnostics,
             },
             "tool_calls": list((context.get("tool_context") or {}).get("tool_calls") or []),
             "tool_results": list((context.get("tool_context") or {}).get("tool_results") or []),
