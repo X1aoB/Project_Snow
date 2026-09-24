@@ -1022,6 +1022,7 @@ class PublicAPITests(TestCase):
                 ],
                 "request_stage": "text",
                 "error_code": "forged_error",
+                "error_stage": "provider",
                 "degraded_services": ["forged_dependency"],
                 "include_conversation_context": False,
                 "turnstile_token": "development-bypass",
@@ -1040,6 +1041,7 @@ class PublicAPITests(TestCase):
         self.assertEqual(context["assistant_content_blocks"], [])
         self.assertEqual(context["request_stage"], "")
         self.assertEqual(context["error_code"], "")
+        self.assertEqual(context["error_stage"], "")
         self.assertEqual(context["degraded_services"], [])
 
     def test_request_body_larger_than_64kb_is_rejected(self) -> None:
@@ -1388,6 +1390,8 @@ class PublicAPITests(TestCase):
                 "request_id": str(uuid4()),
                 "chat_request_id": chat_request_id,
                 "body": "这是一条带诊断的反馈",
+                "error_code": "request_failed",
+                "error_stage": "transport",
                 "turnstile_token": "development-bypass",
             },
         )
@@ -1395,6 +1399,8 @@ class PublicAPITests(TestCase):
         context = self.store.feedback_rows()[0]["context"]
         self.assertEqual(context["chat_request_id"], chat_request_id)
         self.assertEqual(context["generation_outcome"], "normalized")
+        self.assertEqual(context["error_code"], "request_failed")
+        self.assertEqual(context["error_stage"], "transport")
         self.assertEqual(
             context["response_adjustments"],
             ["public_punctuation_normalized"],
@@ -1660,11 +1666,12 @@ class PublicAPITests(TestCase):
         )
 
     def test_text_channel_rejects_action_blocks(self) -> None:
+        request_id = str(uuid4())
         response = self.client.post(
             "/public/v1/chat/stream",
             headers={"Origin": "http://testserver"},
             json={
-                "request_id": str(uuid4()),
+                "request_id": request_id,
                 "provider": "openai",
                 "credential": "x" * 40,
                 "model": "gpt-test",
@@ -1675,6 +1682,78 @@ class PublicAPITests(TestCase):
         )
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["detail"]["code"], "invalid_request")
+        self.assertEqual(response.json()["detail"]["request_id"], request_id)
+        self.assertEqual(response.json()["detail"]["stage"], "content_validation")
+        self.assertFalse(response.json()["detail"]["retryable"])
+
+    def test_in_person_action_and_speech_blocks_preserve_order_and_text(self) -> None:
+        credential, _ = self._byok()
+        payload = {
+            "request_id": str(uuid4()),
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": MVP_CHARACTERS[0].character_id,
+            "communication_channel": "in_person",
+            "content_blocks": [
+                {"type": "action", "text": "牵着凯西娅向她的房间走去"},
+                {"type": "speech", "text": "偷偷跑当然是你相对于其他姑娘们来说的，至于特训嘛，我可没说具体是特训什么"},
+            ],
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        generated = {
+            "answer": "她看向你。\n好。",
+            "content_blocks": [
+                {"type": "action", "text": "她看向你。"},
+                {"type": "speech", "text": "好。"},
+            ],
+            "response_adjustments": [],
+        }
+        with patch.object(self.app.state.chat_service.mvp, "chat", return_value=generated) as chat:
+            response = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            chat.call_args.kwargs["analyst_content_blocks"],
+            [
+                {"type": "action", "text": "牵着凯西娅向她的房间走去"},
+                {"type": "speech", "text": "偷偷跑当然是你相对于其他姑娘们来说的，至于特训嘛，我可没说具体是特训什么"},
+            ],
+        )
+        self.assertIn('"block_index":0', response.text)
+        self.assertIn('"block_type":"action"', response.text)
+
+    def test_chat_terminal_error_sse_includes_request_id_stage_and_retryability(self) -> None:
+        credential, _ = self._byok()
+        request_id = str(uuid4())
+        payload = {
+            "request_id": request_id,
+            "provider": "openai",
+            "credential": credential,
+            "model": "gpt-test",
+            "character_id": MVP_CHARACTERS[0].character_id,
+            "communication_channel": "in_person",
+            "content_blocks": [{"type": "speech", "text": "连接诊断测试"}],
+            "recent_history": [],
+            "history_summary": "",
+            "state_package": "",
+        }
+        with patch.object(self.app.state.chat_service, "chat", side_effect=RuntimeError("synthetic generation failure")):
+            response = self.client.post(
+                "/public/v1/chat/stream",
+                headers={"Origin": "http://testserver"},
+                json=payload,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"code":"generation_failed"', response.text)
+        self.assertIn(f'"request_id":"{request_id}"', response.text)
+        self.assertIn('"stage":"unknown"', response.text)
+        self.assertIn('"retryable":true', response.text)
 
     def test_presence_rejects_tampered_state_package(self) -> None:
         signed = sign_state(

@@ -1549,6 +1549,10 @@ class ApplicationLayerTests(unittest.TestCase):
         selected_ids = [hit["citation"]["document_id"] for hit in context["hits"]]
         self.assertEqual(context["question_focus"], "current_condition")
         self.assertIn("doc_1eec692886123f76", selected_ids)
+        retrieval_diagnostics = context["retrieval_diagnostics"]
+        self.assertEqual(retrieval_diagnostics["question_focus"], "current_condition")
+        self.assertGreaterEqual(retrieval_diagnostics["returned_documents"], 1)
+        self.assertIn("source_layer_counts", retrieval_diagnostics)
 
     @pytest.mark.runtime_data
     def test_mvp_logistics_retrieval_is_scoped_to_character_and_armor(self) -> None:

@@ -106,6 +106,45 @@ _PUBLIC_NORMALIZATION_ADJUSTMENTS = frozenset({
     "public_punctuation_normalized",
 })
 
+_PUBLIC_ERROR_STAGES = frozenset({
+    "content_validation",
+    "state_validation",
+    "character_data",
+    "generation_queue",
+    "retrieval",
+    "provider",
+    "generation_validation",
+    "idempotency_store",
+    "transport",
+    "unknown",
+})
+_PUBLIC_NON_RETRYABLE_ERROR_CODES = frozenset({
+    "sticker_unavailable",
+    "character_unavailable",
+    "generation_interrupted",
+    "role_guard_rejected",
+    "upstream_invalid_response",
+})
+
+
+def _public_error_payload(
+    request_id: Any,
+    code: str,
+    stage: str,
+    *,
+    retry_after_seconds: int | None = None,
+) -> dict[str, Any]:
+    safe_stage = stage if stage in _PUBLIC_ERROR_STAGES else "unknown"
+    payload: dict[str, Any] = {
+        "code": str(code or "request_failed"),
+        "retryable": str(code or "request_failed") not in _PUBLIC_NON_RETRYABLE_ERROR_CODES,
+        "request_id": str(request_id or ""),
+        "stage": safe_stage,
+    }
+    if isinstance(retry_after_seconds, int) and not isinstance(retry_after_seconds, bool) and retry_after_seconds > 0:
+        payload["retry_after_seconds"] = min(retry_after_seconds, 300)
+    return payload
+
 
 def _public_immersive_thinking_decision(
     provider: ProviderSpec, max_provider_calls: int = 2, reasoning_effort: str | None = None,
@@ -1774,6 +1813,11 @@ class PublicChatService:
                 "reaction": None,
                 "model_called": model_called,
                 "terminal_error": code,
+                "error": _public_error_payload(
+                    prepared.get("arrival_id"),
+                    code,
+                    str((diagnostics or {}).get("error_stage") or "unknown"),
+                ),
                 "diagnostics": diagnostics or {},
             }.items()
             if key != "state"
@@ -2643,6 +2687,11 @@ class PublicChatService:
             "movement_status": {"status": "state_unchanged"},
             "response_adjustments": response_adjustments or [],
             "terminal_error": code,
+            "error": _public_error_payload(
+                request.request_id,
+                code,
+                error_stage,
+            ),
             "diagnostics": diagnostics,
         }
 
