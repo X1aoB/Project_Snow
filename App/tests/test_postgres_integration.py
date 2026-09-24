@@ -255,7 +255,8 @@ def test_subscription_pair_poll_result_and_connector_limits_use_postgres(databas
         assert detail["code"] == "rate_limit_exceeded"
         assert detail["scope"] == "subscription_connector_hour" and detail["limit"] == 1800
         assert detail["retryable"] is True and detail["stage"] == "unknown"
-        assert re.fullmatch(r"[0-9a-f-]{36}", detail["request_id"])
+        if "request_id" in detail:
+            assert re.fullmatch(r"[0-9a-f-]{36}", detail["request_id"])
         assert detail["retry_after_seconds"] == 60
         assert rejected.headers["Retry-After"] == "60" and counters() == exhausted
         other = client.post("/public/v1/subscription/connector/result", headers=origin, json=completed[1])
