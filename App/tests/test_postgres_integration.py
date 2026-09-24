@@ -251,8 +251,12 @@ def test_subscription_pair_poll_result_and_connector_limits_use_postgres(databas
         exhausted = counters()
         rejected = client.post("/public/v1/subscription/connector/result", headers=origin, json=completed[0])
         assert rejected.status_code == 429
-        assert rejected.json()["detail"] == {"code": "rate_limit_exceeded",
-                                              "scope": "subscription_connector_hour", "limit": 1800}
+        detail = rejected.json()["detail"]
+        assert detail["code"] == "rate_limit_exceeded"
+        assert detail["scope"] == "subscription_connector_hour" and detail["limit"] == 1800
+        assert detail["retryable"] is True and detail["stage"] == "unknown"
+        assert re.fullmatch(r"[0-9a-f-]{36}", detail["request_id"])
+        assert detail["retry_after_seconds"] == 60
         assert rejected.headers["Retry-After"] == "60" and counters() == exhausted
         other = client.post("/public/v1/subscription/connector/result", headers=origin, json=completed[1])
         assert other.status_code == 200
