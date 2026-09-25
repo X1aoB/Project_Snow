@@ -692,7 +692,12 @@ class PublicStore:
         return public_code
 
     def claim_feedback_email(self, limit: int = 10) -> list[dict[str, Any]]:
-        """Claim due mail rows without exposing their values to callers that do not need them."""
+        """Claim due mail rows with only the fields used by the email worker.
+
+        The worker needs the submitted feedback body and encrypted optional QQ
+        contact to render the operator notification.  Conversation context,
+        diagnostics and other request state remain excluded from this query.
+        """
 
         now = _utcnow()
         locked_until = now + timedelta(minutes=10)
@@ -702,7 +707,7 @@ class PublicStore:
                     text(
                         """
                     SELECT o.outbox_id, o.feedback_id, o.attempt_count,
-                           f.public_code, f.created_at
+                           f.public_code, f.created_at, f.body_text, f.qq_cipher
                     FROM public_feedback_email_outbox o
                     JOIN public_feedback f ON f.feedback_id = o.feedback_id
                     WHERE f.expires_at > :now
@@ -795,12 +800,12 @@ class PublicStore:
         return {str(row["status"]): int(row["count"] or 0) for row in rows}
 
     def queue_feedback_email(self, identifier: str, *, force: bool = False) -> dict[str, Any] | None:
-        """Queue one receipt email by feedback ID or public receipt code.
+        """Queue one feedback email by feedback ID or public receipt code.
 
         The operation is intentionally idempotent while a delivery is pending.
         A sent receipt is only queued again when an explicitly authenticated
         operator requests ``force``; the mailer still receives receipt fields
-        only and never reads feedback content.
+        only and never reads feedback context or diagnostics.
         """
 
         identifier = str(identifier or "").strip()

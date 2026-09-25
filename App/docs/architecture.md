@@ -89,10 +89,13 @@ MVP feedback stream. The PostgreSQL `public_feedback_triage` table records the
 latest operator decision without rewriting the submitted row; the private
 admin list joins that decision while keeping the default `pending_triage`
 state for new reports. The receipt outbox is separate: a public report is
-queued at submission, the dedicated mailer sends only its public number and
-timestamp, and an authenticated loopback admin action can safely requeue the
-latest report or an explicit number. Feedback text, conversation context,
-diagnostics, QQ and SMTP credentials never enter that mail path.
+queued at submission, the dedicated mailer sends its public number, timestamp,
+submitted feedback body and optional QQ contact, and an authenticated loopback
+admin action can safely requeue the latest report or an explicit number.
+Conversation context, diagnostics, IP data and SMTP credentials never enter
+that mail path. The mailer role is granted only `body_text` and encrypted
+`qq_cipher`; the QQ key is mounted separately and is used only while rendering
+this operator email.
 
 ## B: persona-first hybrid retrieval
 

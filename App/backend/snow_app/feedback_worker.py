@@ -1,4 +1,4 @@
-"""Dedicated least-privilege feedback receipt mail worker."""
+"""Dedicated least-privilege feedback notification worker."""
 
 from __future__ import annotations
 

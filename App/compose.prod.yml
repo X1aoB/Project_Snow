@@ -125,9 +125,11 @@ services:
       PUBLIC_DATABASE_PORT: "5432"
       PUBLIC_DATABASE_NAME: project_snow
       PUBLIC_FEEDBACK_SMTP_PASSWORD_FILE: /run/project-snow-secrets/feedback_smtp_password
+      PUBLIC_QQ_KEY_FILE: /run/project-snow-secrets/public_qq_key
     volumes:
       - /etc/project-snow/secrets/feedback_mailer_database_password:/run/host-secrets/feedback_mailer_database_password:ro
       - /etc/project-snow/secrets/feedback_smtp_password:/run/host-secrets/feedback_smtp_password:ro
+      - /etc/project-snow/secrets/public_qq_key:/run/host-secrets/public_qq_key:ro
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m

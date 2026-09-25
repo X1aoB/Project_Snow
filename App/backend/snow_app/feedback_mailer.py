@@ -1,7 +1,8 @@
 """Asynchronous feedback notification worker.
 
-The public API only enqueues a reference to a feedback row.  Email carries a
-receipt number, never user text, conversation context, diagnostics, or QQ.
+The public API only enqueues a reference to a feedback row.  Email carries
+the submitted feedback body and optional QQ contact, while conversation
+context, diagnostics, IP data and credentials remain outside this path.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable
 
 from .config import PublicSettings
+from .public_security import decrypt_qq
 from .public_store import PublicStore
 
 
@@ -40,13 +42,28 @@ class FeedbackMailer:
 
     def _message(self, row: dict[str, Any]) -> EmailMessage:
         receipt = str(row.get("public_code") or row.get("feedback_id") or "")[:96]
+        body = str(row.get("body_text") or "").strip()
+        encrypted_qq = str(row.get("qq_cipher") or "").strip()
+        if encrypted_qq:
+            try:
+                qq = decrypt_qq(self.settings, encrypted_qq)
+            except Exception as exc:
+                # Treat a missing/invalid QQ key as a transient delivery
+                # failure.  The worker never sends the encrypted value.
+                raise RuntimeError("feedback_qq_decryption_failed") from exc
+        else:
+            qq = ""
         lines = [
             "Project Snow 新反馈",
             f"反馈编号：{receipt}",
             f"提交时间：{row.get('created_at')}",
             "",
-            "为保护用户隐私，通知邮件不包含反馈正文、对话、诊断或联系方式。",
-            "请通过 SSH 隧道访问私有管理端查看。",
+            "反馈内容：",
+            body or "（未提供）",
+            "",
+            f"联系 QQ：{qq or '未提供'}",
+            "",
+            "本邮件不包含对话上下文、诊断信息、IP 地址或凭据。",
         ]
         message = EmailMessage()
         message["From"] = self.settings.feedback_email_from
