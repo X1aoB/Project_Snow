@@ -69,7 +69,7 @@ def test_empty_database_upgrade_and_repeated_upgrade(database):
         tables = inspect(schema).get_table_names()
         assert "public_request_leases" in tables
         assert "public_feedback_email_outbox" in tables
-        assert schema.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260907_0005"
+        assert schema.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260925_0006"
     finally:
         schema.close()
 
@@ -348,7 +348,7 @@ def test_failed_migration_rolls_back_ddl_and_revision_atomically(database, tmp_p
     (tmp_path / "failed_revision.py").write_text(
         "from alembic import op\n"
         "revision = 'synthetic_failure'\n"
-        "down_revision = '20260907_0005'\n"
+        "down_revision = '20260925_0006'\n"
         "branch_labels = None\n"
         "depends_on = None\n"
         "def upgrade():\n"
@@ -372,6 +372,6 @@ def test_failed_migration_rolls_back_ddl_and_revision_atomically(database, tmp_p
         assert "failed_migration_probe" not in inspect(connection).get_table_names()
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            == "20260907_0005"
+            == "20260925_0006"
         )
     assert PublicStore("", engine=database).claim_request("after-failure", "subject", "hash")[0] == "claimed"

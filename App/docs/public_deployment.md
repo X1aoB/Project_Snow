@@ -66,6 +66,23 @@ Preserve the currently configured Cloudflare Access policy throughout inactive-c
 - `/srv/project-snow/media/stickers/releases/<version>`: independently verified sticker releases. `ops/fetch-promote-sticker-media.sh <version> stage-only` verifies 363 resources and 363 thumbnails without changing the legacy `current` symlink.
 - `/etc/project-snow/secrets`: root-only secret files, mode `0700`; individual files mode `0600`. The public image starts with a minimal root entrypoint, copies only its approved secret files into a private container tmpfs with mode `0400`, and immediately drops to the unprivileged `snow` user before Alembic, Uvicorn or admin code runs. Secret values are never placed in Compose environment interpolation.
 - `/etc/project-snow/feedback-mailer.env`: root-owned mode `0600` non-secret mailer settings. It must contain exactly `PUBLIC_FEEDBACK_EMAIL_TO`, `PUBLIC_FEEDBACK_EMAIL_FROM`, `PUBLIC_FEEDBACK_SMTP_HOST`, `PUBLIC_FEEDBACK_SMTP_PORT` and `PUBLIC_FEEDBACK_SMTP_USERNAME`; database and SMTP passwords remain separate root-only mounted files. Sender, host and username may all be empty to disable receipt email, but partial SMTP configuration is rejected. Deploy and promote reject extra keys, duplicate keys, malformed values, a symlink or unsafe ownership/mode.
+
+公网反馈的邮件通知由 `public_feedback_email_outbox` 异步发送。提交成功后会立即写入待发送项，独立 mailer 最多每 30 秒领取一次；邮件只包含反馈编号和提交时间，不包含正文、对话、诊断或 QQ。管理员可通过本机 `127.0.0.1:19090` 的私有管理端按时间倒序查看反馈，使用 `POST /admin/v1/feedback/latest/email` 发送最新一条的编号回执，或使用 `POST /admin/v1/feedback/{feedback_id-or-public_code}/email?force=true` 重发已发送回执。未指定 `force` 时，待发送或已发送项不会重复入队。
+
+公网反馈的解决状态以 `public_feedback_triage` 追加事件保存，默认是 `pending_triage`；私有管理端的 `POST /admin/v1/feedback/{feedback_id-or-public_code}/triage` 接受 `pending_triage`、`planned`、`resolved`、`ignored`、`fixed_verified` 等状态。列表始终按 `created_at DESC` 返回，并附带最新状态和备注，因此忘记反馈编号时可以先查看今早的最新记录，再按编号标记或发送回执。旧的 MVP JSONL 反馈状态线路继续保留，两条线路互不覆盖。
+
+操作员可在服务器上通过 SSH 隧道执行以下只读/入队操作；令牌从 root-only 文件读取，不要把它复制到聊天或命令历史：
+
+```sh
+TOKEN="$(cat /etc/project-snow/secrets/public_admin_token)"
+curl -fsS -H "Authorization: Bearer $TOKEN" \
+  'http://127.0.0.1:19090/admin/v1/feedback?limit=10'
+curl -fsS -X POST -H "Authorization: Bearer $TOKEN" \
+  'http://127.0.0.1:19090/admin/v1/feedback/latest/email'
+curl -fsS -H "Authorization: Bearer $TOKEN" \
+  'http://127.0.0.1:19090/admin/v1/feedback/email/status'
+unset TOKEN
+```
 - `/etc/project-snow/cloudflared`: root-only named-tunnel configuration and credentials. Ingress maps only `snow.xiaob.dev` to `http://caddy:8080`, followed by an explicit `http_status:404` catch-all.
 - `/etc/project-snow/origin-edge`: root-owned mode-`0700` TLS material. Each public certificate pair has an immutable `releases/<bundle-sha256>` directory containing `origin-cert.pem`, `origin-key.pem`, `aop-ca.pem` and exact install metadata as root-owned, single regular files with mode `0400`. The public Origin CA certificate and public AOP trust CA are fixed by Git and the CI manifest. The sole private origin key is never stored in Git or a release archive: `deploy.ps1` uploads it to one SHA-named file inside the deploy-owned mode-`0700` inbox, and the root runner requires exact SHA-256, owner/group, mode `0600`, size, link-count and `O_NOFOLLOW` checks before OpenSSL proves it matches the Git-bound certificate. The verified bundle is installed by same-filesystem atomic rename and the inbox copy is removed. Existing bundles are never replaced, so a failed stage cannot damage live TLS material.
 - The application Caddy port `8080` exists only on internal Docker networks and is not published on the host. `cloudflared` reaches it through the existing `edge-client` network. A separate least-privilege Caddy sidecar terminates origin TLS on container port `8443` and reaches only `caddy:8080` through the dedicated internal `origin-backend` network; the sidecar is not attached to the shared `edge-client` network.

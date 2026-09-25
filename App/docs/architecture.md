@@ -84,6 +84,16 @@ retrieval latency, guard-fallback rate, terminal error rate, and duplicate-reque
 rate as acceptance gates. The default ranking and source data remain unchanged
 until those measurements pass review.
 
+Public feedback follows the same append-only triage principle as the internal
+MVP feedback stream. The PostgreSQL `public_feedback_triage` table records the
+latest operator decision without rewriting the submitted row; the private
+admin list joins that decision while keeping the default `pending_triage`
+state for new reports. The receipt outbox is separate: a public report is
+queued at submission, the dedicated mailer sends only its public number and
+timestamp, and an authenticated loopback admin action can safely requeue the
+latest report or an explicit number. Feedback text, conversation context,
+diagnostics, QQ and SMTP credentials never enter that mail path.
+
 ## B: persona-first hybrid retrieval
 
 1. The lakehouse creates source-aware chunks from specialized manifests and their referenced raw pages.
