@@ -66,6 +66,16 @@ at 3 seconds, the generation gate at 4 active slots with 8 queued slots, and
 each operation at no more than two provider calls. These limits remain fixed
 while retrieval weights and reranking are evaluated.
 
+The synchronous public store is isolated behind a bounded adapter with five
+transaction workers and eight waiting positions. This is deliberately aligned
+with the 4-active/8-queued generation envelope: a short rate-limit, claim or
+terminal-write transaction cannot reject an otherwise admitted chat only
+because the adapter has fewer waiting positions than the generation gate. The
+adapter remains fail-closed when all 13 positions are occupied; that response
+is retryable, carries `Retry-After: 2`, and is included in backpressure
+observability. This is a database capacity bound, not permission to add
+Uvicorn workers or to bypass the single-process generation gate.
+
 Retrieval optimization is incremental. First measure synthetic golden queries
 for persona facts, current state, relationships, costume/style, casual turns,
 cross-character mentions, and dependency failures. Then tune lane weighting or

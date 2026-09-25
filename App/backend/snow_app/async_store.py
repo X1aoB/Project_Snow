@@ -20,7 +20,15 @@ class AsyncPublicStore:
     PostgreSQL statement/lock/connect timeouts bound the active operation.
     """
 
-    def __init__(self, store: PublicStore, *, workers: int = 5, queued: int = 5):
+    def __init__(self, store: PublicStore, *, workers: int = 5, queued: int = 8):
+        """Create a bounded adapter for synchronous store transactions.
+
+        The public generation gate admits four active requests and eight
+        waiting requests.  Store calls are short, but every admitted request
+        performs at least one transaction before it reaches that gate.  Keep
+        eight waiting store operations so a full public generation envelope is
+        not rejected solely by the adapter's local backpressure limit.
+        """
         self.store = store
         self.owner_token = secrets.token_hex(16)
         # SQLite's test StaticPool shares one connection: serialize transactions.

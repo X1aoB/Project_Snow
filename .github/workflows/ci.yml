@@ -413,10 +413,19 @@ jobs:
       - name: Prepare generated contract fixtures
         run: python scripts/prepare_ci_runtime.py
       - name: Full portable Python suite
+        id: portable-python
         run: >-
           python -m pytest tests
           -m "not runtime_data"
           --ignore=tests/test_public_frontend_e2e.py -q
+          --junitxml=portable-python-junit.xml
+      - name: Upload portable Python failure report
+        if: ${{ always() && steps.portable-python.outcome == 'failure' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: portable-python-junit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: App/portable-python-junit.xml
+          if-no-files-found: warn
       - name: Validate shared immersive design layer
         run: python scripts/validate_shared_design.py
       - name: Isolated public browser suite
