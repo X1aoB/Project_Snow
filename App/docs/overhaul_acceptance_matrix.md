@@ -51,7 +51,7 @@
 | D3 | 数据版本保留与复用内容真实性 | 实测通过（合成及真实 Neo4j） | 激活不隐式 GC；Qdrant 比较 ID、payload、维度、距离与归一化向量；Neo4j 比较节点/边属性、标签和端点。真实图服务破坏场景通过；不能仅凭数量复用。[data_loader.py](../backend/snow_app/data_loader.py)、[test_data_release.py](../tests/test_data_release.py)。 |
 | D4 | 固定 22 角色离线质量门禁 | 实测通过（合成行为） | 固定 22×8 正反例执行生产规则，覆盖通道、动作、文本清理和检索范围；不是只数 case 数量，也不代表自然度或人物还原获得人工批准。[test_dialogue_quality.py](../tests/test_dialogue_quality.py)、[dialogue_quality_v1.md](../tests/fixtures/dialogue_quality_v1.md)。 |
 | D5 | 全角色真实模型人格/RAG评测与成本 | 尚未完成 | 需固定 provider/model、提示和检索版本，评估人物一致性、证据引用、幻觉、拒答及成本；先约定调用预算与验收阈值。TTS 的 300 元不自动授权本项支出。[test_dialogue_quality.py](../tests/test_dialogue_quality.py)、[public_service.py](../backend/snow_app/public_service.py)。 |
-| D6 | 反馈隐私、去重、保留和邮件 outbox | 实测通过（隔离）；生产权限拆分待验收 | 反馈脱敏、去重、过期清理与 outbox 重试有回归；未以真实邮件发送或生产凭据轮换作为本轮证据。[feedback_mailer.py](../backend/snow_app/feedback_mailer.py)、[test_feedback_regressions.py](../tests/test_feedback_regressions.py)。 |
+| D6 | 反馈隐私、去重、保留和邮件 outbox | 实测通过（隔离）；生产权限拆分待验收 | 反馈脱敏、去重、过期清理与 outbox 重试有回归；通知邮件现在按明确授权包含正文和可选 QQ，worker 只获 `body_text`、加密 `qq_cipher` 及独立 QQ-key 挂载，不读取上下文；仍未以真实邮件发送或生产凭据轮换作为本轮证据。[feedback_mailer.py](../backend/snow_app/feedback_mailer.py)、[test_feedback_mailer.py](../tests/test_feedback_mailer.py)。 |
 
 ## E UI、用户流程与浏览器可靠性
 

@@ -130,7 +130,7 @@ class DeploymentContractTests(TestCase):
         self.assertNotIn("turnstile_secret", admin)
         self.assertNotIn("public_credential_key", admin)
         self.assertIn("feedback_smtp_password", mailer)
-        self.assertNotIn("public_qq_key", mailer)
+        self.assertIn("public_qq_key", mailer)
         self.assertNotIn("public_database_url", mailer)
         self.assertNotIn("PUBLIC_ENV_FILE", mailer)
         self.assertIn("PUBLIC_MAILER_ENV_FILE", mailer)
@@ -140,6 +140,10 @@ class DeploymentContractTests(TestCase):
             "/etc/project-snow/secrets/feedback_mailer_database_password:"
             "/run/secrets/feedback_mailer_database_password:ro",
             compose,
+        )
+        self.assertIn(
+            "/etc/project-snow/secrets/public_qq_key:/run/host-secrets/public_qq_key:ro",
+            mailer,
         )
         entrypoint = self.read("infra/public-entrypoint.sh")
         self.assertIn("feedback_mailer_database_password", entrypoint)
@@ -165,6 +169,17 @@ class DeploymentContractTests(TestCase):
         self.assertNotIn("body_text", migration)
         self.assertNotIn("context_json", migration)
         self.assertNotIn("qq_cipher", migration)
+
+    def test_feedback_mailer_role_reads_only_requested_notification_details(self) -> None:
+        migration = self.read(
+            "migrations/versions/20260926_0007_feedback_mailer_details.py"
+        )
+        self.assertIn(
+            "GRANT SELECT (body_text, qq_cipher)",
+            migration,
+        )
+        self.assertNotIn("context_json", migration)
+        self.assertNotIn("ip_fingerprint", migration)
 
     def test_public_edge_blocks_private_health_and_caps_request_bodies(self) -> None:
         caddyfile = self.read("infra/Caddyfile")

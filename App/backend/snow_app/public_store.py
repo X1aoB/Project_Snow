@@ -147,6 +147,39 @@ CREATE INDEX IF NOT EXISTS public_request_lease_expiry_idx ON public_request_lea
 """
 
 
+FEEDBACK_TRIAGE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS public_feedback_triage (
+    event_id VARCHAR(64) PRIMARY KEY,
+    feedback_id VARCHAR(36) NOT NULL REFERENCES public_feedback(feedback_id) ON DELETE CASCADE,
+    status VARCHAR(32) NOT NULL CHECK (
+        status IN (
+            'pending_triage', 'planned', 'resolved', 'ignored',
+            'open', 'needs_verification', 'fixed_verified',
+            'not_reproduced', 'duplicate', 'superseded_by_architecture'
+        )
+    ),
+    note VARCHAR(2000) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE INDEX IF NOT EXISTS public_feedback_triage_feedback_idx
+    ON public_feedback_triage (feedback_id, created_at DESC, event_id DESC);
+"""
+
+
+PUBLIC_FEEDBACK_TRIAGE_STATUSES = {
+    "pending_triage",
+    "planned",
+    "resolved",
+    "ignored",
+    "open",
+    "needs_verification",
+    "fixed_verified",
+    "not_reproduced",
+    "duplicate",
+    "superseded_by_architecture",
+}
+
+
 class PublicStore:
     def __init__(self, database_url: str, *, engine: Engine | None = None):
         self.database_url = database_url
@@ -189,7 +222,9 @@ class PublicStore:
 
     def create_schema(self) -> None:
         with self.begin() as connection:
-            for statement in (SCHEMA_SQL + OUTBOX_SCHEMA_SQL + LEASE_SCHEMA_SQL).split(";"):
+            for statement in (
+                SCHEMA_SQL + OUTBOX_SCHEMA_SQL + LEASE_SCHEMA_SQL + FEEDBACK_TRIAGE_SCHEMA_SQL
+            ).split(";"):
                 if statement.strip():
                     connection.execute(text(statement))
 
@@ -204,6 +239,7 @@ class PublicStore:
         try:
             with self.begin() as connection:
                 connection.execute(text("SELECT request_id FROM public_request_leases LIMIT 0"))
+                connection.execute(text("SELECT event_id FROM public_feedback_triage LIMIT 0"))
                 return True
         except PublicStoreUnavailable:
             return False
@@ -656,7 +692,12 @@ class PublicStore:
         return public_code
 
     def claim_feedback_email(self, limit: int = 10) -> list[dict[str, Any]]:
-        """Claim due mail rows without exposing their values to callers that do not need them."""
+        """Claim due mail rows with only the fields used by the email worker.
+
+        The worker needs the submitted feedback body and encrypted optional QQ
+        contact to render the operator notification.  Conversation context,
+        diagnostics and other request state remain excluded from this query.
+        """
 
         now = _utcnow()
         locked_until = now + timedelta(minutes=10)
@@ -666,7 +707,7 @@ class PublicStore:
                     text(
                         """
                     SELECT o.outbox_id, o.feedback_id, o.attempt_count,
-                           f.public_code, f.created_at
+                           f.public_code, f.created_at, f.body_text, f.qq_cipher
                     FROM public_feedback_email_outbox o
                     JOIN public_feedback f ON f.feedback_id = o.feedback_id
                     WHERE f.expires_at > :now
@@ -758,14 +799,179 @@ class PublicStore:
             )
         return {str(row["status"]): int(row["count"] or 0) for row in rows}
 
+    def queue_feedback_email(self, identifier: str, *, force: bool = False) -> dict[str, Any] | None:
+        """Queue one feedback email by feedback ID or public receipt code.
+
+        The operation is intentionally idempotent while a delivery is pending.
+        A sent receipt is only queued again when an explicitly authenticated
+        operator requests ``force``; the mailer still receives receipt fields
+        only and never reads feedback context or diagnostics.
+        """
+
+        identifier = str(identifier or "").strip()
+        if not identifier:
+            return None
+        now = _utcnow()
+        with self.begin() as connection:
+            row = connection.execute(
+                text(
+                    """
+                    SELECT f.feedback_id, f.public_code, f.created_at,
+                           o.outbox_id, o.status, o.next_attempt_at, o.sent_at
+                    FROM public_feedback f
+                    LEFT JOIN public_feedback_email_outbox o ON o.feedback_id = f.feedback_id
+                    WHERE f.feedback_id = :identifier OR f.public_code = :identifier
+                    LIMIT 1
+                    """
+                ),
+                {"identifier": identifier},
+            ).mappings().first()
+            if not row:
+                return None
+
+            outbox_id = str(row["outbox_id"] or "")
+            status = str(row["status"] or "")
+            queued = False
+            if not outbox_id:
+                outbox_id = secrets.token_hex(18)
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO public_feedback_email_outbox
+                            (outbox_id, feedback_id, status, attempt_count,
+                             next_attempt_at, created_at, expires_at)
+                        SELECT :outbox_id, feedback_id, 'pending', 0,
+                               :now, :now, expires_at
+                        FROM public_feedback
+                        WHERE feedback_id = :feedback_id
+                        ON CONFLICT (feedback_id) DO NOTHING
+                        """
+                    ),
+                    {
+                        "outbox_id": outbox_id,
+                        "feedback_id": row["feedback_id"],
+                        "now": now,
+                    },
+                )
+                status = "pending"
+                queued = True
+            elif status == "sent" and force:
+                updated = connection.execute(
+                    text(
+                        """
+                        UPDATE public_feedback_email_outbox
+                        SET status = 'pending', next_attempt_at = :now,
+                            locked_until = NULL, last_error_code = NULL, sent_at = NULL
+                        WHERE outbox_id = :outbox_id AND status = 'sent'
+                        """
+                    ),
+                    {"outbox_id": outbox_id, "now": now},
+                )
+                queued = int(updated.rowcount or 0) == 1
+                if queued:
+                    status = "pending"
+
+            return {
+                "feedback_id": str(row["feedback_id"]),
+                "public_code": str(row["public_code"]),
+                "created_at": row["created_at"],
+                "outbox_id": outbox_id,
+                "email_status": status or "pending",
+                "queued": queued,
+            }
+
+    def triage_feedback(
+        self,
+        identifier: str,
+        status: str,
+        note: str = "",
+    ) -> dict[str, Any] | None:
+        """Append an auditable resolution event for one public feedback row."""
+
+        identifier = str(identifier or "").strip()
+        status = str(status or "").strip()
+        if status not in PUBLIC_FEEDBACK_TRIAGE_STATUSES:
+            raise ValueError("unsupported feedback triage status")
+        if not identifier:
+            return None
+        now = _utcnow()
+        event_id = "public_feedback_triage_" + secrets.token_hex(24)
+        with self.begin() as connection:
+            row = connection.execute(
+                text(
+                    """
+                    SELECT feedback_id, public_code
+                    FROM public_feedback
+                    WHERE feedback_id = :identifier OR public_code = :identifier
+                    LIMIT 1
+                    """
+                ),
+                {"identifier": identifier},
+            ).mappings().first()
+            if not row:
+                return None
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO public_feedback_triage
+                        (event_id, feedback_id, status, note, created_at)
+                    VALUES (:event_id, :feedback_id, :status, :note, :created_at)
+                    """
+                ),
+                {
+                    "event_id": event_id,
+                    "feedback_id": row["feedback_id"],
+                    "status": status,
+                    "note": str(note or "").strip()[:2000],
+                    "created_at": now,
+                },
+            )
+        return {
+            "event_id": event_id,
+            "feedback_id": str(row["feedback_id"]),
+            "public_code": str(row["public_code"]),
+            "status": status,
+            "note": str(note or "").strip()[:2000],
+            "created_at": now,
+        }
+
     def feedback_rows(self, limit: int = 100) -> list[dict[str, Any]]:
         with self.begin() as connection:
             rows = (
                 connection.execute(
                     text(
                         """
-                    SELECT feedback_id, public_code, body_text, context_json, qq_cipher, created_at, expires_at
-                    FROM public_feedback ORDER BY created_at DESC LIMIT :limit
+                    SELECT f.feedback_id, f.public_code, f.body_text, f.context_json,
+                           f.qq_cipher, f.created_at, f.expires_at,
+                           COALESCE(
+                               (SELECT o.status
+                                FROM public_feedback_email_outbox o
+                                WHERE o.feedback_id = f.feedback_id),
+                               'pending'
+                           ) AS email_status,
+                           COALESCE(
+                               (SELECT t.status
+                                FROM public_feedback_triage t
+                                WHERE t.feedback_id = f.feedback_id
+                                ORDER BY t.created_at DESC, t.event_id DESC
+                                LIMIT 1),
+                               'pending_triage'
+                           ) AS resolution_status,
+                           COALESCE(
+                               (SELECT t.note
+                                FROM public_feedback_triage t
+                                WHERE t.feedback_id = f.feedback_id
+                                ORDER BY t.created_at DESC, t.event_id DESC
+                                LIMIT 1),
+                               ''
+                           ) AS resolution_note,
+                           (SELECT t.created_at
+                            FROM public_feedback_triage t
+                            WHERE t.feedback_id = f.feedback_id
+                            ORDER BY t.created_at DESC, t.event_id DESC
+                            LIMIT 1) AS resolution_updated_at
+                    FROM public_feedback f
+                    ORDER BY f.created_at DESC LIMIT :limit
                     """
                     ),
                     {"limit": max(1, min(limit, 500))},
@@ -780,6 +986,10 @@ class PublicStore:
                 "context_json": None,
                 "has_qq": bool(row["qq_cipher"]),
                 "qq_cipher": row["qq_cipher"],
+                "email_status": str(row["email_status"] or "pending"),
+                "resolution_status": str(row["resolution_status"] or "pending_triage"),
+                "resolution_note": str(row["resolution_note"] or ""),
+                "resolution_updated_at": row["resolution_updated_at"],
             }
             for row in rows
         ]

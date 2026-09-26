@@ -92,6 +92,7 @@ ANONYMOUS_COOKIE = "__Host-snow_anon"
 DEVELOPMENT_ANONYMOUS_COOKIE = "snow_anon_dev"
 MAX_BODY_BYTES = 64 * 1024
 REQUEST_BODY_TIMEOUT_SECONDS = 10
+PUBLIC_DATABASE_RETRY_AFTER_SECONDS = 2
 LOGGER = configure_public_logger()
 
 _ERROR_STAGES = frozenset(
@@ -822,7 +823,13 @@ def create_app(
             try:
                 await async_store.call("consume_limits", ip_subject, ip_limits)
             except PublicStoreUnavailable:
-                return _error_response(request, "public_database_unavailable", 503)
+                return _error_response(
+                    request,
+                    "public_database_unavailable",
+                    503,
+                    headers={"Retry-After": str(PUBLIC_DATABASE_RETRY_AFTER_SECONDS)},
+                    retry_after_seconds=PUBLIC_DATABASE_RETRY_AFTER_SECONDS,
+                )
             except RateLimitExceeded as exc:
                 return _error_response(
                     request,
@@ -897,7 +904,13 @@ def create_app(
 
     @app.exception_handler(PublicStoreUnavailable)
     async def database_unavailable(request: Request, _exc: PublicStoreUnavailable):
-        return _error_response(request, "public_database_unavailable", 503)
+        return _error_response(
+            request,
+            "public_database_unavailable",
+            503,
+            headers={"Retry-After": str(PUBLIC_DATABASE_RETRY_AFTER_SECONDS)},
+            retry_after_seconds=PUBLIC_DATABASE_RETRY_AFTER_SECONDS,
+        )
 
     @app.get("/public/v1/build-info")
     def build_info() -> dict[str, Any]:
@@ -1632,6 +1645,7 @@ def create_app(
                             and retry_after_seconds > 0
                             else {"retry_after_seconds": 2}
                             if terminal_error.startswith("generation_queue_")
+                            or terminal_error == "public_database_unavailable"
                             else {}
                         ),
                     },

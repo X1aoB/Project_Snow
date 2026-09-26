@@ -26,7 +26,7 @@ from backend.snow_app.public_service import (
     PublicChatService,
     _public_immersive_thinking_decision,
 )
-from backend.snow_app.public_store import PublicStore
+from backend.snow_app.public_store import PublicStore, PublicStoreUnavailable
 
 
 def _settings() -> PublicSettings:
@@ -938,6 +938,29 @@ class PublicAPITests(TestCase):
         self.assertEqual(duplicate.status_code, 200)
         self.assertTrue(duplicate.json()["suppressed"])
         self.assertEqual(len(self.store.feedback_rows()), 1)
+
+    def test_database_backpressure_has_retryable_error_envelope(self) -> None:
+        with patch.object(
+            self.app.state.async_store,
+            "call",
+            side_effect=PublicStoreUnavailable("synthetic capacity"),
+        ):
+            response = self.client.post(
+                "/public/v1/feedback",
+                headers={"Origin": "http://testserver"},
+                json={
+                    "request_id": str(uuid4()),
+                    "body": "数据库背压测试",
+                    "turnstile_token": "development-bypass",
+                },
+            )
+        detail = response.json()["detail"]
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.headers["Retry-After"], "2")
+        self.assertEqual(detail["code"], "public_database_unavailable")
+        self.assertTrue(detail["retryable"])
+        self.assertEqual(detail["stage"], "idempotency_store")
+        self.assertEqual(detail["retry_after_seconds"], 2)
 
     def test_feedback_redacts_accidentally_pasted_provider_keys(self) -> None:
         leaked = "sk-test-never-log-this"

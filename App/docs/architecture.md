@@ -66,6 +66,16 @@ at 3 seconds, the generation gate at 4 active slots with 8 queued slots, and
 each operation at no more than two provider calls. These limits remain fixed
 while retrieval weights and reranking are evaluated.
 
+The synchronous public store is isolated behind a bounded adapter with five
+transaction workers and eight waiting positions. This is deliberately aligned
+with the 4-active/8-queued generation envelope: a short rate-limit, claim or
+terminal-write transaction cannot reject an otherwise admitted chat only
+because the adapter has fewer waiting positions than the generation gate. The
+adapter remains fail-closed when all 13 positions are occupied; that response
+is retryable, carries `Retry-After: 2`, and is included in backpressure
+observability. This is a database capacity bound, not permission to add
+Uvicorn workers or to bypass the single-process generation gate.
+
 Retrieval optimization is incremental. First measure synthetic golden queries
 for persona facts, current state, relationships, costume/style, casual turns,
 cross-character mentions, and dependency failures. Then tune lane weighting or
@@ -73,6 +83,19 @@ deduplication behind a feature flag, using evidence hit rate, recall@k, P95
 retrieval latency, guard-fallback rate, terminal error rate, and duplicate-request
 rate as acceptance gates. The default ranking and source data remain unchanged
 until those measurements pass review.
+
+Public feedback follows the same append-only triage principle as the internal
+MVP feedback stream. The PostgreSQL `public_feedback_triage` table records the
+latest operator decision without rewriting the submitted row; the private
+admin list joins that decision while keeping the default `pending_triage`
+state for new reports. The receipt outbox is separate: a public report is
+queued at submission, the dedicated mailer sends its public number, timestamp,
+submitted feedback body and optional QQ contact, and an authenticated loopback
+admin action can safely requeue the latest report or an explicit number.
+Conversation context, diagnostics, IP data and SMTP credentials never enter
+that mail path. The mailer role is granted only `body_text` and encrypted
+`qq_cipher`; the QQ key is mounted separately and is used only while rendering
+this operator email.
 
 ## B: persona-first hybrid retrieval
 
