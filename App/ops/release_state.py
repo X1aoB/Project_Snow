@@ -17,6 +17,21 @@ from maintenance import (DIGEST, OBJECT_ID, SHA, SHARED_IMAGE_KEYS, MaintenanceE
 
 ANCHOR_ID = re.compile(r"^[0-9a-f]{40}-[0-9a-f]{64}$")
 SNOW_REPOSITORIES = {"ghcr.io/x1aob/project_snow-public", "ghcr.io/x1aob/project_snow-embedding"}
+LEGACY_BASELINE_ID = "baseline-502ec99-0.9.6-20260907"
+LEGACY_BASELINE_SHA = "502ec99412bef843c37e4b31a53df8fa9faeb33c"
+LEGACY_BASELINE_FILES = frozenset({
+    "active-colour", "current", "containers.json", "current-config.json", "current-manifest.json",
+})
+# Frozen configuration projection of the protected 0.9.6 release, not the
+# current application's configuration schema. None of these paths hold secrets.
+LEGACY_BASELINE_CONFIGURATION = frozenset({
+    "compose.prod.yml", "infra/Caddyfile", "infra/OriginEdge.Caddyfile",
+    "config/origin-edge/origin-cert.pem", "config/origin-edge/aop-ca.pem",
+    "scripts/install_origin_tls.py", "scripts/cloudflare_origin_firewall.py",
+    "ops/project-snow-origin-firewall.service", "ops/project-snow-origin-firewall.timer",
+    "infra/egress-squid.conf", "infra/neo4j-entrypoint.sh", "infra/postgres/postgresql.conf",
+    "infra/public-api.Dockerfile", "requirements-public.txt",
+})
 
 
 def digest(payload: bytes) -> str:
@@ -126,6 +141,98 @@ def verify_anchor(paths: Paths, identifier: str) -> tuple[Path, dict[str, Any]]:
     if identifier != f"{metadata.get('commit_sha')}-{identity}":
         raise MaintenanceError("Recovery anchor content identity mismatch")
     return root, metadata
+
+
+def _strict_json(path: Path) -> Any:
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise MaintenanceError("Legacy baseline contains duplicate JSON fields")
+            result[key] = value
+        return result
+
+    def invalid_constant(_value):
+        raise MaintenanceError("Legacy baseline contains invalid JSON constants")
+
+    try:
+        return json.loads(read_text(path), object_pairs_hook=unique_object, parse_constant=invalid_constant)
+    except (ValueError, UnicodeError) as exc:
+        raise MaintenanceError("Legacy baseline contains malformed JSON") from exc
+
+
+def verify_legacy_baseline(paths: Paths) -> set[str]:
+    """Read only the named, version-bound 0.9.6 snapshot; never convert it.
+
+    Every captured container image is retained, including historical and foreign
+    application images. Unknown anchor formats continue to disable collection.
+    """
+    root = paths.root / "releases" / "anchors" / LEGACY_BASELINE_ID
+    for parent in (root, *root.parents):
+        _controlled_directory(parent)
+    if {child.name for child in root.iterdir()} != LEGACY_BASELINE_FILES:
+        raise MaintenanceError("Legacy baseline contains an unexpected file set")
+    for name in LEGACY_BASELINE_FILES:
+        require_regular(root / name)
+    colour = read_text(root / "active-colour").strip()
+    marker = read_text(root / "current").split()
+    if (colour != "blue" or len(marker) != 4 or marker[:2] != [colour, LEGACY_BASELINE_SHA]
+            or not all(DIGEST.fullmatch(value) for value in marker[2:])):
+        raise MaintenanceError("Legacy baseline marker identity mismatch")
+    manifest = _strict_json(root / "current-manifest.json")
+    binding = _strict_json(root / "current-config.json")
+    if (not isinstance(manifest, dict) or manifest.get("schema_version") != "project-snow-release-1"
+            or manifest.get("commit_sha") != LEGACY_BASELINE_SHA or manifest.get("app_version") != "0.9.6"):
+        raise MaintenanceError("Legacy baseline manifest identity mismatch")
+    for field, repository, expected in (
+        ("application", "ghcr.io/x1aob/project_snow-public", marker[2]),
+        ("embedding", "ghcr.io/x1aob/project_snow-embedding", marker[3]),
+    ):
+        coordinates = manifest.get(field)
+        if (not isinstance(coordinates, dict) or set(coordinates) != {"image", "digest"}
+                or coordinates.get("image") != repository
+                or f"{coordinates.get('image')}@{coordinates.get('digest')}" != expected):
+            raise MaintenanceError("Legacy baseline image coordinates disagree")
+    configuration = paths.root / "releases" / "configurations" / LEGACY_BASELINE_SHA
+    if (not isinstance(binding, dict)
+            or set(binding) != {"schema_version", "colour", "commit_sha", "root", "configuration_sha256"}
+            or binding.get("schema_version") != "project-snow-config-snapshot-1"
+            or binding.get("colour") != colour or binding.get("commit_sha") != LEGACY_BASELINE_SHA
+            or binding.get("root") != str(configuration)):
+        raise MaintenanceError("Legacy baseline configuration identity mismatch")
+    hashes = binding.get("configuration_sha256")
+    if (not isinstance(hashes, dict) or set(hashes) != LEGACY_BASELINE_CONFIGURATION
+            or hashes != manifest.get("configuration_sha256")
+            or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+                   for value in hashes.values())):
+        raise MaintenanceError("Legacy baseline configuration hashes disagree")
+    for name, expected in hashes.items():
+        path = configuration / name
+        for parent in (path.parent, *path.parent.parents):
+            _controlled_directory(parent)
+        require_regular(path)
+        if path.stat().st_size > 1024 * 1024 or digest(path.read_bytes()) != expected:
+            raise MaintenanceError("Legacy baseline configuration is missing or changed")
+    containers = _strict_json(root / "containers.json")
+    if not isinstance(containers, list) or len(containers) != 25:
+        raise MaintenanceError("Legacy baseline container inventory is incomplete")
+    references = set(marker[2:])
+    identifiers, names = set(), set()
+    for container in containers:
+        if (not isinstance(container, dict) or set(container) != {"id", "image", "name", "status"}
+                or not isinstance(container["id"], str) or not re.fullmatch(r"[0-9a-f]{64}", container["id"])
+                or not isinstance(container["image"], str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", container["image"])
+                or not isinstance(container["name"], str)
+                or not re.fullmatch(r"/?[A-Za-z0-9][A-Za-z0-9_.-]*", container["name"])
+                or container["status"] not in ("created", "running", "paused", "restarting", "removing", "exited", "dead")):
+            raise MaintenanceError("Legacy baseline container inventory is invalid")
+        name = container["name"].removeprefix("/")
+        if container["id"] in identifiers or name in names:
+            raise MaintenanceError("Legacy baseline container inventory contains duplicates")
+        identifiers.add(container["id"])
+        names.add(name)
+        references.add(container["image"])
+    return references
 
 
 def archive_colour(paths: Paths, colour: str) -> str:
@@ -260,6 +367,8 @@ def protected_image_references(paths: Paths, *, strict_unknown: bool = True) -> 
             if ANCHOR_ID.fullmatch(child.name):
                 root, _ = verify_anchor(paths, child.name)
                 references.update(value for value in read_environment(root / "compose.env").values() if DIGEST.fullmatch(value))
+            elif child.name == LEGACY_BASELINE_ID:
+                references.update(verify_legacy_baseline(paths))
             elif child.name != "latest.json" and strict_unknown:
                 # A separately captured emergency/baseline anchor may use an
                 # older schema. Do not silently ignore its protected resources.
@@ -348,6 +457,10 @@ def image_gc_plan(paths: Paths, execute: Callable[[list[str]], str] = run) -> di
         if int(columns[1]) > 0:
             protected_ids.add(columns[0])
     for reference in sorted(references):
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", reference):
+            # A baseline may record the runnable image identity while Docker's
+            # inspect resolves it to an OCI index identity. Retain both.
+            protected_ids.add(reference)
         images = docker_json(["image", "inspect", reference], execute)
         if not isinstance(images, list) or len(images) != 1:
             raise MaintenanceError("A retained release image is missing; restore it before garbage collection")

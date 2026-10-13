@@ -53,6 +53,8 @@ project-snow-release rollback <inactive-colour> <40sha>
 
 prepare 只写非活动 colour，标记最后提交，先校验配置内容及共享依赖 pins。不能将锚点放回正在服务的 colour；共享依赖不同须先单独还原依赖。旧格式基线锚点仍原样备份；无法解释其引用时 `gc-plan` **拒绝继续**，不能通过忽略未知目录来清理镜像。
 
+`baseline-502ec99-0.9.6-20260907` 的五文件历史快照可由只读兼容校验器识别。它核对完整 0.9.6 commit、marker、manifest、配置内容及容器清单，将清单内所有应用的镜像 ID 和基线镜像 digest 一并加入保护集合；不转换、移动或删除原始资料。缺失文件、身份不一致、无法解析的镜像或其他未知旧格式仍会中止清理。只有完成严格核验后的 `gc-plan` 可作为逐镜像清理依据，空间调查报告不能代替该检查。
+
 `gc-plan` 保护所有应用的运行和停止容器、Docker 容器引用计数（包括共享 runnable manifest 的 OCI index）、所有已知 release/runtime/anchor pins。只有全部标签都属于 Snow GHCR 仓库、且无引用的 image ID 可成为候选。未标记、混合标签、Dify 和未知镜像都被排除。
 
 ```sh
