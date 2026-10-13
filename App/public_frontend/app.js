@@ -1570,15 +1570,22 @@ async function persistDrafts() {
   try { await writeDraftsDatabase(db, values, revision); }
   catch { useMemoryStorage(); }
 }
+function captureComposerDraft() {
+  if (!state.selected) return false;
+  // Persistence can update the thread's channel before its visible composer.
+  // Keep edits with the character and channel that still own these controls.
+  const ownerKey = state.composerDraftKey || draftKey();
+  state.drafts.set(ownerKey, $("message-input").value);
+  state.drafts.set(ownerKey.replace(/:message$/, ":action"), $("action-input").value);
+  return true;
+}
 async function saveDraftNow() {
   window.clearTimeout(state.draftTimer);
-  if (!state.selected) return;
-  const channel = currentThread()?.channel || "text";
-  state.drafts.set(draftKey(state.selected, channel, "message"), $("message-input").value);
-  state.drafts.set(draftKey(state.selected, channel, "action"), $("action-input").value);
+  if (!captureComposerDraft()) return;
   await persistDrafts();
 }
 function scheduleDraftSave() {
+  captureComposerDraft();
   window.clearTimeout(state.draftTimer);
   state.draftTimer = window.setTimeout(() => { void saveDraftNow(); }, 220);
 }
@@ -5446,7 +5453,6 @@ function arrivalReactionUnavailableMessage(code = "") {
 async function arriveInPerson() {
   cancelBackgroundSummaries();
   if (!state.selected || globalRequestBusy()) return;
-  await saveDraftNow();
   state.arrivalPending = true;
   const started = performance.now();
   const characterId = state.selected;
@@ -5466,6 +5472,7 @@ async function arriveInPerson() {
   }
   updateComposerAvailability();
   try {
+    await saveDraftNow();
     await transitionPresence("in_person", characterId, thread);
     transitionApplied = true;
     if (featureEnabled("motion_v2") && ownsVisibleArrival()) {

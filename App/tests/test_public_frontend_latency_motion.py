@@ -154,6 +154,78 @@ class PublicFrontendLatencyMotionTests(TestCase):
         page.locator("#send-message").click()
         self.assertTrue(LatencyHandler.started.wait(timeout=5))
 
+    def wait_for_in_person_ready(self, page):
+        # An enabled TEXT composer can precede the async arrival reservation.
+        # Readiness belongs to the requested surface and completed business work.
+        page.locator("#in-person-surface").wait_for(state="visible")
+        page.wait_for_function("""() => {
+          const surface=document.querySelector('#in-person-surface');
+          return document.querySelector('#chat-app').dataset.channel==='in_person'
+            && !surface.hidden && !surface.inert
+            && document.querySelector('#stage-presence-status').hidden
+            && !document.querySelector('#send-message').disabled;
+        }""")
+
+    def hold_next_draft_completion(self, page, *, skip_completions=0):
+        """Withhold one native draft commit notification, not the transaction.
+
+        The real IDB write completes. Its application completion listener is
+        delivered only on release, making a slow persistence boundary repeatable
+        without pausing animation clocks or stubbing a product function.
+        """
+        page.evaluate("""skip => {
+          if(!window.__draftCompletionGate) {
+            const gate={armed:false,held:false,deliver:null,skip:0};
+            window.__draftCompletionGate=gate;
+            const draftTransactions=new WeakSet();
+            const put=IDBObjectStore.prototype.put;
+            IDBObjectStore.prototype.put=function(value,...args) {
+              if(this.name==='app_state' && value?.key==='drafts') draftTransactions.add(this.transaction);
+              return put.call(this,value,...args);
+            };
+            const listen=IDBTransaction.prototype.addEventListener;
+            IDBTransaction.prototype.addEventListener=function(type,listener,options) {
+              if(type==='complete' && typeof listener==='function') {
+                return listen.call(this,type,function(event) {
+                  if(gate.armed && this.mode==='readwrite' && draftTransactions.has(this)) {
+                    if(gate.skip>0) {gate.skip--;listener.call(this,event);return;}
+                    gate.armed=false;gate.held=true;
+                    gate.deliver=()=>{gate.held=false;gate.deliver=null;listener.call(this,event);};
+                  } else listener.call(this,event);
+                },options);
+              }
+              return listen.call(this,type,listener,options);
+            };
+            gate.release=()=>{if(gate.deliver) gate.deliver();};
+          }
+          if(window.__draftCompletionGate.held) throw new Error('previous draft completion remains held');
+          window.__draftCompletionGate.skip=skip;
+          window.__draftCompletionGate.armed=true;
+        }""", skip_completions)
+
+    def wait_for_persisted_draft(self, page, channel, message, action=""):
+        page.evaluate("window.__persistedDraftProbe={matched:false,pending:false}")
+        page.wait_for_function("""wanted => {
+          const probe=window.__persistedDraftProbe;
+          if(probe.matched) return true;
+          if(probe.pending) return false;
+          probe.pending=true;
+          const request=indexedDB.open('project-snow-public',4);
+          request.onerror=()=>{probe.pending=false;};
+          request.onsuccess=()=>{
+            const db=request.result;
+            const get=db.transaction('app_state','readonly').objectStore('app_state').get('drafts');
+            get.onerror=()=>{db.close();probe.pending=false;};
+            get.onsuccess=()=>{
+              const values=get.result?.values||{};
+              const messageKey=Object.keys(values).find(key=>key.endsWith(':'+wanted.channel+':message')&&values[key]===wanted.message);
+              probe.matched=Boolean(messageKey)&&values[messageKey.replace(/:message$/,':action')]===wanted.action;
+              db.close();probe.pending=false;
+            };
+          };
+          return false;
+        }""", arg={"channel": channel, "message": message, "action": action})
+
     def test_committed_body_precedes_completion_and_retains_nodes_and_private_free_metrics(self):
         with fixture.sync_playwright() as playwright:
             browser = fixture._launch_browser(playwright)
@@ -328,7 +400,7 @@ class PublicFrontendLatencyMotionTests(TestCase):
                 page = browser.new_page()
                 self.open(page, verified=False)
                 page.locator("#go-in-person").click(); page.locator("#confirm-presence-transition").click()
-                page.wait_for_function("!document.querySelector('#send-message').disabled")
+                self.wait_for_in_person_ready(page)
                 self.send(page)
                 page.wait_for_function("""() => {
                   const sample=window.__projectSnowPerformance.getSamples()[0];
@@ -378,7 +450,7 @@ class PublicFrontendLatencyMotionTests(TestCase):
                 page.locator("#message-input").fill("连续切换的通讯器草稿")
                 page.locator("#go-in-person").click()
                 page.locator("#confirm-presence-transition").click()
-                page.wait_for_function("!document.querySelector('#send-message').disabled")
+                self.wait_for_in_person_ready(page)
                 page.locator("#message-input").fill("连续切换的面对面草稿")
                 before = LatencyHandler.transition_calls
                 LatencyHandler.transition_started.clear()
@@ -409,6 +481,92 @@ class PublicFrontendLatencyMotionTests(TestCase):
             finally:
                 browser.close()
 
+    def test_arrival_reserves_controls_while_native_draft_completion_is_withheld(self):
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+        with fixture.sync_playwright() as playwright:
+            browser = fixture._launch_browser(playwright)
+            try:
+                page = browser.new_page()
+                self.open(page)
+                page.locator("#message-input").fill("到场前的合成草稿")
+                self.wait_for_persisted_draft(page, "text", "到场前的合成草稿")
+                page.locator("#go-in-person").click()
+                self.hold_next_draft_completion(page)
+                page.locator("#confirm-presence-transition").click()
+                page.wait_for_function("window.__draftCompletionGate.held")
+                self.assertTrue(page.locator("#text-surface").is_visible())
+                self.assertTrue(page.locator("#in-person-surface").evaluate("node=>node.hidden&&node.inert"))
+                for control in ("#send-message", "#go-in-person", "#confirm-presence-transition", "#open-communicator"):
+                    self.assertTrue(page.locator(control).is_disabled())
+                self.assertTrue(page.locator("#message-input").is_editable())
+                self.assertEqual(LatencyHandler.transition_calls, 0)
+                self.assertEqual(fixture.PublicFrontendHandler.request_paths.count("/public/v1/presence/arrival"), 0)
+                # A second actual pointer action cannot reopen the dialog or
+                # start another arrival while the first write is outstanding.
+                with self.assertRaises(PlaywrightTimeoutError):
+                    page.locator("#go-in-person").click(timeout=250)
+                self.assertTrue(page.locator("#presence-dialog").is_hidden())
+                self.assertEqual(LatencyHandler.transition_calls, 0)
+                page.evaluate("window.__draftCompletionGate.release()")
+                self.wait_for_in_person_ready(page)
+                self.assertEqual(LatencyHandler.transition_calls, 1)
+                self.assertEqual(fixture.PublicFrontendHandler.request_paths.count("/public/v1/presence/arrival"), 1)
+                self.assertEqual(LatencyHandler.requests, [])
+            finally:
+                browser.close()
+
+    def test_edits_during_native_draft_wait_keep_both_channel_and_action_owners(self):
+        with fixture.sync_playwright() as playwright:
+            browser = fixture._launch_browser(playwright)
+            try:
+                page = browser.new_page()
+                self.open(page)
+                page.locator("#message-input").fill("原来的通讯器草稿")
+                self.wait_for_persisted_draft(page, "text", "原来的通讯器草稿")
+                page.locator("#go-in-person").click()
+                # The first draft save belongs to arrival reservation. Hold the
+                # second save, after the position ACK but before the surface
+                # switches, so the late native input cannot be recaptured by a
+                # later source-channel save and hide a lost-edit regression.
+                self.hold_next_draft_completion(page, skip_completions=1)
+                page.locator("#confirm-presence-transition").click()
+                page.wait_for_function("window.__draftCompletionGate.held")
+                page.locator("#message-input").fill("等待期间更新的通讯器草稿")
+                self.assertTrue(page.locator("#text-surface").is_visible())
+                self.assertEqual(LatencyHandler.transition_calls, 1)
+                page.evaluate("window.__draftCompletionGate.release()")
+                self.wait_for_in_person_ready(page)
+                self.assertEqual(page.locator("#message-input").input_value(), "")
+                self.assertEqual(page.locator("#action-input").input_value(), "")
+
+                page.locator("#message-input").fill("原来的面对面草稿")
+                page.locator("#toggle-action").click()
+                page.locator("#action-input").fill("原来的面对面动作")
+                self.wait_for_persisted_draft(page, "in_person", "原来的面对面草稿", "原来的面对面动作")
+                self.hold_next_draft_completion(page)
+                page.locator("#open-communicator").click()
+                page.wait_for_function("window.__draftCompletionGate.held")
+                self.assertTrue(page.locator("#in-person-surface").is_visible())
+                self.assertTrue(page.locator("#message-input").is_editable())
+                page.locator("#message-input").fill("等待期间更新的面对面草稿")
+                page.locator("#action-input").fill("等待期间更新的面对面动作")
+                page.evaluate("window.__draftCompletionGate.release()")
+                page.wait_for_function("!document.querySelector('#text-surface').hidden && !document.querySelector('#text-surface').inert && !document.querySelector('#send-message').disabled")
+                self.assertEqual(page.locator("#message-input").input_value(), "等待期间更新的通讯器草稿")
+                self.assertEqual(page.locator("#action-input").input_value(), "")
+                page.locator("#go-in-person").click()
+                page.locator("#confirm-presence-transition").click()
+                self.wait_for_in_person_ready(page)
+                self.assertEqual(page.locator("#message-input").input_value(), "等待期间更新的面对面草稿")
+                self.assertEqual(page.locator("#action-input").input_value(), "等待期间更新的面对面动作")
+                self.wait_for_persisted_draft(page, "text", "等待期间更新的通讯器草稿")
+                self.wait_for_persisted_draft(page, "in_person", "等待期间更新的面对面草稿", "等待期间更新的面对面动作")
+                self.assertEqual(LatencyHandler.transition_calls, 3)
+                self.assertEqual(LatencyHandler.requests, [])
+            finally:
+                browser.close()
+
     def test_synthetic_background_finishes_received_speech_and_resumes_visible_measurement(self):
         """Exercise visibility handlers; headless tabs do not emulate OS backgrounding."""
         LatencyHandler.scenario = "typed_measurement"
@@ -420,7 +578,7 @@ class PublicFrontendLatencyMotionTests(TestCase):
                 self.open(page, verified=False)
                 page.locator("#go-in-person").click()
                 page.locator("#confirm-presence-transition").click()
-                page.wait_for_function("!document.querySelector('#send-message').disabled")
+                self.wait_for_in_person_ready(page)
                 self.send(page)
                 page.wait_for_function("document.querySelector('#stage-speech').textContent.startsWith('这一') && !document.querySelector('#stage-speech').textContent.includes('。')")
                 page.locator("#message-input").fill("后台恢复保留的合成草稿")
