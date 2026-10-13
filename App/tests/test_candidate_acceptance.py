@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -54,11 +54,13 @@ def staged(tmp_path, monkeypatch):
         ),
     )
     write("releases/current-config.json", '{"configuration_sha256":{"sample":"old"}}')
-    write("runtime/compose.env", f"PUBLIC_API_IMAGE={old_image}\n")
+    write("runtime/public-current.env", "PUBLIC_CHAT_LATENCY_V2=false\nPUBLIC_VERIFIED_BLOCK_STREAM=false\nPUBLIC_MOTION_V2=false\n")
+    write("runtime/public-candidate.env", "PUBLIC_CHAT_LATENCY_V2=true\nPUBLIC_VERIFIED_BLOCK_STREAM=false\nPUBLIC_MOTION_V2=true\n")
+    write("runtime/compose.env", f"PUBLIC_API_IMAGE={old_image}\nPUBLIC_ENV_FILE={root / 'runtime/public-current.env'}\n")
     write("releases/colours/green", f"green {CANDIDATE} {new_image} {EMBEDDING}\n")
     write("releases/colours/green-manifest.json", manifest_payload)
     write("releases/colours/green-config.json", '{"configuration_sha256":{"sample":"new"}}')
-    write("runtime/colours/green.compose.env", f"PUBLIC_API_IMAGE={new_image}\n")
+    write("runtime/colours/green.compose.env", f"PUBLIC_API_IMAGE={new_image}\nPUBLIC_ENV_FILE={root / 'runtime/public-candidate.env'}\n")
     write(
         "releases/colours/green-stage-receipt",
         f"project-snow-stage-receipt-1 {'f' * 64} green {CANDIDATE} {new_image} {EMBEDDING}\n",
@@ -150,6 +152,105 @@ def test_every_incomplete_acceptance_check_blocks_receipt(staged, check):
     with pytest.raises(maintenance.MaintenanceError, match="every required check"):
         ready(staged)
     assert not (staged[0].root / "releases/acceptance").exists()
+
+
+@pytest.mark.parametrize("release", ["current", "candidate"])
+@pytest.mark.parametrize("flag", ["PUBLIC_CHAT_LATENCY_V2", "PUBLIC_VERIFIED_BLOCK_STREAM", "PUBLIC_MOTION_V2"])
+def test_referenced_public_flag_change_invalidates_receipt_without_container_restart(staged, release, flag):
+    approved(staged)
+    source = staged[0].root / "runtime" / f"public-{release}.env"
+    before = source.read_text()
+    old_value = next(line.split("=", 1)[1] for line in before.splitlines() if line.startswith(flag + "="))
+    source.write_text(before.replace(f"{flag}={old_value}", f"{flag}={'false' if old_value == 'true' else 'true'}"))
+    with pytest.raises(maintenance.MaintenanceError, match="runtime changed"):
+        acceptance.verify(staged[0], "green", CANDIDATE, now=NOW, execute=staged[1])
+
+
+def test_public_environment_receipt_contains_hashes_without_private_values(staged):
+    source = staged[0].root / "runtime/public-candidate.env"
+    source.write_text(source.read_text() + "PRIVATE_FIXTURE_VALUE=synthetic-private-content\n")
+    receipt = ready(staged)
+    document = acceptance.load_receipt(staged[0], receipt["receipt_id"])
+    assert document["snapshot"]["public_environments"]["candidate"] == {
+        "path": str(source), "sha256": acceptance.sha256(source.read_bytes()),
+    }
+    assert set(document["snapshot"]["public_environments"]) == {"current", "candidate"}
+    assert "synthetic-private-content" not in json.dumps(document)
+    assert all(".Config.Env" not in str(command) for command in staged[5])
+
+
+def test_receipt_without_referenced_environment_hashes_requires_fresh_acceptance(staged):
+    receipt = ready(staged)
+    document = acceptance.load_receipt(staged[0], receipt["receipt_id"])
+    del document["snapshot"]["public_environments"]
+    with pytest.raises(maintenance.MaintenanceError, match="runtime changed"):
+        acceptance.validate_receipt(staged[0], document, CURRENT, now=NOW, execute=staged[1])
+
+
+@pytest.mark.parametrize("environment", [{}, {"PUBLIC_ENV_FILE": ""}])
+def test_legacy_compose_default_public_environment_is_bound(monkeypatch, environment):
+    # The controller runs on Linux; model its paths without touching host /etc.
+    source = PurePosixPath("/etc/project-snow/public.env")
+    checked = []
+    monkeypatch.setattr(acceptance, "Path", PurePosixPath)
+    monkeypatch.setattr(acceptance, "read_environment", lambda path: environment)
+    monkeypatch.setattr(acceptance, "directory", lambda path: checked.append(path))
+
+    def read(path):
+        assert path == source
+        return b"PUBLIC_MOTION_V2=false\n"
+
+    monkeypatch.setattr(acceptance, "read_payload", read)
+    result = acceptance.public_environment_identity(
+        maintenance.Paths(root=PurePosixPath("/srv/project-snow")),
+        PurePosixPath("/srv/project-snow/runtime/compose.env"),
+    )
+    assert result == {"path": str(source), "sha256": acceptance.sha256(read(source))}
+    assert checked == [source.parent]
+
+
+def test_referenced_public_environment_newline_change_is_not_normalized_away(staged):
+    approved(staged)
+    source = staged[0].root / "runtime/public-candidate.env"
+    source.write_bytes(source.read_bytes().replace(b"\n", b"\r\n"))
+    with pytest.raises(maintenance.MaintenanceError, match="runtime changed"):
+        acceptance.verify(staged[0], "green", CANDIDATE, now=NOW, execute=staged[1])
+
+
+@pytest.mark.parametrize("fault", ["outside", "relative", "traversal", "missing", "oversized"])
+def test_unsafe_or_unbounded_referenced_public_environment_blocks_acceptance(staged, fault):
+    paths = staged[0]
+    source = paths.root / "runtime/public-candidate.env"
+    if fault == "outside":
+        source = paths.root.parent / "outside.env"
+        source.write_text("PUBLIC_MOTION_V2=true\n")
+    elif fault == "relative":
+        source = Path("runtime/public-candidate.env")
+    elif fault == "traversal":
+        source = paths.root / "runtime" / ".." / "runtime/public-candidate.env"
+    elif fault == "missing":
+        source.unlink()
+    elif fault == "oversized":
+        source.write_bytes(b"X" * (1024 * 1024 + 1))
+    compose = paths.root / "runtime/colours/green.compose.env"
+    compose.write_text(compose.read_text().split("PUBLIC_ENV_FILE=", 1)[0] + f"PUBLIC_ENV_FILE={source}\n")
+    with pytest.raises((maintenance.MaintenanceError, FileNotFoundError)):
+        ready(staged)
+
+
+def test_public_environment_uses_regular_file_and_ancestor_validation(staged, monkeypatch):
+    source = staged[0].root / "runtime/public-candidate.env"
+    checked = []
+    monkeypatch.setattr(acceptance, "directory", lambda path: checked.append(path))
+
+    def reject_source(path, **kwargs):
+        if path == source:
+            raise maintenance.MaintenanceError("Expected a root-controlled file")
+
+    monkeypatch.setattr(maintenance, "require_regular", reject_source)
+    with pytest.raises(maintenance.MaintenanceError, match="root-controlled"):
+        acceptance.public_environment_identity(staged[0], staged[0].root / "runtime/colours/green.compose.env")
+    assert source.parent in checked
 
 
 @pytest.mark.parametrize("seconds", [59, 86401])

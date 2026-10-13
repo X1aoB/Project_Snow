@@ -68,8 +68,10 @@ def test_empty_database_upgrade_and_repeated_upgrade(database):
     try:
         tables = inspect(schema).get_table_names()
         assert "public_request_leases" in tables
+        assert "public_request_blocks" in tables
         assert "public_feedback_email_outbox" in tables
-        assert schema.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260926_0007"
+        assert "public_feedback_triage" in tables
+        assert schema.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261013_0008"
     finally:
         schema.close()
 
@@ -97,8 +99,8 @@ def test_upgrade_preserves_feedback_and_old_cache_schema(database):
     assert len(store.feedback_rows(10)) == 1
 
 
-def old_store_module():
-    reference = os.getenv("TEST_OLD_APP_REF")
+def old_store_module(reference=None):
+    reference = reference or os.getenv("TEST_OLD_APP_REF")
     if not reference:
         pytest.skip("TEST_OLD_APP_REF required for actual old-code compatibility")
     source = subprocess.run(
@@ -348,7 +350,7 @@ def test_failed_migration_rolls_back_ddl_and_revision_atomically(database, tmp_p
     (tmp_path / "failed_revision.py").write_text(
         "from alembic import op\n"
         "revision = 'synthetic_failure'\n"
-        "down_revision = '20260926_0007'\n"
+        "down_revision = '20261013_0008'\n"
         "branch_labels = None\n"
         "depends_on = None\n"
         "def upgrade():\n"
@@ -372,6 +374,103 @@ def test_failed_migration_rolls_back_ddl_and_revision_atomically(database, tmp_p
         assert "failed_migration_probe" not in inspect(connection).get_table_names()
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            == "20260926_0007"
+            == "20261013_0008"
         )
     assert PublicStore("", engine=database).claim_request("after-failure", "subject", "hash")[0] == "claimed"
+
+
+def test_concurrent_block_publication_is_idempotent_and_fences_conflicting_content(database):
+    migrate(database)
+    store = PublicStore("", engine=database)
+    store.claim_request("stream", "subject", "hash", owner_token="owner")
+    blocks = [{"type": "speech", "text": "合成回复第一段。"}, {"type": "action", "text": "点头。"}]
+
+    def publish(_index):
+        return store.commit_request_blocks("stream", "subject", blocks, owner_token="owner")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(publish, range(8)))
+    assert all(result == results[0] for result in results)
+    assert [event["sequence"] for event in results[0]] == [0, 1]
+    assert len({event["block_id"] for event in results[0]}) == 2
+    with pytest.raises(PublicStoreUnavailable):
+        store.commit_request_blocks("stream", "subject", [blocks[1]], owner_token="owner")
+    with pytest.raises(PublicStoreUnavailable):
+        store.commit_request_blocks("stream", "foreign", blocks, owner_token="owner")
+    with pytest.raises(PublicStoreUnavailable):
+        store.commit_request_blocks("stream", "subject", blocks, owner_token="foreign")
+    assert store.request_blocks("stream", "foreign") == []
+    assert store.request_blocks("stream", "subject") == results[0]
+
+
+def test_0008_old_new_old_keeps_v1_cache_and_replays_confirmed_crash_prefix(database):
+    old = old_store_module(os.getenv("TEST_PREVIOUS_APP_REF"))
+    migrate(database, "20260926_0007")
+    old_store = old.PublicStore("", engine=database)
+    old_store.claim_request("before", "subject", "hash")
+    old_store.complete_request("before", {"answer": "old before expansion"})
+    def cache_columns(connection):
+        return [
+            (column["name"], str(column["type"]), column["nullable"], column["default"])
+            for column in inspect(connection).get_columns("public_request_cache")
+        ]
+
+    with database.connect() as connection:
+        original_columns = cache_columns(connection)
+    migrate(database)
+    with database.connect() as connection:
+        assert cache_columns(connection) == original_columns
+    store = PublicStore("", engine=database)
+    assert store.request_result("before", "subject")["answer"] == "old before expansion"
+    blocks = [{"type": "message", "text": "已确认的合成回复。"}]
+    now = datetime(2026, 10, 13, tzinfo=UTC)
+    with patch("backend.snow_app.public_store._utcnow", return_value=now):
+        store.claim_request("completed-v2", "subject", "hash", owner_token="worker")
+        events = store.commit_request_blocks("completed-v2", "subject", blocks, owner_token="worker")
+        store.complete_request(
+            "completed-v2", {"answer": blocks[0]["text"], "content_blocks": blocks}, owner_token="worker"
+        )
+        store.claim_request("interrupted-v2", "subject", "hash", owner_token="worker")
+        interrupted = store.commit_request_blocks("interrupted-v2", "subject", blocks, owner_token="worker")
+    later = now + timedelta(seconds=46)
+    with patch("backend.snow_app.public_store._utcnow", return_value=later), patch.object(
+        old, "_utcnow", return_value=later
+    ):
+        assert store.recover_expired_requests() == 1
+        assert old_store.request_result("completed-v2", "subject")["answer"] == blocks[0]["text"]
+        assert store.request_blocks("completed-v2", "subject") == events
+        recovered = old_store.request_result("interrupted-v2", "subject")
+        assert recovered == {"terminal_error": "generation_interrupted", "answer": "", "content_blocks": []}
+        assert store.request_blocks("interrupted-v2", "subject") == interrupted
+        with pytest.raises(PublicStoreUnavailable):
+            store.commit_request_blocks("interrupted-v2", "subject", blocks, owner_token="worker")
+        old_store.claim_request("after-rollback", "subject", "hash")
+        old_store.complete_request("after-rollback", {"answer": "old after rollback"})
+        assert old_store.request_result("after-rollback", "subject")["answer"] == "old after rollback"
+    # Actual old application cleanup also cascades through the new child table.
+    with patch.object(old, "_utcnow", return_value=now + timedelta(days=2)):
+        old_store.cleanup()
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM public_request_blocks")).scalar_one() == 0
+
+
+def test_database_rejects_invalid_block_order_range_and_cascades_release(database):
+    migrate(database)
+    store = PublicStore("", engine=database)
+    store.claim_request("checks", "subject", "hash", owner_token="owner")
+    blocks = [{"type": "message", "text": "temporary fixture"}]
+    store.commit_request_blocks("checks", "subject", blocks, owner_token="owner")
+    with database.begin() as connection:
+        for sequence, block_type, body_text in ((8, "message", "x"), (1, "sticker", "x"), (1, "message", "")):
+            with pytest.raises(DBAPIError):
+                with connection.begin_nested():
+                    connection.execute(
+                        text("""INSERT INTO public_request_blocks
+                            (request_id, sequence, block_id, block_type, body_text)
+                            VALUES ('checks', :sequence, :block_id, :block_type, :body_text)"""),
+                        {"sequence": sequence, "block_id": uuid4().hex,
+                         "block_type": block_type, "body_text": body_text},
+                    )
+    store.release_request("checks", owner_token="owner")
+    with database.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM public_request_blocks")).scalar_one() == 0

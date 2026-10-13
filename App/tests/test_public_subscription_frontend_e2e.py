@@ -34,7 +34,7 @@ class SubscriptionFrontendE2ETests(TestCase):
     def setUp(self) -> None:
         frontend.PublicFrontendE2ETests().setUp()
 
-    def _subscription_routes(self, page, *, status="waiting", model="gpt-5.6-luna", models=None, protocol_version=1):
+    def _subscription_routes(self, page, *, status="waiting", model="gpt-5.6-luna", models=None, protocol_version=1, features=None):
         session = {"status": status, "model": model, "effort": "max", "protocol_version": protocol_version, "expires_at": (datetime.now(UTC) + timedelta(minutes=20)).isoformat()}
         if models is not None:
             session["models"] = json.loads(json.dumps(models))
@@ -44,6 +44,8 @@ class SubscriptionFrontendE2ETests(TestCase):
             payload = route.fetch().json()
             payload["subscription"] = {"enabled": True, "model": "gpt-5.6-luna", "effort": "max", "protocol_version": 2}
             payload["providers"].append({"provider_id": "codex_subscription", "display_name": "Codex 订阅"})
+            if features is not None:
+                payload["features"] = features
             route.fulfill(json=payload)
 
         def subscription(route):
@@ -437,12 +439,12 @@ class SubscriptionFrontendE2ETests(TestCase):
         with frontend.sync_playwright() as playwright:
             browser = frontend._launch_browser(playwright)
             page = browser.new_page()
-            self._subscription_routes(page, status="connected")
+            self._subscription_routes(page, status="connected", features={"chat_latency_v2": True, "verified_block_replay": True, "motion_v2": True})
             attempts = []
 
             def chat(route):
                 attempts.append(route.request.post_data_json)
-                route.fulfill(status=503, json={"detail": {"code": "subscription_result_unknown"}})
+                route.fulfill(status=503, json={"detail": {"code": "subscription_result_unknown", "stage": "idempotency_store", "retryable": False}})
 
             page.route("**/public/v1/chat/stream", chat)
             self._open(page)
@@ -456,6 +458,15 @@ class SubscriptionFrontendE2ETests(TestCase):
             self.assertIn("避免重复发送", page.locator(".message-recovery-note").inner_text())
             page.wait_for_timeout(1300)
             self.assertEqual(len(attempts), 1)
+            saved = page.evaluate("""async () => {
+              const db=await new Promise(resolve=>{const request=indexedDB.open('project-snow-public',4);request.onsuccess=()=>resolve(request.result)});
+              const messages=await new Promise(resolve=>{const request=db.transaction('messages').objectStore('messages').getAll();request.onsuccess=()=>resolve(request.result)});
+              db.close();const message=messages.find(item=>item.role==='user');
+              return {requestId:message.requestId,snapshotId:message.requestSnapshot?.request_id,errorStage:message.errorStage};
+            }""")
+            self.assertEqual(saved["requestId"], attempts[0]["request_id"])
+            self.assertEqual(saved["snapshotId"], attempts[0]["request_id"])
+            self.assertEqual(saved["errorStage"], "idempotency_store")
             browser.close()
 
     def test_subscription_pauses_background_summaries_without_changing_api_preference(self):

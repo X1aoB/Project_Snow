@@ -188,6 +188,9 @@ class PublicSettings:
     attribution_url: str = "/public/v1/attributions"
     max_provider_calls_per_action: int = 2
     byok_lifetime_hours: int = 12
+    chat_latency_v2: bool = True
+    verified_block_stream: bool = False
+    motion_v2: bool = True
     subscription_enabled: bool = False
 
     @classmethod
@@ -294,6 +297,9 @@ class PublicSettings:
             # environment knob bounded so a deployment cannot silently turn
             # a tab-scoped convenience token into a long-lived credential.
             byok_lifetime_hours=max(1, min(12, byok_lifetime_hours)),
+            chat_latency_v2=os.getenv("PUBLIC_CHAT_LATENCY_V2", "true").casefold() == "true",
+            verified_block_stream=os.getenv("PUBLIC_VERIFIED_BLOCK_STREAM", "false").casefold() == "true",
+            motion_v2=os.getenv("PUBLIC_MOTION_V2", "true").casefold() == "true",
             subscription_enabled=os.getenv("PUBLIC_SUBSCRIPTION_ENABLED", "false").casefold() == "true",
         )
 

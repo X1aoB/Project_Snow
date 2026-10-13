@@ -147,6 +147,19 @@ CREATE INDEX IF NOT EXISTS public_request_lease_expiry_idx ON public_request_lea
 """
 
 
+REQUEST_BLOCKS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS public_request_blocks (
+    request_id VARCHAR(128) NOT NULL REFERENCES public_request_cache(request_id) ON DELETE CASCADE,
+    sequence INTEGER NOT NULL CHECK (sequence BETWEEN 0 AND 7),
+    block_id VARCHAR(64) NOT NULL,
+    block_type VARCHAR(16) NOT NULL CHECK (block_type IN ('message', 'speech', 'action')),
+    body_text VARCHAR(2000) NOT NULL CHECK (length(body_text) BETWEEN 1 AND 2000),
+    PRIMARY KEY (request_id, sequence),
+    UNIQUE (block_id)
+);
+"""
+
+
 FEEDBACK_TRIAGE_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS public_feedback_triage (
     event_id VARCHAR(64) PRIMARY KEY,
@@ -223,7 +236,8 @@ class PublicStore:
     def create_schema(self) -> None:
         with self.begin() as connection:
             for statement in (
-                SCHEMA_SQL + OUTBOX_SCHEMA_SQL + LEASE_SCHEMA_SQL + FEEDBACK_TRIAGE_SCHEMA_SQL
+                SCHEMA_SQL + OUTBOX_SCHEMA_SQL + LEASE_SCHEMA_SQL
+                + FEEDBACK_TRIAGE_SCHEMA_SQL + REQUEST_BLOCKS_SCHEMA_SQL
             ).split(";"):
                 if statement.strip():
                     connection.execute(text(statement))
@@ -239,6 +253,7 @@ class PublicStore:
         try:
             with self.begin() as connection:
                 connection.execute(text("SELECT request_id FROM public_request_leases LIMIT 0"))
+                connection.execute(text("SELECT request_id FROM public_request_blocks LIMIT 0"))
                 connection.execute(text("SELECT event_id FROM public_feedback_triage LIMIT 0"))
                 return True
         except PublicStoreUnavailable:
@@ -299,6 +314,13 @@ class PublicStore:
         expires_at = now + (timedelta(days=1) if owner_token else timedelta(minutes=10))
         with self.begin() as connection:
             self._recover_expired(connection, now)
+            connection.execute(
+                text(
+                    "DELETE FROM public_request_blocks WHERE request_id IN "
+                    "(SELECT request_id FROM public_request_cache WHERE expires_at <= :now)"
+                ),
+                {"now": now},
+            )
             connection.execute(
                 text(
                     "DELETE FROM public_request_leases WHERE request_id IN (SELECT request_id FROM public_request_cache WHERE expires_at <= :now)"
@@ -424,22 +446,163 @@ class PublicStore:
             )
             return self._recover_expired(connection, _utcnow())
 
+    @staticmethod
+    def _lock_request(connection: Connection, request_id: str) -> None:
+        # The parent row serializes publishers, completion and deletion. SQLite
+        # test calls are serialized by AsyncPublicStore; production uses PG.
+        query = "SELECT request_id FROM public_request_cache WHERE request_id = :request_id"
+        if connection.dialect.name == "postgresql":
+            query += " FOR UPDATE"
+        connection.execute(text(query), {"request_id": request_id}).first()
+
+    @staticmethod
+    def _block_events(connection: Connection, request_id: str) -> list[dict[str, Any]]:
+        rows = connection.execute(
+            text(
+                "SELECT sequence, block_id, block_type, body_text FROM public_request_blocks "
+                "WHERE request_id = :request_id ORDER BY sequence"
+            ),
+            {"request_id": request_id},
+        ).mappings().all()
+        return [
+            {
+                "sequence": int(row["sequence"]),
+                "block_id": row["block_id"],
+                "block": {"type": row["block_type"], "text": row["body_text"]},
+            }
+            for row in rows
+        ]
+
+    def commit_request_blocks(
+        self,
+        request_id: str,
+        subject_hash: str,
+        blocks: Sequence[dict[str, str]],
+        *,
+        owner_token: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Durably append a validated cumulative prefix before publishing it.
+
+        Callers must perform content/security checks before this boundary. This
+        transaction provides ownership fencing and immutable ordered delivery;
+        it never exposes raw provider deltas or alters an acknowledged block.
+        """
+        if not owner_token or not isinstance(blocks, (list, tuple)) or len(blocks) > 8:
+            raise PublicStoreUnavailable("invalid request block publication")
+        canonical: list[dict[str, str]] = []
+        for block in blocks:
+            if (
+                not isinstance(block, dict)
+                or set(block) != {"type", "text"}
+                or block.get("type") not in {"message", "speech", "action"}
+                or not isinstance(block.get("text"), str)
+                or not block["text"].strip()
+                or len(block["text"]) > 2000
+                or "\x00" in block["text"]
+            ):
+                raise PublicStoreUnavailable("invalid request block publication")
+            canonical.append({"type": block["type"], "text": block["text"]})
+        if len("\n".join(block["text"] for block in canonical)) > 2000:
+            raise PublicStoreUnavailable("request block publication exceeds text limit")
+        with self.begin() as connection:
+            self._lock_request(connection, request_id)
+            now = _utcnow()
+            owned = connection.execute(
+                text(
+                    "SELECT 1 FROM public_request_cache AS cache "
+                    "JOIN public_request_leases AS lease ON lease.request_id = cache.request_id "
+                    "WHERE cache.request_id = :request_id AND cache.subject_hash = :subject_hash "
+                    "AND cache.status = 'processing' AND cache.expires_at > :now "
+                    "AND lease.owner_token = :owner AND lease.lease_expires_at > :now"
+                ),
+                {"request_id": request_id, "subject_hash": subject_hash, "owner": owner_token, "now": now},
+            ).first()
+            if not owned:
+                raise PublicStoreUnavailable("request ownership was lost before block publication")
+            existing = self._block_events(connection, request_id)
+            if len(canonical) < len(existing) or any(
+                event["sequence"] != index or event["block"] != canonical[index]
+                for index, event in enumerate(existing)
+            ):
+                raise PublicStoreUnavailable("request block prefix does not match confirmed content")
+            for sequence in range(len(existing), len(canonical)):
+                block = canonical[sequence]
+                block_id = hashlib.sha256(f"{request_id}\x1f{sequence}".encode()).hexdigest()
+                connection.execute(
+                    text(
+                        "INSERT INTO public_request_blocks "
+                        "(request_id, sequence, block_id, block_type, body_text) "
+                        "VALUES (:request_id, :sequence, :block_id, :block_type, :body_text)"
+                    ),
+                    {
+                        "request_id": request_id, "sequence": sequence, "block_id": block_id,
+                        "block_type": block["type"], "body_text": block["text"],
+                    },
+                )
+                existing.append({"sequence": sequence, "block_id": block_id, "block": block})
+            return existing
+
+    def request_blocks(self, request_id: str, subject_hash: str) -> list[dict[str, Any]]:
+        """Read confirmed content for this subject, including interrupted turns."""
+        if not request_id:
+            return []
+        with self.begin() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT block.sequence, block.block_id, block.block_type, block.body_text "
+                    "FROM public_request_blocks AS block JOIN public_request_cache AS cache "
+                    "ON cache.request_id = block.request_id "
+                    "WHERE cache.request_id = :request_id AND cache.subject_hash = :subject_hash "
+                    "AND cache.expires_at > :now ORDER BY block.sequence"
+                ),
+                {"request_id": request_id, "subject_hash": subject_hash, "now": _utcnow()},
+            ).mappings().all()
+        return [
+            {
+                "sequence": int(row["sequence"]), "block_id": row["block_id"],
+                "block": {"type": row["block_type"], "text": row["body_text"]},
+            }
+            for row in rows
+        ]
+
     def complete_request(
         self, request_id: str, response: dict[str, Any], *, owner_token: str | None = None
     ) -> None:
         with self.begin() as connection:
             self._recover_expired(connection, _utcnow())
+            self._lock_request(connection, request_id)
+            confirmed = self._block_events(connection, request_id)
+            if confirmed:
+                if not owner_token:
+                    raise PublicStoreUnavailable("request block completion requires its lease owner")
+                if not response.get("terminal_error"):
+                    final_blocks = response.get("content_blocks")
+                    if not isinstance(final_blocks, list) or len(final_blocks) < len(confirmed) or any(
+                        not isinstance(final_blocks[index], dict)
+                        or {key: final_blocks[index].get(key) for key in ("type", "text")} != event["block"]
+                        for index, event in enumerate(confirmed)
+                    ):
+                        raise PublicStoreUnavailable("completed response changed confirmed request blocks")
+                    answer = response.get("answer")
+                    rendered = "\n".join(
+                        str(block.get("text") or "").strip() for block in final_blocks
+                        if isinstance(block, dict) and str(block.get("text") or "").strip()
+                    ).strip()
+                    if answer != rendered:
+                        raise PublicStoreUnavailable("completed answer does not match confirmed request blocks")
             result = connection.execute(
                 text("""
                 UPDATE public_request_cache SET status = 'completed', response_json = :response_json, expires_at = :expires
-                WHERE request_id = :request_id AND status = 'processing'
+                WHERE request_id = :request_id AND status = 'processing' AND expires_at > :now
                   AND (CAST(:owner AS VARCHAR(64)) IS NULL OR EXISTS (SELECT 1 FROM public_request_leases AS lease
-                       WHERE lease.request_id = public_request_cache.request_id AND lease.owner_token = :owner))
+                       WHERE lease.request_id = public_request_cache.request_id AND lease.owner_token = :owner
+                         AND lease.lease_expires_at > :now))
             """),
                 {
                     "request_id": request_id,
                     "response_json": _json(response),
                     "owner": owner_token,
+                    "now": _utcnow(),
                     "expires": _utcnow() + timedelta(minutes=10),
                 },
             )
@@ -460,6 +623,10 @@ class PublicStore:
                 {"request_id": request_id, "owner": owner_token},
             )
             if removed.rowcount:
+                connection.execute(
+                    text("DELETE FROM public_request_blocks WHERE request_id = :request_id"),
+                    {"request_id": request_id},
+                )
                 connection.execute(
                     text("DELETE FROM public_request_leases WHERE request_id = :request_id"),
                     {"request_id": request_id},
@@ -998,6 +1165,14 @@ class PublicStore:
         now = _utcnow()
         deleted: dict[str, int] = {}
         with self.begin() as connection:
+            result = connection.execute(
+                text(
+                    "DELETE FROM public_request_blocks WHERE request_id IN "
+                    "(SELECT request_id FROM public_request_cache WHERE expires_at <= :now)"
+                ),
+                {"now": now},
+            )
+            deleted["public_request_blocks"] = max(0, int(result.rowcount or 0))
             connection.execute(
                 text(
                     "DELETE FROM public_request_leases WHERE request_id IN (SELECT request_id FROM public_request_cache WHERE expires_at <= :now)"

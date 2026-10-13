@@ -46,6 +46,22 @@ CATALOGUE = [
 
 
 class SubscriptionBrokerTests(TestCase):
+    def test_stream_passthrough_preserves_api_transport_and_blocks_internal_hostname(self):
+        upstream = Mock()
+        context = nullcontext(object())
+        upstream.stream.return_value = context
+        broker = Mock()
+        client = SubscriptionSyncClient(broker, upstream)
+        self.assertIs(client.stream("POST", "https://api.deepseek.com/chat/completions",
+                                   json={"stream": True}, timeout=30), context)
+        upstream.stream.assert_called_once_with("POST", "https://api.deepseek.com/chat/completions",
+                                                json={"stream": True}, timeout=30)
+        for url in (BASE_URL + "/chat/completions", "https://codex-subscription.invalid/unexpected"):
+            with self.assertRaisesRegex(SubscriptionError, "subscription_protocol_error"):
+                client.stream("POST", url, json={"stream": True})
+        self.assertEqual(upstream.stream.call_count, 1)
+        broker.complete.assert_not_called()
+
     def connected(self, broker, subject="first"):
         relay, code, _ = broker.pair(subject, 43200)
         token, _ = broker.connect(code)

@@ -408,6 +408,13 @@ class SubscriptionSyncClient:
             return httpx.Response(200, json=payload, request=httpx.Request("POST", url))
         return self.upstream.post(url, **kwargs)
 
+    def stream(self, method, url, **kwargs):
+        # The local subscription protocol currently returns one complete answer.
+        # Never let its reserved hostname escape to an upstream HTTP transport.
+        if str(url).startswith("https://codex-subscription.invalid"):
+            raise SubscriptionError("subscription_protocol_error", 422)
+        return self.upstream.stream(method, url, **kwargs)
+
     def close(self):
         self.upstream.close()
 

@@ -20,6 +20,8 @@ from zoneinfo import ZoneInfo
 from .config import PublicSettings, Settings
 from .dialogue_core import DialogueContext, DialogueEngine, GenerationBudget, GenerationGate, WorldState
 from .dialogue_core import GenerationBusy as GenerationBusy
+from .generation_stream import GenerationPublicationError, GenerationStreamPartialError, current_generation_observer
+from .model_capabilities import immersive_model_policy
 from .mvp_policy import MVP_CHARACTERS, scene_visual_key
 from .mvp_service import (
     MVPService,
@@ -115,6 +117,7 @@ _PUBLIC_ERROR_STAGES = frozenset({
     "provider",
     "generation_validation",
     "idempotency_store",
+    "publication_store",
     "transport",
     "unknown",
 })
@@ -124,8 +127,8 @@ _PUBLIC_NON_RETRYABLE_ERROR_CODES = frozenset({
     "generation_interrupted",
     "role_guard_rejected",
     "upstream_invalid_response",
+    "generation_partial",
 })
-
 
 def _public_error_payload(
     request_id: Any,
@@ -148,6 +151,7 @@ def _public_error_payload(
 
 def _public_immersive_thinking_decision(
     provider: ProviderSpec, max_provider_calls: int = 2, reasoning_effort: str | None = None,
+    *, model: str = "", latency_v2: bool = True, verified_stream: bool = False,
 ) -> dict[str, Any]:
     """Build the complete provider request contract for public dialogue."""
 
@@ -156,8 +160,10 @@ def _public_immersive_thinking_decision(
                 "reason": "personal_codex_subscription", "provider_kind": provider.provider_id,
                 "request_fields": {"reasoning_effort": reasoning_effort} if reasoning_effort is not None else {},
                 "max_provider_http_calls": max(1, min(2, max_provider_calls)),
-                "disable_compatibility_retries": True}
-    return {
+                "disable_compatibility_retries": True,
+                "chat_latency_v2": False, "compact_public_schema": latency_v2,
+                "verified_block_stream": False}
+    decision = {
         "requested": "off",
         "effective": "off",
         "reason": "public_immersive_policy",
@@ -169,6 +175,14 @@ def _public_immersive_thinking_decision(
         "max_provider_http_calls": max(1, min(2, max_provider_calls)),
         "disable_compatibility_retries": True,
     }
+    if latency_v2 and model:
+        decision.update(immersive_model_policy(provider.provider_id, model))
+    decision.update({
+        "chat_latency_v2": latency_v2,
+        "compact_public_schema": latency_v2,
+        "verified_block_stream": verified_stream,
+    })
+    return decision
 
 
 def _history_turns(history: list[HistoryTurn]) -> list[dict[str, Any]]:
@@ -1887,6 +1901,7 @@ class PublicChatService:
                     },
                     thinking_decision=_public_immersive_thinking_decision(
                         provider, self.public_settings.max_provider_calls_per_action, request.reasoning_effort,
+                        model=request.model, latency_v2=self.public_settings.chat_latency_v2,
                     ),
                     max_tokens_override=1600,
                     persist_exchange=False,
@@ -2094,12 +2109,33 @@ class PublicChatService:
         *,
         gate_reserved: bool = False,
     ) -> dict[str, Any]:
+        observer = current_generation_observer()
+        original_publish = observer.on_verified_blocks if observer else None
+        if observer is not None and original_publish is not None:
+            def checked_publish(blocks: list[dict[str, Any]]) -> bool:
+                # The engine has checked its character/context rules. Apply
+                # the public boundary as well; no normalization can silently
+                # alter a prefix already exposed to the browser.
+                expected_type = "message" if request.communication_channel == "text" else "speech"
+                if not blocks or any(block.get("type") != expected_type for block in blocks):
+                    return False
+                safe_blocks, _answer, truncated, safety = self._public_generation_content(
+                    {"content_blocks": blocks}, request.communication_channel, sticker_candidates=[],
+                )
+                if safety or truncated or safe_blocks != blocks:
+                    return False
+                return original_publish(blocks)
+            observer.on_verified_blocks = checked_publish
         async def generate():
             return await asyncio.to_thread(self._chat_sync, request, subject_hash, provider, api_key)
 
-        if gate_reserved:
-            return await generate()
-        return await self.gate.run(generate)
+        try:
+            if gate_reserved:
+                return await generate()
+            return await self.gate.run(generate)
+        finally:
+            if observer is not None:
+                observer.on_verified_blocks = original_publish
 
     def policy_rejection(
         self,
@@ -2243,7 +2279,11 @@ class PublicChatService:
                             "reason": "public_byok",
                         },
                         thinking_decision=_public_immersive_thinking_decision(
-                            provider, budget.max_provider_calls, request.reasoning_effort,
+                            provider, budget.max_provider_calls, request.reasoning_effort, model=request.model,
+                            latency_v2=self.public_settings.chat_latency_v2,
+                            verified_stream=self.public_settings.verified_block_stream
+                            and current_generation_observer() is not None
+                            and current_generation_observer().on_verified_blocks is not None,
                         ),
                         max_tokens_override=1600,
                         persist_exchange=False,
@@ -2256,6 +2296,18 @@ class PublicChatService:
                         public_state_update_catalog=movement_catalog,
                     )
                 result = self.engine.generate(context, budget, generate).payload
+            except GenerationStreamPartialError as exc:
+                return self._terminal_result(
+                    request, provider, total_started, code="generation_partial",
+                    error_stage="generation_validation", result={"usage": exc.usage},
+                )
+            except GenerationPublicationError as exc:
+                # This executes in the generation worker so its request-local
+                # model count is retained even when the first block's ACK fails.
+                return self._terminal_result(
+                    request, provider, total_started, code="public_database_unavailable",
+                    error_stage="publication_store", result={"usage": exc.usage},
+                )
             except SubscriptionError as exc:
                 return self._terminal_result(request, provider, total_started, code=exc.code, error_stage="provider")
             except Exception as exc:
@@ -2315,6 +2367,14 @@ class PublicChatService:
                 sticker_diagnostics=sticker_diagnostics,
                 response_adjustments=adjustments,
             )
+            observer = current_generation_observer()
+            if observer is not None and observer.published_blocks:
+                published = observer.published_blocks
+                if safety_category or content_blocks[:len(published)] != published:
+                    return self._terminal_result(
+                        request, provider, total_started, code="generation_partial",
+                        error_stage="generation_validation", result=result,
+                    )
             if not content_blocks or (
                 not answer and not any(block.get("type") == "sticker" for block in content_blocks)
             ):

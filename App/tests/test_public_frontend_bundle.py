@@ -307,8 +307,9 @@ class PublicFrontendBundleBrowserTests(TestCase):
                 "state_package": "fixed-subject.signature",
                 "local_day_key": "2026-09-07",
             }
+            confirmed = {"type": "message", "text": "已经确认的合成回复片段。"}
             page.evaluate(
-                """async snapshot => {
+                """async ({snapshot, confirmed}) => {
               const db=await new Promise(resolve=>{
                 const r=indexedDB.open('project-snow-public',4);r.onsuccess=()=>resolve(r.result)
               });
@@ -317,10 +318,16 @@ class PublicFrontendBundleBrowserTests(TestCase):
                 const store=tx.objectStore('messages');const r=store.get('fixture-000001');
                 r.onsuccess=()=>store.put({...r.result,status:'pending',
                   requestId:snapshot.request_id,requestSnapshot:snapshot});
+                store.put({id:'fixture-confirmed-prefix',characterId:snapshot.character_id,
+                  role:'assistant',content:confirmed.text,contentBlocks:[confirmed],
+                  communicationChannel:'text',createdAt:Date.now(),status:'failed',partial:true,
+                  requestId:snapshot.request_id,errorCode:'generation_partial',
+                  committedBlocks:[{request_id:snapshot.request_id,character_id:snapshot.character_id,
+                    sequence:0,block_id:'synthetic-confirmed',block:confirmed}]});
                 tx.oncomplete=resolve
               });db.close();
             }""",
-                snapshot,
+                {"snapshot": snapshot, "confirmed": confirmed},
             )
             for edition, draft in (
                 ("compat-096", "S1兼容草稿"),
@@ -336,7 +343,12 @@ class PublicFrontendBundleBrowserTests(TestCase):
                 record = helpers.read_record(page, "messages", "fixture-000001")
                 self.assertEqual(record["requestId"], snapshot["request_id"])
                 self.assertEqual(record["requestSnapshot"], snapshot)
-                self.assertEqual(helpers.stored_count(page), 2)
+                self.assertEqual(helpers.stored_count(page), 3)
+                prefix = helpers.read_record(page, "messages", "fixture-confirmed-prefix")
+                self.assertEqual(prefix["contentBlocks"], [confirmed])
+                self.assertEqual(prefix["requestId"], snapshot["request_id"])
+                self.assertTrue(prefix["partial"])
+                self.assertEqual(prefix["committedBlocks"][0]["block"], confirmed)
                 page.locator("#message-input").fill(draft)
                 helpers.wait_saved_draft(page, draft)
                 page.goto(self.base_url + "/privacy/", wait_until="networkidle")

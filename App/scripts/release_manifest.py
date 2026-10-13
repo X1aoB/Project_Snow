@@ -259,6 +259,9 @@ def create_manifest(
             "request_leases": (
                 app_root / "migrations" / "versions" / "20260907_0005_request_leases.py"
             ).is_file(),
+            "request_blocks": (
+                app_root / "migrations" / "versions" / "20261013_0008_request_blocks.py"
+            ).is_file(),
         },
         "application": {"image": public_image, "digest": public_digest},
         "embedding": {"image": embedding_image, "digest": embedding_digest},

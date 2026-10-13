@@ -834,6 +834,9 @@ build_candidate_public_env() {
   public_subscription_enabled=false
   public_statistics_enabled=false
   public_web_concurrency=1
+  public_chat_latency_v2=true
+  public_verified_block_stream=false
+  public_motion_v2=true
   carriage_return="$(printf '\r')"
   while IFS= read -r public_line || [ -n "$public_line" ]; do
     case "$public_line" in
@@ -855,6 +858,7 @@ build_candidate_public_env() {
       PUBLIC_ORIGIN|PUBLIC_DEVELOPMENT_ORIGINS|PUBLIC_ALLOW_INSECURE_DEV|\
       PUBLIC_AUTO_CREATE_SCHEMA|PUBLIC_TRUST_PROXY_HEADERS|PUBLIC_ENABLED_PROVIDERS|\
       PUBLIC_SUBSCRIPTION_ENABLED|PUBLIC_STATISTICS_ENABLED|WEB_CONCURRENCY|\
+      PUBLIC_CHAT_LATENCY_V2|PUBLIC_VERIFIED_BLOCK_STREAM|PUBLIC_MOTION_V2|\
       PUBLIC_APP_VERSION|PUBLIC_DATA_VERSION|PUBLIC_MEDIA_VERSION|PUBLIC_MEDIA_ROOT|\
       PUBLIC_EXPERIENCE_NOTICE_VERSION|PUBLIC_ARRIVAL_PROBABILITY|\
       PUBLIC_STICKER_VERSION|PUBLIC_STICKER_ROOT|TURNSTILE_SITE_KEY|\
@@ -895,6 +899,9 @@ build_candidate_public_env() {
         [ "$public_value" != true ] || public_statistics_enabled=true
         ;;
       WEB_CONCURRENCY) public_web_concurrency="$public_value" ;;
+      PUBLIC_CHAT_LATENCY_V2) public_chat_latency_v2="$public_value" ;;
+      PUBLIC_VERIFIED_BLOCK_STREAM) public_verified_block_stream="$public_value" ;;
+      PUBLIC_MOTION_V2) public_motion_v2="$public_value" ;;
     esac
   done < "$source_file"
 
@@ -909,6 +916,15 @@ build_candidate_public_env() {
     echo 'Public API requires WEB_CONCURRENCY=1.' >&2
     return 1
   }
+  for public_presentation_flag in "$public_chat_latency_v2" "$public_verified_block_stream" "$public_motion_v2"; do
+    case "$public_presentation_flag" in
+      true|false) ;;
+      *)
+        echo 'Public presentation flags must be true or false.' >&2
+        return 1
+        ;;
+    esac
+  done
 
   [ "$public_have_enabled_providers" -eq 1 ] &&
     printf '%s\n' "$public_enabled_providers" |
@@ -949,6 +965,8 @@ build_candidate_public_env() {
     printf 'PUBLIC_STATISTICS_ENABLED=%s\n' "$public_statistics_enabled" || return 1
     printf 'PUBLIC_SUBSCRIPTION_ENABLED=%s\nWEB_CONCURRENCY=1\n' \
       "$public_subscription_enabled" || return 1
+    printf 'PUBLIC_CHAT_LATENCY_V2=%s\nPUBLIC_VERIFIED_BLOCK_STREAM=%s\nPUBLIC_MOTION_V2=%s\n' \
+      "$public_chat_latency_v2" "$public_verified_block_stream" "$public_motion_v2" || return 1
     printf 'PUBLIC_APP_VERSION=%s\nPUBLIC_DATA_VERSION=%s\n' \
       "$candidate_app_version" "$candidate_data_version" || return 1
     printf 'PUBLIC_MEDIA_VERSION=%s\nPUBLIC_MEDIA_ROOT=%s\n' \

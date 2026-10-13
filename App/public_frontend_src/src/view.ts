@@ -20,7 +20,32 @@ export function reconcileMarkup(root: HTMLElement, markup: string): void {
     const key = candidate.getAttribute("data-message-id") || candidate.getAttribute("data-ui-key") || candidate.id;
     const candidateMarkup = candidate.outerHTML;
     const cached = key ? previous.get(key) : undefined;
-    const node = cached?.markup === candidateMarkup && cached.node.parentNode === root ? cached.node : candidate;
+    let node = cached?.markup === candidateMarkup && cached.node.parentNode === root ? cached.node : candidate;
+    if (cached && node === candidate && cached.node.parentNode === root && candidate.hasAttribute("data-message-id")) {
+      const previousTemplate = root.ownerDocument.createElement("template");
+      previousTemplate.innerHTML = cached.markup;
+      const prior = previousTemplate.content.querySelector(".message-content-stack");
+      const live = cached.node.querySelector(".message-content-stack");
+      const incoming = candidate.querySelector(".message-content-stack");
+      // Append-only committed replies retain existing text selections, image decodes
+      // and focus. Complex card structure changes still use the normal row replacement.
+      if (prior && live && incoming && cached.node.querySelector(".message-body")?.childElementCount === candidate.querySelector(".message-body")?.childElementCount) {
+        const oldMarkup = Array.from(prior.children).map(item => item.outerHTML);
+        const existing = Array.from(live.children) as Element[];
+        const incomingChildren = Array.from(incoming.children);
+        incomingChildren.forEach((item, index) => {
+          if (existing[index] && oldMarkup[index] === item.outerHTML) return;
+          if (existing[index]) existing[index]!.replaceWith(item); else live.append(item);
+        });
+        for (let index = incomingChildren.length; index < existing.length; index += 1) existing[index]?.remove();
+        cached.node.setAttribute("class", candidate.getAttribute("class") || "");
+        for (const selector of [".meta", ".message-tools", ".rendezvous-card"]) {
+          const nextPart = candidate.querySelector(selector), previousPart = cached.node.querySelector(selector);
+          if (nextPart && previousPart && nextPart.outerHTML !== previousPart.outerHTML) previousPart.replaceWith(nextPart);
+        }
+        node = cached.node;
+      }
+    }
     if (node !== position) root.insertBefore(node, position);
     position = node.nextSibling;
     if (key) next.set(key, { node, markup: candidateMarkup });
