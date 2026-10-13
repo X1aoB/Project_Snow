@@ -918,13 +918,11 @@ const LOCAL_PINYIN_TOKENS = {
   "98322bd505f4": ["cx", "chenxing"],
   "ca0144ccd81b": ["lf", "lifu"],
 };
+const localDayFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit",
+});
 function localDayKey(timestamp = Date.now()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Hong_Kong",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(timestamp));
+  const parts = localDayFormatter.formatToParts(new Date(timestamp));
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
 }
@@ -4090,13 +4088,15 @@ function blockHtml(block) {
   const className = block.type === "action" ? "content-action" : block.type === "speech" ? "content-speech" : "content-message";
   return `<div class="${className}">${escapeHtml(block.text)}</div>`;
 }
-function formatMessageTime(timestamp, previousTimestamp = 0, estimated = false) {
+function formatMessageTime(timestamp, previousTimestamp = 0, estimated = false, clockFormatter = null) {
   const value = new Date(Number(timestamp) || Date.now());
   const previous = previousTimestamp ? new Date(Number(previousTimestamp)) : null;
   if (previous && value.getTime() - previous.getTime() <= 5 * 60 * 1000 && localDayKey(value) === localDayKey(previous)) return "";
   const now = new Date();
   const dayDiff = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()) / 86400000);
-  const clock = value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const clock = clockFormatter && Number.isFinite(value.getTime())
+    ? clockFormatter.format(value)
+    : value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
   let label;
   if (value.getFullYear() !== now.getFullYear()) label = `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")} ${clock}`;
   else if (dayDiff === 0) label = clock;
@@ -4225,6 +4225,9 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     bindTimelineActions();
     return;
   }
+  // Resolve the device locale/timezone once per render, keeping live changes
+  // while avoiding a formatter allocation for every historical timestamp.
+  const clockFormatter = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", hour12: false });
   reconcileMarkup(timeline, older + messages.map((message, index) => {
     const failed = message.status === "failed";
     const presenting = message.role === "assistant" && presentationFor()?.messageId === message.id;
@@ -4233,7 +4236,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
         ? '<span class="message-recovery-note">结果尚未确认，请先检查个人连接器，避免重复发送。</span>'
         : `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
       : message.role === "assistant" && !presenting ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
-    const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
+    const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated, clockFormatter);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
     const blocks = message.role === "assistant" ? visibleBlocksFor(message) : message.contentBlocks;
     return `${time ? `<div class="message-time" data-ui-key="time:${escapeHtml(message.id)}" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${message.partial ? "回复未完成 · 已保留收到的内容" : failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div>${message.role === "assistant" ? rendezvousCardMarkup(message, presenting) : ""}<div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
@@ -4242,11 +4245,11 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   bindTimelineActions();
   bindAvatarImages(timeline);
   for (const message of messages) {
-    const node = [...timeline.querySelectorAll("[data-message-id]")].find(item => item.dataset.messageId === message.id);
     if (state.seenMessageEntries.has(message) || state.paintedMessageIds.has(message.id)) continue;
     markMessageEntrySeen(message);
     // Historical rows and background arrivals must not animate on re-render.
     if (!featureEnabled("motion_v2") || quietPresentation() || message.createdAtEstimated || Date.now() - message.createdAt > 3000 || !wasNearBottom) continue;
+    const node = [...timeline.querySelectorAll("[data-message-id]")].find(item => item.dataset.messageId === message.id);
     if (node) void transientMotion.play(node, [{ opacity: .25, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 180, easing: "cubic-bezier(.22,.72,.24,1)" });
   }
   const newMessages = allMessages.length > previousCount;

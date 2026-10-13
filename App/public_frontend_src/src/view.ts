@@ -8,9 +8,16 @@ export function historyWindow<T extends { id: string }>(messages: T[], endId = "
 }
 
 const renderedNodes = new WeakMap<HTMLElement, Map<string, { node: Element; markup: string }>>();
+const renderedMarkup = new WeakMap<HTMLElement, { markup: string; children: ChildNode[] }>();
 
 /** Reuse unchanged rows so streaming elsewhere preserves focus, images and selection. */
 export function reconcileMarkup(root: HTMLElement, markup: string): void {
+  const previousMarkup = renderedMarkup.get(root);
+  // Unchanged history is common when returning from the stage. Preserve live
+  // rows without reparsing them; an external structural change invalidates it.
+  if (previousMarkup?.markup === markup
+      && previousMarkup.children.length === root.childNodes.length
+      && previousMarkup.children.every((node, index) => root.childNodes[index] === node)) return;
   const template = root.ownerDocument.createElement("template");
   template.innerHTML = markup;
   const previous = renderedNodes.get(root) ?? new Map();
@@ -56,6 +63,7 @@ export function reconcileMarkup(root: HTMLElement, markup: string): void {
     unwanted.remove();
   }
   renderedNodes.set(root, next);
+  renderedMarkup.set(root, { markup, children: Array.from(root.childNodes) });
 }
 
 export function focusWithin(event: KeyboardEvent, panel: HTMLElement): boolean {

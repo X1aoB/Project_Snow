@@ -239,7 +239,10 @@ function historyWindow(messages, endId = "", limit = MAX_VISIBLE_MESSAGES) {
   return { messages: messages.slice(start, end), start, end, hasNewer: end < messages.length };
 }
 var renderedNodes = /* @__PURE__ */ new WeakMap();
+var renderedMarkup = /* @__PURE__ */ new WeakMap();
 function reconcileMarkup(root, markup) {
+  const previousMarkup = renderedMarkup.get(root);
+  if (previousMarkup?.markup === markup && previousMarkup.children.length === root.childNodes.length && previousMarkup.children.every((node, index) => root.childNodes[index] === node)) return;
   const template = root.ownerDocument.createElement("template");
   template.innerHTML = markup;
   const previous = renderedNodes.get(root) ?? /* @__PURE__ */ new Map();
@@ -284,6 +287,7 @@ function reconcileMarkup(root, markup) {
     unwanted.remove();
   }
   renderedNodes.set(root, next);
+  renderedMarkup.set(root, { markup, children: Array.from(root.childNodes) });
 }
 function focusWithin(event, panel) {
   if (event.key !== "Tab") return false;

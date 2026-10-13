@@ -515,6 +515,120 @@ class PublicFrontendLatencyMotionTests(TestCase):
             finally:
                 browser.close()
 
+    def test_actual_runtime_reconciler_restores_external_children_and_preserves_append_focus(self):
+        with fixture.sync_playwright() as playwright:
+            browser = fixture._launch_browser(playwright)
+            try:
+                page = browser.new_page()
+                self.open(page)
+                result = page.evaluate("""async () => {
+                  const {reconcileMarkup}=await import('/modules/runtime.js');
+                  const root=document.createElement('div');document.body.append(root);
+                  const control='<button data-ui-key="control">焦点控件</button>';
+                  const tail='<section data-ui-key="tail">末尾控件</section>';
+                  const row=blocks=>'<article data-message-id="committed" class="message assistant"><div class="message-body"><span class="meta">角色<input value="original" aria-label="live-value"></span><div class="message-content-stack">'+blocks+'</div><div class="message-tools"></div></div></article>';
+                  const first='<p>第一段合成正文。</p>',initial=control+row(first)+tail;
+                  try {
+                    reconcileMarkup(root,initial);
+                    const originalControl=root.firstElementChild,originalRow=root.children[1];
+                    const originalLive=originalRow.querySelector('input');originalLive.value='edited-live-value';
+                    originalControl.focus();reconcileMarkup(root,initial);
+                    const unchanged=root.firstElementChild===originalControl&&root.children[1]===originalRow&&document.activeElement===originalControl
+                      &&originalRow.querySelector('input')===originalLive&&originalLive.value==='edited-live-value';
+                    const recovered=[];
+                    for(const [name,mutate] of [
+                      ['add',()=>root.append(document.createTextNode('external-direct-text'))],
+                      ['remove',()=>root.children[1].remove()],
+                      ['replace',()=>root.children[1].replaceWith(document.createElement('aside'))],
+                      ['reorder',()=>root.insertBefore(root.lastChild,root.firstChild)],
+                    ]) {
+                      mutate();reconcileMarkup(root,initial);
+                      recovered.push({name,restored:root.childNodes.length===3&&[...root.children].map(n=>n.dataset.uiKey||n.dataset.messageId).join(',')==='control,committed,tail'});
+                    }
+                    const retainedRow=root.children[1],retainedBlock=retainedRow.querySelector('.message-content-stack').firstElementChild;
+                    const focused=retainedRow.querySelector('input');focused.value='retained-live-value';focused.focus();focused.setSelectionRange(2,7);
+                    reconcileMarkup(root,control+row(first+'<p>追加的合成尾段。</p>')+tail);
+                    const stack=root.children[1].querySelector('.message-content-stack');
+                    return {unchanged,recovered,rowPreserved:root.children[1]===retainedRow,
+                      firstBlockPreserved:stack.firstElementChild===retainedBlock,focusPreserved:document.activeElement===focused,
+                      liveInputPreserved:root.children[1].querySelector('input')===focused&&focused.value==='retained-live-value'&&focused.selectionStart===2&&focused.selectionEnd===7,
+                      texts:[...stack.children].map(n=>n.textContent)};
+                  } finally {root.remove();}
+                }""")
+                self.assertTrue(result["unchanged"])
+                self.assertEqual(result["recovered"], [{"name": name, "restored": True} for name in ("add", "remove", "replace", "reorder")])
+                self.assertTrue(result["rowPreserved"])
+                self.assertTrue(result["firstBlockPreserved"])
+                self.assertTrue(result["focusPreserved"])
+                self.assertTrue(result["liveInputPreserved"])
+                self.assertEqual(result["texts"], ["第一段合成正文。", "追加的合成尾段。"])
+                self.assertEqual(LatencyHandler.requests, [])
+            finally:
+                browser.close()
+
+    def test_history_groups_hong_kong_days_and_keeps_device_clock_and_estimates(self):
+        with fixture.sync_playwright() as playwright:
+            browser = fixture._launch_browser(playwright)
+            try:
+                page = browser.new_page(locale="en-US", timezone_id="America/Los_Angeles")
+                self.open(page)
+                reliability_fixture.PublicFrontendReliabilityTests.seed(page, count=3)
+                clocks = page.evaluate("""async () => {
+                  const stamps=['2026-10-13T15:59:59Z','2026-10-13T16:00:00Z','2026-10-13T16:00:02Z'].map(Date.parse);
+                  const db=await new Promise(resolve=>{const r=indexedDB.open('project-snow-public',4);r.onsuccess=()=>resolve(r.result)});
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction('messages','readwrite'),store=tx.objectStore('messages');
+                    stamps.forEach((stamp,index)=>{
+                      const request=store.get('fixture-'+String(index).padStart(6,'0'));
+                      request.onsuccess=()=>store.put({...request.result,createdAt:stamp,createdAtEstimated:index===1});
+                    });tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+                  });db.close();
+                  return stamps.slice(0,2).map(stamp=>new Date(stamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',hour12:false}));
+                }""")
+                page.reload(wait_until="networkidle")
+                self.assertEqual(page.locator("#timeline .message").count(), 3)
+                labels = page.locator("#timeline .message-time").all_text_contents()
+                self.assertEqual(len(labels), 2)
+                self.assertTrue(labels[0].endswith(clocks[0]), labels[0])
+                self.assertTrue(labels[1].endswith(clocks[1] + "（估算）"), labels[1])
+                self.assertEqual(LatencyHandler.requests, [])
+            finally:
+                browser.close()
+
+    def measure_mode_motion(self, page, trigger):
+        page.wait_for_load_state("networkidle")
+        page.wait_for_function("document.getAnimations().every(animation=>animation.playState!=='running'||animation.effect.getTiming().iterations===Infinity)")
+        page.evaluate("""() => {
+          window.__motionLongTasks=[];
+          window.__motionObserver=new PerformanceObserver(list=>{
+            for(const entry of list.getEntries())window.__motionLongTasks.push({start_ms:entry.startTime,duration_ms:entry.duration});
+          });window.__motionObserver.observe({type:'longtask',buffered:false});
+          window.__motionTrace={idleStart:performance.now(),actionStart:0,start:0,end:0,frames:[],last:0,interactiveCounts:[]};
+        }""")
+        page.wait_for_timeout(150)
+        page.evaluate("""() => {
+          window.__motionTrace.actionStart=performance.now();
+          const track=now=>{const t=window.__motionTrace;
+            if(t.last)t.frames.push(now-t.last);t.last=now;
+            t.interactiveCounts.push([...document.querySelectorAll('#text-surface,#in-person-surface')].filter(n=>!n.hidden&&!n.inert).length);
+            if(document.querySelector('.surface-transition-snapshot')){if(!t.start)t.start=now;}
+            else if(t.start){t.end=now;return;}requestAnimationFrame(track);
+          };requestAnimationFrame(track);
+        }""")
+        page.locator(trigger).click()
+        page.wait_for_function("window.__motionTrace.end > 0")
+        page.evaluate("() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))")
+        return page.evaluate("""() => {
+          window.__motionObserver.disconnect();const t=window.__motionTrace;
+          return {duration_ms:t.end-t.start,action_to_settled_ms:t.end-t.actionStart,
+            idle_long_tasks_ms:window.__motionLongTasks.filter(e=>e.start_ms>=t.idleStart&&e.start_ms<t.actionStart).map(e=>e.duration_ms),
+            long_tasks_ms:window.__motionLongTasks.filter(e=>e.start_ms>=t.actionStart&&e.start_ms<=t.end).map(e=>e.duration_ms),
+            frame_intervals_ms:t.frames,interactive_surface_counts:t.interactiveCounts,
+            interactive_surfaces:[...document.querySelectorAll('#text-surface,#in-person-surface')].filter(n=>!n.hidden&&!n.inert).length,
+            snapshots:document.querySelectorAll('.surface-transition-snapshot').length,
+            rendered_history_rows:document.querySelectorAll('#timeline .message').length};
+        }""")
+
     def test_warm_mobile_transition_has_one_interactive_surface_and_no_long_task(self):
         with fixture.sync_playwright() as playwright:
             browser = fixture._launch_browser(playwright)
@@ -535,52 +649,48 @@ class PublicFrontendLatencyMotionTests(TestCase):
                 page.wait_for_function("document.querySelectorAll('#timeline .message').length === 200")
                 self.assertEqual(page.locator("#timeline .message").count(), 200)
                 self.assertEqual(reliability_fixture.PublicFrontendReliabilityTests.stored_count(page), 350)
+                page.locator("#message-input").fill("长历史通讯器草稿")
+                page.evaluate("document.querySelector('#timeline').scrollTop=100")
+                page.wait_for_function("Math.abs(document.querySelector('#timeline').scrollTop-100)<=1")
+                page.evaluate("""() => {
+                  const timeline=document.querySelector('#timeline');
+                  window.__historyScroll=timeline.scrollTop;
+                  window.__keptHistoryNode=timeline.querySelector('[data-message-id]');
+                  window.__keptHistoryId=window.__keptHistoryNode.dataset.messageId;
+                }""")
                 page.locator("#go-in-person").click()
                 page.locator("#confirm-presence-transition").wait_for(state="visible")
-                page.wait_for_load_state("networkidle")
-                page.wait_for_function("document.getAnimations().every(animation=>animation.playState!=='running'||animation.effect.getTiming().iterations===Infinity)")
-                page.evaluate("""() => {
-                  window.__motionLongTasks = [];
-                  window.__motionObserver = new PerformanceObserver(list => {
-                    for (const entry of list.getEntries()) window.__motionLongTasks.push({start_ms:entry.startTime,duration_ms:entry.duration});
-                  }); window.__motionObserver.observe({type:'longtask', buffered:false});
-                  window.__motionTrace = {idleStart:performance.now(),actionStart:0,start:0,end:0,frames:[],last:0};
-                }""")
-                page.wait_for_timeout(150)
-                page.evaluate("""() => {
-                  window.__motionTrace.actionStart=performance.now();
-                  const track = now => { const t=window.__motionTrace;
-                    if (t.last) t.frames.push(now-t.last);t.last=now;
-                    if (document.querySelector('.surface-transition-snapshot')) {if (!t.start)t.start=now;}
-                    else if(t.start){t.end=now;return;}
-                    requestAnimationFrame(track);
-                  };requestAnimationFrame(track);
-                }""")
-                page.locator("#confirm-presence-transition").click()
-                page.wait_for_function("window.__motionTrace.end > 0")
-                page.evaluate("() => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))")
-                result = page.evaluate("""() => {
-                  window.__motionObserver.disconnect();const t=window.__motionTrace;
-                  return {duration_ms:t.end-t.start,
-                    idle_long_tasks_ms:window.__motionLongTasks.filter(entry=>entry.start_ms>=t.idleStart&&entry.start_ms<t.actionStart).map(entry=>entry.duration_ms),
-                    long_tasks_ms:window.__motionLongTasks.filter(entry=>entry.start_ms>=t.actionStart&&entry.start_ms<=t.end).map(entry=>entry.duration_ms),
-                    frame_intervals_ms:t.frames,interactive_surfaces:[...document.querySelectorAll('#text-surface,#in-person-surface')].filter(node=>!node.hidden&&!node.inert).length,
-                    snapshots:document.querySelectorAll('.surface-transition-snapshot').length};
-                }""")
-                result.update(browser=browser.version, viewport={"width": 390, "height": 844},
-                              synthetic_indexeddb_history_rows=350, rendered_history_rows=200,
-                              environment=f"{platform.system()} headless browser; warm synthetic fixture; no CPU emulation",
-                              platform=platform.system(), browser_channel=os.getenv("PROJECT_SNOW_PLAYWRIGHT_CHANNEL", "").strip() or "bundled",
-                              real_device_profile="unknown", physical_soft_keyboard_tested=False,
-                              phase="idle baseline then confirmed warm mode transition", paid_calls=0)
+                forward = self.measure_mode_motion(page, "#confirm-presence-transition")
+                page.wait_for_function("!document.querySelector('#send-message').disabled")
+                page.locator("#message-input").fill("长历史面对面草稿")
+                reverse = self.measure_mode_motion(page, "#open-communicator")
+                reverse.update(communicator_draft_preserved=page.locator("#message-input").input_value() == "长历史通讯器草稿",
+                               history_node_preserved=page.evaluate("window.__keptHistoryNode === [...document.querySelectorAll('#timeline [data-message-id]')].find(node=>node.dataset.messageId===window.__keptHistoryId)"),
+                               scroll_delta_px=page.evaluate("Math.abs(document.querySelector('#timeline').scrollTop-window.__historyScroll)"))
                 target = Path(__file__).resolve().parents[2] / ".tmp" / "latency-motion-followup"
                 target.mkdir(parents=True, exist_ok=True)
-                (target / "performance.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
-                self.assertEqual(result["interactive_surfaces"], 1)
-                self.assertEqual(result["snapshots"], 0)
-                self.assertGreaterEqual(result["duration_ms"], 300)
-                self.assertLessEqual(result["duration_ms"], 430)
-                self.assertEqual(result["long_tasks_ms"], [])
+                for direction, result in (("forward", forward), ("reverse", reverse)):
+                    result.update(direction=direction, browser=browser.version, viewport={"width": 390, "height": 844},
+                                  synthetic_indexeddb_history_rows=350,
+                                  environment=f"{platform.system()} headless browser; warm synthetic fixture; no CPU emulation",
+                                  platform=platform.system(), browser_channel=os.getenv("PROJECT_SNOW_PLAYWRIGHT_CHANNEL", "").strip() or "bundled",
+                                  real_device_profile="unknown", physical_soft_keyboard_tested=False,
+                                  phase="idle baseline then confirmed warm mode transition", paid_calls=0)
+                    (target / f"performance-{direction}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+                    with self.subTest(direction=direction):
+                        self.assertEqual(result["interactive_surfaces"], 1)
+                        self.assertEqual(set(result["interactive_surface_counts"]), {1})
+                        self.assertEqual(result["snapshots"], 0)
+                        self.assertEqual(result["rendered_history_rows"], 200)
+                        self.assertGreaterEqual(result["duration_ms"], 300)
+                        self.assertLessEqual(result["duration_ms"], 430)
+                        self.assertEqual(result["idle_long_tasks_ms"], [])
+                        self.assertEqual(result["long_tasks_ms"], [])
+                self.assertTrue(reverse["communicator_draft_preserved"])
+                self.assertTrue(reverse["history_node_preserved"])
+                self.assertLessEqual(reverse["scroll_delta_px"], 1)
+                saved_drafts = reliability_fixture.PublicFrontendReliabilityTests.read_record(page, "app_state", "drafts")
+                self.assertEqual(saved_drafts["values"]["25b23cb64398:in_person:message"], "长历史面对面草稿")
             finally:
                 browser.close()
 
