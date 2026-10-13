@@ -50,8 +50,19 @@ jobs:
           build-args: |
             APP_REVISION=${{ github.sha }}
             APP_BUILD_TIME=${{ github.event.head_commit.timestamp }}
+            RUNTIME_DEPENDENCY_STAGE=pinned-runtime
           cache-from: type=gha,scope=public-api
           cache-to: type=gha,mode=max,scope=public-api
+      - name: Verify the complete published application image inventory
+        env:
+          PUBLIC_IMAGE: ${{ steps.images.outputs.public }}@${{ steps.public.outputs.digest }}
+        run: |
+          python App/scripts/verify_public_image_inventory.py --app-root App \
+            --output public-image-inventory.json --expected-source-commit "$GITHUB_SHA"
+          docker run --rm --network none --read-only --entrypoint python \
+            --volume "$PWD/App/scripts/verify_public_image_inventory.py:/tmp/verify.py:ro" \
+            --volume "$PWD/public-image-inventory.json:/tmp/expected.json:ro" \
+            "$PUBLIC_IMAGE" -I -B /tmp/verify.py --manifest /tmp/expected.json --image-root /app
       - name: Scan published application image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

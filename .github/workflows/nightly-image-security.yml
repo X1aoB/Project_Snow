@@ -28,14 +28,24 @@ jobs:
         with:
           context: App
           file: App/infra/public-api.Dockerfile
+          platforms: linux/amd64
           build-args: |
             APP_REVISION=${{ github.sha }}
+            RUNTIME_DEPENDENCY_STAGE=refreshed-runtime
           pull: true
           push: false
           load: true
           tags: project-snow-public:nightly-security
           no-cache: true
           cache-to: type=gha,mode=max,scope=public-api
+      - name: Verify the complete freshly rebuilt application image inventory
+        run: |
+          python App/scripts/verify_public_image_inventory.py --app-root App \
+            --output public-image-inventory.json --expected-source-commit "$GITHUB_SHA"
+          docker run --rm --network none --read-only --entrypoint python \
+            --volume "$PWD/App/scripts/verify_public_image_inventory.py:/tmp/verify.py:ro" \
+            --volume "$PWD/public-image-inventory.json:/tmp/expected.json:ro" \
+            project-snow-public:nightly-security -I -B /tmp/verify.py --manifest /tmp/expected.json --image-root /app
       - id: public-scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:

@@ -103,6 +103,60 @@ class DeploymentContractTests(TestCase):
         self.assertIn('exec gosu snow "$@"', entrypoint)
         self.assertNotIn("/etc/project-snow/secrets:/run/secrets:ro", compose)
 
+    def test_reused_public_dependencies_are_explicit_and_application_is_replaced(self) -> None:
+        dockerfile = self.read("infra/public-api.Dockerfile")
+        spec = importlib.util.spec_from_file_location("public_runtime_base_contract", self.app_root / "scripts" / "verify_public_runtime_base.py")
+        runtime_base = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runtime_base)
+        self.assertTrue(dockerfile.startswith("ARG RUNTIME_DEPENDENCY_STAGE=refreshed-runtime\n"))
+        pinned_start = dockerfile.index(f"FROM {runtime_base.APPROVED_IMAGE} AS pinned-runtime")
+        final_start = dockerfile.index("FROM ${RUNTIME_DEPENDENCY_STAGE} AS runtime")
+        fresh, pinned, final = dockerfile[:pinned_start], dockerfile[pinned_start:final_start], dockerfile[final_start:]
+        self.assertIn("AS refreshed-runtime", fresh)
+        self.assertIn("apt-get upgrade -y --no-install-recommends", fresh)
+        self.assertIn("pip install --no-cache-dir --require-hashes", fresh)
+        self.assertNotIn("APP_REVISION", fresh)
+        self.assertNotIn("APP_REVISION", pinned)
+        self.assertIn("python -I -B /tmp/project-snow-base/verify_public_runtime_base.py", pinned)
+        self.assertIn("--candidate-lock /tmp/project-snow-base/requirements-public.txt", pinned)
+        self.assertNotIn("pip install", pinned)
+        self.assertNotIn("apt-get", pinned)
+        self.assertLess(final.index("WORKDIR /\n"), final.index("RUN rm -rf /app && mkdir /app"))
+        self.assertLess(final.index("RUN rm -rf /app && mkdir /app"), final.index("COPY requirements-public.txt ./"))
+        self.assertLess(final.index("ARG APP_REVISION"), final.index("--verify --output /app"))
+        self.assertIn('org.opencontainers.image.revision="${APP_REVISION}"', final)
+        self.assertIn('org.opencontainers.image.source="https://github.com/X1aoB/Project_Snow"', final)
+        self.assertIn('ENTRYPOINT ["/app/infra/public-entrypoint.sh"]', final)
+
+    def test_image_workflows_select_verified_reuse_and_preserve_fresh_security_path(self) -> None:
+        workflows = self.app_root.parent / ".github" / "workflows"
+        ci = (workflows / "ci.yml").read_text(encoding="utf-8")
+        publish = (workflows / "publish-images.yml").read_text(encoding="utf-8")
+        nightly = (workflows / "nightly-image-security.yml").read_text(encoding="utf-8")
+        self.assertIn("RUNTIME_DEPENDENCY_STAGE=pinned-runtime", ci)
+        self.assertIn("RUNTIME_DEPENDENCY_STAGE=pinned-runtime", publish)
+        self.assertIn("RUNTIME_DEPENDENCY_STAGE=refreshed-runtime", nightly)
+        self.assertNotIn("RUNTIME_DEPENDENCY_STAGE=pinned-runtime", nightly)
+        self.assertIn("no-cache: true", nightly)
+        self.assertIn("pull: true", nightly)
+        for workflow in (ci, publish, nightly):
+            self.assertIn("--output public-image-inventory.json --expected-source-commit", workflow)
+            self.assertIn('--expected-source-commit "$GITHUB_SHA"', workflow)
+            self.assertIn("docker run --rm --network none --read-only --entrypoint python", workflow)
+            self.assertIn("/tmp/verify.py --manifest /tmp/expected.json --image-root /app", workflow)
+            self.assertIn("platforms: linux/amd64", workflow)
+            self.assertLess(workflow.index("file: App/infra/public-api.Dockerfile"),
+                            workflow.index("python App/scripts/verify_public_image_inventory.py"))
+            self.assertLess(workflow.index("python App/scripts/verify_public_image_inventory.py"),
+                            workflow.index("uses: aquasecurity/trivy-action@"))
+        self.assertIn("provenance: mode=max", publish)
+        self.assertIn("sbom: true", publish)
+        self.assertIn("project-snow-public:ci -I -B /tmp/verify.py", ci)
+        self.assertIn("project-snow-public:nightly-security -I -B /tmp/verify.py", nightly)
+        self.assertIn('"$PUBLIC_IMAGE" -I -B /tmp/verify.py', publish)
+        self.assertIn("PUBLIC_IMAGE: ${{ steps.images.outputs.public }}@${{ steps.public.outputs.digest }}", publish)
+        self.assertIn("image-ref: ${{ steps.images.outputs.public }}@${{ steps.public.outputs.digest }}", publish)
+
     def test_public_networks_and_secrets_are_least_privilege(self) -> None:
         compose = self.read("compose.prod.yml")
         api = compose[compose.index("x-api: &api"):compose.index("\nservices:")]

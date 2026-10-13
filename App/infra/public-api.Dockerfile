@@ -1,9 +1,8 @@
-FROM python:3.12-slim@sha256:09f7da3bc104798d0afb40bc08d23ab2da20a76130cec1f2ef170848f5d85217
+ARG RUNTIME_DEPENDENCY_STAGE=refreshed-runtime
+
+FROM python:3.12-slim@sha256:09f7da3bc104798d0afb40bc08d23ab2da20a76130cec1f2ef170848f5d85217 AS refreshed-runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app
-ARG APP_REVISION=""
-ARG APP_BUILD_TIME=""
-ENV APP_REVISION=${APP_REVISION} APP_BUILD_TIME=${APP_BUILD_TIME}
 WORKDIR /app
 RUN useradd --create-home --uid 10001 snow \
     && apt-get update \
@@ -12,6 +11,28 @@ RUN useradd --create-home --uid 10001 snow \
     && rm -rf /var/lib/apt/lists/*
 COPY requirements-public.txt ./
 RUN pip install --no-cache-dir --require-hashes -r requirements-public.txt
+
+# A changed lock fails this explicit release path; no packages are installed.
+FROM ghcr.io/x1aob/project_snow-public@sha256:787eaaf0f65eb66d2a0ce89336832c0a9ea0a4909ddf1ad853754a5c0a7a5441 AS pinned-runtime
+USER root
+COPY requirements-public.txt /tmp/project-snow-base/requirements-public.txt
+COPY scripts/verify_public_runtime_base.py /tmp/project-snow-base/verify_public_runtime_base.py
+RUN python -I -B /tmp/project-snow-base/verify_public_runtime_base.py \
+        --candidate-lock /tmp/project-snow-base/requirements-public.txt \
+    && rm -rf /tmp/project-snow-base
+
+FROM ${RUNTIME_DEPENDENCY_STAGE} AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app
+USER root
+WORKDIR /
+RUN rm -rf /app && mkdir /app
+ARG APP_REVISION=""
+ARG APP_BUILD_TIME=""
+ENV APP_REVISION=${APP_REVISION} APP_BUILD_TIME=${APP_BUILD_TIME}
+LABEL org.opencontainers.image.revision="${APP_REVISION}" \
+      org.opencontainers.image.source="https://github.com/X1aoB/Project_Snow"
+WORKDIR /app
+COPY requirements-public.txt ./
 COPY backend ./backend
 COPY config/public_knowledge ./config/public_knowledge
 COPY migrations ./migrations
