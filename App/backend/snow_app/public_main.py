@@ -5,16 +5,17 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
 import mimetypes
 import os
 import secrets
 import time
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -28,6 +29,8 @@ from .config import PublicSettings, Settings
 from .frontend_identity import read_frontend_identity
 from .generation_stream import GenerationObserver, observe_generation
 from .model_capabilities import immersive_model_policy, public_model_profiles
+from .public_logging import configure_public_logger
+from .public_statistics import install_statistics_config
 from .mvp_service import MVPProviderError, _normalize_expression_state, _normalize_stage_motion
 from .public_contracts import (
     ByokSessionRequest,
@@ -72,6 +75,16 @@ from .public_store import (
     PublicStoreUnavailable,
     RateLimitExceeded,
 )
+from .public_subscription import (
+    EFFORT as SUBSCRIPTION_EFFORT,
+    MODEL as SUBSCRIPTION_MODEL,
+    PROTOCOL_VERSION as SUBSCRIPTION_PROTOCOL_VERSION,
+    PROVIDER as SUBSCRIPTION_PROVIDER,
+    SubscriptionBroker,
+    SubscriptionError,
+    SubscriptionSyncClient,
+    install_subscription_routes,
+)
 
 # Minimal production images do not necessarily ship a mime.types entry for
 # WebP. StaticFiles inherits Python's process-wide mapping, so register the
@@ -82,7 +95,180 @@ ANONYMOUS_COOKIE = "__Host-snow_anon"
 DEVELOPMENT_ANONYMOUS_COOKIE = "snow_anon_dev"
 MAX_BODY_BYTES = 64 * 1024
 REQUEST_BODY_TIMEOUT_SECONDS = 10
-LOGGER = logging.getLogger("snow.public")
+PUBLIC_DATABASE_RETRY_AFTER_SECONDS = 2
+LOGGER = configure_public_logger()
+
+_ERROR_STAGES = frozenset(
+    {
+        "content_validation",
+        "state_validation",
+        "character_data",
+        "generation_queue",
+        "retrieval",
+        "provider",
+        "generation_validation",
+        "idempotency_store",
+        "publication_store",
+        "transport",
+        "unknown",
+    }
+)
+_ERROR_STAGE_BY_CODE = {
+    "invalid_request": "content_validation",
+    "sticker_unavailable": "content_validation",
+    "invalid_movement_location": "content_validation",
+    "invalid_presence_request": "content_validation",
+    "request_too_large": "content_validation",
+    "request_read_timeout": "transport",
+    "request_timeout": "transport",
+    "request_failed": "transport",
+    "stream_disconnected": "transport",
+    "service_draining": "generation_queue",
+    "subject_generation_busy": "generation_queue",
+    "generation_queue_full": "generation_queue",
+    "generation_queue_timeout": "generation_queue",
+    # A catch-all generation failure has no more precise public stage. Keep
+    # the internal exception detail private and expose the controlled
+    # ``unknown`` stage to clients.
+    "generation_interrupted": "unknown",
+    "generation_failed": "unknown",
+    "generation_partial": "generation_validation",
+    "provider_not_enabled": "provider",
+    "provider_credential_rejected": "provider",
+    "provider_model_discovery_failed": "provider",
+    "provider_network_error": "provider",
+    "provider_timeout": "provider",
+    "provider_rate_limited": "provider",
+    "provider_request_failed": "provider",
+    "upstream_invalid_response": "generation_validation",
+    "role_guard_rejected": "generation_validation",
+    "public_database_unavailable": "idempotency_store",
+    "request_id_conflict": "idempotency_store",
+    "request_in_progress": "idempotency_store",
+    "state_invalid": "state_validation",
+    "state_subject_mismatch": "state_validation",
+    "invalid_presence_transition": "state_validation",
+    "character_unavailable": "character_data",
+}
+_NON_RETRYABLE_ERROR_CODES = frozenset(
+    {
+        "invalid_request",
+        "sticker_unavailable",
+        "invalid_movement_location",
+        "invalid_presence_request",
+        "request_too_large",
+        "request_id_conflict",
+        "generation_interrupted",
+        "generation_partial",
+        "provider_not_enabled",
+        "provider_credential_rejected",
+        "character_unavailable",
+        "state_invalid",
+        "state_subject_mismatch",
+        "invalid_presence_transition",
+        "role_guard_rejected",
+        "upstream_invalid_response",
+        "turnstile_required",
+        "turnstile_expired",
+        "turnstile_timeout",
+        "turnstile_unavailable",
+    }
+)
+
+
+def _safe_request_id(value: Any) -> str:
+    try:
+        return str(UUID(str(value)))
+    except (AttributeError, TypeError, ValueError):
+        return ""
+
+
+def _request_id_from_request(request: Request) -> str:
+    state_value = getattr(getattr(request, "state", None), "public_request_id", "")
+    if state_value:
+        return _safe_request_id(state_value)
+    raw_body = getattr(request, "_body", b"")
+    if not raw_body:
+        return ""
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, TypeError, ValueError, json.JSONDecodeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return _safe_request_id(payload.get("request_id") or payload.get("arrival_id"))
+
+
+def _error_stage(code: str, explicit: Any = "") -> str:
+    candidate = str(explicit or "").strip()
+    if candidate in _ERROR_STAGES:
+        return candidate
+    return _ERROR_STAGE_BY_CODE.get(code, "unknown")
+
+
+def _error_retryable(code: str, http_status: int, explicit: Any = None) -> bool:
+    if isinstance(explicit, bool):
+        return explicit
+    if code in _NON_RETRYABLE_ERROR_CODES:
+        return False
+    return http_status >= 500 or http_status in {408, 409, 429}
+
+
+def _error_detail(
+    code: str,
+    http_status: int,
+    message: str | None = None,
+    *,
+    request_id: str = "",
+    stage: str = "",
+    retryable: bool | None = None,
+    retry_after_seconds: int | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    detail: dict[str, Any] = {
+        "code": code,
+        "message": message or code,
+        "retryable": _error_retryable(code, http_status, retryable),
+        "stage": _error_stage(code, stage),
+    }
+    safe_id = _safe_request_id(request_id)
+    if safe_id:
+        detail["request_id"] = safe_id
+    if isinstance(retry_after_seconds, int) and not isinstance(retry_after_seconds, bool) and retry_after_seconds > 0:
+        detail["retry_after_seconds"] = min(retry_after_seconds, 300)
+    if extra:
+        detail.update(extra)
+    return detail
+
+
+def _error_response(
+    request: Request,
+    code: str,
+    http_status: int,
+    *,
+    message: str | None = None,
+    headers: dict[str, str] | None = None,
+    stage: str = "",
+    retryable: bool | None = None,
+    retry_after_seconds: int | None = None,
+    extra: dict[str, Any] | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=http_status,
+        content={
+            "detail": _error_detail(
+                code,
+                http_status,
+                message,
+                request_id=_request_id_from_request(request),
+                stage=stage,
+                retryable=retryable,
+                retry_after_seconds=retry_after_seconds,
+                extra=extra,
+            )
+        },
+        headers=headers,
+    )
 
 def _anonymous_cookie_name(settings: PublicSettings) -> str:
     return DEVELOPMENT_ANONYMOUS_COOKIE if settings.allow_insecure_dev else ANONYMOUS_COOKIE
@@ -106,10 +292,31 @@ def _client_ip(request: Request) -> str:
     return str(request.client.host if request.client else "unknown")[:64]
 
 
-def _error(code: str, http_status: int, message: str | None = None) -> HTTPException:
+def _error(
+    code: str,
+    http_status: int,
+    message: str | None = None,
+    *,
+    request_id: str = "",
+    stage: str = "",
+    retryable: bool | None = None,
+    retry_after_seconds: int | None = None,
+    extra: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> HTTPException:
     return HTTPException(
         status_code=http_status,
-        detail={"code": code, "message": message or code},
+        detail=_error_detail(
+            code,
+            http_status,
+            message,
+            request_id=request_id,
+            stage=stage,
+            retryable=retryable,
+            retry_after_seconds=retry_after_seconds,
+            extra=extra,
+        ),
+        headers=headers,
     )
 
 
@@ -255,6 +462,15 @@ def _request_hash(payload: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _model_request_body(payload: ChatRequest | PresenceArrivalRequest | SummarizeRequest) -> dict[str, Any]:
+    body = payload.model_dump(mode="json", exclude={"credential"})
+    # Preserve hashes of request snapshots created before effort selection was
+    # introduced. Explicit efforts remain part of the idempotency contract.
+    if body.get("reasoning_effort") is None:
+        body.pop("reasoning_effort", None)
+    return body
+
+
 def _feedback_blocks(blocks: list[Any], limit: int) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     remaining = limit
@@ -303,13 +519,20 @@ def create_app(
     chat_service: PublicChatService | None = None,
 ) -> FastAPI:
     public_settings = public_settings or PublicSettings.from_environment()
+    subscription_broker = SubscriptionBroker(public_settings.subscription_enabled)
+    enabled_providers = tuple(provider for provider in public_settings.enabled_providers
+                              if provider != SUBSCRIPTION_PROVIDER)
+    if subscription_broker.enabled:
+        enabled_providers += (SUBSCRIPTION_PROVIDER,)
+    public_settings = replace(public_settings, enabled_providers=enabled_providers,
+                              subscription_enabled=subscription_broker.enabled)
     internal_settings = internal_settings or Settings.from_environment()
     image_revision = os.getenv("APP_REVISION", "").strip()
     revision = os.getenv("APP_REVISION", os.getenv("GIT_SHA", "")).strip()
     build_time = os.getenv("APP_BUILD_TIME", "").strip()
     frontend_identity = read_frontend_identity(required=bool(image_revision))
     store = store or PublicStore(public_settings.database_url)
-    provider_http = ProviderHTTPPool()
+    provider_http = ProviderHTTPPool(subscription_broker)
     async_store = AsyncPublicStore(store)
     chat_service = chat_service or PublicChatService(
         internal_settings,
@@ -318,6 +541,10 @@ def create_app(
     )
     if chat_service is not None and getattr(chat_service, "provider_client", None) is None:
         chat_service.provider_client = provider_http
+    if not isinstance(chat_service.mvp._model_http_client, SubscriptionSyncClient):
+        chat_service.mvp._model_http_client = SubscriptionSyncClient(
+            subscription_broker, chat_service.mvp._model_http_client,
+        )
     # Verify immutable packages before any URL is mounted.  Subsequent calls
     # return the in-memory snapshot and never re-hash runtime media.
     media_startup_status = chat_service.media.verify(force=True)
@@ -386,6 +613,7 @@ def create_app(
             renewal.cancel()
             await asyncio.gather(renewal, return_exceptions=True)
             try:
+                subscription_broker.close()
                 await asyncio.to_thread(chat_service.close)
             finally:
                 try:
@@ -405,8 +633,10 @@ def create_app(
     app.state.public_store = store
     app.state.chat_service = chat_service
     app.state.provider_http = provider_http
+    app.state.subscription_broker = subscription_broker
     app.state.async_store = async_store
     app.state.draining = False
+    install_subscription_routes(app, public_settings, subscription_broker, async_store)
     chat_jobs: dict[str, asyncio.Task[dict[str, Any]]] = {}
     delivery_journals: dict[str, DeliveryJournal] = {}
     active_request_leases: dict[str, asyncio.Task[Any]] = {}
@@ -466,7 +696,13 @@ def create_app(
         """Reserve the subject unless this is a reconnect to the same operation."""
 
         if app.state.draining:
-            raise HTTPException(status_code=503, detail={"code": "service_draining"}, headers={"Retry-After": "5"})
+            raise _error(
+                "service_draining",
+                503,
+                request_id=operation_id,
+                retry_after_seconds=5,
+                headers={"Retry-After": "5"},
+            )
         async with active_subject_lock:
             owner = active_subject_requests.get(subject)
             if owner and owner != operation_id:
@@ -478,9 +714,11 @@ def create_app(
                     if summary["task"] is not None:
                         summary["task"].cancel()
                 else:
-                    raise HTTPException(
-                        status_code=429,
-                        detail={"code": "subject_generation_busy"},
+                    raise _error(
+                        "subject_generation_busy",
+                        429,
+                        request_id=operation_id,
+                        retry_after_seconds=2,
                         headers={"Retry-After": "2"},
                     )
             if owner == operation_id:
@@ -523,10 +761,10 @@ def create_app(
     async def public_boundary(request: Request, call_next):
         path = request.url.path
         if path.startswith("/api/"):
-            return JSONResponse(status_code=404, content={"detail": {"code": "route_not_public"}})
+            return _error_response(request, "route_not_public", 404)
         request_host = str(request.url.hostname or "").casefold().rstrip(".")
         if request_host not in _allowed_hosts(public_settings):
-            return JSONResponse(status_code=400, content={"detail": {"code": "host_rejected"}})
+            return _error_response(request, "host_rejected", 400)
         cookie_name = _anonymous_cookie_name(public_settings)
         anonymous_id = str(request.cookies.get(cookie_name) or "").strip()
         new_cookie = not is_valid_anonymous_id(anonymous_id)
@@ -537,16 +775,16 @@ def create_app(
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             origin = str(request.headers.get("Origin") or "").rstrip("/")
             if origin not in public_settings.allowed_origins:
-                return JSONResponse(status_code=403, content={"detail": {"code": "origin_rejected"}})
+                return _error_response(request, "origin_rejected", 403)
             content_type = str(request.headers.get("Content-Type") or "").split(";", 1)[0].casefold()
             if content_type != "application/json":
-                return JSONResponse(status_code=415, content={"detail": {"code": "json_required"}})
+                return _error_response(request, "json_required", 415)
             try:
                 content_length = int(request.headers.get("Content-Length") or 0)
             except ValueError:
                 content_length = MAX_BODY_BYTES + 1
             if content_length > MAX_BODY_BYTES:
-                return JSONResponse(status_code=413, content={"detail": {"code": "request_too_large"}})
+                return _error_response(request, "request_too_large", 413)
             chunks: list[bytes] = []
             received = 0
             try:
@@ -554,21 +792,36 @@ def create_app(
                     async for chunk in request.stream():
                         received += len(chunk)
                         if received > MAX_BODY_BYTES:
-                            return JSONResponse(
-                                status_code=413,
-                                content={"detail": {"code": "request_too_large"}},
-                            )
+                            return _error_response(request, "request_too_large", 413)
                         chunks.append(chunk)
             except TimeoutError:
-                return JSONResponse(
-                    status_code=408,
-                    content={"detail": {"code": "request_read_timeout"}},
-                )
+                return _error_response(request, "request_read_timeout", 408)
             # Starlette dependencies may read the body after this middleware.
             # Cache only the bounded content so they do not consume the stream.
             request._body = b"".join(chunks)  # type: ignore[attr-defined]
             ip_subject = daily_ip_fingerprint(public_settings, _client_ip(request))
-            if path == "/public/v1/feedback":
+            if path in {"/public/v1/subscription/connector/poll", "/public/v1/subscription/connector/result"}:
+                try:
+                    body = json.loads(request._body)
+                    token = body.get("connector_token") if isinstance(body, dict) else None
+                    if not isinstance(token, str) or len(token) != 43:
+                        raise SubscriptionError("credential_invalid", 401)
+                    connector_hash = subscription_broker.authenticate(token)
+                except (ValueError, SubscriptionError) as exc:
+                    code = exc.code if isinstance(exc, SubscriptionError) else "invalid_request"
+                    status = exc.status_code if isinstance(exc, SubscriptionError) else 422
+                    return JSONResponse(status_code=status, content={"detail": {"code": code}})
+                # Authenticate before granting the heartbeat allowance. A personal
+                # connector never drains the website's ordinary IP/chat buckets.
+                # Keep the namespaced identity within PostgreSQL's VARCHAR(64)
+                # contract, independently of browser/IP rate-limit subjects.
+                ip_subject = hashlib.sha256(("subscription-connector:" + connector_hash).encode()).hexdigest()
+                ip_limits = [("subscription_connector_hour", "hour", 1800),
+                             ("subscription_connector_day", "day", 43200)]
+            elif path.startswith("/public/v1/subscription/"):
+                ip_limits = [("subscription_setup_ip_hour", "hour", 60),
+                             ("subscription_setup_ip_day", "day", 300)]
+            elif path == "/public/v1/feedback":
                 ip_limits = [("feedback_ip_hour", "hour", 20), ("feedback_ip_day", "day", 50)]
             elif path.startswith("/public/v1/byok/"):
                 ip_limits = [("byok_ip_hour", "hour", 30), ("byok_ip_day", "day", 100)]
@@ -577,20 +830,25 @@ def create_app(
             try:
                 await async_store.call("consume_limits", ip_subject, ip_limits)
             except PublicStoreUnavailable:
-                return JSONResponse(status_code=503, content={"detail": {"code": "public_database_unavailable"}})
+                return _error_response(
+                    request,
+                    "public_database_unavailable",
+                    503,
+                    headers={"Retry-After": str(PUBLIC_DATABASE_RETRY_AFTER_SECONDS)},
+                    retry_after_seconds=PUBLIC_DATABASE_RETRY_AFTER_SECONDS,
+                )
             except RateLimitExceeded as exc:
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "detail": {
-                            "code": "rate_limit_exceeded",
-                            "scope": exc.scope,
-                            "limit": exc.limit,
-                        }
-                    },
+                return _error_response(
+                    request,
+                    "rate_limit_exceeded",
+                    429,
                     headers={"Retry-After": "60"},
+                    retry_after_seconds=60,
+                    extra={"scope": exc.scope, "limit": exc.limit},
                 )
         response = await call_next(request)
+        if path.startswith("/public/v1/subscription/"):
+            response.headers["Cache-Control"] = "no-store"
         if new_cookie and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             response.set_cookie(
                 cookie_name,
@@ -611,11 +869,54 @@ def create_app(
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
-    @app.exception_handler(PublicStoreUnavailable)
-    async def database_unavailable(_request: Request, _exc: PublicStoreUnavailable):
+    @app.exception_handler(HTTPException)
+    async def http_error(request: Request, exc: HTTPException):
+        raw_detail = exc.detail if isinstance(exc.detail, dict) else {}
+        code = str(raw_detail.get("code") or "request_failed")
+        raw_request_id = str(raw_detail.get("request_id") or "")
+        request_id = _safe_request_id(raw_request_id) or _request_id_from_request(request)
+        extras = {
+            key: value
+            for key, value in raw_detail.items()
+            if key not in {"code", "message", "retryable", "stage", "request_id", "retry_after_seconds"}
+        }
+        retry_after = raw_detail.get("retry_after_seconds")
         return JSONResponse(
-            status_code=503,
-            content={"detail": {"code": "public_database_unavailable"}},
+            status_code=exc.status_code,
+            content={
+                "detail": _error_detail(
+                    code,
+                    exc.status_code,
+                    str(raw_detail.get("message") or code),
+                    request_id=request_id,
+                    stage=str(raw_detail.get("stage") or ""),
+                    retryable=raw_detail.get("retryable"),
+                    retry_after_seconds=retry_after if isinstance(retry_after, int) else None,
+                    extra=extras,
+                )
+            },
+            headers=exc.headers,
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_public_error(request: Request, _exc: Exception):
+        # Route-level failures that happen before the SSE stream is created
+        # still need the same safe reconciliation envelope. Do not serialize
+        # exception text: it may contain provider or user supplied data.
+        LOGGER.error(
+            "public_unhandled_exception",
+            extra={"path": str(request.url.path)[:160]},
+        )
+        return _error_response(request, "request_failed", 503, stage="unknown")
+
+    @app.exception_handler(PublicStoreUnavailable)
+    async def database_unavailable(request: Request, _exc: PublicStoreUnavailable):
+        return _error_response(
+            request,
+            "public_database_unavailable",
+            503,
+            headers={"Retry-After": str(PUBLIC_DATABASE_RETRY_AFTER_SECONDS)},
+            retry_after_seconds=PUBLIC_DATABASE_RETRY_AFTER_SECONDS,
         )
 
     @app.get("/public/v1/build-info")
@@ -674,6 +975,8 @@ def create_app(
             },
             "providers": enabled,
             "model_profiles": public_model_profiles(),
+            "subscription": {"enabled": subscription_broker.enabled, "model": SUBSCRIPTION_MODEL,
+                             "effort": SUBSCRIPTION_EFFORT, "protocol_version": SUBSCRIPTION_PROTOCOL_VERSION},
             "turnstile_site_key": public_settings.turnstile_site_key,
             "limits": {
                 "input_characters": 2000,
@@ -823,6 +1126,8 @@ def create_app(
         ):
             raise _error("byok_notices_required", 422)
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        if spec.provider_id == SUBSCRIPTION_PROVIDER:
+            raise _error("subscription_pairing_required", 422)
         await async_store.call("consume_limits",
             request.state.subject_hash,
             [("byok_session_hour", "hour", 10), ("byok_session_day", "day", 30)],
@@ -870,7 +1175,8 @@ def create_app(
             )
         except ProviderRequestError as exc:
             raise _error(exc.code, exc.status_code) from exc
-        return {"provider": spec.provider_id, "models": discovered, "manual_model_allowed": True}
+        return {"provider": spec.provider_id, "models": discovered,
+                "manual_model_allowed": spec.provider_id != SUBSCRIPTION_PROVIDER}
 
     @app.post("/public/v1/presence/resolve")
     def presence_resolve(request: Request, payload: PresenceResolveRequest) -> dict[str, Any]:
@@ -921,6 +1227,8 @@ def create_app(
     @app.post("/public/v1/presence/arrival")
     async def presence_arrival(request: Request, payload: PresenceArrivalRequest) -> dict[str, Any]:
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
+            raise _error("reasoning_effort_not_supported", 422)
         claims = open_byok_credential(
             public_settings,
             anonymous_id=request.state.anonymous_id,
@@ -928,7 +1236,7 @@ def create_app(
             expected_provider=spec.provider_id,
         )
         cache_id = "presence-arrival:" + str(payload.arrival_id)
-        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        request_body = _model_request_body(payload)
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
@@ -955,6 +1263,10 @@ def create_app(
             if prepared["decision"] == "unnoticed":
                 result = {key: value for key, value in prepared.items() if key != "state"}
             else:
+                if spec.provider_id == SUBSCRIPTION_PROVIDER:
+                    payload.reasoning_effort = subscription_broker.preflight(
+                        str(claims["api_key"]), payload.model, payload.reasoning_effort,
+                    )
                 try:
                     await async_store.call("consume_limits",
                         request.state.subject_hash,
@@ -1020,6 +1332,8 @@ def create_app(
         )
         publish_v2 = stream_v2 and public_settings.verified_block_stream
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
+            raise _error("reasoning_effort_not_supported", 422)
         public_model = redact_sensitive_text(payload.model, 200)
         chat_service.ensure_character_available(payload.character_id)
         try:
@@ -1045,8 +1359,9 @@ def create_app(
             token=payload.credential,
             expected_provider=spec.provider_id,
         )
-        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        request_body = _model_request_body(payload)
         request_id = str(payload.request_id)
+        request.state.public_request_id = request_id
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, request_id)
         try:
@@ -1089,6 +1404,10 @@ def create_app(
                     raise _error("request_in_progress", 409)
         else:
             try:
+                if spec.provider_id == SUBSCRIPTION_PROVIDER:
+                    payload.reasoning_effort = subscription_broker.preflight(
+                        str(claims["api_key"]), payload.model, payload.reasoning_effort,
+                    )
                 await async_store.call("consume_limits",
                     request.state.subject_hash,
                     [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
@@ -1215,7 +1534,7 @@ def create_app(
                     }
                 except Exception as exc:
                     exception_type = type(exc).__name__
-                    terminal_stage = "generation"
+                    terminal_stage = "unknown"
                     generated = {
                         "request_id": request_id,
                         "character_id": payload.character_id,
@@ -1226,7 +1545,7 @@ def create_app(
                         "content_blocks": [],
                         "state_package": payload.state_package,
                         "terminal_error": "generation_failed",
-                        "diagnostics": {"error_stage": "generation"},
+                        "diagnostics": {"error_stage": "unknown"},
                     }
                 diagnostics = generated.setdefault("diagnostics", {})
                 timings = diagnostics.setdefault("timings_ms", {})
@@ -1441,20 +1760,57 @@ def create_app(
                 for packet in block_events(await stored_blocks()):
                     yield packet
             if resolved is None:
-                yield _sse("error", {"code": "generation_failed", "retryable": True})
+                yield _sse(
+                    "error",
+                    {
+                        "code": "generation_failed",
+                        "retryable": True,
+                        "request_id": request_id,
+                        "stage": "unknown",
+                    },
+                )
                 return
             result_payload = resolved
             if result_payload.get("terminal_error"):
                 terminal_error = str(result_payload["terminal_error"])
+                internal_diagnostics = (
+                    result_payload.get("diagnostics")
+                    if isinstance(result_payload.get("diagnostics"), dict)
+                    else {}
+                )
+                service_error = (
+                    result_payload.get("error")
+                    if isinstance(result_payload.get("error"), dict)
+                    else {}
+                )
+                error_stage = _error_stage(
+                    terminal_error,
+                    service_error.get("stage") or internal_diagnostics.get("error_stage"),
+                )
+                retryable = _error_retryable(
+                    terminal_error,
+                    500,
+                    service_error.get("retryable"),
+                )
+                retry_after_seconds = service_error.get("retry_after_seconds")
                 yield _sse(
                     "error",
                     {
                         "code": terminal_error,
-                        "retryable": terminal_error != "generation_interrupted",
+                        "retryable": retryable,
+                        "request_id": request_id,
+                        "stage": error_stage,
                         "idempotent_replay": idempotent_replay,
                         **(
-                            {"retry_after_seconds": 2}
+                            {
+                                "retry_after_seconds": min(int(retry_after_seconds), 300)
+                            }
+                            if isinstance(retry_after_seconds, int)
+                            and not isinstance(retry_after_seconds, bool)
+                            and retry_after_seconds > 0
+                            else {"retry_after_seconds": 2}
                             if terminal_error.startswith("generation_queue_")
+                            or terminal_error == "public_database_unavailable"
                             else {}
                         ),
                         **({"partial": bool(sent_sequences), "retryable": False}
@@ -1623,6 +1979,8 @@ def create_app(
     @app.post("/public/v1/chat/summarize")
     async def summarize(request: Request, payload: SummarizeRequest) -> dict[str, Any]:
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
+            raise _error("reasoning_effort_not_supported", 422)
         claims = open_byok_credential(
             public_settings,
             anonymous_id=request.state.anonymous_id,
@@ -1630,7 +1988,7 @@ def create_app(
             expected_provider=spec.provider_id,
         )
         cache_id = "chat-summary:" + str(payload.request_id)
-        request_body = payload.model_dump(mode="json", exclude={"credential"})
+        request_body = _model_request_body(payload)
         subject = request.state.subject_hash
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
@@ -1654,6 +2012,10 @@ def create_app(
                 if cached.get("terminal_error"):
                     raise _error(str(cached["terminal_error"]), 409)
                 return {**cached, "idempotent_replay": True}
+            if spec.provider_id == SUBSCRIPTION_PROVIDER:
+                payload.reasoning_effort = subscription_broker.preflight(
+                    str(claims["api_key"]), payload.model, payload.reasoning_effort,
+                )
             # Summaries are extra model calls and therefore consume the same
             # daily 200-call budget as chat, but deliberately do not touch the
             # hourly 50-round bucket.
@@ -1662,6 +2024,10 @@ def create_app(
             if summary_control is not None:
                 summary_control["task"] = generation
             started = time.monotonic()
+            interrupted_code = (
+                "subscription_result_unknown" if spec.provider_id == SUBSCRIPTION_PROVIDER
+                else "generation_interrupted"
+            )
             try:
                 while not generation.done():
                     if (
@@ -1672,8 +2038,8 @@ def create_app(
                         generation.cancel()
                         await asyncio.gather(generation, return_exceptions=True)
                         request_claimed = False
-                        await complete_owned_request(cache_id, {"terminal_error": "generation_interrupted"})
-                        raise _error("generation_interrupted", 409)
+                        await complete_owned_request(cache_id, {"terminal_error": interrupted_code})
+                        raise _error(interrupted_code, 409)
                     await asyncio.wait({generation}, timeout=0.25)
                 result = await generation
             except BaseException as exc:
@@ -1681,9 +2047,10 @@ def create_app(
                 await asyncio.gather(generation, return_exceptions=True)
                 if request_claimed:
                     request_claimed = False
-                    await complete_owned_request(cache_id, {"terminal_error": "generation_interrupted"})
+                    terminal_code = exc.code if isinstance(exc, SubscriptionError) else interrupted_code
+                    await complete_owned_request(cache_id, {"terminal_error": terminal_code})
                 if isinstance(exc, asyncio.CancelledError) and not asyncio.current_task().cancelling():
-                    raise _error("generation_interrupted", 409) from exc
+                    raise _error(interrupted_code, 409) from exc
                 raise
             request_claimed = False
             await complete_owned_request(cache_id, result)
@@ -1762,6 +2129,9 @@ def create_app(
             "assistant_content_blocks": assistant_blocks,
             "request_stage": redact_sensitive_text(payload.request_stage, 80),
             "error_code": redact_sensitive_text(payload.error_code, 80),
+            "error_stage": _error_stage(payload.error_code, payload.error_stage)
+            if payload.error_code or payload.error_stage
+            else "",
             "degraded_services": [redact_sensitive_text(item, 80) for item in payload.degraded_services],
             "ui_surface": redact_sensitive_text(payload.ui_surface, 80),
         }
@@ -1772,6 +2142,11 @@ def create_app(
             context["chat_request_id"] = str(payload.chat_request_id)
             if chat_result:
                 context["generation_diagnostics"] = chat_result.get("diagnostics") or {}
+                retrieval = chat_result.get("retrieval")
+                if isinstance(retrieval, dict):
+                    safe_retrieval = retrieval.get("diagnostics")
+                    if isinstance(safe_retrieval, dict):
+                        context["retrieval_diagnostics"] = safe_retrieval
                 context["generation_outcome"] = chat_result.get("generation_outcome") or ""
                 context["response_adjustments"] = chat_result.get("response_adjustments") or []
                 context["chat_error_code"] = chat_result.get("terminal_error") or ""
@@ -1882,48 +2257,51 @@ def create_app(
         }
 
     @app.exception_handler(PublicSecurityError)
-    async def security_error(_request: Request, exc: PublicSecurityError):
+    async def security_error(request: Request, exc: PublicSecurityError):
         code, http_status = _public_security_disposition(exc)
-        return JSONResponse(
-            status_code=http_status,
-            content={"detail": {"code": code}},
-        )
+        return _error_response(request, code, http_status, stage="state_validation")
 
     @app.exception_handler(ProviderRequestError)
-    async def provider_error(_request: Request, exc: ProviderRequestError):
-        return JSONResponse(status_code=exc.status_code, content={"detail": {"code": exc.code}})
+    async def provider_error(request: Request, exc: ProviderRequestError):
+        return _error_response(request, exc.code, exc.status_code, stage="provider")
 
     @app.exception_handler(RateLimitExceeded)
-    async def rate_limit_error(_request: Request, exc: RateLimitExceeded):
-        return JSONResponse(
-            status_code=429,
-            content={"detail": {"code": "rate_limit_exceeded", "scope": exc.scope, "limit": exc.limit}},
+    async def rate_limit_error(request: Request, exc: RateLimitExceeded):
+        return _error_response(
+            request,
+            "rate_limit_exceeded",
+            429,
             headers={"Retry-After": "60"},
+            retry_after_seconds=60,
+            extra={"scope": exc.scope, "limit": exc.limit},
         )
 
     @app.exception_handler(GenerationBusy)
-    async def generation_busy(_request: Request, exc: GenerationBusy):
-        return JSONResponse(
-            status_code=429,
-            content={"detail": {"code": str(exc), "retry_after_seconds": 2}},
+    async def generation_busy(request: Request, exc: GenerationBusy):
+        return _error_response(
+            request,
+            str(exc),
+            429,
             headers={"Retry-After": "2"},
+            retry_after_seconds=2,
         )
 
     @app.exception_handler(CharacterUnavailable)
-    async def character_unavailable(_request: Request, _exc: CharacterUnavailable):
-        return JSONResponse(status_code=503, content={"detail": {"code": "character_unavailable"}})
+    async def character_unavailable(request: Request, _exc: CharacterUnavailable):
+        return _error_response(request, "character_unavailable", 503, stage="character_data")
 
     @app.exception_handler(RequestValidationError)
     @app.exception_handler(ValidationError)
-    async def validation_error(_request: Request, _exc: Exception):
-        return JSONResponse(status_code=422, content={"detail": {"code": "invalid_request"}})
+    async def validation_error(request: Request, _exc: Exception):
+        return _error_response(request, "invalid_request", 422, stage="content_validation")
 
     @app.exception_handler(MVPProviderError)
-    async def mvp_provider_error(_request: Request, _exc: MVPProviderError):
-        return JSONResponse(status_code=502, content={"detail": {"code": "provider_request_failed"}})
+    async def mvp_provider_error(request: Request, _exc: MVPProviderError):
+        return _error_response(request, "provider_request_failed", 502, stage="provider")
 
     app_root = Path(__file__).resolve().parents[2]
     frontend_path = app_root / "public_frontend"
+    install_statistics_config(app, frontend_path)
     shared_design_path = app_root / "frontend" / "shared"
     immersive_assets_path = app_root / "frontend" / "assets" / "immersive"
     if public_settings.media_root.is_dir() and media_startup_status.get("status") == "ok":

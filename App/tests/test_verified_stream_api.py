@@ -20,7 +20,7 @@ from backend.snow_app.dialogue_core import GenerationGate
 from backend.snow_app.generation_stream import current_generation_observer
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from backend.snow_app.public_contracts import ChatRequest
-from backend.snow_app.public_main import create_app, _request_hash
+from backend.snow_app.public_main import create_app, _model_request_body, _request_hash
 from backend.snow_app.public_store import PublicStore, PublicStoreUnavailable
 from tests.test_public_request_recovery import settings
 
@@ -238,7 +238,7 @@ class VerifiedStreamApiTests(IsolatedAsyncioTestCase):
 
     async def test_other_owner_is_polled_without_starting_a_model(self):
         request_id = str(self.payload.request_id)
-        request_hash = _request_hash(self.payload.model_dump(mode="json", exclude={"credential"}))
+        request_hash = _request_hash(_model_request_body(self.payload))
         self.store.claim_request(request_id, "subject", request_hash, owner_token="remote")
         self.store.commit_request_blocks(request_id, "subject", [BLOCK], owner_token="remote")
         response = await self.endpoint(self.request(), self.payload)

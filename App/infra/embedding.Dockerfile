@@ -1,6 +1,10 @@
 FROM python:3.12-slim@sha256:09f7da3bc104798d0afb40bc08d23ab2da20a76130cec1f2ef170848f5d85217 AS system-base
 
-RUN apt-get update \
+# Advance only after reviewing a fresh vulnerability scan; an unchanged image
+# must not reuse an older apt upgrade layer when security fixes are required.
+ARG SYSTEM_SECURITY_REVISION=2026-09-13
+RUN test -n "$SYSTEM_SECURITY_REVISION" \
+    && apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 

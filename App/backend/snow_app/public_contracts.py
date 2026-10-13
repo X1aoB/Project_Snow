@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -105,6 +107,7 @@ class ChatRequest(StrictModel):
     provider: str = Field(min_length=1, max_length=24)
     credential: str = Field(min_length=20, max_length=8192)
     model: str = Field(min_length=1, max_length=200)
+    reasoning_effort: ReasoningEffort | None = None
     character_id: str = Field(min_length=12, max_length=32)
     message: str = Field(default="", max_length=2000)
     communication_channel: Literal["text", "in_person"] = "text"
@@ -144,6 +147,7 @@ class SummarizeRequest(StrictModel):
     provider: str = Field(min_length=1, max_length=24)
     credential: str = Field(min_length=20, max_length=8192)
     model: str = Field(min_length=1, max_length=200)
+    reasoning_effort: ReasoningEffort | None = None
     character_id: str = Field(min_length=12, max_length=32)
     turns: list[HistoryTurn] = Field(min_length=2, max_length=24)
     previous_summary: str = Field(default="", max_length=6000)
@@ -164,6 +168,7 @@ class FeedbackRequest(StrictModel):
     assistant_content_blocks: list[ContentBlock] = Field(default_factory=list, max_length=8)
     request_stage: str = Field(default="", max_length=80)
     error_code: str = Field(default="", max_length=80)
+    error_stage: str = Field(default="", max_length=40)
     degraded_services: list[str] = Field(default_factory=list, max_length=8)
     ui_surface: str = Field(default="immersive-web", max_length=80)
     include_conversation_context: bool = True
@@ -181,6 +186,7 @@ class FeedbackRequest(StrictModel):
             self.assistant_content_blocks = []
             self.request_stage = ""
             self.error_code = ""
+            self.error_stage = ""
             self.degraded_services = []
         user_length = sum(len(block.text) for block in self.user_content_blocks)
         assistant_length = sum(len(block.text) for block in self.assistant_content_blocks)
@@ -217,6 +223,7 @@ class PresenceArrivalRequest(StrictModel):
     provider: str = Field(min_length=1, max_length=24)
     credential: str = Field(min_length=20, max_length=8192)
     model: str = Field(min_length=1, max_length=200)
+    reasoning_effort: ReasoningEffort | None = None
     character_id: str = Field(min_length=12, max_length=32)
     recent_history: list[HistoryTurn] = Field(default_factory=list, max_length=24)
     history_summary: str = Field(default="", max_length=6000)

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hmac
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, status
+from pydantic import BaseModel, Field
 
 from .config import PublicSettings
 from .public_security import decrypt_qq
@@ -15,6 +16,22 @@ from .public_store import PublicStore
 settings = PublicSettings.from_environment()
 store = PublicStore(settings.database_url)
 app = FastAPI(title="Project Snow Private Admin", docs_url=None, redoc_url=None)
+
+
+class PublicFeedbackTriageRequest(BaseModel):
+    status: Literal[
+        "pending_triage",
+        "planned",
+        "resolved",
+        "ignored",
+        "open",
+        "needs_verification",
+        "fixed_verified",
+        "not_reproduced",
+        "duplicate",
+        "superseded_by_architecture",
+    ]
+    note: str = Field(default="", max_length=2000)
 
 
 def _authorized(request: Request) -> None:
@@ -60,6 +77,74 @@ def feedback(request: Request, limit: int = 100) -> dict[str, Any]:
         row.pop("qq_cipher", None)
         row["conversation_parts"] = _conversation_parts(row.get("context") or {})
     return {"feedback": rows}
+
+
+def _email_result(result: dict[str, Any]) -> dict[str, Any]:
+    queued = bool(result.get("queued"))
+    return {
+        "status": "queued" if queued else (
+            "already_sent" if result.get("email_status") == "sent" else "already_pending"
+        ),
+        "feedback_id": result["feedback_id"],
+        "public_code": result["public_code"],
+        "created_at": result["created_at"],
+        "email_status": result["email_status"],
+    }
+
+
+@app.get("/admin/v1/feedback/email/status")
+def feedback_email_status(request: Request) -> dict[str, Any]:
+    _authorized(request)
+    return {"status": store.feedback_email_status()}
+
+
+@app.post("/admin/v1/feedback/latest/email")
+def email_latest_feedback(
+    request: Request,
+    limit: int = 1,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Queue the newest feedback receipts without requiring a remembered code."""
+
+    _authorized(request)
+    rows = store.feedback_rows(max(1, min(int(limit), 20)))
+    if not rows:
+        raise HTTPException(status_code=404, detail="not_found")
+    results = []
+    for row in rows:
+        queued = store.queue_feedback_email(str(row["feedback_id"]), force=force)
+        if queued is not None:
+            results.append(_email_result(queued))
+    return {"feedback": results}
+
+
+@app.post("/admin/v1/feedback/{feedback_id}/email")
+def email_feedback(
+    feedback_id: str,
+    request: Request,
+    force: bool = False,
+) -> dict[str, Any]:
+    _authorized(request)
+    result = store.queue_feedback_email(feedback_id, force=force)
+    if result is None:
+        raise HTTPException(status_code=404, detail="not_found")
+    return _email_result(result)
+
+
+@app.post("/admin/v1/feedback/{feedback_id}/triage")
+def triage_feedback(
+    feedback_id: str,
+    request: Request,
+    payload: PublicFeedbackTriageRequest,
+) -> dict[str, Any]:
+    _authorized(request)
+    try:
+        result = store.triage_feedback(feedback_id, payload.status, payload.note)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="unsupported_status") from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="not_found")
+    return result
 
 
 @app.get("/admin/v1/feedback/{feedback_id}/qq")

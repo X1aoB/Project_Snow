@@ -118,7 +118,16 @@ class MiaExpressionRuntimeTests(TestCase):
         self.assertIn("function updateStageCharacterArt(node, character, expressionState, performanceId = \"\")", self.javascript)
         self.assertIn("const STAGE_PRESENTATION_RENDERERS = Object.freeze", self.javascript)
         self.assertIn("function stagePresentationRenderer(presentation)", self.javascript)
-        self.assertIn("async function preloadStagePresentation(presentation, signal)", self.javascript)
+        # The shared-cache entry point returns a Promise directly; preparation
+        # still goes through the selected renderer and verifies before commit.
+        preload = re.search(
+            r"(?:async )?function preloadStagePresentation\(presentation, signal\) \{(.*?)\n\}",
+            self.javascript, re.S,
+        )
+        self.assertIsNotNone(preload)
+        self.assertIn("return new Promise(", preload.group(1))
+        self.assertIn("prepareStagePresentation(presentation, entry.controller.signal)", preload.group(1))
+        self.assertIn("const prepared = await renderer.preload(presentation, signal)", self.javascript)
         self.assertIn(
             'requestedState, "neutral"',
             self.javascript,
@@ -131,10 +140,23 @@ class MiaExpressionRuntimeTests(TestCase):
 
     def test_character_switch_keeps_a_decoded_outgoing_layer_for_crossfade(self) -> None:
         stylesheet = (PUBLIC_ROOT / "app.css").read_text(encoding="utf-8")
-        self.assertIn("function crossfadeStageCharacterArt(node)", self.javascript)
-        self.assertIn("previousCharacterId !== characterId", self.javascript)
-        self.assertIn("duration: 280", self.javascript)
-        self.assertIn("Promise.allSettled", self.javascript)
+        crossfade = re.search(
+            r"function crossfadeStageCharacterArt\(node, duration = 280\) \{(.*?)\n\}",
+            self.javascript, re.S,
+        )
+        self.assertIsNotNone(crossfade)
+        transition = crossfade.group(1)
+        self.assertIn("const outgoing = node.cloneNode(false)", transition)
+        self.assertIn("outgoing.animate([{ opacity: 1 }, { opacity: 0 }], options)", transition)
+        self.assertIn("node.animate([{ opacity: 0 }, { opacity: 1 }], options)", transition)
+        self.assertIn("Promise.allSettled", transition)
+        self.assertIn("transition.dispose?.()", transition)
+        # Expressions use a quick transition; switching characters retains the
+        # existing duration and decoded outgoing surface until both fades end.
+        self.assertIn(
+            "crossfadeStageCharacterArt(node, previousCharacterId === characterId ? 160 : 280)",
+            self.javascript,
+        )
         self.assertIn(".stage-character-art-outgoing", stylesheet)
         self.assertIn('data-stage-art-transition="incoming"', stylesheet)
         self.assertIn("if (previousId && previousId !== characterId) cancelStageArt();", self.javascript)

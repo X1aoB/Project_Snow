@@ -191,6 +191,7 @@ class PublicSettings:
     chat_latency_v2: bool = True
     verified_block_stream: bool = False
     motion_v2: bool = True
+    subscription_enabled: bool = False
 
     @classmethod
     def from_environment(cls) -> "PublicSettings":
@@ -236,7 +237,7 @@ class PublicSettings:
         except (TypeError, ValueError):
             byok_lifetime_hours = 12
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "0.10.0-rc.3"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "1.0.0"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_public_database_url(),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),
@@ -299,6 +300,7 @@ class PublicSettings:
             chat_latency_v2=os.getenv("PUBLIC_CHAT_LATENCY_V2", "true").casefold() == "true",
             verified_block_stream=os.getenv("PUBLIC_VERIFIED_BLOCK_STREAM", "false").casefold() == "true",
             motion_v2=os.getenv("PUBLIC_MOTION_V2", "true").casefold() == "true",
+            subscription_enabled=os.getenv("PUBLIC_SUBSCRIPTION_ENABLED", "false").casefold() == "true",
         )
 
     @property

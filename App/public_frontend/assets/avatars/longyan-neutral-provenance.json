@@ -1,0 +1,66 @@
+{
+  "schema_version": "project-snow-avatar-provenance-1",
+  "character_id": "447ed3c401c9",
+  "display_name": "胧嫣",
+  "expression": "neutral",
+  "source": {
+    "media_version": "2026.09.09.character.1",
+    "asset_url": "/media/2026.09.09.character.1/expressions/447ed3c401c9/faces/neutral.888e34b623fb460c.webp",
+    "sha256": "888e34b623fb460ccb8f0742866d14e293cb1fc7d4ba7cd9e967596756d00a93",
+    "width": 384,
+    "height": 384,
+    "expression_manifest_url": "/media/2026.09.09.character.1/expressions/447ed3c401c9/manifest.json",
+    "expression_manifest_sha256": "15a772faa4b7da45427e83399b3668d72f6743787de9cbc09a861dfcbfae88e1",
+    "approved_round": 4,
+    "approved_variant": "U4",
+    "approved_crop": {
+      "source_sha256": "d3dc11cbd8dc9c60795f22b11f28375663faf9b693cd61fcc4a254572969f615",
+      "source_width": 968,
+      "source_height": 1336,
+      "box_xyxy": [
+        235,
+        55,
+        635,
+        455
+      ],
+      "content_width": 368,
+      "content_height": 368,
+      "transparent_padding_px": 8
+    }
+  },
+  "transformation": {
+    "operation": "resize_existing_approved_face_without_recropping_or_redrawing",
+    "resampling": "LANCZOS",
+    "format": "WEBP",
+    "lossless": true,
+    "quality": 80,
+    "method": 4,
+    "exact": true,
+    "pillow_version": "12.3.0",
+    "libwebp_version": "1.6.0"
+  },
+  "rights": {
+    "public_use_authorized": true,
+    "authorization_basis": "explicit_project_operator_instruction",
+    "independent_verification": false,
+    "verification_status": "not_performed",
+    "notice": "Fan-made derivatives of Snowbreak characters. Independent rights verification has not been performed; publication follows the project operator instruction. Existing source attribution and takedown handling remain applicable.",
+    "additional_license_grant": false
+  },
+  "outputs": [
+    {
+      "url": "/assets/avatars/longyan-neutral-96.webp",
+      "width": 96,
+      "height": 96,
+      "bytes": 12314,
+      "sha256": "b0320310a332649ed937de3ffcf9da892e4622a168bcfec797e3e9fc3f531e60"
+    },
+    {
+      "url": "/assets/avatars/longyan-neutral-200.webp",
+      "width": 200,
+      "height": 200,
+      "bytes": 44426,
+      "sha256": "74d306807f1b7fffd2be377724363d59cfc2a0bb62711d0b542855fdae5e9c17"
+    }
+  ]
+}

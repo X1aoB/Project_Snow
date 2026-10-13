@@ -130,7 +130,7 @@ class DeploymentContractTests(TestCase):
         self.assertNotIn("turnstile_secret", admin)
         self.assertNotIn("public_credential_key", admin)
         self.assertIn("feedback_smtp_password", mailer)
-        self.assertNotIn("public_qq_key", mailer)
+        self.assertIn("public_qq_key", mailer)
         self.assertNotIn("public_database_url", mailer)
         self.assertNotIn("PUBLIC_ENV_FILE", mailer)
         self.assertIn("PUBLIC_MAILER_ENV_FILE", mailer)
@@ -140,6 +140,10 @@ class DeploymentContractTests(TestCase):
             "/etc/project-snow/secrets/feedback_mailer_database_password:"
             "/run/secrets/feedback_mailer_database_password:ro",
             compose,
+        )
+        self.assertIn(
+            "/etc/project-snow/secrets/public_qq_key:/run/host-secrets/public_qq_key:ro",
+            mailer,
         )
         entrypoint = self.read("infra/public-entrypoint.sh")
         self.assertIn("feedback_mailer_database_password", entrypoint)
@@ -165,6 +169,17 @@ class DeploymentContractTests(TestCase):
         self.assertNotIn("body_text", migration)
         self.assertNotIn("context_json", migration)
         self.assertNotIn("qq_cipher", migration)
+
+    def test_feedback_mailer_role_reads_only_requested_notification_details(self) -> None:
+        migration = self.read(
+            "migrations/versions/20260926_0007_feedback_mailer_details.py"
+        )
+        self.assertIn(
+            "GRANT SELECT (body_text, qq_cipher)",
+            migration,
+        )
+        self.assertNotIn("context_json", migration)
+        self.assertNotIn("ip_fingerprint", migration)
 
     def test_public_edge_blocks_private_health_and_caps_request_bodies(self) -> None:
         caddyfile = self.read("infra/Caddyfile")
@@ -797,6 +812,45 @@ printf '%s\n' "$build_status"
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "0")
+
+    def test_statistics_public_environment_is_optional_and_exact_opt_in(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        start = deploy.index("build_candidate_public_env() {")
+        end = deploy.index('\n}\n\nif [ ! -r "$static_env" ]', start) + 2
+        harness = r'''
+set -u
+test_root=$1
+flag=$2
+source_file="$test_root/public.env"
+output_file="$test_root/candidate.env"
+printf '%s\n' 'PUBLIC_ENABLED_PROVIDERS=openai' 'TURNSTILE_SITE_KEY=fixture-key' > "$source_file"
+if [ "$flag" != absent ]; then
+  printf 'PUBLIC_STATISTICS_ENABLED=%s\n' "$flag" >> "$source_file"
+fi
+candidate_app_version=1.0.0
+candidate_data_version=synthetic-data
+candidate_media_version=synthetic-media
+candidate_media_root=/synthetic-media
+candidate_sticker_version=synthetic-stickers
+candidate_sticker_root=/synthetic-stickers
+stat() {
+  case "$2" in
+    %u) printf '%s\n' 0 ;;
+    %a) printf '%s\n' 600 ;;
+    %h) printf '%s\n' 1 ;;
+    *) command stat "$@" ;;
+  esac
+}
+''' + deploy[start:end] + r'''
+build_candidate_public_env "$source_file" "$output_file" || exit 1
+grep '^PUBLIC_STATISTICS_ENABLED=' "$output_file"
+'''
+        for flag in ("absent", "false", "true", "True", "1", " true", "true ", ""):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as temporary_root:
+                result = self.run_posix_shell(harness, Path(temporary_root).as_posix(), flag)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            expected = "true" if flag == "true" else "false"
+            self.assertEqual(result.stdout.strip(), f"PUBLIC_STATISTICS_ENABLED={expected}")
 
     def test_compose_allows_a_colour_to_pin_verified_media(self) -> None:
         compose = self.read("compose.prod.yml")
@@ -3448,12 +3502,12 @@ seal_configuration_snapshot "$seal_root"
         self.assertIn("python ./scripts/prepare_public_frontend.py --verify --output /app", dockerfile)
         self.assertNotIn("RUN python ./scripts/fingerprint_public_frontend.py", dockerfile)
         self.assertIn("pip install --no-cache-dir --require-hashes", dockerfile)
-        self.assertIn('href="/app.css?v=0.10.0-rc.3"', public_html)
-        self.assertIn('src="/app.js?v=0.10.0-rc.3"', public_html)
+        self.assertIn('href="/app.css?v=1.0.0"', public_html)
+        self.assertIn('src="/app.js?v=1.0.0"', public_html)
         self.assertIn('href="/shared/immersive.css?v=0.9.2"', public_html)
         self.assertIn('src="/privacy/privacy.js?v=0.9.2"', privacy_html)
         self.assertIn('experience_notice_version || "0.9.2"', public_javascript)
-        self.assertIn("PUBLIC_APP_VERSION=0.10.0-rc.3", public_env)
+        self.assertIn("PUBLIC_APP_VERSION=1.0.0", public_env)
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", public_env)
         self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=0.9.2", public_env)
         self.assertIn("PUBLIC_BYOK_LIFETIME_HOURS=12", public_env)

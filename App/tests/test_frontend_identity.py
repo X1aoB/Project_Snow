@@ -123,6 +123,7 @@ def test_build_info_snapshots_image_identity_and_never_selects_ui_from_environme
     service = SimpleNamespace(
         media=SimpleNamespace(verify=lambda **_kwargs: {}),
         stickers=SimpleNamespace(verify=lambda **_kwargs: {}),
+        mvp=SimpleNamespace(_model_http_client=SimpleNamespace(close=lambda: None)),
         provider_client=object(),
         close=lambda: None,
     )

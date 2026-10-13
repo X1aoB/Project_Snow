@@ -30,7 +30,7 @@ class FeedbackMailerTests(TestCase):
         self.store = PublicStore("sqlite+pysqlite:///:memory:")
         self.store.create_schema()
 
-    def test_feedback_email_contains_receipt_only(self) -> None:
+    def test_feedback_email_contains_body_and_optional_qq_without_context(self) -> None:
         encrypted = encrypt_qq(self.settings, "12345678")
         self.store.insert_feedback(
             subject_hash="subject",
@@ -50,10 +50,11 @@ class FeedbackMailerTests(TestCase):
         self.assertEqual(result["sent"], 1)
         self.assertEqual(self.store.feedback_email_status(), {"sent": 1})
         body = sent[0].get_content()
-        self.assertNotIn("12345678", body)
-        self.assertNotIn("页面反馈", body)
+        self.assertIn("反馈内容：", body)
+        self.assertIn("页面反馈", body)
+        self.assertIn("联系 QQ：12345678", body)
         self.assertNotIn("安全回复", body)
-        self.assertIn("snow-", body)
+        self.assertIn("反馈编号：snow-", body)
         self.assertNotIn(encrypted, body)
         self.assertNotIn("smtp-secret", body)
 
@@ -90,8 +91,32 @@ class FeedbackMailerTests(TestCase):
         self.assertEqual(len(claimed), 1)
         self.assertEqual(
             set(claimed[0]),
-            {"outbox_id", "feedback_id", "attempt_count", "public_code", "created_at"},
+            {
+                "outbox_id",
+                "feedback_id",
+                "attempt_count",
+                "public_code",
+                "created_at",
+                "body_text",
+                "qq_cipher",
+            },
         )
+
+    def test_feedback_email_without_qq_is_explicit(self) -> None:
+        self.store.insert_feedback(
+            subject_hash="subject-no-qq",
+            ip_fingerprint="daily-ip-no-qq",
+            body_text="没有联系方式",
+            context={"assistant_answer": "不得进入邮件"},
+            qq_cipher=None,
+        )
+        sent: list[EmailMessage] = []
+        result = FeedbackMailer(self.settings, self.store, sender=sent.append).run_once()
+        self.assertEqual(result["sent"], 1)
+        body = sent[0].get_content()
+        self.assertIn("没有联系方式", body)
+        self.assertIn("联系 QQ：未提供", body)
+        self.assertNotIn("不得进入邮件", body)
 
     def test_failed_delivery_is_retried_without_losing_feedback(self) -> None:
         self.store.insert_feedback(

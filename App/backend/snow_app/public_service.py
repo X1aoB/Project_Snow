@@ -53,6 +53,7 @@ from .public_security import (
     verify_state,
 )
 from .public_stickers import PublicStickerCatalog
+from .public_subscription import SubscriptionError, SubscriptionSyncClient
 
 
 class StatelessConversationStore:
@@ -107,13 +108,61 @@ _PUBLIC_NORMALIZATION_ADJUSTMENTS = frozenset({
     "public_punctuation_normalized",
 })
 
+_PUBLIC_ERROR_STAGES = frozenset({
+    "content_validation",
+    "state_validation",
+    "character_data",
+    "generation_queue",
+    "retrieval",
+    "provider",
+    "generation_validation",
+    "idempotency_store",
+    "publication_store",
+    "transport",
+    "unknown",
+})
+_PUBLIC_NON_RETRYABLE_ERROR_CODES = frozenset({
+    "sticker_unavailable",
+    "character_unavailable",
+    "generation_interrupted",
+    "role_guard_rejected",
+    "upstream_invalid_response",
+    "generation_partial",
+})
+
+def _public_error_payload(
+    request_id: Any,
+    code: str,
+    stage: str,
+    *,
+    retry_after_seconds: int | None = None,
+) -> dict[str, Any]:
+    safe_stage = stage if stage in _PUBLIC_ERROR_STAGES else "unknown"
+    payload: dict[str, Any] = {
+        "code": str(code or "request_failed"),
+        "retryable": str(code or "request_failed") not in _PUBLIC_NON_RETRYABLE_ERROR_CODES,
+        "request_id": str(request_id or ""),
+        "stage": safe_stage,
+    }
+    if isinstance(retry_after_seconds, int) and not isinstance(retry_after_seconds, bool) and retry_after_seconds > 0:
+        payload["retry_after_seconds"] = min(retry_after_seconds, 300)
+    return payload
+
 
 def _public_immersive_thinking_decision(
-    provider: ProviderSpec, max_provider_calls: int = 2, *, model: str = "",
-    latency_v2: bool = True, verified_stream: bool = False,
+    provider: ProviderSpec, max_provider_calls: int = 2, reasoning_effort: str | None = None,
+    *, model: str = "", latency_v2: bool = True, verified_stream: bool = False,
 ) -> dict[str, Any]:
     """Build the complete provider request contract for public dialogue."""
 
+    if provider.provider_id == "codex_subscription":
+        return {"requested": reasoning_effort or "account_default", "effective": reasoning_effort or "account_default",
+                "reason": "personal_codex_subscription", "provider_kind": provider.provider_id,
+                "request_fields": {"reasoning_effort": reasoning_effort} if reasoning_effort is not None else {},
+                "max_provider_http_calls": max(1, min(2, max_provider_calls)),
+                "disable_compatibility_retries": True,
+                "chat_latency_v2": False, "compact_public_schema": latency_v2,
+                "verified_block_stream": False}
     decision = {
         "requested": "off",
         "effective": "off",
@@ -609,6 +658,10 @@ class PublicChatService:
             conversation_database_path=ephemeral_database,
             conversation_store=StatelessConversationStore(),
         )
+        if provider_client is not None and getattr(provider_client, "subscription_broker", None) is not None:
+            self.mvp._model_http_client = SubscriptionSyncClient(
+                provider_client.subscription_broker, self.mvp._model_http_client,
+            )
         self.gate = GenerationGate()
         self.engine = DialogueEngine()
         self.media = PublicMediaCatalog(
@@ -1774,6 +1827,11 @@ class PublicChatService:
                 "reaction": None,
                 "model_called": model_called,
                 "terminal_error": code,
+                "error": _public_error_payload(
+                    prepared.get("arrival_id"),
+                    code,
+                    str((diagnostics or {}).get("error_stage") or "unknown"),
+                ),
                 "diagnostics": diagnostics or {},
             }.items()
             if key != "state"
@@ -1842,13 +1900,18 @@ class PublicChatService:
                         "reason": "public_presence_arrival",
                     },
                     thinking_decision=_public_immersive_thinking_decision(
-                        provider, self.public_settings.max_provider_calls_per_action,
+                        provider, self.public_settings.max_provider_calls_per_action, request.reasoning_effort,
                         model=request.model, latency_v2=self.public_settings.chat_latency_v2,
                     ),
                     max_tokens_override=1600,
                     persist_exchange=False,
                     remember_session=False,
                     presence_arrival=True,
+                )
+            except SubscriptionError as exc:
+                return self.failed_presence_arrival(
+                    prepared, exc.code, model_called=exc.submitted,
+                    diagnostics=self._diagnostics(total_started, generation_class="rejected", error_stage="provider"),
                 )
             except Exception as exc:
                 from .mvp_service import MVPProviderError
@@ -2216,7 +2279,7 @@ class PublicChatService:
                             "reason": "public_byok",
                         },
                         thinking_decision=_public_immersive_thinking_decision(
-                            provider, budget.max_provider_calls, model=request.model,
+                            provider, budget.max_provider_calls, request.reasoning_effort, model=request.model,
                             latency_v2=self.public_settings.chat_latency_v2,
                             verified_stream=self.public_settings.verified_block_stream
                             and current_generation_observer() is not None
@@ -2245,6 +2308,8 @@ class PublicChatService:
                     request, provider, total_started, code="public_database_unavailable",
                     error_stage="publication_store", result={"usage": exc.usage},
                 )
+            except SubscriptionError as exc:
+                return self._terminal_result(request, provider, total_started, code=exc.code, error_stage="provider")
             except Exception as exc:
                 from .mvp_service import MVPProviderError
 
@@ -2682,6 +2747,11 @@ class PublicChatService:
             "movement_status": {"status": "state_unchanged"},
             "response_adjustments": response_adjustments or [],
             "terminal_error": code,
+            "error": _public_error_payload(
+                request.request_id,
+                code,
+                error_stage,
+            ),
             "diagnostics": diagnostics,
         }
 
@@ -2772,6 +2842,7 @@ class PublicChatService:
                 user_prompt=prompt,
                 max_tokens=1200,
                 client=self.provider_client,
+                reasoning_effort=request.reasoning_effort,
             )
 
         # Summaries use the same global 4-active/8-queued budget as chat and

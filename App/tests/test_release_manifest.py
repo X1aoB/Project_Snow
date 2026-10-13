@@ -27,7 +27,7 @@ class ReleaseManifestTests(TestCase):
         binding.assert_called_once_with(app_root, commit_sha="a" * 40, frontend_bundle=None)
         self.assertEqual(manifest["frontend"], frontend)
         self.assertEqual(manifest["schema_version"], "project-snow-release-1")
-        self.assertEqual(manifest["app_version"], "0.10.0-rc.3")
+        self.assertEqual(manifest["app_version"], "1.0.0")
         self.assertEqual(manifest["data_version"], "2026.08.19.1")
         self.assertEqual(manifest["media_version"], "2026.09.09.character.1")
         self.assertEqual(manifest["sticker_version"], "2026.08.19.sticker.1")
@@ -48,7 +48,7 @@ class ReleaseManifestTests(TestCase):
             self.assertRegex(artifact["manifest_sha256"], r"^[0-9a-f]{64}$", kind)
             if kind != "data":
                 self.assertRegex(artifact["checksums_sha256"], r"^[0-9a-f]{64}$", kind)
-        self.assertEqual(manifest["migration_heads"], ["20261013_0006"])
+        self.assertEqual(manifest["migration_heads"], ["20261013_0008"])
         self.assertTrue(manifest["runtime_capabilities"]["request_blocks"])
         self.assertEqual(manifest["application"]["digest"], "sha256:" + "b" * 64)
         self.assertEqual(

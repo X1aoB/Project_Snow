@@ -6,6 +6,97 @@
 - `App/runtime/` contains all derived tables, indexes, databases, review queues and logs.
 - `Data/Manifest/page_manifest.jsonl` supplies active/deprecated status and provenance. Specialized `*_index.jsonl` files are the only corpus-discovery inputs.
 
+## Public send and retrieval/reply contract
+
+The public face-to-face send path is intentionally ordered and idempotent:
+
+```text
+HTTP admission and idempotency
+  -> canonical content blocks, channel and scene validation
+  -> query planning
+  -> concurrent FTS5 and vector recall
+  -> reciprocal-rank fusion and source-aware filtering
+  -> character, evidence and current-scene constraints
+  -> bounded context assembly
+  -> at most two provider calls (initial generation plus one controlled repair)
+  -> content-block and role validation
+  -> deterministic safety/continuity fallback
+  -> signed state, durable terminal result and SSE presentation
+```
+
+Every public HTTP or SSE failure carries a stable error code, a bounded
+`stage`, a retryability flag, and the request UUID when it is available. The
+stages are `content_validation`, `state_validation`, `character_data`,
+`generation_queue`, `retrieval`, `provider`, `generation_validation`,
+`idempotency_store`, `transport`, and `unknown`.
+Transport or admission failures are uncertain until the same UUID is
+reconciled through the durable request record; clients must reuse that UUID
+instead of blindly starting a second paid request. A known terminal generation
+failure may be explicitly retried with a new UUID.
+
+The channel contract is server-enforced. Text communication accepts only
+`message` and `sticker`; face-to-face communication accepts only `speech` and
+`action`. The user is always the Analyst. The model cannot turn an unstated
+physical action, visual observation, or feeling into a fact. Current scene state
+is authoritative; historical story evidence cannot move the current scene or
+change the communication channel. Character and cross-character evidence must
+remain source-bound, and graph relations marked `pending_review` are excluded
+from production retrieval.
+
+| Rule area | Required behavior | Enforcement point |
+| --- | --- | --- |
+| Persona | The user is always the Analyst; immersive mode never exposes retrieval, tools, or model mechanics. | Prompt contract and response guard |
+| Channel | Text accepts `message`/`sticker`; face-to-face accepts `speech`/`action`. | Input block validator and output normalizer |
+| Analyst facts | Unstated analyst actions, visuals, and feelings remain unknown. | Guardrail and deterministic fallback |
+| Scene precedence | Current scene state wins; history cannot move the location or change the medium. | Scene filter and state guard |
+| Evidence scope | Character, source document, and graph evidence stay bound; unreviewed relations stay out. | Retrieval filter and citation validation |
+| Dependency failure | Vector or graph timeouts degrade to lexical or no-graph retrieval; database failure is fail-closed. | Retrieval adapter and idempotency store |
+| Budgets | Keep 12 history rounds, 64 KiB request bodies, 3-second retrieval, 4 active/8 queued generation slots, and at most two provider calls. | Contracts, queue gate, and generation budget |
+
+Retrieval degradation is bounded and observable: vector failure falls back to
+lexical search, graph failure removes graph context, and the shared three-second
+retrieval deadline remains in force. Diagnostics record fusion mode, hit count,
+source categories, degraded dependencies, retrieval latency, guard outcomes,
+provider-call count, and error stage, without prompts, responses, credentials,
+raw IPs, or private provider identifiers.
+
+The existing resource limits are part of the public compatibility contract:
+recent history is capped at 12 rounds, each request body at 64 KiB, retrieval
+at 3 seconds, the generation gate at 4 active slots with 8 queued slots, and
+each operation at no more than two provider calls. These limits remain fixed
+while retrieval weights and reranking are evaluated.
+
+The synchronous public store is isolated behind a bounded adapter with five
+transaction workers and eight waiting positions. This is deliberately aligned
+with the 4-active/8-queued generation envelope: a short rate-limit, claim or
+terminal-write transaction cannot reject an otherwise admitted chat only
+because the adapter has fewer waiting positions than the generation gate. The
+adapter remains fail-closed when all 13 positions are occupied; that response
+is retryable, carries `Retry-After: 2`, and is included in backpressure
+observability. This is a database capacity bound, not permission to add
+Uvicorn workers or to bypass the single-process generation gate.
+
+Retrieval optimization is incremental. First measure synthetic golden queries
+for persona facts, current state, relationships, costume/style, casual turns,
+cross-character mentions, and dependency failures. Then tune lane weighting or
+deduplication behind a feature flag, using evidence hit rate, recall@k, P95
+retrieval latency, guard-fallback rate, terminal error rate, and duplicate-request
+rate as acceptance gates. The default ranking and source data remain unchanged
+until those measurements pass review.
+
+Public feedback follows the same append-only triage principle as the internal
+MVP feedback stream. The PostgreSQL `public_feedback_triage` table records the
+latest operator decision without rewriting the submitted row; the private
+admin list joins that decision while keeping the default `pending_triage`
+state for new reports. The receipt outbox is separate: a public report is
+queued at submission, the dedicated mailer sends its public number, timestamp,
+submitted feedback body and optional QQ contact, and an authenticated loopback
+admin action can safely requeue the latest report or an explicit number.
+Conversation context, diagnostics, IP data and SMTP credentials never enter
+that mail path. The mailer role is granted only `body_text` and encrypted
+`qq_cipher`; the QQ key is mounted separately and is used only while rendering
+this operator email.
+
 ## B: persona-first hybrid retrieval
 
 1. The lakehouse creates source-aware chunks from specialized manifests and their referenced raw pages.

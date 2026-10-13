@@ -6,14 +6,33 @@ const apiRoot = "/public/v1";
 const publicHttp = createHttpClient(apiRoot);
 const dbName = "project-snow-public";
 const dbVersion = 4;
+const SUBSCRIPTION_PROVIDER = "codex_subscription";
+const SUBSCRIPTION_MODEL = "gpt-5.6-luna";
+const SUBSCRIPTION_EFFORT = "max";
+const SUBSCRIPTION_EFFORT_LABELS = Object.freeze({ none: "无推理", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "更高", max: "极高", ultra: "最高" });
+const SUBSCRIPTION_SESSION_KEY = "project-snow-public:subscription-pair";
 const SCENE_ASSET_URLS = Object.freeze(JSON.parse(document.querySelector('meta[name="snow-scene-assets"]')?.content || "{}"));
 const SCENE_KEYS = new Set(["generic", "quarters", "lounge", "training", "archive", "canteen", "observation", "medical", "corridor"]);
+// Reuse the approved neutral face crop without changing the original media attribution.
+const CHARACTER_AVATAR_OVERRIDES = Object.freeze({
+  "447ed3c401c9": Object.freeze({
+    thumbnail_src: "/assets/avatars/longyan-neutral-96.webp",
+    src: "/assets/avatars/longyan-neutral-200.webp",
+    portrait_focus_x: 50,
+    portrait_focus_y: 50,
+    portrait_scale: 1,
+  }),
+});
 const state = {
   config: null,
   credential: "",
   credentialExpiresAt: 0,
   provider: "",
   model: "",
+  reasoningEffort: "",
+  modelSetupMode: "api",
+  apiProviderChoice: "",
+  subscription: createSubscriptionState(),
   characters: [],
   stickers: [],
   stickerCatalog: new Map(),
@@ -303,6 +322,21 @@ const errorMessages = {
   provider_timeout: "模型厂商响应超时，请稍后重试。",
   provider_rate_limited: "模型厂商触发了频率限制，请稍后重试。",
   provider_request_failed: "模型厂商拒绝了本次请求，请检查模型 ID 和账户权限。",
+  subscription_disabled: "本站尚未启用订阅连接。你仍可阅读教程，或使用 API Key。",
+  subscription_not_connected: "个人连接器尚未连接或已离线。请打开模型设置，重新配对你自己的 Codex 订阅。",
+  subscription_disconnected: "个人连接器已断开，请在模型设置中重新配对。",
+  subscription_pairing_expired: "配对码已过期，请重新生成。",
+  subscription_model_unavailable: "当前账号或连接器不支持所选模型与推理强度，请重新选择；不会自动替换为其他模型。",
+  subscription_effort_unavailable: "当前账号不支持所选推理强度，请在模型设置中重新选择强度并保存。",
+  subscription_result_unknown: "请求已经交给个人连接器，但结果尚未确认。请检查连接器状态，避免重复发送这条消息。",
+  subscription_login_required: "请在自己的电脑上运行 codex login，使用有订阅的 ChatGPT 账号登录，再重新连接。",
+  subscription_rate_limited: "你的 Codex 订阅目前已触发额度或频率限制，请查看自己的账号用量并稍后再试。",
+  subscription_generation_failed: "个人连接器未能生成回复，请查看本机连接器提示。",
+  subscription_protocol_error: "个人连接器版本不兼容，请下载本站提供的连接器并重新配对。",
+  subscription_connector_stopped: "个人连接器已停止，请在本机重新启动并检查连接状态。",
+  subscription_capacity_reached: "本站当前连接数已满，请稍后再配对。",
+  subscription_busy: "个人连接器仍在处理上一条请求，请等待结果，避免重复发送。",
+  subscription_request_too_large: "本轮对话过长，请开始新的连续性段后再试。",
   character_unavailable: "当前角色数据尚未正确发布，请稍后重试。",
   public_database_unavailable: "服务端数据库暂时不可用，请稍后重试。",
   generation_queue_full: "当前生成请求较多，请稍后重试。",
@@ -329,6 +363,64 @@ const errorMessages = {
   sticker_unavailable: "这个表情暂时不可用，请换一个或稍后再试。",
   state_subject_mismatch: "本地场景凭证仍然无效，请重新发送本条消息。",
   state_invalid: "本地场景状态仍然无效，请重新发送本条消息。",
+};
+
+const PUBLIC_ERROR_STAGES = new Set([
+  "content_validation",
+  "state_validation",
+  "character_data",
+  "generation_queue",
+  "retrieval",
+  "provider",
+  "generation_validation",
+  "idempotency_store",
+  "transport",
+  "unknown",
+]);
+const errorStageMessages = {
+  content_validation: "请求内容无法通过校验，请检查动作和对白后重试。",
+  state_validation: "本地场景状态已变化，请重新发送本条消息。",
+  character_data: "当前角色资料暂时不可用，请稍后重试。",
+  generation_queue: "当前生成请求较多，请稍后重试。",
+  retrieval: "角色资料暂时无法读取，请稍后重试。",
+  provider: "模型厂商暂时无法响应，请稍后重试。",
+  generation_validation: "角色回复未通过校验，请稍后重试。",
+  idempotency_store: "请求状态暂时无法保存，请稍后重试。",
+  transport: "连接暂时中断，请稍后重试。",
+  unknown: "请求失败，请稍后重试。",
+};
+const errorStageByCode = {
+  invalid_request: "content_validation",
+  sticker_unavailable: "content_validation",
+  invalid_movement_location: "content_validation",
+  invalid_presence_request: "content_validation",
+  request_too_large: "content_validation",
+  request_read_timeout: "transport",
+  request_timeout: "transport",
+  request_failed: "transport",
+  stream_disconnected: "transport",
+  service_draining: "generation_queue",
+  subject_generation_busy: "generation_queue",
+  generation_queue_full: "generation_queue",
+  generation_queue_timeout: "generation_queue",
+  generation_interrupted: "unknown",
+  generation_failed: "unknown",
+  provider_not_enabled: "provider",
+  provider_credential_rejected: "provider",
+  provider_model_discovery_failed: "provider",
+  provider_network_error: "provider",
+  provider_timeout: "provider",
+  provider_rate_limited: "provider",
+  provider_request_failed: "provider",
+  upstream_invalid_response: "generation_validation",
+  role_guard_rejected: "generation_validation",
+  public_database_unavailable: "idempotency_store",
+  request_id_conflict: "idempotency_store",
+  request_in_progress: "idempotency_store",
+  state_invalid: "state_validation",
+  state_subject_mismatch: "state_validation",
+  invalid_presence_transition: "state_validation",
+  character_unavailable: "character_data",
 };
 
 const STATE_PACKAGE_RECOVERY_CODES = new Set(["state_subject_mismatch", "state_invalid"]);
@@ -388,8 +480,33 @@ function escapeHtml(value) {
   span.textContent = plain(value);
   return span.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+function normalizedErrorStage(value) {
+  const candidate = plain(value).trim();
+  return PUBLIC_ERROR_STAGES.has(candidate) ? candidate : "";
+}
+function _errorStageForClientCode(code) {
+  return errorStageByCode[plain(code)] || "unknown";
+}
+function chatError(code = "request_failed", detail = {}, status = 0) {
+  const error = new Error(plain(code) || "request_failed");
+  const payload = detail && typeof detail === "object" ? detail : {};
+  error.requestId = plain(payload.request_id);
+  error.errorStage = normalizedErrorStage(payload.stage);
+  error.retryable = typeof payload.retryable === "boolean" ? payload.retryable : null;
+  const retryAfter = Number(payload.retry_after_seconds);
+  error.retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0
+    ? Math.min(300, Math.floor(retryAfter))
+    : 0;
+  error.httpStatus = Number(status) || 0;
+  return error;
+}
 function displayError(error) {
   const code = error instanceof Error ? error.message : plain(error);
+  if (code === "credential_invalid" && state.provider === SUBSCRIPTION_PROVIDER) return errorMessages.subscription_not_connected;
+  const stage = normalizedErrorStage(error instanceof Error ? error.errorStage : "");
+  if (stage && ["request_failed", "chat_failed", "generation_failed"].includes(code)) {
+    return errorStageMessages[stage] || errorMessages.request_failed;
+  }
   return errorMessages[code] || (/^[a-z][a-z0-9_]*$/.test(code) ? errorMessages.request_failed : code);
 }
 
@@ -1103,6 +1220,7 @@ function normalizeMessage(message) {
     errorCode: message.errorCode || "",
     partial: Boolean(message.partial),
     committedBlocks: Array.isArray(message.committedBlocks) ? message.committedBlocks : [],
+    errorStage: normalizedErrorStage(message.errorStage || message.error_stage),
     source: message.source || "chat",
     conversationSegmentId: plain(message.conversationSegmentId || message.conversation_segment_id),
     usage: message.usage && typeof message.usage === "object" ? { ...message.usage } : null,
@@ -1466,18 +1584,20 @@ function restoreDraft() {
 function sessionKey() { return "project-snow-public:byok"; }
 function saveCredential() {
   if (!state.credential || !state.credentialExpiresAt) return;
-  tabPreferences.setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, expiresAt: state.credentialExpiresAt }));
+  tabPreferences.setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, ...(state.provider === SUBSCRIPTION_PROVIDER ? { reasoningEffort: state.reasoningEffort } : {}), expiresAt: state.credentialExpiresAt }));
 }
 function clearCredential() {
   tabPreferences.removeItem(sessionKey());
   state.credential = "";
   state.credentialExpiresAt = 0;
   state.model = "";
+  state.reasoningEffort = "";
   refreshCredentialStatus();
   updateComposerAvailability();
 }
 function configured() {
   if (state.credentialExpiresAt && state.credentialExpiresAt <= Date.now()) clearCredential();
+  if (state.provider === SUBSCRIPTION_PROVIDER && (state.subscription.status !== "connected" || !subscriptionCombinationSupported(state.model, state.reasoningEffort))) return false;
   return Boolean(state.credential && state.provider && state.model);
 }
 function refreshCredentialStatus() {
@@ -1488,7 +1608,9 @@ function refreshCredentialStatus() {
     const expires = localDayKey(expiration) === localDayKey()
       ? expiration.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
       : expiration.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
-    $("credential-status").textContent = `加密凭证有效至 ${expires}；获取模型列表和切换角色无需重新输入 Key。`;
+    $("credential-status").textContent = state.provider === SUBSCRIPTION_PROVIDER
+      ? `个人连接凭证有效至 ${expires}，仅保存在当前标签页。`
+      : `加密凭证有效至 ${expires}；获取模型列表和切换角色无需重新输入 Key。`;
   }
 }
 
@@ -1662,6 +1784,257 @@ async function showExperienceNoticeIfNeeded() {
   });
 }
 
+let subscriptionPollController = null;
+let subscriptionPollTimer = 0;
+let subscriptionPollSequence = 0;
+function apiProviders() { return (state.config?.providers || []).filter((provider) => provider.provider_id !== SUBSCRIPTION_PROVIDER); }
+function createSubscriptionState(overrides = {}) {
+  return { status: "disconnected", credential: "", expiresAt: 0, pairingExpiresAt: 0, pairingCode: "", error: "", models: [], protocolVersion: 1, draftModel: "", draftEffort: "", selectionInitialized: false, selectionNotice: "", ...overrides };
+}
+function subscriptionCombinationSupported(model, effort) {
+  return Boolean(state.subscription.models.find((item) => item.id === model)?.reasoning_efforts.includes(effort));
+}
+function subscriptionReasoningPayload() {
+  return state.provider === SUBSCRIPTION_PROVIDER ? { reasoning_effort: state.reasoningEffort } : {};
+}
+function snapshotSubscriptionEffort(payload) {
+  if (payload?.provider !== SUBSCRIPTION_PROVIDER) return "";
+  return Object.hasOwn(payload, "reasoning_effort") ? plain(payload.reasoning_effort) : payload.model === SUBSCRIPTION_MODEL ? SUBSCRIPTION_EFFORT : "";
+}
+function subscriptionCatalogue(payload) {
+  const version = Number(payload.protocol_version || 1);
+  if (![1, 2].includes(version)) throw new Error("subscription_protocol_error");
+  if (!Array.isArray(payload.models)) {
+    if (version === 1 && payload.model === SUBSCRIPTION_MODEL && payload.effort === SUBSCRIPTION_EFFORT) {
+      return [{ id: SUBSCRIPTION_MODEL, display_name: "GPT-5.6 Luna", reasoning_efforts: [SUBSCRIPTION_EFFORT], default_reasoning_effort: SUBSCRIPTION_EFFORT }];
+    }
+    throw new Error("subscription_model_unavailable");
+  }
+  const seen = new Set();
+  return payload.models.flatMap((item) => {
+    const model = plain(item?.id).trim();
+    const efforts = [...new Set((Array.isArray(item?.reasoning_efforts) ? item.reasoning_efforts : []).filter((effort) => Object.hasOwn(SUBSCRIPTION_EFFORT_LABELS, effort)))];
+    if (!model || model.length > 200 || seen.has(model) || !efforts.length) return [];
+    if (version === 1 && (model !== SUBSCRIPTION_MODEL || !efforts.includes(SUBSCRIPTION_EFFORT))) return [];
+    seen.add(model);
+    const allowed = version === 1 ? [SUBSCRIPTION_EFFORT] : efforts;
+    return [{ id: model, display_name: plain(item.display_name).trim() || model, reasoning_efforts: allowed,
+      default_reasoning_effort: allowed.includes(item.default_reasoning_effort) ? item.default_reasoning_effort : allowed.length === 1 ? allowed[0] : "" }];
+  });
+}
+function updateSubscriptionSelection(payload) {
+  const subscription = state.subscription;
+  subscription.models = subscriptionCatalogue(payload);
+  subscription.protocolVersion = Number(payload.protocol_version || 1);
+  if (!subscription.selectionInitialized) {
+    subscription.selectionInitialized = true;
+    if (state.provider === SUBSCRIPTION_PROVIDER && state.model) {
+      subscription.draftModel = state.model;
+      subscription.draftEffort = state.reasoningEffort;
+    } else {
+      const luna = subscription.models.find((item) => item.id === SUBSCRIPTION_MODEL);
+      subscription.draftModel = luna?.id || "";
+      subscription.draftEffort = luna?.reasoning_efforts.includes(SUBSCRIPTION_EFFORT) ? SUBSCRIPTION_EFFORT : luna?.default_reasoning_effort || "";
+      subscription.selectionNotice = !luna ? "当前账号没有默认的 Luna Max，请明确选择一个可用模型。"
+        : subscription.draftEffort !== SUBSCRIPTION_EFFORT ? `当前账号的 Luna 不支持 max，请确认所示默认强度 ${subscription.draftEffort || "（请选择）"}。` : "";
+    }
+  }
+  if (subscription.draftModel && !subscriptionCombinationSupported(subscription.draftModel, subscription.draftEffort)) {
+    if (!subscription.models.some((item) => item.id === subscription.draftModel)) subscription.draftModel = "";
+    subscription.draftEffort = "";
+    subscription.selectionNotice = "账号可用模型或推理强度已改变，请重新选择并保存。当前聊天配置不会自动替换。";
+  }
+}
+function chooseSubscriptionModel(model) {
+  const subscription = state.subscription;
+  const selected = subscription.models.find((item) => item.id === model);
+  subscription.draftModel = selected?.id || "";
+  subscription.selectionNotice = "";
+  if (!selected) subscription.draftEffort = "";
+  else if (!selected.reasoning_efforts.includes(subscription.draftEffort)) {
+    subscription.draftEffort = selected.default_reasoning_effort;
+    subscription.selectionNotice = subscription.draftEffort ? `已显示该模型默认推理强度：${SUBSCRIPTION_EFFORT_LABELS[subscription.draftEffort]}（${subscription.draftEffort}）。保存后生效。` : "请为此模型选择推理强度。";
+  }
+  renderSubscriptionSettings();
+}
+function renderSubscriptionModelControls() {
+  const subscription = state.subscription;
+  const connected = subscription.status === "connected";
+  $("subscription-model-controls").hidden = !connected;
+  const model = subscription.models.find((item) => item.id === subscription.draftModel);
+  const modelOptions = '<option value="">请选择模型</option>' + subscription.models.map((item) => {
+    const label = subscription.models.some((other) => other.id !== item.id && other.display_name === item.display_name) ? `${item.display_name} · ${item.id}` : item.display_name;
+    return `<option value="${escapeHtml(item.id)}">${escapeHtml(label)}</option>`;
+  }).join("");
+  const effortOptions = '<option value="">请选择推理强度</option>' + (model?.reasoning_efforts || []).map((effort) => `<option value="${effort}">${SUBSCRIPTION_EFFORT_LABELS[effort]} · ${effort}</option>`).join("");
+  if ($("subscription-model-select").innerHTML !== modelOptions) $("subscription-model-select").innerHTML = modelOptions;
+  if ($("subscription-effort-select").innerHTML !== effortOptions) $("subscription-effort-select").innerHTML = effortOptions;
+  $("subscription-model-select").value = subscription.draftModel;
+  $("subscription-effort-select").value = subscription.draftEffort;
+  $("subscription-model-select").disabled = Boolean(modelSetupController);
+  $("subscription-effort-select").disabled = Boolean(modelSetupController) || !model;
+  $("subscription-model-name").textContent = connected ? model?.display_name || "选择订阅模型" : "默认 Luna Max";
+  $("subscription-model-detail").textContent = connected ? model ? `${model.id} · ${subscription.draftEffort || "请选择强度"}` : "使用此账号支持的模型与推理强度" : `${SUBSCRIPTION_MODEL} · ${SUBSCRIPTION_EFFORT}`;
+  const saved = state.provider === SUBSCRIPTION_PROVIDER && state.model === subscription.draftModel && state.reasoningEffort === subscription.draftEffort;
+  $("subscription-selection-hint").textContent = subscription.selectionNotice || (saved ? "当前已保存此模型与推理强度。" : "选择会在点击“使用所选模型”后生效。");
+}
+function subscriptionEnabled() {
+  const config = state.config?.subscription;
+  return config?.enabled === true && config.model === SUBSCRIPTION_MODEL && config.effort === SUBSCRIPTION_EFFORT
+    && [1, 2].includes(config.protocol_version) && state.config?.providers?.some((provider) => provider.provider_id === SUBSCRIPTION_PROVIDER);
+}
+function subscriptionSettingsVisible() {
+  return $("settings-dialog").open && !$("settings-panel-models").hidden && state.modelSetupMode === "subscription" && !document.hidden;
+}
+function stopSubscriptionPolling() {
+  subscriptionPollSequence += 1;
+  window.clearTimeout(subscriptionPollTimer);
+  subscriptionPollTimer = 0;
+  subscriptionPollController?.abort();
+  subscriptionPollController = null;
+}
+function storeSubscriptionCredential() {
+  const { credential, expiresAt, pairingExpiresAt } = state.subscription;
+  if (credential && expiresAt > Date.now()) tabPreferences.setItem(SUBSCRIPTION_SESSION_KEY, JSON.stringify({ credential, expiresAt, pairingExpiresAt }));
+  else tabPreferences.removeItem(SUBSCRIPTION_SESSION_KEY);
+}
+function forgetSubscription(status = "disconnected", error = "") {
+  const { draftModel, draftEffort } = state.subscription;
+  state.subscription = createSubscriptionState({ status, error, draftModel, draftEffort, selectionInitialized: Boolean(draftModel) });
+  tabPreferences.removeItem(SUBSCRIPTION_SESSION_KEY);
+  if (state.provider === SUBSCRIPTION_PROVIDER) clearCredential();
+}
+function renderSubscriptionSettings() {
+  const selected = state.modelSetupMode === "subscription";
+  const enabled = subscriptionEnabled();
+  const subscription = state.subscription;
+  const busy = Boolean(modelSetupController);
+  $("model-mode-api").setAttribute("aria-pressed", String(!selected));
+  $("model-mode-subscription").setAttribute("aria-pressed", String(selected));
+  $("api-model-settings").hidden = selected;
+  $("subscription-settings").hidden = !selected;
+  renderSubscriptionModelControls();
+  const actions = $("model-session-actions");
+  const subscriptionActions = $("subscription-session-actions");
+  if (selected && actions.parentElement !== subscriptionActions) subscriptionActions.append(actions);
+  else if (!selected && actions.parentElement === subscriptionActions) $("setup-error").after(actions);
+  $("clear-credential").hidden = selected;
+  $("save-model").textContent = selected ? "使用所选模型" : "保存本次模型会话";
+  $("save-model").disabled = busy || (selected ? !enabled || subscription.status !== "connected" || !subscription.credential || !subscriptionCombinationSupported(subscription.draftModel, subscription.draftEffort) : !apiProviders().length);
+  $("pair-subscription").hidden = !enabled || subscription.status === "connected";
+  $("pair-subscription").disabled = busy;
+  $("pair-subscription").textContent = subscription.credential ? "重新生成配对码" : "生成配对码";
+  $("disconnect-subscription").hidden = !enabled || !subscription.credential;
+  $("disconnect-subscription").disabled = busy;
+  $("subscription-pairing").hidden = !subscription.pairingCode || subscription.status !== "waiting";
+  $("subscription-pairing-code").textContent = subscription.pairingCode;
+  $("subscription-pairing-expiry").textContent = subscription.pairingExpiresAt
+    ? `有效至 ${new Date(subscription.pairingExpiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}。配对完成后此页会隐藏配对码。` : "";
+  $("subscription-connect-command").textContent = `node snow-codex-connector.mjs --site ${window.location.origin}`;
+  const statusCopy = {
+    disconnected: "尚未连接个人连接器。请按下方教程完成登录和配对。",
+    checking: "正在核对个人连接器状态……",
+    waiting: "等待本机连接器配对。生成配对码还没有建立连接，完成教程后会自动更新。",
+    connected: "已连接个人连接器。请选择模型与推理强度，再保存本次会话。",
+  };
+  $("subscription-status").dataset.status = !enabled ? "disabled" : subscription.error ? "error" : subscription.status;
+  $("subscription-status").textContent = !enabled ? errorMessages.subscription_disabled
+    : subscription.error ? displayError(subscription.error) : statusCopy[subscription.status] || statusCopy.disconnected;
+}
+function chooseModelMode(mode) {
+  stopSubscriptionPolling();
+  const select = $("provider-select");
+  if (mode === "subscription") {
+    if (select.value && select.value !== SUBSCRIPTION_PROVIDER) state.apiProviderChoice = select.value;
+    state.modelSetupMode = "subscription";
+    if (subscriptionEnabled()) select.value = SUBSCRIPTION_PROVIDER;
+  } else {
+    state.modelSetupMode = "api";
+    select.value = state.apiProviderChoice || (state.provider !== SUBSCRIPTION_PROVIDER ? state.provider : "") || apiProviders()[0]?.provider_id || "";
+  }
+  syncProviderControls(select.value);
+  showError("setup-error", "");
+  renderSubscriptionSettings();
+  if (mode === "subscription") startSubscriptionPolling();
+}
+async function refreshSubscriptionStatus(signal) {
+  if (!subscriptionEnabled() || !state.subscription.credential) return;
+  const payload = await api("/subscription/status", { signal, timeoutMs: 10000 });
+  signal?.throwIfAborted();
+  if (payload.status === "connected") {
+    try { updateSubscriptionSelection(payload); }
+    catch (error) { forgetSubscription("disconnected", error.message); throw error; }
+    const expiresAt = Date.parse(payload.expires_at);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error("subscription_pairing_expired");
+    state.subscription.status = "connected";
+    state.subscription.error = "";
+    state.subscription.pairingCode = "";
+    state.subscription.pairingExpiresAt = 0;
+    state.subscription.expiresAt = expiresAt;
+    if (state.provider === SUBSCRIPTION_PROVIDER && state.model) {
+      state.credentialExpiresAt = expiresAt;
+      saveCredential();
+    }
+    storeSubscriptionCredential();
+  } else if (payload.status === "waiting" && (state.subscription.pairingExpiresAt || state.subscription.expiresAt) > Date.now()) {
+    state.subscription.status = "waiting";
+    state.subscription.error = "";
+  } else {
+    forgetSubscription("disconnected", payload.status === "waiting" ? "subscription_pairing_expired" : "subscription_not_connected");
+  }
+  renderSubscriptionSettings();
+  updateComposerAvailability();
+}
+function startSubscriptionPolling() {
+  stopSubscriptionPolling();
+  if (!subscriptionSettingsVisible() || !subscriptionEnabled() || !state.subscription.credential) return;
+  const sequence = subscriptionPollSequence;
+  const poll = async () => {
+    if (sequence !== subscriptionPollSequence || !subscriptionSettingsVisible()) return;
+    const controller = new AbortController();
+    subscriptionPollController = controller;
+    try { await refreshSubscriptionStatus(controller.signal); }
+    catch (error) {
+      if (controller.signal.aborted) return;
+      state.subscription.error = error?.message === "credential_invalid" ? "subscription_not_connected" : (error?.message || "request_failed");
+      if (["credential_invalid", "subscription_pairing_expired", "subscription_not_connected", "subscription_disconnected", "subscription_disabled"].includes(error?.message)) forgetSubscription("disconnected", state.subscription.error);
+      renderSubscriptionSettings();
+    } finally {
+      if (subscriptionPollController === controller) subscriptionPollController = null;
+      if (sequence === subscriptionPollSequence && subscriptionSettingsVisible() && state.subscription.credential) subscriptionPollTimer = window.setTimeout(poll, state.subscription.error ? 6000 : 3000);
+    }
+  };
+  void poll();
+}
+async function pairSubscription() {
+  stopSubscriptionPolling();
+  await runModelSetup("pair-subscription", async (signal) => {
+    if (!subscriptionEnabled()) throw new Error("subscription_disabled");
+    if (!experienceNoticeAccepted()) throw new Error("experience_notice_required");
+    const payload = await api("/subscription/pair", { method: "POST", signal, timeoutMs: 15000, body: JSON.stringify({ accepted_transit_notice: true, accepted_cost_notice: true, accepted_local_history_notice: true }) });
+    signal.throwIfAborted();
+    const expiresAt = Date.parse(payload.expires_at);
+    const pairingExpiresAt = Date.parse(payload.pairing_expires_at || payload.expires_at);
+    if (payload.provider !== SUBSCRIPTION_PROVIDER || !plain(payload.credential) || !plain(payload.pairing_code) || !Number.isFinite(expiresAt) || expiresAt <= Date.now() || !Number.isFinite(pairingExpiresAt) || pairingExpiresAt <= Date.now()) throw new Error("invalid_request");
+    const draftModel = state.subscription.draftModel || (state.provider === SUBSCRIPTION_PROVIDER ? state.model : "");
+    const draftEffort = state.subscription.draftEffort || (state.provider === SUBSCRIPTION_PROVIDER ? state.reasoningEffort : "");
+    if (state.provider === SUBSCRIPTION_PROVIDER) clearCredential();
+    state.subscription = createSubscriptionState({ status: "waiting", credential: plain(payload.credential), expiresAt, pairingExpiresAt, pairingCode: plain(payload.pairing_code), draftModel, draftEffort, selectionInitialized: Boolean(draftModel) });
+    storeSubscriptionCredential();
+  });
+  renderSubscriptionSettings();
+  startSubscriptionPolling();
+}
+async function disconnectSubscription() {
+  stopSubscriptionPolling();
+  await runModelSetup("disconnect-subscription", async (signal) => {
+    await api("/subscription/disconnect", { method: "POST", signal, timeoutMs: 10000, body: "{}" });
+    signal.throwIfAborted();
+    forgetSubscription();
+    toast("个人连接器已断开");
+  });
+  renderSubscriptionSettings();
+}
 function syncProviderControls(providerId = $("provider-select")?.value || "") {
   const select = $("provider-select");
   if (select) {
@@ -1680,6 +2053,7 @@ function chooseProvider(providerId) {
   const select = $("provider-select");
   const previousChoice = plain(select.dataset.providerChoice || state.provider);
   const changed = Boolean(previousChoice && previousChoice !== value);
+  state.apiProviderChoice = value;
   $("provider-select").value = value;
   syncProviderControls(value);
   if (changed) {
@@ -1690,11 +2064,12 @@ function chooseProvider(providerId) {
     $("discovered-models").hidden = true;
   }
   refreshCredentialStatus();
+  renderSubscriptionSettings();
 }
 function renderMobileProviderOptions() {
   const root = $("provider-options-mobile");
   if (!root) return;
-  root.innerHTML = (state.config?.providers || []).map((provider) => `<button type="button" role="radio" data-provider-option="${escapeHtml(provider.provider_id)}" aria-checked="false" tabindex="-1">${escapeHtml(provider.display_name)}</button>`).join("");
+  root.innerHTML = apiProviders().map((provider) => `<button type="button" role="radio" data-provider-option="${escapeHtml(provider.provider_id)}" aria-checked="false" tabindex="-1">${escapeHtml(provider.display_name)}</button>`).join("");
   root.querySelectorAll("[data-provider-option]").forEach((button) => {
     button.onclick = () => chooseProvider(button.dataset.providerOption);
     button.onkeydown = (event) => {
@@ -1719,7 +2094,7 @@ async function loadConfig() {
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
   $("provider-select").innerHTML = state.config.providers.length
-    ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}">${escapeHtml(provider.display_name)}</option>`).join("")
+    ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}"${provider.provider_id === SUBSCRIPTION_PROVIDER ? " hidden" : ""}>${escapeHtml(provider.display_name)}</option>`).join("")
     : '<option value="">暂未开放模型厂商</option>';
   renderMobileProviderOptions();
   const providerLinks = [];
@@ -1731,7 +2106,7 @@ async function loadConfig() {
   }
   $("provider-doc-links").innerHTML = providerLinks.join("");
   $("provider-doc-links").hidden = !providerLinks.length;
-  $("provider-empty").hidden = Boolean(state.config.providers.length);
+  $("provider-empty").hidden = Boolean(apiProviders().length);
   $("discover-models").disabled = !state.config.providers.length;
   $("save-model").disabled = !state.config.providers.length;
   if (!state.config.providers.length) showError("setup-error", "当前暂未开放可用的模型厂商。");
@@ -1746,14 +2121,30 @@ async function loadConfig() {
         state.credentialExpiresAt = saved.expiresAt;
         state.provider = saved.provider;
         state.model = saved.model || "";
+        state.reasoningEffort = saved.provider === SUBSCRIPTION_PROVIDER ? plain(saved.reasoningEffort) || (saved.model === SUBSCRIPTION_MODEL ? SUBSCRIPTION_EFFORT : "") : "";
+        if (saved.provider === SUBSCRIPTION_PROVIDER) state.modelSetupMode = "subscription";
         $("provider-select").value = state.provider;
         syncProviderControls(state.provider);
         $("model-id").value = state.model;
       } else clearCredential();
     } catch { clearCredential(); }
   }
+  try {
+    const pending = JSON.parse(tabPreferences.getItem(SUBSCRIPTION_SESSION_KEY) || "null");
+    const credential = state.provider === SUBSCRIPTION_PROVIDER ? state.credential : plain(pending?.credential);
+    const expiresAt = state.provider === SUBSCRIPTION_PROVIDER ? state.credentialExpiresAt : Number(pending?.expiresAt);
+    if (subscriptionEnabled() && credential && expiresAt > Date.now()) {
+      state.subscription = createSubscriptionState({ status: "checking", credential, expiresAt, pairingExpiresAt: Number(pending?.pairingExpiresAt) || 0 });
+      await refreshSubscriptionStatus();
+    } else if (credential) forgetSubscription();
+  } catch (error) {
+    state.subscription.status = "disconnected";
+    state.subscription.error = error?.message || "subscription_not_connected";
+  }
+  state.apiProviderChoice = (state.provider !== SUBSCRIPTION_PROVIDER ? state.provider : "") || apiProviders()[0]?.provider_id || "";
   refreshCredentialStatus();
   syncProviderControls($("provider-select").value);
+  renderSubscriptionSettings();
 }
 function normalizeSticker(sticker) {
   if (!sticker?.asset_id) return null;
@@ -1837,7 +2228,7 @@ async function runModelSetup(action, task) {
   const label = button.textContent;
   controls.forEach(([control]) => { control.disabled = true; });
   form.setAttribute("aria-busy", "true");
-  button.textContent = action === "discover-models" ? "正在获取模型列表…" : "正在保存模型会话…";
+  button.textContent = ({ "discover-models": "正在获取模型列表…", "pair-subscription": "正在生成配对码…", "disconnect-subscription": "正在断开连接…" })[action] || "正在保存模型会话…";
   showError("setup-error", "");
   try {
     await task(controller.signal);
@@ -1852,6 +2243,7 @@ async function runModelSetup(action, task) {
     $("model-verification").hidden = true;
     $("model-turnstile").setAttribute("aria-busy", "false");
     modelSetupController = null;
+    renderSubscriptionSettings();
   }
 }
 async function issueCredential(signal) {
@@ -1892,6 +2284,7 @@ async function issueCredential(signal) {
 }
 async function discoverModels() {
   return runModelSetup("discover-models", async (signal) => {
+    if (state.modelSetupMode === "subscription") throw new Error("subscription_model_unavailable");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
     if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential(signal);
     const payload = await api("/byok/models", { method: "POST", signal, timeoutMs: 30000, body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
@@ -1904,6 +2297,25 @@ async function discoverModels() {
 }
 async function saveModelSession() {
   return runModelSetup("save-model", async (signal) => {
+    if (state.modelSetupMode === "subscription") {
+      if (!subscriptionEnabled()) throw new Error("subscription_disabled");
+      await refreshSubscriptionStatus(signal);
+      signal.throwIfAborted();
+      if (state.subscription.status !== "connected" || !state.subscription.credential) throw new Error("subscription_not_connected");
+      if (!subscriptionCombinationSupported(state.subscription.draftModel, state.subscription.draftEffort)) throw new Error("subscription_model_unavailable");
+      cancelBackgroundSummaries();
+      state.provider = SUBSCRIPTION_PROVIDER;
+      state.model = state.subscription.draftModel;
+      state.reasoningEffort = state.subscription.draftEffort;
+      state.credential = state.subscription.credential;
+      state.credentialExpiresAt = state.subscription.expiresAt;
+      saveCredential();
+      refreshCredentialStatus();
+      updateComposerAvailability();
+      $("settings-dialog").close();
+      toast(`已使用你自己的 Codex 订阅 · ${state.model} · ${state.reasoningEffort}`);
+      return;
+    }
     const model = $("discovered-models").value.trim() || $("model-id").value.trim();
     if (!model) throw new Error("请填写或选择模型 ID。");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
@@ -1911,6 +2323,7 @@ async function saveModelSession() {
     signal.throwIfAborted();
     state.provider = $("provider-select").value;
     state.model = model;
+    state.reasoningEffort = "";
     saveCredential();
     refreshCredentialStatus();
     updateComposerAvailability();
@@ -1948,7 +2361,7 @@ async function ensureContinuityDecision(thread) {
   return true;
 }
 function avatarMarkup(character, { thumbnail = true, priority = false, className = "" } = {}) {
-  const avatar = character?.avatar || null;
+  const avatar = CHARACTER_AVATAR_OVERRIDES[character?.character_id] || character?.avatar || null;
   const src = avatar ? (thumbnail ? avatar.thumbnail_src : avatar.src) : "";
   const focus = avatar ? ` style="--portrait-focus-x:${Number(avatar.portrait_focus_x || 50)}%;--portrait-focus-y:${Number(avatar.portrait_focus_y || 50)}%;--portrait-scale:${Number(avatar.portrait_scale || 1)}"` : "";
   const image = src ? `<img src="${escapeHtml(src)}" alt="" loading="${priority ? "eager" : "lazy"}" decoding="async"${priority ? " fetchpriority=\"high\"" : ""} />` : "";
@@ -2278,6 +2691,25 @@ function renderRequestStatus() {
       }
     };
     target.append(" ", refresh);
+  }
+  // The face-to-face surface intentionally hides the text timeline. Keep the
+  // same retry action reachable from its status row when the last user turn
+  // failed, so the preserved action/speech draft is not the only recovery
+  // path. Text mode already renders this action beside the failed message.
+  if (!pending && currentThread()?.channel === "in_person") {
+    const failedMessage = [...(currentThread()?.messages || [])]
+      .reverse()
+      .find((message) => message.role === "user" && message.status === "failed");
+    if (failedMessage) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "request-retry";
+      retry.dataset.retryMessage = failedMessage.id;
+      retry.textContent = "重试";
+      retry.disabled = globalRequestBusy();
+      retry.onclick = () => retryMessage(failedMessage.id);
+      target.append(" ", retry);
+    }
   }
   const stop = $("stop-waiting");
   if (stop) stop.hidden = !pending || ["arrival", "presenting"].includes(pending.phase);
@@ -3782,7 +4214,9 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     const failed = message.status === "failed";
     const presenting = message.role === "assistant" && presentationFor()?.messageId === message.id;
     const tools = failed && message.role === "user"
-      ? `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
+      ? message.errorCode === "subscription_result_unknown"
+        ? '<span class="message-recovery-note">结果尚未确认，请先检查个人连接器，避免重复发送。</span>'
+        : `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
       : message.role === "assistant" && !presenting ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
     const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
@@ -4426,7 +4860,7 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
     }
     if (event === "error") {
-      const error = new Error(payload.code || "chat_failed");
+      const error = chatError(payload.code || "chat_failed", payload);
       error.partial = Boolean(payload.partial);
       error.terminal = true;
       throw error;
@@ -4450,18 +4884,39 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
 function recoverableChatError(error) {
   if (error?.terminal || error?.partial) return false;
   const code = error instanceof Error ? error.message : plain(error);
-  return error instanceof TypeError || ["stream_disconnected", "request_in_progress", "provider_network_error", "request_failed"].includes(code);
-}
-
-function shouldReuseChatRequest(error) {
-  const code = error instanceof Error ? error.message : plain(error);
+  if (error instanceof Error && error.retryable === false) return false;
   return error instanceof TypeError || [
     "stream_disconnected",
     "request_in_progress",
     "provider_network_error",
     "provider_timeout",
+    "request_timeout",
+    "request_failed",
+    "generation_queue_full",
+    "generation_queue_timeout",
+    "subject_generation_busy",
+  ].includes(code);
+}
+
+function shouldReuseChatRequest(error) {
+  const code = error instanceof Error ? error.message : plain(error);
+  // retryable=false prevents another generation; uncertain results still need
+  // their original UUID so a later reconciliation cannot charge a new request.
+  if (["public_database_unavailable", "subscription_result_unknown"].includes(code)) return true;
+  if (error instanceof Error && error.retryable === false) return false;
+  return error instanceof TypeError || [
+    "stream_disconnected",
+    "request_in_progress",
+    "request_failed",
+    "provider_network_error",
+    "provider_timeout",
+    "request_timeout",
     "request_cancelled",
     "public_database_unavailable",
+    "subscription_result_unknown",
+    "generation_queue_full",
+    "generation_queue_timeout",
+    "subject_generation_busy",
   ].includes(code);
 }
 
@@ -4479,6 +4934,7 @@ function compatibleRetrySnapshot(userMessage) {
   if (plain(candidate.payload.communication_channel) !== plain(userMessage.communicationChannel)) return null;
   if (plain(candidate.payload.movement_location_id) !== plain(userMessage.movementLocationId)) return null;
   if (plain(candidate.payload.provider) !== state.provider || plain(candidate.payload.model) !== state.model) return null;
+  if (state.provider === SUBSCRIPTION_PROVIDER && snapshotSubscriptionEffort(candidate.payload) !== state.reasoningEffort) return null;
   return { requestId: candidateRequestId, payload: structuredClone(candidate.payload) };
 }
 
@@ -4491,6 +4947,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     request_id: requestId,
     provider: state.provider,
     model: state.model,
+    ...subscriptionReasoningPayload(),
     character_id: characterId,
     message: userMessage.content,
     communication_channel: userMessage.communicationChannel,
@@ -4525,7 +4982,8 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     userMessage.requestSnapshot = null;
     userMessage.status = "failed";
     userMessage.errorCode = error instanceof Error ? error.message : "request_too_large";
-    state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode });
+    userMessage.errorStage = "content_validation";
+    state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode, errorStage: userMessage.errorStage });
     await dbPutThread(thread);
     if (state.selected === characterId) {
       renderAll();
@@ -4537,6 +4995,10 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   requestSnapshot = { ...boundedRequest };
   delete requestSnapshot.credential;
   const requestBody = JSON.stringify(boundedRequest);
+  // Optional, isolated analytics signal: identifiers only; never inspect requestBody.
+  try {
+    window.snowStatisticsRequest?.(requestId);
+  } catch { /* Analytics must not affect chat submission. */ }
   const ownsRequest = () => ownsTypingState(characterId, requestId);
   const ownsVisibleRequest = () => ownsRequest() && state.selected === characterId;
   cancelPresentationQueue(characterId);
@@ -4552,6 +5014,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   userMessage.conversationSegmentId = thread.conversationSegmentId;
   userMessage.status = "pending";
   userMessage.errorCode = "";
+  userMessage.errorStage = "";
   if (state.selected === characterId) renderAll();
   setTypingState({ characterId, requestId, channel: userMessage.communicationChannel, phase: "waiting" });
   setRequestStatus(characterId, "", requestId);
@@ -4631,19 +5094,28 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   try {
     let result = null;
     let lastError = null;
-    const backoffs = [0, 1000, 2000, 4000];
+    const backoffs = requestSnapshot.provider === SUBSCRIPTION_PROVIDER ? [0] : [0, 1000, 2000, 4000];
     for (let attempt = 0; attempt < backoffs.length; attempt += 1) {
       if (attempt > 0) {
         if (!recoverableChatError(lastError) || requestController.signal.aborted) throw lastError;
         setRequestStatus(characterId, `连接中断，正在恢复（${attempt}/3）……`, requestId);
-        await abortableDelay(backoffs[attempt], requestController.signal);
+        const retryAfterMs = Number(lastError?.retryAfterSeconds || 0) * 1000;
+        await abortableDelay(Math.max(backoffs[attempt], retryAfterMs), requestController.signal);
       }
       try {
         const response = await fetch(`${apiRoot}/chat/stream`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", ...(streamV2 ? { "X-Snow-Stream-Version": "2" } : {}) }, signal: requestController.signal, body: requestBody });
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));
-          const serverCode = plain(payload?.detail?.code);
-          const error = new Error(serverCode || ([502, 503, 504].includes(response.status) ? "provider_network_error" : "chat_failed"));
+          const detail = payload?.detail && typeof payload.detail === "object" ? payload.detail : {};
+          const serverCode = plain(detail.code);
+          const fallbackCode = [502, 503, 504].includes(response.status) ? "provider_network_error" : "chat_failed";
+          const error = chatError(serverCode || fallbackCode, detail, response.status);
+          if (!error.retryAfterSeconds) {
+            const headerRetryAfter = Number(response.headers.get("Retry-After"));
+            if (Number.isFinite(headerRetryAfter) && headerRetryAfter > 0) {
+              error.retryAfterSeconds = Math.min(300, Math.floor(headerRetryAfter));
+            }
+          }
           throw error;
         }
         result = await consumeChatStream(response, { characterId, requestId, fallbackChannel: userMessage.communicationChannel, committedReply, onCommitted });
@@ -4682,7 +5154,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     thread.turnCount += 1;
     thread.continuityDecision = "";
     thread.lastActiveAt = Date.now();
-    if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: "", usage: result.usage });
+    if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: "", errorStage: "", usage: result.usage });
     await dbPutThread(thread);
     state.retrySnapshots.delete(userMessage.id);
     userMessage.requestSnapshot = null;
@@ -4719,7 +5191,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     await commitDisplay.catch(() => {});
     await userPersistence.catch(() => {});
     const error = caught?.name === "AbortError" ? new Error(requestTimedOut ? "provider_timeout" : "request_cancelled") : caught;
-    if (!latencyV2 && !committedReply?.blocks.length && stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
+    if (!latencyV2 && !committedReply?.blocks.length && requestSnapshot.provider !== SUBSCRIPTION_PROVIDER && stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
       cancelPresentationQueue(characterId, requestId);
       state.retrySnapshots.delete(userMessage.id);
       await clearPersistedWorldPackage();
@@ -4739,7 +5211,12 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     }
     userMessage.status = "failed";
     userMessage.errorCode = error instanceof Error ? error.message : "chat_failed";
-    if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode });
+    if (requestSnapshot.provider === SUBSCRIPTION_PROVIDER && ["subscription_not_connected", "subscription_disconnected", "credential_invalid"].includes(userMessage.errorCode)) {
+      forgetSubscription("disconnected", "subscription_not_connected");
+      renderSubscriptionSettings();
+    }
+    userMessage.errorStage = normalizedErrorStage(error instanceof Error ? error.errorStage : "") || _errorStageForClientCode(userMessage.errorCode);
+    if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode, errorStage: userMessage.errorStage });
     await dbPutThread(thread);
     if (ownsVisibleRequest()) renderAll();
     if (ownsRequest()) {
@@ -4825,6 +5302,7 @@ async function retryMessage(messageId) {
   if (snapshot && (
     plain(snapshot.payload?.provider) !== state.provider
     || plain(snapshot.payload?.model) !== state.model
+    || (state.provider === SUBSCRIPTION_PROVIDER && snapshotSubscriptionEffort(snapshot.payload) !== state.reasoningEffort)
   )) {
     state.retrySnapshots.delete(message.id);
     message.requestId = "";
@@ -4846,7 +5324,7 @@ function remainingProviderCallBudget(usage) {
   return Math.max(0, limit - used);
 }
 function scheduleAutoSummary(thread, chatUsage = null) {
-  if (!state.autoSummaryEnabled || !configured()) return;
+  if (state.provider === SUBSCRIPTION_PROVIDER || !state.autoSummaryEnabled || !configured()) return;
   // A summary is another provider operation belonging to the current user
   // action. Never start it when validation/rewriting already consumed both
   // calls, or when an older server omitted the auditable call count.
@@ -4876,7 +5354,7 @@ function cancelBackgroundSummaries() {
   state.summaryInFlight.clear();
 }
 async function runAutoSummary(thread) {
-  if (!thread.summaryRequestId || !state.autoSummaryEnabled || !configured() || state.summaryInFlight.has(thread.characterId) || globalRequestBusy()) return;
+  if (state.provider === SUBSCRIPTION_PROVIDER || !thread.summaryRequestId || !state.autoSummaryEnabled || !configured() || state.summaryInFlight.has(thread.characterId) || globalRequestBusy()) return;
   state.summaryInFlight.add(thread.characterId);
   const controller = new AbortController();
   state.summaryControllers.set(thread.characterId, controller);
@@ -4890,7 +5368,7 @@ async function runAutoSummary(thread) {
       content_blocks: wireBlocks(message.contentBlocks),
     }));
     const requestPayload = fitPublicRequestPayload(
-      { request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, character_id: thread.characterId, turns, previous_summary: thread.summary || "" },
+      { request_id: requestId, provider: state.provider, credential: state.credential, model: state.model, ...subscriptionReasoningPayload(), character_id: thread.characterId, turns, previous_summary: thread.summary || "" },
       { arrays: [{ key: "turns", minimum: 2 }], texts: ["previous_summary"] },
     );
     const payload = await api("/chat/summarize", { method: "POST", signal: controller.signal, timeoutMs: 20000, body: JSON.stringify(requestPayload) });
@@ -4980,7 +5458,7 @@ async function arriveInPerson() {
       return;
     }
     const arrivalPayload = fitPublicRequestPayload(
-      { arrival_id: arrivalId, provider: state.provider, credential: state.credential, model: state.model, character_id: characterId, recent_history: requestHistory(thread?.messages || [], "", thread?.conversationSegmentId || ""), history_summary: thread?.continuityDecision === "start_today" ? "" : (thread?.summary || ""), state_package: state.worldPackage || "" },
+      { arrival_id: arrivalId, provider: state.provider, credential: state.credential, model: state.model, ...subscriptionReasoningPayload(), character_id: characterId, recent_history: requestHistory(thread?.messages || [], "", thread?.conversationSegmentId || ""), history_summary: thread?.continuityDecision === "start_today" ? "" : (thread?.summary || ""), state_package: state.worldPackage || "" },
       { arrays: [{ key: "recent_history", minimum: 0 }], texts: ["history_summary"] },
     );
     const result = await api("/presence/arrival", { method: "POST", body: JSON.stringify(arrivalPayload) });
@@ -5149,7 +5627,7 @@ function toggleContacts({ mobileOpen = false } = {}) {
   return expanded;
 }
 function openSettings(tab = "models") {
-  if (tab !== "models") modelSetupController?.abort();
+  if (tab !== "models") { modelSetupController?.abort(); stopSubscriptionPolling(); }
   document.querySelectorAll("[data-settings-tab]").forEach((button) => {
     const selected = button.dataset.settingsTab === tab;
     button.classList.toggle("active", selected);
@@ -5160,14 +5638,18 @@ function openSettings(tab = "models") {
   if (tab === "history") storageBytes().then((bytes) => { $("storage-usage").textContent = `当前浏览器记录约占 ${formatBytes(bytes)}。`; });
   const activeThread = currentThread();
   $("auto-summary-enabled").checked = state.autoSummaryEnabled;
+  $("subscription-summary-hint").hidden = state.provider !== SUBSCRIPTION_PROVIDER;
   $("history-retention").value = String(state.historyRetentionDays);
   $("day-continuity-preference").value = state.dayContinuityPreference;
   $("summary-last-updated").textContent = activeThread?.summaryUpdatedAt ? `最近更新：${new Date(activeThread.summaryUpdatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}` : "尚未生成摘要";
-  $("provider-select").value = state.provider || $("provider-select").value;
+  $("provider-select").value = state.modelSetupMode === "subscription" && subscriptionEnabled()
+    ? SUBSCRIPTION_PROVIDER : state.apiProviderChoice || state.provider || $("provider-select").value;
   syncProviderControls($("provider-select").value);
   $("model-id").value = state.model || $("model-id").value;
   refreshCredentialStatus();
   if (!$("settings-dialog").open) $("settings-dialog").showModal();
+  renderSubscriptionSettings();
+  if (tab === "models") startSubscriptionPolling();
 }
 function openFeedback(messageId = "") {
   state.feedbackMessageId = messageId;
@@ -5217,7 +5699,7 @@ async function submitFeedback(event) {
   const includeContext = $("feedback-include-context").checked;
   const assistantSpeech = renderBlocksText(assistantBlocks.filter((block) => block.type !== "action"));
   try {
-    const contextual = includeContext ? { chat_request_id: chatRequestId || null, character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: assistantSpeech, user_content_blocks: userBlocks, assistant_content_blocks: assistantBlocks, error_code: latest.errorCode || userMessage.errorCode || "" } : {};
+    const contextual = includeContext ? { chat_request_id: chatRequestId || null, character_id: state.selected || "", provider: state.provider || "", model: state.model || "", user_message: userMessage.content || "", assistant_answer: assistantSpeech, user_content_blocks: userBlocks, assistant_content_blocks: assistantBlocks, error_code: latest.errorCode || userMessage.errorCode || "", error_stage: latest.errorStage || userMessage.errorStage || "" } : {};
     const payload = await api("/feedback", { method: "POST", timeoutMs: 20000, body: JSON.stringify({ request_id: id(), body: $("feedback-body").value, qq: $("feedback-qq").value, turnstile_token: await tokenForFeedback(), include_conversation_context: includeContext, request_stage: target?.communicationChannel || thread.channel || "immersive-web", ui_surface: "immersive-web", ...contextual }) });
     $("feedback-dialog").close();
     $("feedback-form").reset();
@@ -5375,8 +5857,24 @@ $("stage-toggle-ui").onclick = () => { $("stage-menu").open = false; $("in-perso
 $("stage-open-feedback").onclick = () => { const messageId = $("stage-open-feedback").dataset.messageId || ""; if (!messageId) return; $("stage-menu").open = false; openFeedback(messageId); };
 $("discover-models").onclick = discoverModels;
 $("save-model").onclick = saveModelSession;
+$("model-mode-api").onclick = () => chooseModelMode("api");
+$("model-mode-subscription").onclick = () => chooseModelMode("subscription");
+$("subscription-model-select").onchange = () => chooseSubscriptionModel($("subscription-model-select").value);
+$("subscription-effort-select").onchange = () => {
+  const effort = $("subscription-effort-select").value;
+  state.subscription.draftEffort = subscriptionCombinationSupported(state.subscription.draftModel, effort) ? effort : "";
+  state.subscription.selectionNotice = "";
+  renderSubscriptionSettings();
+};
+$("pair-subscription").onclick = pairSubscription;
+$("disconnect-subscription").onclick = disconnectSubscription;
+$("copy-subscription-code").onclick = async () => {
+  if (!state.subscription.pairingCode) return;
+  try { await navigator.clipboard.writeText(state.subscription.pairingCode); toast("配对码已复制，请只输入到你自己的连接器"); }
+  catch { toast("无法自动复制，请选中配对码后手动复制"); }
+};
 $("clear-credential").onclick = () => { clearCredential(); $("api-key").focus(); toast("当前标签页的模型凭证已清除"); };
-$("discovered-models").onchange = () => { if ($("discovered-models").value) { $("model-id").value = $("discovered-models").value; state.model = $("discovered-models").value; saveCredential(); } };
+$("discovered-models").onchange = () => { if (state.modelSetupMode !== "subscription" && $("discovered-models").value) { $("model-id").value = $("discovered-models").value; state.model = $("discovered-models").value; saveCredential(); } };
 $("toggle-advanced-model").onclick = () => {
   const panel = $("advanced-model-panel");
   const expanded = panel.hidden;
@@ -5425,8 +5923,9 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   };
 });
 $("feedback-dialog").addEventListener("close", () => prepareFeedbackVerification({ cancelPending: true }));
-$("settings-dialog").addEventListener("close", () => modelSetupController?.abort());
-$("settings-dialog").addEventListener("cancel", () => modelSetupController?.abort());
+$("settings-dialog").addEventListener("close", () => { modelSetupController?.abort(); stopSubscriptionPolling(); });
+$("settings-dialog").addEventListener("cancel", () => { modelSetupController?.abort(); stopSubscriptionPolling(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopSubscriptionPolling(); else startSubscriptionPolling(); });
 $("sticker-picker").addEventListener("close", () => $("toggle-sticker").setAttribute("aria-expanded", "false"));
 window.addEventListener("keydown", (event) => {
   if (document.querySelector("dialog[open]")) return;
@@ -5721,6 +6220,7 @@ $("apply-build-update").onclick = async () => {
 };
 window.addEventListener("focus", () => { void checkBuildUpdate(); });
 window.addEventListener("pagehide", () => {
+  stopSubscriptionPolling();
   state.writerRelease?.();
   state.writerChannel?.close();
   state.stageWarmController?.abort();

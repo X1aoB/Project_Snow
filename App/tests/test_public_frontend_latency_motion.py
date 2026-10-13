@@ -25,7 +25,7 @@ class LatencyHandler(fixture.PublicFrontendHandler):
         cls.requests.append((payload["request_id"], self.headers.get("X-Snow-Stream-Version")))
         if cls.scenario == "database_unknown" and len(cls.requests) == 1:
             cls.started.set()
-            self._json({"detail": {"code": "public_database_unavailable"}}, status=503)
+            self._json({"detail": {"code": "public_database_unavailable", "stage": "idempotency_store", "retryable": False}}, status=503)
             return
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")

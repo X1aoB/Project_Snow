@@ -274,6 +274,7 @@ class RequestDurabilityTests(IsolatedAsyncioTestCase):
             response = await endpoint(self.request, payload)
             output = "".join([chunk async for chunk in response.body_iterator])
         self.assertIn("public_database_unavailable", output)
+        self.assertIn('"retry_after_seconds":2', output)
         self.assertEqual(self.app.state.active_request_leases, {})
         # Renew a distinct live request in the same process. The orphan must
         # still expire; process-level renewal must never keep it alive.

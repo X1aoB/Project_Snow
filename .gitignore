@@ -12,6 +12,10 @@ build/
 develop-eggs/
 dist/
 downloads/
+# This audited source is distributed with the public website.
+!App/public_frontend/downloads/
+App/public_frontend/downloads/*
+!App/public_frontend/downloads/snow-codex-connector.mjs
 eggs/
 .eggs/
 lib/

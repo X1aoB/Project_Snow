@@ -151,6 +151,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
     turnstile_site_key = ""
     chat_payloads: list[dict[str, object]] = []
     chat_attempts: dict[str, int] = {}
+    chat_failure_mode = "success"
     presence_resolve_count = 0
     arrival_mode = "success"
     transition_mode = "success"
@@ -310,7 +311,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             self._json(manifest)
             return
         assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
-        if path.startswith("/modules/") and path.endswith(".js"):
+        if (path.startswith("/modules/") and path.endswith(".js")) or (path.startswith("/statistics/") and path.endswith((".mjs", ".css"))):
             candidate = (PUBLIC_ROOT / path.lstrip("/")).resolve()
             if candidate.is_relative_to(PUBLIC_ROOT.resolve()) and candidate.is_file():
                 assets[path] = candidate.relative_to(PUBLIC_ROOT.resolve()).as_posix()
@@ -364,7 +365,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         body = (PUBLIC_ROOT / filename).read_bytes()
-        content_type = "text/html" if filename.endswith(".html") else "text/javascript" if filename.endswith(".js") else "text/css"
+        content_type = "text/html" if filename.endswith(".html") else "text/javascript" if filename.endswith((".js", ".mjs")) else "text/css"
         self.send_response(200)
         self.send_header("Content-Type", f"{content_type}; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -490,6 +491,24 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 f'event: meta\ndata: {json.dumps({"request_id": payload.get("request_id"), "character_id": payload.get("character_id"), "provider": "openai", "model": "gpt-e2e", "communication_channel": channel}, ensure_ascii=False)}\n\n'
             ).encode()
             request_id = str(payload.get("request_id") or "")
+            if type(self).chat_failure_mode in {"request_failed", "request_failed_twice"}:
+                attempts = type(self).chat_attempts
+                attempts[request_id] = attempts.get(request_id, 0) + 1
+                failure_limit = 4 if type(self).chat_failure_mode == "request_failed" else 2
+                if attempts[request_id] <= failure_limit:
+                    self._json(
+                        {
+                            "detail": {
+                                "code": "request_failed",
+                                "request_id": request_id,
+                                "retryable": True,
+                                "stage": "transport",
+                                "retry_after_seconds": 0,
+                            }
+                        },
+                        status=503,
+                    )
+                    return
             if payload.get("message") == "取消重连测试":
                 attempts = type(self).chat_attempts
                 attempts[request_id] = attempts.get(request_id, 0) + 1
@@ -769,6 +788,7 @@ class PublicFrontendE2ETests(TestCase):
         PublicFrontendHandler.turnstile_site_key = ""
         PublicFrontendHandler.chat_payloads = []
         PublicFrontendHandler.chat_attempts = {}
+        PublicFrontendHandler.chat_failure_mode = "success"
         PublicFrontendHandler.presence_resolve_count = 0
         PublicFrontendHandler.arrival_mode = "success"
         PublicFrontendHandler.transition_mode = "success"
@@ -798,6 +818,177 @@ class PublicFrontendE2ETests(TestCase):
         page.locator("#accept-experience-notice").click()
         page.wait_for_function("document.querySelector('#connection-status').textContent === '服务已连接'")
         page.wait_for_function("document.querySelector('#announcements-date').textContent.includes('北京时间')")
+
+    def _statistics_chat(self, page):
+        page.goto(self.base_url, wait_until="networkidle")
+        page.locator("#accept-experience-notice").click()
+        page.locator("#go-in-person-label", has_text="观景区").wait_for(state="visible")
+        self._configure_model(page)
+        page.locator("#message-input").fill("统计隔离测试正文")
+
+    @staticmethod
+    def _open_statistics_settings(page):
+        if not page.locator("#settings-dialog").is_visible():
+            if page.locator("#contact-panel").get_attribute("aria-hidden") == "true":
+                page.locator("#open-contacts").click()
+            page.locator("#open-settings").click()
+        page.locator('[data-settings-tab="privacy"]').click()
+        page.locator("#settings-panel-privacy #snow-statistics-settings").click()
+
+    def test_statistics_disabled_leaves_chat_and_storage_independent(self):
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            try:
+                page = browser.new_page()
+                posts = []
+                page.on("request", lambda request: posts.append(request.url) if "/analytics/" in request.url else None)
+                self._statistics_chat(page)
+                page.locator("#send-message").click()
+                page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
+                self.assertEqual(page.evaluate("typeof window.snowStatisticsRequest"), "undefined")
+                self.assertEqual(page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('snow.statistics.'))"), [])
+                self.assertEqual(posts, [])
+                self.assertEqual(len(PublicFrontendHandler.chat_payloads), 1)
+            finally:
+                browser.close()
+
+    def test_statistics_failures_allow_chat_under_production_csp(self):
+        caddy = (APP_ROOT / "infra/Caddyfile").read_text(encoding="utf-8")
+        PublicFrontendHandler.content_security_policy = next(
+            line.strip().split('"', 2)[1] for line in caddy.splitlines()
+            if line.strip().startswith('Content-Security-Policy "'))
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            try:
+                for failure in ("unavailable", "disconnected", "timeout"):
+                    with self.subTest(failure=failure):
+                        page = browser.new_page()
+                        page.add_init_script("""localStorage.setItem('snow.statistics.v1.project_snow.consent', String(Date.now()+60000));
+                            window.__statisticsCsp = [];
+                            document.addEventListener('securitypolicyviolation', e => window.__statisticsCsp.push(e.blockedURI));""")
+                        config = {"enabled": True, "app": "project_snow", "endpoint": self.base_url + "/analytics/v1/events", "paths": ["/"]}
+                        page.route("**/statistics/config.mjs", lambda route: route.fulfill(
+                            content_type="text/javascript", body="export default " + json.dumps(config)))
+                        pending = []
+
+                        def fail_collection(route):
+                            if failure == "unavailable":
+                                route.fulfill(status=503, content_type="application/json", body='{"detail":"unavailable"}')
+                            elif failure == "disconnected":
+                                route.abort("connectionfailed")
+                            else:
+                                # Deliberately unresolved while chatting; release handlers before closing the page.
+                                pending.append(route)
+
+                        page.route("**/analytics/v1/events", fail_collection)
+                        self._statistics_chat(page)
+                        with page.expect_request(lambda request: "/analytics/v1/events" in request.url and
+                                                 "request_observed" in (request.post_data or ""), timeout=8000) as sent:
+                            page.locator("#send-message").click()
+                            page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
+                        payload = sent.value.post_data
+                        self.assertNotIn("统计隔离测试正文", payload)
+                        self.assertNotIn("sk-e2e-only-not-real", payload)
+                        self.assertNotIn("request_complete", payload)
+                        self.assertEqual(page.evaluate("window.__statisticsCsp"), [])
+                        self._open_statistics_settings(page)
+                        page.get_by_role("button", name="关闭访问统计", exact=True).click()
+                        self.assertEqual(page.evaluate("typeof window.snowStatisticsRequest"), "undefined")
+                        self.assertEqual(page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('snow.statistics.'))"),
+                                         ["snow.statistics.v1.project_snow.consent"])
+                        self.assertLess(page.evaluate("Number(localStorage.getItem('snow.statistics.v1.project_snow.consent'))"), 0)
+                        self.assertEqual(page.locator("#timeline .message.user").count(), 1)
+                        for route in pending:
+                            route.abort("aborted")
+                        page.close()
+            finally:
+                browser.close()
+
+    def test_statistics_consent_is_visible_revocable_and_shared_across_tabs(self):
+        config = {"enabled": True, "app": "project_snow", "endpoint": self.base_url + "/analytics/v1/events", "paths": ["/"]}
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            try:
+                context = browser.new_context(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
+                context.route("**/statistics/config.mjs", lambda route: route.fulfill(
+                    content_type="text/javascript", body="export default " + json.dumps(config)))
+                sent = []
+
+                def receive(route):
+                    sent.append(route.request.post_data)
+                    route.fulfill(status=202, content_type="application/json", body='{"accepted":1}')
+
+                context.route("**/analytics/v1/events", receive)
+                first, second = context.new_page(), context.new_page()
+                first.goto(self.base_url, wait_until="networkidle")
+                first.locator("#accept-experience-notice").click()
+                first.get_by_role("heading", name="允许访问统计吗？").wait_for(state="visible")
+                self.assertIn("不受此开关影响", first.locator("#snow-statistics-notice").inner_text())
+                self.assertEqual(first.locator(".contact-footer #snow-statistics-settings").count(), 0)
+                self.assertEqual(first.locator('#snow-statistics-notice a[href="/privacy/"]').count(), 1)
+                self.assertEqual(sent, [])
+                self._assert_no_horizontal_overflow(first)
+                evidence = os.getenv("SNOW_STATISTICS_SCREENSHOT_DIR")
+                if evidence:
+                    target = Path(evidence)
+                    target.mkdir(parents=True, exist_ok=True)
+                    first.set_viewport_size({"width": 320, "height": 720})
+                    self._assert_no_horizontal_overflow(first)
+                    first.screenshot(path=str(target / "snow-consent-mobile320.png"), animations="disabled", timeout=10000)
+                    first.set_viewport_size({"width": 1440, "height": 1000})
+                    first.screenshot(path=str(target / "snow-consent-desktop1440.png"), animations="disabled", timeout=10000)
+                    first.set_viewport_size({"width": 390, "height": 844})
+                first.get_by_role("button", name="暂不允许", exact=True).click()
+                second.goto(self.base_url, wait_until="networkidle")
+                self.assertEqual(second.evaluate("typeof window.snowStatisticsRequest"), "undefined")
+                self._open_statistics_settings(first)
+                self.assertTrue(first.locator("#settings-dialog #snow-statistics-notice").is_visible())
+                self._assert_no_horizontal_overflow(first)
+                if evidence:
+                    first.screenshot(path=str(target / "snow-statistics-settings-mobile390.png"), animations="disabled")
+                    first.set_viewport_size({"width": 1440, "height": 1000})
+                    first.screenshot(path=str(target / "snow-statistics-settings-desktop1440.png"), animations="disabled")
+                    first.set_viewport_size({"width": 390, "height": 844})
+                first.locator("#snow-statistics-notice button").last.focus()
+                first.keyboard.press("Escape")
+                self.assertTrue(first.locator("#settings-dialog").is_visible())
+                self.assertFalse(first.locator("#snow-statistics-notice").is_visible())
+                self.assertEqual(first.evaluate("document.activeElement.id"), "snow-statistics-settings")
+                self._open_statistics_settings(first)
+                first.locator('[data-close-dialog="settings-dialog"]').click()
+                first.locator("#settings-dialog").wait_for(state="hidden")
+                first.wait_for_function("document.querySelector('#snow-statistics-notice').parentElement === document.body")
+                self.assertFalse(first.locator("#snow-statistics-notice").is_visible())
+                self._open_statistics_settings(first)
+                self.assertTrue(first.locator("#settings-dialog #snow-statistics-notice").is_visible())
+                self.assertEqual(first.locator("#snow-statistics-notice").count(), 1)
+                first.get_by_role("button", name="允许访问统计", exact=True).focus()
+                first.keyboard.press("Enter")
+                self.assertEqual(first.evaluate("typeof window.snowStatisticsRequest"), "function")
+                self.assertFalse(first.locator("#snow-statistics-notice").is_visible())
+                self.assertEqual(first.evaluate("document.activeElement.id"), "snow-statistics-settings")
+                second.reload(wait_until="networkidle")
+                self.assertEqual(second.evaluate("typeof window.snowStatisticsRequest"), "function")
+                second.locator("#open-contacts").focus()
+                self._open_statistics_settings(first)
+                first.get_by_role("button", name="关闭访问统计", exact=True).focus()
+                first.keyboard.press("Enter")
+                self.assertEqual(first.evaluate("document.activeElement.id"), "snow-statistics-settings")
+                second.wait_for_function("typeof window.snowStatisticsRequest === 'undefined'")
+                self.assertEqual(second.evaluate("document.activeElement.id"), "open-contacts")
+                self.assertEqual(second.evaluate("Object.keys(localStorage).filter(k => /snow.statistics.*(anonymous|session)$/.test(k))"), [])
+                self.assertIn("已关闭", second.locator("#snow-statistics-settings").inner_text())
+                self._open_statistics_settings(first)
+                first.get_by_role("button", name="允许访问统计", exact=True).click()
+                self._open_statistics_settings(first)
+                first.locator("#settings-tab-privacy").focus()
+                first.evaluate("window.dispatchEvent(new Event('snow:analytics:revoke'))")
+                self.assertEqual(first.evaluate("typeof window.snowStatisticsRequest"), "undefined")
+                self.assertFalse(first.locator("#snow-statistics-notice").is_visible())
+                self.assertEqual(first.evaluate("document.activeElement.id"), "settings-tab-privacy")
+                context.close()
+            finally:
+                browser.close()
 
     @staticmethod
     def _announcement_screenshot(page, name):
@@ -2975,6 +3166,91 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(next(iter(PublicFrontendHandler.chat_attempts.values())), 2)
             self.assertEqual(page.locator("#timeline .message.user").count(), 1)
             self.assertEqual(page.locator("#timeline .message.assistant").count(), 1)
+            browser.close()
+
+    def test_in_person_action_and_speech_retries_uncertain_request_with_same_id(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#stage-speech").get_by_text("你来了。").wait_for(state="visible")
+            page.locator("#presence-arrival-loading").wait_for(state="hidden")
+
+            PublicFrontendHandler.chat_failure_mode = "request_failed_twice"
+            action = "牵着凯西娅向她的房间走去"
+            speech = "偷偷跑当然是你相对于其他姑娘们来说的，至于特训嘛，我可没说具体是特训什么"
+            page.locator("#toggle-action").click()
+            page.locator("#action-input").fill(action)
+            page.locator("#message-input").fill(speech)
+            page.locator("#send-message").click()
+            page.locator("#stage-speech").get_by_text("晚上好，分析员。").wait_for(state="visible", timeout=12000)
+
+            self.assertEqual(len(PublicFrontendHandler.chat_payloads), 3)
+            request_ids = {payload.get("request_id") for payload in PublicFrontendHandler.chat_payloads}
+            self.assertEqual(len(request_ids), 1)
+            for payload in PublicFrontendHandler.chat_payloads:
+                self.assertEqual(
+                    payload.get("content_blocks"),
+                    [{"type": "action", "text": action}, {"type": "speech", "text": speech}],
+                )
+                self.assertEqual(payload.get("communication_channel"), "in_person")
+            stored_users = page.evaluate(
+                """async () => {
+                    const request = indexedDB.open('project-snow-public', 4);
+                    const db = await new Promise((resolve, reject) => {
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                    const tx = db.transaction('messages', 'readonly');
+                    const rows = await new Promise((resolve, reject) => {
+                        const values = [];
+                        const cursor = tx.objectStore('messages').openCursor();
+                        cursor.onsuccess = () => {
+                            const item = cursor.result;
+                            if (!item) return resolve(values);
+                            if (item.value.role === 'user') values.push(item.value);
+                            item.continue();
+                        };
+                        cursor.onerror = () => reject(cursor.error);
+                    });
+                    db.close();
+                    return rows;
+                }"""
+            )
+            self.assertEqual(len(stored_users), 1)
+            self.assertEqual(page.locator("#action-input").input_value(), "")
+            self.assertEqual(page.locator("#message-input").input_value(), "")
+            browser.close()
+
+    def test_failed_in_person_action_and_speech_keeps_both_drafts_for_retry(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            self._configure_model(page)
+            page.locator("#go-in-person").click()
+            page.locator("#confirm-presence-transition").click()
+            page.locator("#stage-speech").get_by_text("你来了。").wait_for(state="visible")
+            page.locator("#presence-arrival-loading").wait_for(state="hidden")
+
+            PublicFrontendHandler.chat_failure_mode = "request_failed"
+            action = "牵着凯西娅向她的房间走去"
+            speech = "偷偷跑当然是你相对于其他姑娘们来说的，至于特训嘛，我可没说具体是特训什么"
+            page.locator("#toggle-action").click()
+            page.locator("#action-input").fill(action)
+            page.locator("#message-input").fill(speech)
+            page.locator("#send-message").click()
+            page.locator("#request-status").get_by_text("连接暂时中断，请稍后重试。").wait_for(state="visible", timeout=12000)
+
+            self.assertEqual(page.locator("#action-input").input_value(), action)
+            self.assertEqual(page.locator("#message-input").input_value(), speech)
+            self.assertEqual(sum(PublicFrontendHandler.chat_attempts.values()), 4)
+            self.assertTrue(page.locator("[data-retry-message]").count())
             browser.close()
 
     def test_stop_waiting_cancels_reconnect_backoff(self) -> None:
