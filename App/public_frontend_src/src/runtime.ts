@@ -91,3 +91,4 @@ export function validateHistoryBackup(value: unknown): HistoryBackup {
 }
 export { MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin } from "./view";
 export { PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope } from "./presentation";
+export { SERVER_TIMING_KEYS, anonymousServerTimings } from "./performance";

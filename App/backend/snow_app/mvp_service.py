@@ -9168,6 +9168,64 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             and not set(context.get("query_intents") or ()).intersection({"relationship", "experience", "current_state"})
         )
 
+    @staticmethod
+    def _stream_verbal_blocks_complete(blocks: list[dict[str, Any]]) -> bool:
+        """Conservatively gate early publication, never whole-answer validity.
+
+        JSON completeness is not sentence completeness. Require an explicit
+        ending and balanced delimiters, and withhold a small set of exact
+        waiting phrases/dangling connectives. This cannot prove relevance or
+        grammar; the ordinary cumulative role/fact/security guards still run.
+        Legitimate unpunctuated prose remains eligible for final delivery.
+        """
+        pairs = {"(": ")", "（": "）", "[": "]", "【": "】", "{": "}",
+                 "《": "》", "〈": "〉", "「": "」", "『": "』", "“": "”", "‘": "’"}
+        closers = set(pairs.values())
+        waiting = {
+            "让我想想", "我想想", "让我想一下", "请稍等", "稍等", "稍等一下",
+            "等我一下", "正在输入", "正在思考", "正在生成", "正在生成回复",
+            "正在回复", "正在处理", "我正在思考", "我正在想",
+            "letmethink", "thinking", "pleasewait",
+        }
+        dangling = {
+            "因为", "所以", "但是", "如果", "假如", "虽然", "不过", "然后",
+            "而且", "例如", "比如", "我其实", "我想说", "我是想说", "也就是说",
+        }
+        punctuation = str.maketrans("", "", "。！？.!?…\"'" + "".join(pairs) + "".join(closers))
+        if not blocks:
+            return False
+        for block in blocks:
+            text = block.get("text")
+            if block.get("type") not in {"message", "speech"} or not isinstance(text, str):
+                return False
+            text = text.strip()
+            stack: list[str] = []
+            for index, char in enumerate(text):
+                if char in {"\"", "'"}:
+                    # An apostrophe within an English word is not a quote.
+                    if (char == "'" and index > 0 and index + 1 < len(text)
+                            and text[index - 1].isascii() and text[index - 1].isalnum()
+                            and text[index + 1].isascii() and text[index + 1].isalnum()):
+                        continue
+                    if stack and stack[-1] == char:
+                        stack.pop()
+                    else:
+                        stack.append(char)
+                elif char in pairs:
+                    stack.append(pairs[char])
+                elif char in closers:
+                    if not stack or stack.pop() != char:
+                        return False
+            if stack:
+                return False
+            ending = text.rstrip("".join(closers) + "\"'").rstrip()
+            if not ending or ending[-1] not in "。！？.!?" or ending.endswith("..."):
+                return False
+            prose = "".join(text.translate(punctuation).split()).casefold()
+            if not prose or prose in waiting or any(prose.endswith(term) for term in dangling):
+                return False
+        return True
+
     def _verify_stream_blocks(self, blocks: list[dict[str, Any]], *, message: str,
                               context: dict[str, Any], channel: str, character_name: str) -> None:
         observer = current_generation_observer()
@@ -9188,7 +9246,8 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             if observer.published_blocks:
                 observer.fail("stream_validation_failed")
             return
-        observer.publish(blocks)
+        if self._stream_verbal_blocks_complete(blocks):
+            observer.publish(blocks)
 
     def chat(
         self,

@@ -1,4 +1,4 @@
-import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope } from "/modules/runtime.js";
+import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope, anonymousServerTimings } from "/modules/runtime.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
@@ -92,6 +92,7 @@ const state = {
   completedPresentationByCharacter: new Map(),
   readyReplyIds: new Set(),
   paintedMessageIds: new Set(),
+  seenMessageEntries: new WeakSet(),
   typewriter: { key: "", timer: 0, fullText: "", displayedText: "" },
   summaryInFlight: new Set(),
   summaryControllers: new Map(),
@@ -603,11 +604,13 @@ const transientMotion = new MotionScope();
 const completedReplyTimings = [];
 function anonymousTiming(timing) {
   const duration = value => Number.isFinite(value) ? Math.max(0, Math.round(value)) : null;
+  const serverTimings = anonymousServerTimings(timing.serverTimings);
   return { send_to_first_effective_ms: timing.firstEffectiveAt ? duration(timing.firstEffectiveAt - timing.sentAt) : null,
     ready_to_paint_ms: timing.firstPaintAt && timing.bodyReceivedAt ? duration(timing.firstPaintAt - timing.bodyReceivedAt - (timing.firstNaturalWaitMs || 0)) : null,
     natural_wait_ms: duration(timing.naturalWaitMs), complete_ms: duration(timing.completedAt - timing.sentAt),
     outcome: timing.outcome, recovery: Boolean(timing.recovery), channel: timing.channel, history_band: timing.historyBand, provider: timing.provider, model_profile: timing.modelProfile,
-    server_queue_ms: duration(timing.serverTimings?.queue_ms), rewrite_ms: duration(timing.serverTimings?.guard_rewrite_ms) };
+    server_queue_ms: duration(serverTimings.queue_ms), rewrite_ms: duration(serverTimings.guard_rewrite_ms),
+    server_timings_ms: serverTimings };
 }
 Object.defineProperty(window, "__projectSnowPerformance", { value: Object.freeze({ getSamples: () => completedReplyTimings.map(anonymousTiming) }) });
 function completeReplyTiming(timing, outcome) {
@@ -915,13 +918,11 @@ const LOCAL_PINYIN_TOKENS = {
   "98322bd505f4": ["cx", "chenxing"],
   "ca0144ccd81b": ["lf", "lifu"],
 };
+const localDayFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit",
+});
 function localDayKey(timestamp = Date.now()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Hong_Kong",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(timestamp));
+  const parts = localDayFormatter.formatToParts(new Date(timestamp));
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
 }
@@ -1096,8 +1097,14 @@ async function messageCount(characterId) {
   }
 }
 
+function markMessageEntrySeen(message) {
+  state.seenMessageEntries.add(message);
+  state.paintedMessageIds.add(message.id);
+  while (state.paintedMessageIds.size > 1000) state.paintedMessageIds.delete(state.paintedMessageIds.values().next().value);
+}
 function rememberStoredMessage(message) {
   const normalized = normalizeMessage(message);
+  markMessageEntrySeen(normalized);
   state.persistedMessages.set(normalized.id, JSON.stringify(normalized));
   state.memoryStores.messages.set(normalized.id, structuredClone(normalized));
   return normalized;
@@ -1105,7 +1112,7 @@ function rememberStoredMessage(message) {
 async function loadMessagePage(characterId, { before = Number.MAX_SAFE_INTEGER, limit = 60 } = {}) {
   const memoryPage = () => [...state.memoryStores.messages.values()]
     .filter((message) => message.characterId === characterId && beforeMessageCursor(message, before))
-    .sort((a, b) => compareMessageCursor(b, a)).slice(0, limit).reverse().map(normalizeMessage);
+    .sort((a, b) => compareMessageCursor(b, a)).slice(0, limit).reverse().map(rememberStoredMessage);
   const db = await openDB();
   if (!db) return memoryPage();
   try {
@@ -1238,6 +1245,9 @@ function normalizeThread(record, characterId) {
     characterId: message.characterId || message.character_id || characterId,
     conversationSegmentId: message.conversationSegmentId || message.conversation_segment_id || segmentId,
   }));
+  // Loaded history, including legacy embedded rows, is already established
+  // content even when its timestamp is recent or has been estimated.
+  normalizedMessages.forEach(markMessageEntrySeen);
   return {
     characterId,
     historyEpoch: state.historyEpoch,
@@ -4078,13 +4088,15 @@ function blockHtml(block) {
   const className = block.type === "action" ? "content-action" : block.type === "speech" ? "content-speech" : "content-message";
   return `<div class="${className}">${escapeHtml(block.text)}</div>`;
 }
-function formatMessageTime(timestamp, previousTimestamp = 0, estimated = false) {
+function formatMessageTime(timestamp, previousTimestamp = 0, estimated = false, clockFormatter = null) {
   const value = new Date(Number(timestamp) || Date.now());
   const previous = previousTimestamp ? new Date(Number(previousTimestamp)) : null;
   if (previous && value.getTime() - previous.getTime() <= 5 * 60 * 1000 && localDayKey(value) === localDayKey(previous)) return "";
   const now = new Date();
   const dayDiff = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()) / 86400000);
-  const clock = value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  const clock = clockFormatter && Number.isFinite(value.getTime())
+    ? clockFormatter.format(value)
+    : value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
   let label;
   if (value.getFullYear() !== now.getFullYear()) label = `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")} ${clock}`;
   else if (dayDiff === 0) label = clock;
@@ -4194,6 +4206,9 @@ function bindTimelineActions() {
   if ($("load-newer-messages")) $("load-newer-messages").onclick = () => loadNewerMessages();
 }
 function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
+  // Render the saved window when the communicator becomes visible. Rebuilding
+  // hidden history during a stage transition adds work and loses scroll geometry.
+  if (featureEnabled("motion_v2") && $("text-surface").hidden) return;
   const thread = currentThread();
   const allMessages = surfaceHistory();
   const window = historyWindow(allMessages, state.timelineEndId, state.timelineVisibleLimit);
@@ -4210,6 +4225,9 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     bindTimelineActions();
     return;
   }
+  // Resolve the device locale/timezone once per render, keeping live changes
+  // while avoiding a formatter allocation for every historical timestamp.
+  const clockFormatter = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", hour12: false });
   reconcileMarkup(timeline, older + messages.map((message, index) => {
     const failed = message.status === "failed";
     const presenting = message.role === "assistant" && presentationFor()?.messageId === message.id;
@@ -4218,7 +4236,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
         ? '<span class="message-recovery-note">结果尚未确认，请先检查个人连接器，避免重复发送。</span>'
         : `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
       : message.role === "assistant" && !presenting ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
-    const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
+    const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated, clockFormatter);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
     const blocks = message.role === "assistant" ? visibleBlocksFor(message) : message.contentBlocks;
     return `${time ? `<div class="message-time" data-ui-key="time:${escapeHtml(message.id)}" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${message.partial ? "回复未完成 · 已保留收到的内容" : failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div>${message.role === "assistant" ? rendezvousCardMarkup(message, presenting) : ""}<div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
@@ -4227,14 +4245,13 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   bindTimelineActions();
   bindAvatarImages(timeline);
   for (const message of messages) {
-    const node = [...timeline.querySelectorAll("[data-message-id]")].find(item => item.dataset.messageId === message.id);
-    if (state.paintedMessageIds.has(message.id)) continue;
-    state.paintedMessageIds.add(message.id);
+    if (state.seenMessageEntries.has(message) || state.paintedMessageIds.has(message.id)) continue;
+    markMessageEntrySeen(message);
     // Historical rows and background arrivals must not animate on re-render.
-    if (!featureEnabled("motion_v2") || quietPresentation() || Date.now() - message.createdAt > 3000 || !wasNearBottom) continue;
+    if (!featureEnabled("motion_v2") || quietPresentation() || message.createdAtEstimated || Date.now() - message.createdAt > 3000 || !wasNearBottom) continue;
+    const node = [...timeline.querySelectorAll("[data-message-id]")].find(item => item.dataset.messageId === message.id);
     if (node) void transientMotion.play(node, [{ opacity: .25, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 180, easing: "cubic-bezier(.22,.72,.24,1)" });
   }
-  while (state.paintedMessageIds.size > 1000) state.paintedMessageIds.delete(state.paintedMessageIds.values().next().value);
   const newMessages = allMessages.length > previousCount;
   timeline.dataset.messageCount = String(allMessages.length);
   if (window.hasNewer) $("new-replies").hidden = false;
@@ -4321,7 +4338,7 @@ function finishTypewriter(key, value) {
   syncFastForward();
   return true;
 }
-function renderTypewriter(text, key) {
+function renderTypewriter(text, key, animate = true) {
   const value = plain(text);
   const speechNode = $("stage-speech");
   if (
@@ -4329,7 +4346,7 @@ function renderTypewriter(text, key) {
     && (state.typewriter.fullText === value || state.typewriter.displayedText === value)
   ) {
     if (state.typewriter.fullText === value && state.typewriter.timer) {
-      if (reducedMotion()) {
+      if (!animate || reducedMotion()) {
         finishTypewriter(key, value);
         return;
       }
@@ -4351,7 +4368,7 @@ function renderTypewriter(text, key) {
   state.typewriter.key = key;
   state.typewriter.fullText = value;
   state.typewriter.displayedText = "";
-  if (!value || quietPresentation()) {
+  if (!animate || !value || quietPresentation()) {
     finishTypewriter(key, value);
     return;
   }
@@ -4474,7 +4491,10 @@ function renderStageSpeech(assistantMessage) {
       ? speechTypewriterKey(assistantMessage)
       : `${plain(assistantMessage.characterId)}:${plain(assistantMessage.requestId)}:${plain(assistantMessage.id)}:placeholder`
     : `scene:${state.selected}:${state.scene?.visual_key || "generic"}`;
-  renderTypewriter(speech, speechKey);
+  const livePresentation = presentationFor();
+  const liveReply = assistantMessage && (livePresentation?.messageId === assistantMessage.id
+    || pending?.channel === "in_person" && pending.requestId === assistantMessage.requestId);
+  renderTypewriter(speech, speechKey, !featureEnabled("chat_latency_v2") || Boolean(liveReply));
   if (assistantMessage?.partial) {
     $("stage-presence-status").hidden = false;
     $("stage-presence-status").textContent = "回复未完成，已保留收到的内容。";
