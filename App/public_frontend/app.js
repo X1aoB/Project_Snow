@@ -1,4 +1,4 @@
-import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope } from "/modules/runtime.js";
+import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope, anonymousServerTimings } from "/modules/runtime.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
@@ -603,11 +603,13 @@ const transientMotion = new MotionScope();
 const completedReplyTimings = [];
 function anonymousTiming(timing) {
   const duration = value => Number.isFinite(value) ? Math.max(0, Math.round(value)) : null;
+  const serverTimings = anonymousServerTimings(timing.serverTimings);
   return { send_to_first_effective_ms: timing.firstEffectiveAt ? duration(timing.firstEffectiveAt - timing.sentAt) : null,
     ready_to_paint_ms: timing.firstPaintAt && timing.bodyReceivedAt ? duration(timing.firstPaintAt - timing.bodyReceivedAt - (timing.firstNaturalWaitMs || 0)) : null,
     natural_wait_ms: duration(timing.naturalWaitMs), complete_ms: duration(timing.completedAt - timing.sentAt),
     outcome: timing.outcome, recovery: Boolean(timing.recovery), channel: timing.channel, history_band: timing.historyBand, provider: timing.provider, model_profile: timing.modelProfile,
-    server_queue_ms: duration(timing.serverTimings?.queue_ms), rewrite_ms: duration(timing.serverTimings?.guard_rewrite_ms) };
+    server_queue_ms: duration(serverTimings.queue_ms), rewrite_ms: duration(serverTimings.guard_rewrite_ms),
+    server_timings_ms: serverTimings };
 }
 Object.defineProperty(window, "__projectSnowPerformance", { value: Object.freeze({ getSamples: () => completedReplyTimings.map(anonymousTiming) }) });
 function completeReplyTiming(timing, outcome) {
