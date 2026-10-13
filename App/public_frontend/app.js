@@ -1,4 +1,4 @@
-import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup } from "/modules/runtime.js";
+import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope } from "/modules/runtime.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
@@ -68,6 +68,11 @@ const state = {
   stageMotionAnimation: null,
   stageMotionCharacterId: "",
   playedStageMotionKeys: new Set(),
+  replyTimingByRequest: new Map(),
+  streamingPresentationByCharacter: new Map(),
+  completedPresentationByCharacter: new Map(),
+  readyReplyIds: new Set(),
+  paintedMessageIds: new Set(),
   typewriter: { key: "", timer: 0, fullText: "", displayedText: "" },
   summaryInFlight: new Set(),
   summaryControllers: new Map(),
@@ -473,7 +478,180 @@ function abortableDelay(milliseconds, signal) {
     signal?.addEventListener("abort", cancel, { once: true });
   });
 }
-function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches || localPreferences.getItem("project-snow-public:motion") === "off"; }
+function featureEnabled(name) { return state.config?.features?.[name] === true; }
+function quietPresentation() { return reducedMotion() || document.hidden; }
+const surfaceMotion = new MotionScope();
+const transientMotion = new MotionScope();
+const completedReplyTimings = [];
+function anonymousTiming(timing) {
+  const duration = value => Number.isFinite(value) ? Math.max(0, Math.round(value)) : null;
+  return { send_to_first_effective_ms: timing.firstEffectiveAt ? duration(timing.firstEffectiveAt - timing.sentAt) : null,
+    ready_to_paint_ms: timing.firstPaintAt && timing.bodyReceivedAt ? duration(timing.firstPaintAt - timing.bodyReceivedAt - (timing.firstNaturalWaitMs || 0)) : null,
+    natural_wait_ms: duration(timing.naturalWaitMs), complete_ms: duration(timing.completedAt - timing.sentAt),
+    outcome: timing.outcome, recovery: Boolean(timing.recovery), channel: timing.channel, history_band: timing.historyBand, provider: timing.provider, model_profile: timing.modelProfile,
+    server_queue_ms: duration(timing.serverTimings?.queue_ms), rewrite_ms: duration(timing.serverTimings?.guard_rewrite_ms) };
+}
+Object.defineProperty(window, "__projectSnowPerformance", { value: Object.freeze({ getSamples: () => completedReplyTimings.map(anonymousTiming) }) });
+function completeReplyTiming(timing, outcome) {
+  if (timing.completedAt) return;
+  timing.completedAt = performance.now(); timing.outcome = outcome;
+  completedReplyTimings.push(timing);
+  if (completedReplyTimings.length > 100) completedReplyTimings.shift();
+  const emit = () => document.dispatchEvent(new CustomEvent("project-snow:reply-timing", { detail: anonymousTiming(timing) }));
+  if (document.hidden) emit(); else requestAnimationFrame(() => requestAnimationFrame(emit));
+}
+function syncMotionState() {
+  document.documentElement.dataset.motion = featureEnabled("motion_v2") ? "v2" : "legacy";
+  document.documentElement.dataset.pageHidden = String(document.hidden);
+  const preference = localPreferences.getItem("project-snow-public:motion") || "auto";
+  document.documentElement.dataset.motionLevel = reducedMotion() ? "off" : preference;
+  if ($("motion-preference")) $("motion-preference").value = preference;
+  if ($("motion-preference-setting")) $("motion-preference-setting").hidden = !featureEnabled("motion_v2");
+}
+function replyTiming(requestId) { return state.replyTimingByRequest.get(requestId); }
+function bodyIsVisible(node) {
+  if (!node?.isConnected || node.closest("[hidden], [inert]") || document.hidden) return false;
+  const bounds = node.getBoundingClientRect();
+  const clip = node.closest("#timeline")?.getBoundingClientRect() || { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
+  return bounds.width > 0 && bounds.height > 0 && bounds.right > Math.max(0, clip.left) && bounds.left < Math.min(innerWidth, clip.right)
+    && bounds.bottom > Math.max(0, clip.top) && bounds.top < Math.min(innerHeight, clip.bottom);
+}
+function recordReplyPaint(requestId, node) {
+  const timing = replyTiming(requestId);
+  if (!timing || timing.firstEffectiveAt || !bodyIsVisible(node)) return;
+  const stage = node.id === "stage-speech";
+  const stageMessage = () => {
+    const message = latestInPersonMessage("assistant");
+    return message?.requestId === requestId && state.typewriter.key === speechTypewriterKey(message) ? message : null;
+  };
+  if (stage && !stageMessage()) return;
+  // First glyph paint measures rendering; a full confirmed speech block measures
+  // an effective reply. Decorative typewriting must not improve the latter.
+  requestAnimationFrame(() => {
+    if (timing.firstEffectiveAt || !bodyIsVisible(node)) return;
+    const message = stage ? stageMessage() : null;
+    if (stage && !message) return;
+    const firstSpeech = stage ? visibleBlocksFor(message).find(block => block.type === "speech" && plain(block.text).trim()) : null;
+    const effective = !stage || Boolean(firstSpeech && node.textContent.startsWith(plain(firstSpeech.text).trim()));
+    let changed = false;
+    if (!timing.firstPaintAt) {
+      timing.firstPaintAt = performance.now();
+      timing.firstNaturalWaitMs = timing.naturalWaitMs;
+      changed = true;
+    }
+    if (effective) { timing.firstEffectiveAt = performance.now(); changed = true; }
+    if (changed && timing.completedAt) document.dispatchEvent(new CustomEvent("project-snow:reply-visible", { detail: anonymousTiming(timing) }));
+  });
+}
+let replyVisibilityFrame = 0;
+function sampleVisibleReplyPaints() {
+  if (document.hidden || replyVisibilityFrame) return;
+  replyVisibilityFrame = requestAnimationFrame(() => {
+    replyVisibilityFrame = 0;
+    const pending = new Map([...state.replyTimingByRequest].filter(([, timing]) => !timing.firstEffectiveAt && timing.characterId === state.selected && timing.messageId)
+      .map(([requestId, timing]) => [timing.messageId, requestId]));
+    if (!$("text-surface").hidden) {
+      for (const node of $("timeline").querySelectorAll(".message.assistant[data-message-id]")) {
+        const requestId = pending.get(node.dataset.messageId);
+        if (requestId) recordReplyPaint(requestId, node.querySelector(".message-content-stack"));
+      }
+    } else {
+      const message = latestInPersonMessage("assistant");
+      const speech = $("stage-speech");
+      if (pending.has(message?.id) && speech.textContent && !speech.classList.contains("is-typing")) recordReplyPaint(message.requestId, speech);
+    }
+  });
+}
+async function waitForNaturalReply(requestId, signal) {
+  const timing = replyTiming(requestId);
+  if (!timing || timing.presented) return;
+  const remaining = remainingNaturalWait(timing.sentAt, performance.now(), quietPresentation() || timing.skip);
+  if (remaining) {
+    const started = performance.now();
+    // Small slices allow a live reduced-motion change or fast-forward to finish promptly.
+    try {
+      while (!quietPresentation() && !timing.skip && remainingNaturalWait(timing.sentAt, performance.now()) > 0) {
+        await abortableDelay(Math.min(32, remainingNaturalWait(timing.sentAt, performance.now())), signal);
+      }
+    } finally { timing.naturalWaitMs += performance.now() - started; }
+  }
+  timing.presented = true;
+}
+function syncFastForward() {
+  const button = $("fast-forward-reply");
+  if (!button) return;
+  const queue = presentationFor();
+  const streaming = state.streamingPresentationByCharacter.get(state.selected);
+  const revealing = !$("in-person-surface").hidden && state.typewriter.fullText && latestInPersonMessage("assistant");
+  button.hidden = !featureEnabled("chat_latency_v2") || !(queue || revealing || state.completedPresentationByCharacter.has(state.selected) || streaming?.receivedCount > streaming?.visibleCount);
+  const row = button.closest(".request-status-row");
+  if (!button.hidden && row) row.hidden = false;
+}
+function finishReceivedPresentation() {
+  const currentTiming = replyTiming(typingStateFor()?.requestId);
+  if (currentTiming) currentTiming.skip = true;
+  const queue = presentationFor();
+  if (queue) {
+    queue.skip = true;
+    queue.visibleCount = queue.blocks.length;
+    const timing = replyTiming(queue.requestId);
+    if (timing) timing.skip = true;
+    renderTimeline();
+  }
+  if (state.typewriter.fullText) finishTypewriter(state.typewriter.key, state.typewriter.fullText);
+  syncFastForward();
+}
+async function deliverCompletedReply(characterId, requestId, message) {
+  const ready = { requestId, messageId: message.id, controller: new AbortController() };
+  state.completedPresentationByCharacter.set(characterId, ready);
+  syncFastForward();
+  try {
+    await waitForNaturalReply(requestId, ready.controller.signal);
+    state.readyReplyIds.delete(message.id);
+    if (!ownsTypingState(characterId, requestId)) return;
+    updateTypingPhase(characterId, requestId, "presenting");
+    await presentAssistantTurn(characterId, requestId, message);
+  } catch (error) {
+    if (error?.name !== "AbortError") showBanner("回复已经保存，可在记录中查看。");
+  } finally {
+    state.readyReplyIds.delete(message.id);
+    if (state.completedPresentationByCharacter.get(characterId) === ready) state.completedPresentationByCharacter.delete(characterId);
+    clearTypingState(characterId, requestId);
+    if (state.selected === characterId) renderAll();
+    syncFastForward(); updateComposerAvailability();
+  }
+}
+function prepareSurfaceMotion(channel) {
+  const previous = $("chat-app").dataset.channel;
+  if (previous === channel) return null;
+  surfaceMotion.cancel();
+  if (!featureEnabled("motion_v2") || quietPresentation()) return null;
+  const outgoing = $(previous === "in_person" ? "in-person-surface" : "text-surface");
+  if (!outgoing || outgoing.hidden) return null;
+  const bounds = outgoing.getBoundingClientRect();
+  const parent = outgoing.parentElement.getBoundingClientRect();
+  const snapshot = outgoing.cloneNode(true);
+  snapshot.removeAttribute("id");
+  snapshot.querySelectorAll("[id]").forEach(node => node.removeAttribute("id"));
+  snapshot.classList.add("surface-transition-snapshot");
+  snapshot.inert = true;
+  snapshot.setAttribute("aria-hidden", "true");
+  Object.assign(snapshot.style, { top: `${bounds.top - parent.top}px`, left: `${bounds.left - parent.left}px`, width: `${bounds.width}px`, height: `${bounds.height}px` });
+  outgoing.parentElement.append(snapshot);
+  surfaceMotion.cleanup(() => snapshot.remove());
+  return snapshot;
+}
+function animateSurface(channel, snapshot) {
+  if (!snapshot) return;
+  const incoming = $(channel === "in_person" ? "in-person-surface" : "text-surface");
+  const distance = document.documentElement.dataset.motionLevel === "light" ? 0 : channel === "in_person" ? 14 : -14;
+  const options = { duration: PRESENTATION_TIMING.mode, easing: "cubic-bezier(.22,.72,.24,1)", fill: "both" };
+  void Promise.all([
+    surfaceMotion.play(snapshot, [{ opacity: 1, transform: "translateY(0)" }, { opacity: 0, transform: `translateY(${-distance}px)` }], options),
+    surfaceMotion.play(incoming, [{ opacity: 0, transform: `translateY(${distance}px)` }, { opacity: 1, transform: "translateY(0)" }], options),
+  ]).finally(() => snapshot.remove());
+}
 const TYPEWRITER_TARGET_STEPS = 90;
 const TYPEWRITER_MAX_DURATION_MS = 5200;
 function codePointOf(value) { return plain(value).codePointAt(0) || 0; }
@@ -573,7 +751,7 @@ function typewriterRevealPlan(graphemes, startIndex = 0) {
     index = end;
   }
   const rawDuration = 24 + steps.slice(0, -1).reduce((total, step) => total + step.delayAfter, 0);
-  const scale = Math.min(1, TYPEWRITER_MAX_DURATION_MS / Math.max(1, rawDuration));
+  const scale = Math.min(1, (featureEnabled("chat_latency_v2") ? 2400 : TYPEWRITER_MAX_DURATION_MS) / Math.max(1, rawDuration));
   return {
     initialDelay: Math.max(1, Math.round(24 * scale)),
     steps: steps.map((step, index) => ({
@@ -894,7 +1072,7 @@ function normalizeMessage(message) {
   const blocks = normalizeBlocks(message.contentBlocks || message.content_blocks, channel, message.content || "");
   const role = message.role === "assistant" ? "assistant" : "user";
   const storedDisplayBlocks = message.displayBlocks || message.display_blocks;
-  const displayBlocks = role === "assistant"
+  const displayBlocks = message.committedBlocks?.length ? blocks : role === "assistant"
     ? deriveDisplayBlocks(storedDisplayBlocks ? normalizeBlocks(storedDisplayBlocks, channel) : blocks, channel)
     : blocks;
   const rawCreatedAt = message.createdAt ?? message.created_at;
@@ -923,6 +1101,8 @@ function normalizeMessage(message) {
       ? structuredClone(message.requestSnapshot)
       : null,
     errorCode: message.errorCode || "",
+    partial: Boolean(message.partial),
+    committedBlocks: Array.isArray(message.committedBlocks) ? message.committedBlocks : [],
     source: message.source || "chat",
     conversationSegmentId: plain(message.conversationSegmentId || message.conversation_segment_id),
     usage: message.usage && typeof message.usage === "object" ? { ...message.usage } : null,
@@ -1031,7 +1211,7 @@ async function dbPutThread(thread) {
 }
 
 function surfaceHistory(surface = "timeline") {
-  const messages = currentThread()?.messages || [];
+  const messages = (currentThread()?.messages || []).filter(message => !state.readyReplyIds.has(message.id));
   return surface === "timeline" ? messages.filter(message => message.communicationChannel === "text") : messages;
 }
 async function loadOlderMessages(surface = "timeline") {
@@ -1533,6 +1713,7 @@ function renderMobileProviderOptions() {
 
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
+  syncMotionState();
   $("version-badge").textContent = state.config.app_version || "0.9.6";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
@@ -1789,7 +1970,7 @@ function typingStateFor(characterId = state.selected) {
 function globalRequestBusy() {
   return Boolean(
     state.chatRequestByCharacter.size
-    || state.typingByCharacter.size
+    || [...state.typingByCharacter.values()].some(pending => !pending.networkDone)
     || state.arrivalPending
     || state.modeTransitionPending
     || state.presenceResolvePending,
@@ -1799,6 +1980,12 @@ function presentationFor(characterId = state.selected) {
   return characterId ? state.presentationByCharacter.get(characterId) || null : null;
 }
 function cancelPresentationQueue(characterId = state.selected, requestId = "") {
+  const ready = state.completedPresentationByCharacter.get(characterId);
+  if (ready && (!requestId || ready.requestId === requestId)) {
+    state.readyReplyIds.delete(ready.messageId);
+    ready.controller.abort();
+    state.completedPresentationByCharacter.delete(characterId);
+  }
   const queue = presentationFor(characterId);
   if (!queue) {
     cancelStageMotion(characterId);
@@ -1892,6 +2079,7 @@ function deriveDisplayBlocks(sourceBlocks, channel = "text") {
   return blocks;
 }
 function presentationBlocks(message) {
+  if (message?.committedBlocks?.length) return message.contentBlocks || [];
   if (message?.communicationChannel === "in_person") {
     return message?.contentBlocks?.length ? message.contentBlocks : message?.displayBlocks || [];
   }
@@ -1971,15 +2159,19 @@ async function presentAssistantTurn(characterId, requestId, message) {
     requestId,
     messageId: message.id,
     blocks,
-    visibleCount: inPerson ? blocks.length : 1,
+    visibleCount: inPerson || message.committedBlocks?.length ? blocks.length : 1,
     timer: 0,
     cancelled: false,
     controller: new AbortController(),
+    skip: false,
   };
+  const ownsPresentation = () => !queue.cancelled && state.presentationByCharacter.get(characterId) === queue
+    && (!typingStateFor(characterId) || ownsTypingState(characterId, requestId));
   const revealCounts = blocks.length <= 4
     ? blocks.map((_block, index) => index + 1)
     : [1, 2, 3, blocks.length];
   state.presentationByCharacter.set(characterId, queue);
+  syncFastForward();
   if (characterId === state.selected) {
     renderTimeline();
     renderStage();
@@ -1995,28 +2187,39 @@ async function presentAssistantTurn(characterId, requestId, message) {
         );
       }
     } else {
-      for (let step = 1; step < revealCounts.length; step += 1) {
-        if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
+      let spent = 0;
+      for (let step = 1; step < revealCounts.length && queue.visibleCount < blocks.length; step += 1) {
+        if (!ownsPresentation()) return false;
         const previousCount = revealCounts[step - 1];
         const visibleCount = revealCounts[step];
         const revealed = blocks.slice(previousCount, visibleCount);
         const hasSticker = revealed.some((item) => item.type === "sticker");
         const previousTextLength = [...plain(blocks[Math.max(0, previousCount - 1)]?.text)].length;
-        const totalWait = hasSticker
+        const totalWait = featureEnabled("chat_latency_v2") ? segmentWait(previousTextLength, spent, quietPresentation() || queue.skip) : hasSticker
           ? requestDelay(requestId, `sticker:${step}`, 2200, 3000)
           : Math.max(2800, Math.min(4200, 2200 + previousTextLength * 35));
-        const readingWait = Math.min(totalWait, requestDelay(requestId, `reading:${step}`, 800, 1400));
+        const readingWait = featureEnabled("chat_latency_v2") ? 0 : Math.min(totalWait, requestDelay(requestId, `reading:${step}`, 800, 1400));
         updateTypingPhase(characterId, requestId, "reading");
         if (!reducedMotion()) await abortableDelay(readingWait, queue.controller.signal);
-        if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
+        if (!ownsPresentation()) return false;
         updateTypingPhase(characterId, requestId, "segment");
         const preload = hasSticker
           ? Promise.all(revealed.filter((item) => item.type === "sticker").map((item) => preloadStickerBlock(item, 1200, queue.controller.signal)))
           : Promise.resolve();
-        if (!reducedMotion()) await Promise.all([abortableDelay(totalWait - readingWait, queue.controller.signal), preload]);
+        if (featureEnabled("chat_latency_v2")) {
+          // Artwork decoding never holds back already available text.
+          void preload.catch(() => {});
+          const began = performance.now();
+          while (!queue.skip && !quietPresentation() && performance.now() - began < totalWait) {
+            await abortableDelay(Math.min(32, totalWait - (performance.now() - began)), queue.controller.signal);
+          }
+          const metrics = replyTiming(requestId);
+          if (metrics) metrics.naturalWaitMs += performance.now() - began;
+          spent += totalWait;
+        } else if (!reducedMotion()) await Promise.all([abortableDelay(totalWait - readingWait, queue.controller.signal), preload]);
         else await preload;
-        if (queue.cancelled || !ownsTypingState(characterId, requestId)) return false;
-        queue.visibleCount = visibleCount;
+        if (!ownsPresentation()) return false;
+        queue.visibleCount = queue.skip ? blocks.length : visibleCount;
         updateTypingPhase(characterId, requestId, "presenting");
         if (characterId === state.selected) {
           renderTimeline();
@@ -2035,6 +2238,7 @@ async function presentAssistantTurn(characterId, requestId, message) {
   if (state.presentationByCharacter.get(characterId) === queue) {
     state.presentationByCharacter.delete(characterId);
   }
+  syncFastForward();
   if (characterId === state.selected) {
     renderTimeline();
     renderStage();
@@ -2079,6 +2283,7 @@ function renderRequestStatus() {
   if (stop) stop.hidden = !pending || ["arrival", "presenting"].includes(pending.phase);
   const row = target.closest(".request-status-row");
   if (row) row.hidden = !target.textContent.trim() && (!stop || stop.hidden);
+  syncFastForward();
 }
 function setRequestStatus(characterId, message, requestId = "", recoveryAction = "") {
   if (!characterId) return;
@@ -2148,6 +2353,16 @@ function bindAvatarImages(root = document) {
 }
 const activeStickerGifs = new Set();
 let stickerObserver = null;
+function refreshAnimatedStickers() {
+  activeStickerGifs.clear();
+  const limit = quietPresentation() || document.documentElement.dataset.motionLevel === "light" ? 0 : 3;
+  for (const image of document.querySelectorAll('.content-sticker img[data-animated="true"]')) {
+    const animate = image.dataset.visible === "true" && activeStickerGifs.size < limit;
+    const source = animate ? image.dataset.animatedSrc : image.dataset.staticSrc;
+    if (source && image.getAttribute("src") !== source) image.src = source;
+    if (animate) activeStickerGifs.add(image);
+  }
+}
 function bindStickerImages(root = document) {
   const images = [...root.querySelectorAll('.content-sticker img[data-animated="true"]')];
   for (const image of activeStickerGifs) {
@@ -2159,26 +2374,8 @@ function bindStickerImages(root = document) {
       for (const entry of entries) {
         const image = entry.target;
         image.dataset.visible = entry.isIntersecting ? "true" : "false";
-        if (entry.isIntersecting && activeStickerGifs.size < 3) {
-          if (image.dataset.animatedSrc) image.src = image.dataset.animatedSrc;
-          activeStickerGifs.add(image);
-        } else if (!entry.isIntersecting) {
-          activeStickerGifs.delete(image);
-          if (image.dataset.staticSrc) image.src = image.dataset.staticSrc;
-        }
       }
-      // An already-visible GIF may have been waiting behind the three-active
-      // cap. Fill any slot freed by an item leaving the viewport without
-      // enabling a fourth animation at the same time.
-      if (activeStickerGifs.size < 3) {
-        for (const image of document.querySelectorAll('.content-sticker img[data-animated="true"][data-visible="true"]')) {
-          if (activeStickerGifs.size >= 3) break;
-          if (!activeStickerGifs.has(image)) {
-            if (image.dataset.animatedSrc) image.src = image.dataset.animatedSrc;
-            activeStickerGifs.add(image);
-          }
-        }
-      }
+      refreshAnimatedStickers();
     }, { rootMargin: "120px 0px" });
   }
   images.forEach((image) => {
@@ -3199,6 +3396,7 @@ async function flushDeferredPresenceRefresh() {
   }
 }
 async function runSceneTransition(operation, title = "正在前往……", owner = 0) {
+  if (featureEnabled("motion_v2")) return await operation;
   const layer = $("scene-transition-layer");
   const started = performance.now();
   layer.dataset.owner = String(owner);
@@ -3240,6 +3438,21 @@ async function runModeTransition(operation, title = "正在打开通讯器") {
   const owner = ++state.modeTransitionSequence;
   const controller = new AbortController();
   state.modeTransitionController = controller;
+  if (featureEnabled("motion_v2")) {
+    const characterId = state.selected;
+    setRequestStatus(characterId, title);
+    try {
+      // Begin network work on the click, independently of the visual transition.
+      return await operation(controller.signal);
+    } finally {
+      if (state.modeTransitionSequence === owner) {
+        state.modeTransitionPending = false;
+        state.modeTransitionController = null;
+        setRequestStatus(characterId, "");
+        updateComposerAvailability();
+      }
+    }
+  }
   if (!layer) {
     try {
       return await operation(controller.signal);
@@ -3286,6 +3499,7 @@ async function runModeTransition(operation, title = "正在打开通讯器") {
   }
 }
 function cancelModeTransition() {
+  surfaceMotion.cancel();
   state.modeTransitionController?.abort();
   state.modeTransitionController = null;
   state.modeTransitionSequence += 1;
@@ -3567,17 +3781,26 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   reconcileMarkup(timeline, older + messages.map((message, index) => {
     const failed = message.status === "failed";
     const presenting = message.role === "assistant" && presentationFor()?.messageId === message.id;
-    const tools = failed
+    const tools = failed && message.role === "user"
       ? `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
       : message.role === "assistant" && !presenting ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
     const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
     const blocks = message.role === "assistant" ? visibleBlocksFor(message) : message.contentBlocks;
-    return `${time ? `<div class="message-time" data-ui-key="time:${escapeHtml(message.id)}" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div>${message.role === "assistant" ? rendezvousCardMarkup(message, presenting) : ""}<div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
+    return `${time ? `<div class="message-time" data-ui-key="time:${escapeHtml(message.id)}" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${message.partial ? "回复未完成 · 已保留收到的内容" : failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div>${message.role === "assistant" ? rendezvousCardMarkup(message, presenting) : ""}<div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
   }).join("") + newer + (window.hasNewer ? "" : timelineTypingMarkup()));
   timeline.dataset.messageCount = String(messages.length);
   bindTimelineActions();
   bindAvatarImages(timeline);
+  for (const message of messages) {
+    const node = [...timeline.querySelectorAll("[data-message-id]")].find(item => item.dataset.messageId === message.id);
+    if (state.paintedMessageIds.has(message.id)) continue;
+    state.paintedMessageIds.add(message.id);
+    // Historical rows and background arrivals must not animate on re-render.
+    if (!featureEnabled("motion_v2") || quietPresentation() || Date.now() - message.createdAt > 3000 || !wasNearBottom) continue;
+    if (node) void transientMotion.play(node, [{ opacity: .25, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 180, easing: "cubic-bezier(.22,.72,.24,1)" });
+  }
+  while (state.paintedMessageIds.size > 1000) state.paintedMessageIds.delete(state.paintedMessageIds.values().next().value);
   const newMessages = allMessages.length > previousCount;
   timeline.dataset.messageCount = String(allMessages.length);
   if (window.hasNewer) $("new-replies").hidden = false;
@@ -3588,6 +3811,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     timeline.scrollTop = Math.max(0, timeline.scrollHeight - previousDistance);
     if (newMessages && messages[messages.length - 1]?.role === "assistant") $("new-replies").hidden = false;
   }
+  sampleVisibleReplyPaints();
   const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant" && message.status === "sent" && !presentationFor()?.messageId);
   if (latestAssistant && timeline.dataset.announcedMessageId !== latestAssistant.id) {
     timeline.dataset.announcedMessageId = latestAssistant.id;
@@ -3595,7 +3819,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   }
 }
 function latestInPersonMessage(role = "") {
-  return [...(currentThread()?.messages || [])].reverse().find((message) => message.communicationChannel === "in_person" && message.status !== "failed" && (!role || message.role === role)) || null;
+  return [...(currentThread()?.messages || [])].reverse().find((message) => !state.readyReplyIds.has(message.id) && message.communicationChannel === "in_person" && (message.status !== "failed" || message.partial) && (!role || message.role === role)) || null;
 }
 function typewriterCompleted(key, value) {
   const announcement = value
@@ -3645,6 +3869,7 @@ function finishTypewriter(key, value) {
   speechNode.classList.remove("is-revealing");
   speechNode.setAttribute("aria-busy", "false");
   speechNode.textContent = value;
+  if (value) recordReplyPaint(latestInPersonMessage("assistant")?.requestId, speechNode);
   const announcement = value
     ? `${currentCharacter()?.display_name || "角色"}：${value}`
     : "";
@@ -3659,6 +3884,7 @@ function finishTypewriter(key, value) {
     $("stage-announcer").textContent = announcement;
   }
   document.dispatchEvent(new Event("project-snow:typewriter-complete"));
+  syncFastForward();
   return true;
 }
 function renderTypewriter(text, key) {
@@ -3691,7 +3917,7 @@ function renderTypewriter(text, key) {
   state.typewriter.key = key;
   state.typewriter.fullText = value;
   state.typewriter.displayedText = "";
-  if (!value || reducedMotion()) {
+  if (!value || quietPresentation()) {
     finishTypewriter(key, value);
     return;
   }
@@ -3720,6 +3946,7 @@ function renderTypewriter(text, key) {
     planIndex += 1;
     speechNode.textContent = displayed;
     state.typewriter.displayedText = displayed;
+    if (displayed) recordReplyPaint(latestInPersonMessage("assistant")?.requestId, speechNode);
     if (index >= characters.length) {
       finishTypewriter(key, value);
       return;
@@ -3729,7 +3956,8 @@ function renderTypewriter(text, key) {
       step.delayAfter,
     );
   };
-  state.typewriter.timer = window.setTimeout(revealNext, plan.initialDelay);
+  state.typewriter.timer = window.setTimeout(revealNext, featureEnabled("chat_latency_v2") ? 0 : plan.initialDelay);
+  syncFastForward();
 }
 function renderStage() {
   const renderSequence = ++state.stageRenderSequence;
@@ -3743,6 +3971,11 @@ function renderStage() {
   let artReady = Promise.resolve(false);
   if ($("chat-app").dataset.channel !== "in_person") {
     cancelStageArt({ hide: true });
+    if (featureEnabled("chat_latency_v2")) {
+      window.clearTimeout(state.typewriter.timer);
+      state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
+      return;
+    }
   } else {
     artReady = updateStageCharacterArt(artNode, character, expressionState,
       normalizePerformanceId(assistantMessage?.performanceId ?? assistantMessage?.performance_id, assistantMessage?.communicationChannel)
@@ -3757,7 +3990,7 @@ function renderStage() {
   const speechKey = assistantMessage ? speechTypewriterKey(assistantMessage) : "";
   const liveReply = pending?.phase === "presenting" && pending.channel === "in_person"
     && assistantMessage?.requestId === pending.requestId;
-  if (liveReply && $("chat-app").dataset.channel === "in_person" && state.typewriter.key !== speechKey) {
+  if (!featureEnabled("chat_latency_v2") && liveReply && $("chat-app").dataset.channel === "in_person" && state.typewriter.key !== speechKey) {
     // Repeated renders share one deadline. A stalled image can delay the first
     // spoken text only briefly, and late completions cannot repaint a new scene.
     if (state.stageSpeechGate?.key !== speechKey) {
@@ -3778,7 +4011,8 @@ function renderStage() {
 function renderStageSpeech(assistantMessage) {
   const pending = typingStateFor();
   const speechNode = $("stage-speech");
-  if (pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {
+  const hasConfirmedBody = assistantMessage?.requestId === pending?.requestId && assistantMessage?.committedBlocks?.length;
+  if (!hasConfirmedBody && pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {
     window.clearTimeout(state.typewriter.timer);
     state.typewriter.timer = 0;
     if (pending.phase !== "segment") {
@@ -3807,6 +4041,11 @@ function renderStageSpeech(assistantMessage) {
       : `${plain(assistantMessage.characterId)}:${plain(assistantMessage.requestId)}:${plain(assistantMessage.id)}:placeholder`
     : `scene:${state.selected}:${state.scene?.visual_key || "generic"}`;
   renderTypewriter(speech, speechKey);
+  if (assistantMessage?.partial) {
+    $("stage-presence-status").hidden = false;
+    $("stage-presence-status").textContent = "回复未完成，已保留收到的内容。";
+  }
+  if (completeSpeech && quietPresentation()) recordReplyPaint(assistantMessage?.requestId, speechNode);
   $("stage-open-feedback").disabled = !assistantMessage || Boolean(presentationFor()?.messageId === assistantMessage?.id);
   $("stage-open-feedback").dataset.messageId = assistantMessage?.id || "";
 }
@@ -3952,15 +4191,19 @@ async function setChannel(channel, persist = true, targetThread = null) {
   // Only the selected thread owns the visible surface and composer controls.
   if (thread && thread.characterId !== state.selected) return;
   const composerChanged = state.composerDraftKey !== draftKey(state.selected, channel);
+  const snapshot = prepareSurfaceMotion(channel);
   if (composerChanged) state.actionComposerOpen = false;
   if (channel === "in_person") state.selectedSticker = null;
   else cancelStageArt({ hide: true });
   $("chat-app").dataset.channel = channel;
   $("text-surface").hidden = channel === "in_person";
   $("in-person-surface").hidden = channel !== "in_person";
+  $("text-surface").inert = channel === "in_person";
+  $("in-person-surface").inert = channel !== "in_person";
   $("chat-app").dataset.channel = channel === "in_person" ? "in_person" : "text";
   syncContactToggleState();
   renderAll();
+  animateSurface(channel, snapshot);
   // Arrival can confirm the already-visible channel after an IndexedDB write.
   // Keep edits made during that wait; only a new character/channel restores a
   // different draft into the composer.
@@ -3969,7 +4212,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   if (restoreCollapsedSidebarFocus) window.setTimeout(() => $("open-contacts")?.focus(), 0);
 }
 function requestHistory(messages, excludedId = "", segmentId = "") {
-  return messages.filter((message) => message.id !== excludedId && !["failed", "pending"].includes(message.status) && (!segmentId || message.conversationSegmentId === segmentId)).slice(-24).map((message) => ({
+  return messages.filter((message) => message.id !== excludedId && !message.partial && !["failed", "pending"].includes(message.status) && (!segmentId || message.conversationSegmentId === segmentId)).slice(-24).map((message) => ({
     role: message.role,
     communication_channel: message.communicationChannel,
     content_blocks: wireBlocks(message.contentBlocks),
@@ -4114,7 +4357,7 @@ async function selectStickerSection(section) {
   renderStickerPicker();
   await loadStickers({ reset: true });
 }
-async function consumeChatStream(response, { characterId, requestId, fallbackChannel }) {
+async function consumeChatStream(response, { characterId, requestId, fallbackChannel, committedReply = null, onCommitted = null }) {
   if (!response.body) throw new Error("stream_disconnected");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -4131,11 +4374,19 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
   let expressionState = "neutral";
   let stageMotion = "none";
   let performanceId = "";
+  let serverTimings = null;
   const handlePacket = async (packet) => {
     const event = (packet.match(/^event: (.+)$/m) || [])[1];
     const data = (packet.match(/^data: (.+)$/m) || [])[1];
     if (!event || !data) return;
     const payload = JSON.parse(data);
+    if (committedReply && event === "progress" && ownsTypingState(characterId, requestId)) {
+      const labels = { queued: "正在排队…", preparing: "正在整理这次对话…", retrieving: "正在回想相关的事…", generating: "正在回复…", validating: "正在确认回复…", saving: "正在保存回复…" };
+      if (labels[payload.phase]) setRequestStatus(characterId, labels[payload.phase], requestId);
+    }
+    if (committedReply && event === "committed_block") {
+      if (committedReply.accept(payload)) onCommitted?.();
+    }
     if (event === "delta") {
       const blockIndex = Number.isFinite(Number(payload.block_index)) ? Number(payload.block_index) : 0;
       const current = streamedBlocks.get(blockIndex) || { type: payload.block_type || (returnedChannel === "text" ? "message" : "speech"), text: "" };
@@ -4162,8 +4413,10 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       }
     }
     if (event === "done") {
+      committedReply?.verifyFinal(payload.content_blocks || []);
       completed = true;
       usage = payload.usage || null;
+      serverTimings = payload.timings_ms && typeof payload.timings_ms === "object" ? payload.timings_ms : null;
       movementStatus = payload.movement_status && typeof payload.movement_status === "object" ? payload.movement_status : null;
       recoveryAction = plain(payload.recovery_action || "none");
       returnedChannel = payload.communication_channel || returnedChannel;
@@ -4172,7 +4425,12 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       performanceId = normalizePerformanceId(payload.performance_id, returnedChannel);
       contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
     }
-    if (event === "error") throw new Error(payload.code || "chat_failed");
+    if (event === "error") {
+      const error = new Error(payload.code || "chat_failed");
+      error.partial = Boolean(payload.partial);
+      error.terminal = true;
+      throw error;
+    }
   };
   while (true) {
     const { value, done } = await reader.read();
@@ -4186,10 +4444,11 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
   if (!completed) throw new Error("stream_disconnected");
   if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, renderBlocksText([...streamedBlocks.values()]));
   if (!contentBlocks.length) throw new Error("upstream_invalid_response");
-  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction, expressionState, stageMotion, performanceId };
+  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction, expressionState, stageMotion, performanceId, serverTimings };
 }
 
 function recoverableChatError(error) {
+  if (error?.terminal || error?.partial) return false;
   const code = error instanceof Error ? error.message : plain(error);
   return error instanceof TypeError || ["stream_disconnected", "request_in_progress", "provider_network_error", "request_failed"].includes(code);
 }
@@ -4202,6 +4461,7 @@ function shouldReuseChatRequest(error) {
     "provider_network_error",
     "provider_timeout",
     "request_cancelled",
+    "public_database_unavailable",
   ].includes(code);
 }
 
@@ -4223,6 +4483,7 @@ function compatibleRetrySnapshot(userMessage) {
 }
 
 async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
+  const sendStartedAt = performance.now();
   let retrySnapshot = stateRecoveryAttempt ? null : compatibleRetrySnapshot(userMessage);
   let requestId = plain(retrySnapshot?.requestId) || id();
   const characterId = thread.characterId;
@@ -4294,15 +4555,73 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   if (state.selected === characterId) renderAll();
   setTypingState({ characterId, requestId, channel: userMessage.communicationChannel, phase: "waiting" });
   setRequestStatus(characterId, "", requestId);
+  const latencyV2 = featureEnabled("chat_latency_v2");
+  const streamV2 = featureEnabled("verified_block_stream") || featureEnabled("verified_block_replay");
+  const metrics = { sentAt: sendStartedAt, bodyReceivedAt: 0, firstPaintAt: 0, naturalWaitMs: 0, presented: false, transport: streamV2 ? "verified_blocks" : "complete_reply", segmentSpent: 0, lastBodyPaintAt: 0 };
+  const publicProvider = ["openai", "deepseek", "dashscope", "zhipu", "moonshot"].includes(state.provider) ? state.provider : "other";
+  metrics.provider = publicProvider;
+  metrics.modelProfile = publicProvider !== "other" && Array.isArray(state.config?.model_profiles?.[publicProvider]) && state.config.model_profiles[publicProvider].includes(state.model) ? state.model : "other";
+  metrics.channel = userMessage.communicationChannel;
+  metrics.characterId = characterId;
+  metrics.recovery = Boolean(retrySnapshot);
+  const historyLength = requestSnapshot.recent_history?.length || 0;
+  metrics.historyBand = historyLength > 16 ? "long" : historyLength > 8 ? "medium" : "short";
+  state.replyTimingByRequest.set(requestId, metrics);
+  while (state.replyTimingByRequest.size > 50) state.replyTimingByRequest.delete(state.replyTimingByRequest.keys().next().value);
+  const committedReply = streamV2 ? new CommittedReply(requestId, characterId) : null;
+  let provisionalReply = thread.messages.find(message => message.role === "assistant" && message.requestId === requestId && message.committedBlocks?.length) || null;
+  for (const event of provisionalReply?.committedBlocks || []) committedReply?.accept(event);
+  let commitDisplay = Promise.resolve();
+  const commitPresentationController = new AbortController();
+  const materializeCommitted = (count = committedReply?.blocks.length) => {
+    if (!committedReply?.blocks.length) return;
+    const record = normalizeMessage({ id: provisionalReply?.id || `reply:${requestId}`, characterId, role: "assistant", contentBlocks: committedReply.blocks.slice(0, count),
+      committedBlocks: committedReply.snapshot.slice(0, count), communicationChannel: userMessage.communicationChannel, createdAt: provisionalReply?.createdAt || Date.now(),
+      requestId, status: "pending", conversationSegmentId: thread.conversationSegmentId });
+    if (provisionalReply) Object.assign(provisionalReply, record);
+    else { provisionalReply = record; thread.messages.push(record); thread.messageCount = Number(thread.messageCount || 0) + 1; }
+    metrics.messageId = record.id;
+    const streaming = state.streamingPresentationByCharacter.get(characterId);
+    if (streaming?.requestId === requestId) streaming.visibleCount = count;
+    if (ownsVisibleRequest()) { updateTypingPhase(characterId, requestId, "streaming"); renderAll(); }
+  };
+  const onCommitted = () => {
+    if (!metrics.bodyReceivedAt) metrics.bodyReceivedAt = performance.now();
+    const count = committedReply.blocks.length;
+    const streaming = state.streamingPresentationByCharacter.get(characterId) || { requestId, visibleCount: 0 };
+    streaming.receivedCount = count;
+    state.streamingPresentationByCharacter.set(characterId, streaming);
+    syncFastForward();
+    commitDisplay = commitDisplay.then(async () => {
+      if (latencyV2) await waitForNaturalReply(requestId, commitPresentationController.signal);
+      if (latencyV2 && metrics.lastBodyPaintAt && !metrics.skip) {
+        const budget = segmentWait(committedReply.blocks[count - 2]?.text.length || 0, metrics.segmentSpent, quietPresentation());
+        const began = performance.now();
+        const remaining = Math.max(0, budget - (began - metrics.lastBodyPaintAt));
+        while (!metrics.skip && !quietPresentation() && performance.now() - began < remaining) {
+          await abortableDelay(Math.min(32, remaining - (performance.now() - began)), commitPresentationController.signal);
+        }
+        metrics.segmentSpent += remaining;
+        metrics.naturalWaitMs += performance.now() - began;
+      }
+      if (!ownsRequest()) return;
+      materializeCommitted(count);
+      metrics.lastBodyPaintAt = performance.now();
+      await dbPutThread(thread);
+    });
+    // Transport reads continue while a short presentation pause or disk write finishes.
+    void commitDisplay.catch(() => {});
+  };
   const timing = { shownAt: 0 };
+  const feedbackController = new AbortController();
   const typingGate = (async () => {
     try {
-      if (!reducedMotion()) await abortableDelay(requestDelay(requestId, "initial", 1800, 2600), requestController.signal);
+      if (!quietPresentation()) await abortableDelay(requestDelay(requestId, "initial", latencyV2 ? 250 : 1800, latencyV2 ? 400 : 2600), feedbackController.signal);
     } catch (error) {
       if (error?.name === "AbortError") return;
       throw error;
     }
-    if (!ownsRequest()) return;
+    if (!ownsRequest() || metrics.presented) return;
     timing.shownAt = performance.now();
     updateTypingPhase(characterId, requestId, "typing");
   })();
@@ -4320,14 +4639,14 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
         await abortableDelay(backoffs[attempt], requestController.signal);
       }
       try {
-        const response = await fetch(`${apiRoot}/chat/stream`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, signal: requestController.signal, body: requestBody });
+        const response = await fetch(`${apiRoot}/chat/stream`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", ...(streamV2 ? { "X-Snow-Stream-Version": "2" } : {}) }, signal: requestController.signal, body: requestBody });
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));
           const serverCode = plain(payload?.detail?.code);
           const error = new Error(serverCode || ([502, 503, 504].includes(response.status) ? "provider_network_error" : "chat_failed"));
           throw error;
         }
-        result = await consumeChatStream(response, { characterId, requestId, fallbackChannel: userMessage.communicationChannel });
+        result = await consumeChatStream(response, { characterId, requestId, fallbackChannel: userMessage.communicationChannel, committedReply, onCommitted });
         break;
       } catch (error) {
         lastError = error;
@@ -4335,28 +4654,47 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       }
     }
     if (!result) throw lastError || new Error("stream_disconnected");
+    // A confirmed terminal reply is a completed business action. Cosmetic waiting
+    // can no longer cancel it or expose a retry with a fresh paid-request ID.
+    window.clearTimeout(requestTimeout);
+    const activeRequest = state.chatRequestByCharacter.get(characterId);
+    if (activeRequest?.requestId === requestId) activeRequest.completed = true;
+    commitPresentationController.abort();
+    metrics.serverTimings = result.serverTimings;
+    if (!metrics.bodyReceivedAt) metrics.bodyReceivedAt = performance.now();
+    await commitDisplay.catch(() => {});
     if (result.returnedChannel === "in_person" && ownsVisibleRequest()) {
       void warmCharacterStage(characterById(characterId), result.expressionState, result.performanceId, requestController.signal);
     }
-    state.retrySnapshots.delete(userMessage.id);
-    userMessage.requestSnapshot = null;
     await userPersistence;
-    await typingGate;
-    if (timing.shownAt && !reducedMotion()) {
+    if (!latencyV2) await typingGate;
+    if (!latencyV2 && timing.shownAt && !reducedMotion()) {
       const visibleFor = performance.now() - timing.shownAt;
       if (visibleFor < 1200) await abortableDelay(1200 - visibleFor, requestController.signal);
     }
     userMessage.status = "sent";
-    const assistantMessage = normalizeMessage({ id: id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, communicationChannel: result.returnedChannel, expressionState: result.expressionState, stageMotion: result.stageMotion, performanceId: result.performanceId, createdAt: Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
-    thread.messages.push(assistantMessage);
-    thread.messageCount = Number(thread.messageCount || 0) + 1;
+    const completedReply = normalizeMessage({ id: provisionalReply?.id || id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, committedBlocks: committedReply?.snapshot || [], communicationChannel: result.returnedChannel, expressionState: result.expressionState, stageMotion: result.stageMotion, performanceId: result.performanceId, createdAt: provisionalReply?.createdAt || Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
+    const assistantMessage = provisionalReply || completedReply;
+    metrics.messageId = assistantMessage.id;
+    if (latencyV2 && !provisionalReply) state.readyReplyIds.add(assistantMessage.id);
+    if (provisionalReply) Object.assign(provisionalReply, completedReply);
+    else { thread.messages.push(assistantMessage); thread.messageCount = Number(thread.messageCount || 0) + 1; }
     thread.turnCount += 1;
     thread.continuityDecision = "";
     thread.lastActiveAt = Date.now();
     if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: "", usage: result.usage });
     await dbPutThread(thread);
-    updateTypingPhase(characterId, requestId, "presenting");
-    await presentAssistantTurn(characterId, requestId, assistantMessage);
+    state.retrySnapshots.delete(userMessage.id);
+    userMessage.requestSnapshot = null;
+    await dbPutThread(thread);
+    if (latencyV2) {
+      const pending = typingStateFor(characterId);
+      if (pending?.requestId === requestId) pending.networkDone = true;
+      void deliverCompletedReply(characterId, requestId, assistantMessage);
+    } else {
+      updateTypingPhase(characterId, requestId, "presenting");
+      await presentAssistantTurn(characterId, requestId, assistantMessage);
+    }
     if (ownsRequest() && result.pendingSceneState) {
       state.sceneByCharacter.set(characterId, result.pendingSceneState);
       if (ownsVisibleRequest()) {
@@ -4371,39 +4709,51 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       } else if (result.pendingStateEvent?.event_type !== "joint_movement") {
         setRequestStatus(characterId, "已完成", requestId);
       }
-      clearTypingState(characterId, requestId);
+      if (!latencyV2) clearTypingState(characterId, requestId);
     }
     scheduleAutoSummary(thread, result.usage);
+    completeReplyTiming(metrics, "success");
     renderCharacters();
   } catch (caught) {
+    commitPresentationController.abort();
+    await commitDisplay.catch(() => {});
     await userPersistence.catch(() => {});
     const error = caught?.name === "AbortError" ? new Error(requestTimedOut ? "provider_timeout" : "request_cancelled") : caught;
-    if (stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
+    if (!latencyV2 && !committedReply?.blocks.length && stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
       cancelPresentationQueue(characterId, requestId);
       state.retrySnapshots.delete(userMessage.id);
       await clearPersistedWorldPackage();
       if (characterId === state.selected) renderScene();
       return await runChat(thread, userMessage, { stateRecoveryAttempt: stateRecoveryAttempt + 1 });
     }
-    if (!shouldReuseChatRequest(error)) {
+    if (!committedReply?.blocks.length && !shouldReuseChatRequest(error)) {
       state.retrySnapshots.delete(userMessage.id);
       userMessage.requestSnapshot = null;
     }
     cancelPresentationQueue(characterId, requestId);
+    if (committedReply?.blocks.length) {
+      materializeCommitted();
+      provisionalReply.partial = true;
+      provisionalReply.status = "failed";
+      provisionalReply.errorCode = error.message || "stream_disconnected";
+    }
     userMessage.status = "failed";
     userMessage.errorCode = error instanceof Error ? error.message : "chat_failed";
     if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: userMessage.errorCode });
     await dbPutThread(thread);
     if (ownsVisibleRequest()) renderAll();
     if (ownsRequest()) {
-      setRequestStatus(characterId, displayError(error), requestId);
+      setRequestStatus(characterId, provisionalReply?.partial ? "回复未完成，已保留收到的内容。可用原请求恢复结果。" : displayError(error), requestId);
       clearTypingState(characterId, requestId);
     }
+    completeReplyTiming(metrics, provisionalReply?.partial ? "partial" : "failed");
   } finally {
     window.clearTimeout(requestTimeout);
     requestController.abort();
     if (state.chatRequestByCharacter.get(characterId)?.requestId === requestId) state.chatRequestByCharacter.delete(characterId);
-    clearTypingState(characterId, requestId);
+    if (state.streamingPresentationByCharacter.get(characterId)?.requestId === requestId) state.streamingPresentationByCharacter.delete(characterId);
+    if (state.completedPresentationByCharacter.get(characterId)?.requestId !== requestId) clearTypingState(characterId, requestId);
+    if (state.completedPresentationByCharacter.get(characterId)?.requestId !== requestId) feedbackController.abort();
     updateComposerAvailability();
     void flushDeferredPresenceRefresh();
   }
@@ -4610,9 +4960,9 @@ async function arriveInPerson() {
   const ownsArrival = () => ownsTypingState(characterId, arrivalId);
   const ownsVisibleArrival = () => ownsArrival() && state.selected === characterId;
   setTypingState({ characterId, requestId: arrivalId, channel: "in_person", phase: "arrival" });
-  await setChannel("in_person", false, thread);
+  if (!featureEnabled("motion_v2")) await setChannel("in_person", false, thread);
   if (ownsVisibleArrival()) {
-    $("presence-arrival-loading").hidden = false;
+    $("presence-arrival-loading").hidden = featureEnabled("motion_v2");
     $("stage-presence-status").hidden = false;
     $("stage-presence-status").textContent = "正在靠近……";
   }
@@ -4620,6 +4970,10 @@ async function arriveInPerson() {
   try {
     await transitionPresence("in_person", characterId, thread);
     transitionApplied = true;
+    if (featureEnabled("motion_v2") && ownsVisibleArrival()) {
+      $("presence-arrival-loading").hidden = true;
+      $("stage-presence-status").textContent = "已来到她身边，正在等待回应…";
+    }
     await dismissCurrentRendezvous(thread);
     if (!configured()) {
       if (ownsVisibleArrival()) showBanner("场景已更新。配置模型后可以开始对话。");
@@ -4655,7 +5009,9 @@ async function arriveInPerson() {
       renderAll();
     }
     if (arrivalMessage && ownsArrival()) {
-      await presentAssistantTurn(characterId, arrivalId, arrivalMessage);
+      const presentation = presentAssistantTurn(characterId, arrivalId, arrivalMessage);
+      if (featureEnabled("chat_latency_v2")) void presentation.catch(() => {});
+      else await presentation;
     }
   } catch (error) {
     cancelPresentationQueue(characterId, arrivalId);
@@ -4680,7 +5036,7 @@ async function arriveInPerson() {
       if (ownsVisibleArrival()) showBanner(displayError(error));
     }
   } finally {
-    const minimum = reducedMotion() ? 0 : 900;
+    const minimum = featureEnabled("motion_v2") || reducedMotion() ? 0 : 900;
     const elapsed = performance.now() - started;
     if (elapsed < minimum) await delay(minimum - elapsed);
     state.arrivalPending = false;
@@ -4904,6 +5260,10 @@ $("movement-invitation").oninput = () => {
 };
 $("stop-waiting").onclick = () => {
   const pending = typingStateFor();
+  if (pending?.networkDone || state.chatRequestByCharacter.get(pending?.characterId)?.completed) {
+    finishReceivedPresentation();
+    return;
+  }
   if (pending && presentationFor(pending.characterId)?.requestId === pending.requestId) {
     cancelPresentationQueue(pending.characterId, pending.requestId);
     updateTypingPhase(pending.characterId, pending.requestId, "presenting");
@@ -4916,6 +5276,17 @@ $("stop-waiting").onclick = () => {
   setRequestStatus(pending.characterId, "正在停止本地等待……", pending.requestId);
   request.controller.abort();
 };
+$("fast-forward-reply").onclick = finishReceivedPresentation;
+$("motion-preference").onchange = () => {
+  localPreferences.setItem("project-snow-public:motion", $("motion-preference").value);
+  syncMotionState();
+  surfaceMotion.cancel();
+  transientMotion.cancel();
+  cancelStageMotion();
+  cancelStageArtTransition();
+  if (reducedMotion()) finishReceivedPresentation();
+  refreshAnimatedStickers();
+};
 $("new-replies").onclick = () => {
   loadNewerMessages("timeline", true);
   $("timeline").scrollTop = $("timeline").scrollHeight;
@@ -4923,6 +5294,7 @@ $("new-replies").onclick = () => {
 };
 $("timeline").addEventListener("scroll", () => {
   if (timelineNearBottom() && !state.timelineEndId) $("new-replies").hidden = true;
+  sampleVisibleReplyPaints();
 }, { passive: true });
 $("feedback-include-context").onchange = renderFeedbackContextPreview;
 $("feedback-retry-verification").onclick = () => $("feedback-form").requestSubmit();
@@ -5095,9 +5467,16 @@ const messageInputResizeObserver = new ResizeObserver(([entry]) => {
 });
 messageInputResizeObserver.observe($("message-input"));
 document.fonts?.ready.then(scheduleMessageInputResize);
-window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", event => { if (event.matches) { cancelStageMotion(); cancelStageArtTransition(); renderStage(); } });
+window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", event => {
+  syncMotionState();
+  if (event.matches) { surfaceMotion.cancel(); transientMotion.cancel(); cancelStageMotion(); cancelStageArtTransition(); finishReceivedPresentation(); renderStage(); }
+  refreshAnimatedStickers();
+});
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) { void saveDraftNow(); cancelBackgroundSummaries(); cancelStageMotion(); cancelStageArtTransition(); }
+  syncMotionState();
+  if (document.hidden) { void saveDraftNow(); cancelBackgroundSummaries(); surfaceMotion.cancel(); transientMotion.cancel(); cancelStageMotion(); cancelStageArtTransition(); finishReceivedPresentation(); }
+  refreshAnimatedStickers();
+  if (!document.hidden) sampleVisibleReplyPaints();
 });
 
 const WRITER_LOCK_NAME = "project-snow-public:writer:v1";

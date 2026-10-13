@@ -235,7 +235,31 @@ function reconcileMarkup(root, markup) {
     const key = candidate.getAttribute("data-message-id") || candidate.getAttribute("data-ui-key") || candidate.id;
     const candidateMarkup = candidate.outerHTML;
     const cached = key ? previous.get(key) : void 0;
-    const node = cached?.markup === candidateMarkup && cached.node.parentNode === root ? cached.node : candidate;
+    let node = cached?.markup === candidateMarkup && cached.node.parentNode === root ? cached.node : candidate;
+    if (cached && node === candidate && cached.node.parentNode === root && candidate.hasAttribute("data-message-id")) {
+      const previousTemplate = root.ownerDocument.createElement("template");
+      previousTemplate.innerHTML = cached.markup;
+      const prior = previousTemplate.content.querySelector(".message-content-stack");
+      const live = cached.node.querySelector(".message-content-stack");
+      const incoming = candidate.querySelector(".message-content-stack");
+      if (prior && live && incoming && cached.node.querySelector(".message-body")?.childElementCount === candidate.querySelector(".message-body")?.childElementCount) {
+        const oldMarkup = Array.from(prior.children).map((item) => item.outerHTML);
+        const existing = Array.from(live.children);
+        const incomingChildren = Array.from(incoming.children);
+        incomingChildren.forEach((item, index) => {
+          if (existing[index] && oldMarkup[index] === item.outerHTML) return;
+          if (existing[index]) existing[index].replaceWith(item);
+          else live.append(item);
+        });
+        for (let index = incomingChildren.length; index < existing.length; index += 1) existing[index]?.remove();
+        cached.node.setAttribute("class", candidate.getAttribute("class") || "");
+        for (const selector of [".meta", ".message-tools", ".rendezvous-card"]) {
+          const nextPart = candidate.querySelector(selector), previousPart = cached.node.querySelector(selector);
+          if (nextPart && previousPart && nextPart.outerHTML !== previousPart.outerHTML) previousPart.replaceWith(nextPart);
+        }
+        node = cached.node;
+      }
+    }
     if (node !== position) root.insertBefore(node, position);
     position = node.nextSibling;
     if (key) next.set(key, { node, markup: candidateMarkup });
@@ -265,6 +289,72 @@ function focusWithin(event, panel) {
   }
   return false;
 }
+
+// src/presentation.ts
+var PRESENTATION_TIMING = Object.freeze({ feedbackMin: 250, feedbackMax: 400, firstReply: 600, segmentMin: 200, segmentMax: 450, segmentBudget: 1200, mode: 360 });
+function remainingNaturalWait(startedAt, now, reduced = false) {
+  return reduced ? 0 : Math.max(0, PRESENTATION_TIMING.firstReply - Math.max(0, now - startedAt));
+}
+function segmentWait(textLength, spent, reduced = false) {
+  return reduced ? 0 : Math.max(0, Math.min(PRESENTATION_TIMING.segmentBudget - spent, Math.max(PRESENTATION_TIMING.segmentMin, Math.min(PRESENTATION_TIMING.segmentMax, 200 + textLength * 3))));
+}
+var CommittedReply = class {
+  constructor(requestId, characterId) {
+    this.requestId = requestId;
+    this.characterId = characterId;
+  }
+  requestId;
+  characterId;
+  events = [];
+  accept(value) {
+    const event = value;
+    if (!event || event.request_id !== this.requestId || event.character_id !== this.characterId || !Number.isSafeInteger(event.sequence) || event.sequence < 0 || typeof event.block_id !== "string" || !event.block_id || !event.block || !["message", "speech"].includes(event.block.type) || typeof event.block.text !== "string" || !event.block.text.trim()) throw new Error("stream_commit_invalid");
+    const previous = this.events.find((item) => item.block_id === event.block_id || item.sequence === event.sequence);
+    if (previous) {
+      if (previous.block_id !== event.block_id || previous.sequence !== event.sequence || previous.block.type !== event.block.type || previous.block.text !== event.block.text) throw new Error("stream_commit_conflict");
+      return false;
+    }
+    const last = this.events.at(-1);
+    if (last ? event.sequence !== last.sequence + 1 : event.sequence !== 0) throw new Error("stream_commit_sequence");
+    this.events.push({ ...event, block: { ...event.block } });
+    return true;
+  }
+  get blocks() {
+    return this.events.map((item) => ({ ...item.block }));
+  }
+  get snapshot() {
+    return this.events.map((item) => ({ ...item, block: { ...item.block } }));
+  }
+  verifyFinal(blocks) {
+    for (let index = 0; index < this.events.length; index += 1) {
+      const expected = this.events[index].block;
+      if (blocks[index]?.type !== expected.type || blocks[index]?.text !== expected.text) throw new Error("stream_commit_conflict");
+    }
+  }
+};
+var MotionScope = class {
+  animations = /* @__PURE__ */ new Set();
+  cleanups = /* @__PURE__ */ new Set();
+  cancel() {
+    for (const animation of this.animations) animation.cancel();
+    this.animations.clear();
+    for (const cleanup of this.cleanups) cleanup();
+    this.cleanups.clear();
+  }
+  play(node, frames, options) {
+    if (typeof node.animate !== "function") return Promise.resolve();
+    const animation = node.animate(frames, options);
+    this.animations.add(animation);
+    return animation.finished.catch(() => {
+    }).then(() => {
+      this.animations.delete(animation);
+      animation.cancel();
+    });
+  }
+  cleanup(callback) {
+    this.cleanups.add(callback);
+  }
+};
 
 // src/runtime.ts
 function createSafeStorage(resolve) {
@@ -335,8 +425,11 @@ function validateHistoryBackup(value) {
   return portableCopy(data);
 }
 export {
+  CommittedReply,
   HISTORY_DATABASE_VERSION,
   MAX_VISIBLE_MESSAGES,
+  MotionScope,
+  PRESENTATION_TIMING,
   STAGE_MOTIONS,
   STAGE_STATES,
   beforeMessageCursor,
@@ -352,6 +445,8 @@ export {
   portableCopy,
   pruneHistoryDatabase,
   reconcileMarkup,
+  remainingNaturalWait,
+  segmentWait,
   transactionDone,
   validateHistoryBackup,
   validateStageRelease,

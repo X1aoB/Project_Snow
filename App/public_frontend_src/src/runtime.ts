@@ -90,3 +90,4 @@ export function validateHistoryBackup(value: unknown): HistoryBackup {
   return portableCopy(data) as HistoryBackup;
 }
 export { MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin } from "./view";
+export { PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope } from "./presentation";
