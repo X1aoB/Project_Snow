@@ -92,6 +92,7 @@ const state = {
   completedPresentationByCharacter: new Map(),
   readyReplyIds: new Set(),
   paintedMessageIds: new Set(),
+  seenMessageEntries: new WeakSet(),
   typewriter: { key: "", timer: 0, fullText: "", displayedText: "" },
   summaryInFlight: new Set(),
   summaryControllers: new Map(),
@@ -1098,8 +1099,14 @@ async function messageCount(characterId) {
   }
 }
 
+function markMessageEntrySeen(message) {
+  state.seenMessageEntries.add(message);
+  state.paintedMessageIds.add(message.id);
+  while (state.paintedMessageIds.size > 1000) state.paintedMessageIds.delete(state.paintedMessageIds.values().next().value);
+}
 function rememberStoredMessage(message) {
   const normalized = normalizeMessage(message);
+  markMessageEntrySeen(normalized);
   state.persistedMessages.set(normalized.id, JSON.stringify(normalized));
   state.memoryStores.messages.set(normalized.id, structuredClone(normalized));
   return normalized;
@@ -1107,7 +1114,7 @@ function rememberStoredMessage(message) {
 async function loadMessagePage(characterId, { before = Number.MAX_SAFE_INTEGER, limit = 60 } = {}) {
   const memoryPage = () => [...state.memoryStores.messages.values()]
     .filter((message) => message.characterId === characterId && beforeMessageCursor(message, before))
-    .sort((a, b) => compareMessageCursor(b, a)).slice(0, limit).reverse().map(normalizeMessage);
+    .sort((a, b) => compareMessageCursor(b, a)).slice(0, limit).reverse().map(rememberStoredMessage);
   const db = await openDB();
   if (!db) return memoryPage();
   try {
@@ -1240,6 +1247,9 @@ function normalizeThread(record, characterId) {
     characterId: message.characterId || message.character_id || characterId,
     conversationSegmentId: message.conversationSegmentId || message.conversation_segment_id || segmentId,
   }));
+  // Loaded history, including legacy embedded rows, is already established
+  // content even when its timestamp is recent or has been estimated.
+  normalizedMessages.forEach(markMessageEntrySeen);
   return {
     characterId,
     historyEpoch: state.historyEpoch,
@@ -4196,6 +4206,9 @@ function bindTimelineActions() {
   if ($("load-newer-messages")) $("load-newer-messages").onclick = () => loadNewerMessages();
 }
 function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
+  // Render the saved window when the communicator becomes visible. Rebuilding
+  // hidden history during a stage transition adds work and loses scroll geometry.
+  if (featureEnabled("motion_v2") && $("text-surface").hidden) return;
   const thread = currentThread();
   const allMessages = surfaceHistory();
   const window = historyWindow(allMessages, state.timelineEndId, state.timelineVisibleLimit);
@@ -4230,13 +4243,12 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   bindAvatarImages(timeline);
   for (const message of messages) {
     const node = [...timeline.querySelectorAll("[data-message-id]")].find(item => item.dataset.messageId === message.id);
-    if (state.paintedMessageIds.has(message.id)) continue;
-    state.paintedMessageIds.add(message.id);
+    if (state.seenMessageEntries.has(message) || state.paintedMessageIds.has(message.id)) continue;
+    markMessageEntrySeen(message);
     // Historical rows and background arrivals must not animate on re-render.
-    if (!featureEnabled("motion_v2") || quietPresentation() || Date.now() - message.createdAt > 3000 || !wasNearBottom) continue;
+    if (!featureEnabled("motion_v2") || quietPresentation() || message.createdAtEstimated || Date.now() - message.createdAt > 3000 || !wasNearBottom) continue;
     if (node) void transientMotion.play(node, [{ opacity: .25, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 180, easing: "cubic-bezier(.22,.72,.24,1)" });
   }
-  while (state.paintedMessageIds.size > 1000) state.paintedMessageIds.delete(state.paintedMessageIds.values().next().value);
   const newMessages = allMessages.length > previousCount;
   timeline.dataset.messageCount = String(allMessages.length);
   if (window.hasNewer) $("new-replies").hidden = false;
@@ -4323,7 +4335,7 @@ function finishTypewriter(key, value) {
   syncFastForward();
   return true;
 }
-function renderTypewriter(text, key) {
+function renderTypewriter(text, key, animate = true) {
   const value = plain(text);
   const speechNode = $("stage-speech");
   if (
@@ -4331,7 +4343,7 @@ function renderTypewriter(text, key) {
     && (state.typewriter.fullText === value || state.typewriter.displayedText === value)
   ) {
     if (state.typewriter.fullText === value && state.typewriter.timer) {
-      if (reducedMotion()) {
+      if (!animate || reducedMotion()) {
         finishTypewriter(key, value);
         return;
       }
@@ -4353,7 +4365,7 @@ function renderTypewriter(text, key) {
   state.typewriter.key = key;
   state.typewriter.fullText = value;
   state.typewriter.displayedText = "";
-  if (!value || quietPresentation()) {
+  if (!animate || !value || quietPresentation()) {
     finishTypewriter(key, value);
     return;
   }
@@ -4476,7 +4488,10 @@ function renderStageSpeech(assistantMessage) {
       ? speechTypewriterKey(assistantMessage)
       : `${plain(assistantMessage.characterId)}:${plain(assistantMessage.requestId)}:${plain(assistantMessage.id)}:placeholder`
     : `scene:${state.selected}:${state.scene?.visual_key || "generic"}`;
-  renderTypewriter(speech, speechKey);
+  const livePresentation = presentationFor();
+  const liveReply = assistantMessage && (livePresentation?.messageId === assistantMessage.id
+    || pending?.channel === "in_person" && pending.requestId === assistantMessage.requestId);
+  renderTypewriter(speech, speechKey, !featureEnabled("chat_latency_v2") || Boolean(liveReply));
   if (assistantMessage?.partial) {
     $("stage-presence-status").hidden = false;
     $("stage-presence-status").textContent = "回复未完成，已保留收到的内容。";

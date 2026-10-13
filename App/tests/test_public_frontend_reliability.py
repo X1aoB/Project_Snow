@@ -692,7 +692,7 @@ class PublicFrontendReliabilityTests(TestCase):
 
             page.route("**/encoding-fixture.png", image)
             self.open(page)
-            result = page.evaluate("""async hash => {
+            result = page.evaluate("""async ({hash, fixtureSource}) => {
                 const originalReader = window.FileReader, nativeDecode = HTMLImageElement.prototype.decode;
                 const later = window.setTimeout, readers = [];
                 let aborts = 0, decodes = 0;
@@ -704,7 +704,12 @@ class PublicFrontendReliabilityTests(TestCase):
                     readAsDataURL() { this.readyState = 1; this.lateLoad = this.onload; readers.push(this); }
                     abort() { this.readyState = 2; aborts++; this.onabort?.(); }
                 };
-                HTMLImageElement.prototype.decode = function() { decodes++; return nativeDecode.call(this); };
+                HTMLImageElement.prototype.decode = function() {
+                    // Startup warmup can decode unrelated approved character art.
+                    // Count only this fixture and its deliberately queued late result.
+                    if (this.src === fixtureSource || this.src === 'data:image/png;base64,untrusted-late-result') decodes++;
+                    return nativeDecode.call(this);
+                };
                 const outcome = promise => promise.then(()=>'unexpected success',error=>error.name+':'+error.message);
                 try {
                     const controller = new AbortController();
@@ -737,7 +742,7 @@ class PublicFrontendReliabilityTests(TestCase):
                     HTMLImageElement.prototype.decode = nativeDecode;
                     window.setTimeout = later;
                 }
-            }""", image_hash)
+            }""", {"hash": image_hash, "fixtureSource": "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")})
             self.assertTrue(result["cancelled"].startswith("AbortError:"))
             self.assertEqual(result["timedOut"], "Error:expression_image_encoding_timeout")
             self.assertEqual(result["aborts"], 2)
