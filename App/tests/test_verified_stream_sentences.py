@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+from contextlib import contextmanager
 from dataclasses import replace
 from unittest.mock import Mock
 from uuid import uuid4
@@ -135,16 +137,32 @@ def test_real_public_pipeline_withholds_incomplete_blocks_and_preserves_acked_pr
     provider_calls = []
     before_eof = []
     after_tail = []
+    event_loop = None
+    event_loop_thread = None
+    provider_threads = set()
+
+    def provider_read(method):
+        # Observe durable ACKs through the same serialized queue as the route.
+        # A direct read here would share StaticPool's DBAPI connection with a
+        # snow-store transaction, even if the fixture used a SQLite file.
+        assert event_loop is not None
+        thread = threading.get_ident()
+        assert thread != event_loop_thread
+        provider_threads.add(thread)
+        return asyncio.run_coroutine_threadsafe(
+            app.state.async_store.call(method, str(payload.request_id), "subject"),
+            event_loop,
+        ).result(timeout=10)
 
     class Chunks(httpx.SyncByteStream):
         def __iter__(self):
             yield sse([prefix], finish=None).replace("data: [DONE]\n\n", "").encode()
-            records = store.request_blocks(str(payload.request_id), "subject")
+            records = provider_read("request_blocks")
             assert len(records) == early_count
             before_eof.extend(records)
-            assert store.request_result(str(payload.request_id), "subject") is None
+            assert provider_read("request_result") is None
             yield sse([tail], finish=None).replace("data: [DONE]\n\n", "").encode()
-            after_tail.extend(store.request_blocks(str(payload.request_id), "subject"))
+            after_tail.extend(provider_read("request_blocks"))
             assert len(after_tail) == early_count
             yield sse([], usage={"total_tokens": 30}).encode()
 
@@ -155,6 +173,21 @@ def test_real_public_pipeline_withholds_incomplete_blocks_and_preserves_acked_pr
     mvp._model_http_client.close()
     mvp._model_http_client = httpx.Client(transport=httpx.MockTransport(handler))
     app = create_app(public_settings, mvp.settings, store, service)
+    transaction_threads = set()
+    connection_ids = set()
+    original_begin = store.begin
+
+    @contextmanager
+    def observed_begin():
+        thread = threading.get_ident()
+        assert threading.current_thread().name.startswith("snow-store")
+        assert thread != event_loop_thread and thread not in provider_threads
+        transaction_threads.add(thread)
+        with original_begin() as connection:
+            connection_ids.add(id(connection.connection.driver_connection))
+            yield connection
+
+    monkeypatch.setattr(store, "begin", observed_begin)
     endpoint = next(route.endpoint for route in app.routes if route.path == "/public/v1/chat/stream")
 
     def request():
@@ -166,19 +199,23 @@ def test_real_public_pipeline_withholds_incomplete_blocks_and_preserves_acked_pr
                 if packet.startswith(f"event: {name}\n")]
 
     async def exercise():
+        nonlocal event_loop, event_loop_thread
+        event_loop = asyncio.get_running_loop()
+        event_loop_thread = threading.get_ident()
         try:
             response = await endpoint(request(), payload)
             packets = [packet async for packet in response.body_iterator]
             assert events(packets, "error") == []
             assert len(events(packets, "done")) == 1
-            saved = store.request_result(str(payload.request_id), "subject")
+            saved = await app.state.async_store.call("request_result", str(payload.request_id), "subject")
             expected_blocks = [{"type": block_type, "text": text} for text in texts]
             assert saved["content_blocks"] == expected_blocks
             assert saved["answer"] == "\n".join(texts)
             assert not saved.get("terminal_error")
             committed = events(packets, "committed_block")
             assert len(committed) == early_count
-            assert store.request_blocks(str(payload.request_id), "subject") == before_eof == after_tail
+            durable = await app.state.async_store.call("request_blocks", str(payload.request_id), "subject")
+            assert durable == before_eof == after_tail
             expected_deltas = [{"text": text, "block_index": index, "block_type": block_type}
                                for index, text in enumerate(texts) if index >= early_count]
             assert events(packets, "delta") == expected_deltas
@@ -195,6 +232,7 @@ def test_real_public_pipeline_withholds_incomplete_blocks_and_preserves_acked_pr
                 assert events(repeated, "committed_block")[0]["block_id"] == committed[0]["block_id"]
             assert len(provider_calls) == 1
             assert provider_calls[0]["stream"] is True
+            assert len(transaction_threads) == len(connection_ids) == len(provider_threads) == 1
         finally:
             await asyncio.gather(*list(app.state.chat_jobs.values()), return_exceptions=True)
             await app.state.async_store.close()
