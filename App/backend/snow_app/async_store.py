@@ -33,7 +33,7 @@ class AsyncPublicStore:
     async def call(self, method: str, *args: Any, **kwargs: Any) -> Any:
         if self._closed or not self._capacity.acquire(blocking=False):
             raise PublicStoreUnavailable("public database capacity exhausted")
-        if method in {"claim_request", "complete_request", "release_request"}:
+        if method in {"claim_request", "commit_request_blocks", "complete_request", "release_request"}:
             kwargs.setdefault("owner_token", self.owner_token)
         try:
             future = self._executor.submit(partial(getattr(self.store, method), *args, **kwargs))

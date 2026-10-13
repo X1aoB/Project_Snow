@@ -29,7 +29,7 @@ _MODEL_ENVELOPE_KEYS = frozenset(
 
 
 def _looks_like_model_envelope(value: Any) -> bool:
-    return isinstance(value, dict) and "answer" in value and bool(_MODEL_ENVELOPE_KEYS.intersection(value))
+    return isinstance(value, dict) and ("answer" in value or "content_blocks" in value) and bool(_MODEL_ENVELOPE_KEYS.intersection(value))
 
 
 def _decode_json_candidate(text: str) -> Any:
@@ -186,7 +186,7 @@ def _clean_renderable_text(text: Any) -> str:
         seen.add(candidate)
         decoded = _decode_json_candidate(candidate)
         if isinstance(decoded, dict):
-            if "answer" in decoded:
+            if "answer" in decoded or "content_blocks" in decoded:
                 nested_answer = decoded.get("answer")
                 if isinstance(nested_answer, str) and nested_answer.strip() != candidate:
                     candidate = nested_answer.strip()
@@ -196,9 +196,9 @@ def _clean_renderable_text(text: Any) -> str:
                 block_items = decoded.get("content_blocks")
                 if isinstance(block_items, list):
                     block_text = "\n".join(
-                        str(item.get("text") or "").strip()
+                        item["text"].strip()
                         for item in block_items
-                        if isinstance(item, dict) and str(item.get("text") or "").strip()
+                        if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip()
                     ).strip()
                     if block_text:
                         candidate = block_text
@@ -266,4 +266,11 @@ def _parse_model_json(content: str) -> dict[str, Any]:
     answer_value = value.get("answer")
     if isinstance(answer_value, str):
         value = {**value, "answer": _clean_renderable_text(answer_value)}
+    elif "answer" not in value and isinstance(value.get("content_blocks"), list):
+        # The compact public contract generates visible text once. Preserve
+        # the historical parsed shape for downstream guards and API adapters.
+        value = {**value, "answer": "\n".join(
+            text for item in value["content_blocks"] if isinstance(item, dict)
+            if (text := _clean_renderable_text(item.get("text")))
+        )}
     return value

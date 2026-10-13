@@ -19,6 +19,7 @@ import secrets
 import socket
 import threading
 import time
+from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
@@ -32,6 +33,15 @@ import httpx
 
 from .chat_store import ConversationStore
 from .config import Settings
+from .generation_stream import (
+    GenerationPublicationError,
+    GenerationStreamError,
+    GenerationStreamPartialError,
+    current_generation_observer,
+    read_completion_stream,
+    validate_generation_blocks,
+)
+from .model_capabilities import immersive_model_policy
 from .dialogue_core import (
     GenerationBudget,
     GenerationBudgetExceeded,
@@ -1405,6 +1415,9 @@ def _json_content(response: httpx.Response) -> str:
 
 
 class MVPService:
+    _PROFILE_PROMPT_REVISION = "dialogue-profile-projection-1"
+    _PROFILE_PROMPT_CACHE_LIMIT = 64
+
     def __init__(
         self,
         settings: Settings,
@@ -1453,6 +1466,8 @@ class MVPService:
         self._question_mtime: int | None = None
         self._dialogue_profiles_cache: dict[str, dict[str, Any]] | None = None
         self._dialogue_profiles_mtime: int | None = None
+        self._profile_prompt_cache: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
+        self._profile_prompt_cache_lock = threading.RLock()
         self._style_index_cache: dict[str, list[dict[str, Any]]] | None = None
         self._story_character_names_cache: dict[str, str] | None = None
         # Older lakehouse manifests did not persist the recommendation/armor
@@ -1491,6 +1506,9 @@ class MVPService:
             0, int((time.perf_counter() - started_at) * 1000)
         )
         self._generation_diagnostics.value = diagnostics
+        observer = current_generation_observer()
+        if observer is not None:
+            observer.phase(name, diagnostics[name])
 
     def _post_model(
         self,
@@ -1499,6 +1517,10 @@ class MVPService:
         max_provider_http_calls: int | None = None,
         **kwargs: Any,
     ) -> httpx.Response:
+        self._reserve_model_call(max_provider_http_calls)
+        return self._model_http_client.post(endpoint, **kwargs)
+
+    def _reserve_model_call(self, max_provider_http_calls: int | None = None) -> None:
         diagnostics = self.generation_diagnostics()
         current_calls = int(diagnostics.get("provider_http_calls", 0))
         budget = active_generation_budget()
@@ -1511,7 +1533,29 @@ class MVPService:
                 raise MVPProviderError("本次操作已达到模型请求次数上限。") from exc
         diagnostics["provider_http_calls"] = current_calls + 1
         self._generation_diagnostics.value = diagnostics
-        return self._model_http_client.post(endpoint, **kwargs)
+
+    def _stream_model(self, endpoint: str, *, body: dict[str, Any], headers: dict[str, str],
+                      timeout: float, max_provider_http_calls: int | None) -> tuple[str, dict[str, Any]]:
+        self._reserve_model_call(max_provider_http_calls)
+        started = time.perf_counter()
+        observer = current_generation_observer()
+        try:
+            with self._model_http_client.stream("POST", endpoint, json=body, headers=headers, timeout=timeout) as response:
+                response.raise_for_status()
+                self._record_generation_duration("provider_headers_ms", started)
+                if "text/event-stream" not in response.headers.get("content-type", ""):
+                    raise GenerationStreamError("provider_stream_content_type")
+                return read_completion_stream(response, started_at=started)
+        except (GenerationStreamPartialError, GenerationPublicationError):
+            raise
+        except Exception as exc:
+            # An opened upstream request may already be billed. Neither a
+            # transport error nor a malformed/partial stream is retried.
+            if observer is not None and observer.published_blocks:
+                observer.fail("provider_stream_interrupted")
+            if isinstance(exc, (httpx.HTTPError, GenerationStreamError)):
+                raise MVPProviderError("模型流式请求未完成；请保留原请求查询结果。") from exc
+            raise
 
     def close(self) -> None:
         self._model_http_client.close()
@@ -1887,6 +1931,41 @@ class MVPService:
             }
             self._dialogue_profiles_mtime = mtime
         return self._dialogue_profiles_cache
+
+    def _cached_dialogue_profile_prompt_context(
+        self, character_id: str, profile: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Reuse only the pure static projection, with no session data in cache.
+
+        Fingerprinting also fences changed profile inputs at the same mtime.
+        The existing pure helper remains authoritative for guards and callers;
+        every returned value is detached from the shared cached projection.
+        """
+        if not profile:
+            return None
+        if not hasattr(self, "_profile_prompt_cache_lock"):
+            return self._dialogue_profile_prompt_context(profile)
+        try:
+            mtime_ns = self.dialogue_profiles_path.stat().st_mtime_ns
+        except OSError:
+            mtime_ns = None
+        data_version = str(getattr(getattr(self.repository, "public_settings", None), "data_version", ""))
+        fingerprint = sha256(json.dumps(
+            profile, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        key = (data_version, mtime_ns, fingerprint, self._PROFILE_PROMPT_REVISION, str(character_id))
+        with self._profile_prompt_cache_lock:
+            cached = self._profile_prompt_cache.get(key)
+            if cached is None:
+                cached = copy.deepcopy(self._dialogue_profile_prompt_context(profile))
+                if cached is None:
+                    return None
+                self._profile_prompt_cache[key] = cached
+                while len(self._profile_prompt_cache) > self._PROFILE_PROMPT_CACHE_LIMIT:
+                    self._profile_prompt_cache.popitem(last=False)
+            else:
+                self._profile_prompt_cache.move_to_end(key)
+            return copy.deepcopy(cached)
 
     @staticmethod
     def _dialogue_profile_prompt_context(profile: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -6072,6 +6151,7 @@ class MVPService:
         tool_context: dict[str, Any] | None = None,
         dual_persona_context: dict[str, Any] | None = None,
         relationship_address_memory: dict[str, Any] | None = None,
+        compact_public_schema: bool = False,
     ) -> str:
         mode = self._normalize_mode(mode)
         communication_channel = self._normalize_communication_channel(communication_channel)
@@ -6338,7 +6418,7 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
             if dual_persona_context.get("active")
             else ""
         )
-        return f"""你是 Project Snow 的角色对话模型，当前为“{mode}”模式。你要模拟《尘白禁区》角色“{character.display_name}”，并始终把当前用户视为“分析员”。
+        prompt = f"""你是 Project Snow 的角色对话模型，当前为“{mode}”模式。你要模拟《尘白禁区》角色“{character.display_name}”，并始终把当前用户视为“分析员”。
 
 {mode_rule}
 
@@ -6404,8 +6484,17 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
 {{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message|sticker","text":"...","asset_id":"仅在 sticker 时填写","caption":"仅在 sticker 时填写"}}],"expression_state":"neutral|gentle_smile|happy|amused|teasing|relieved|serious|focused|thinking|confused|skeptical|concerned|surprised|embarrassed|sad|disappointed|annoyed|angry","stage_motion":"none|lean_in|tremble|recoil|startle","state_updates":[],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
 """
 
+        if compact_public_schema and mode == "immersive":
+            prompt = prompt.split("仅返回 JSON 对象，不要输出 Markdown 代码围栏。", 1)[0]
+            prompt += """仅返回一个 JSON 对象，不要 Markdown 代码围栏。正文只写入 content_blocks，服务端会按顺序拼接 answer；不要重复生成 answer，也不要输出 analysis_process、work_summary、work_steps 或思考过程。保留完整自然回复与必要动作，不为节省字段缩短或删减有用对白。每个块必须完整表达一句话或一个自然消息；content_blocks 必须是对象最后一个字段。其余字段先输出：
+{"state_updates":[],"expression_state":"neutral","stage_motion":"none","performance_id":"","confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":[],"used_relation_candidate_ids":[],"uncertainties":[],"citation_notes":[],"content_blocks":[{"type":"speech|action|message|sticker","text":"..."}]}
+expression_state、stage_motion、performance_id 仍须遵守上文角色和媒介规则。只有 sticker 块使用 asset_id 与 caption；普通正文块仅含 type 和 text。state_updates 仅允许本轮明确获准的提案；没有提案时必须为空数组。
+"""
+        return prompt
+
     def _prompt(self, character: Any, message: str, context: dict[str, Any]) -> str:
         evidence = []
+        seen_evidence: set[tuple[str, str]] = set()
         documents = self.repository.documents_by_id()
         focus = str(context.get("question_focus") or "general")
         if focus in {
@@ -6434,22 +6523,31 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
             citation = hit["citation"]
             document = documents.get(str(citation.get("document_id") or ""), {})
             evidence_date = _document_date_key(document)
+            record = {
+                "document_id": citation["document_id"],
+                "title": citation["title"],
+                "source_type": citation["source_type"],
+                "narrative_scope": source_layer(citation["source_type"], bool((hit.get("metadata") or {}).get("requires_costume_context"))),
+                "evidence_date": evidence_date or None,
+                "temporal_scope": "dated_background" if evidence_date else "undated_background",
+                "text": str(hit.get("text", "")),
+            }
+            # Exact duplicates only: distinct provenance, dates, scopes or
+            # excerpts remain separate. Never mutate the guard's full context.
+            identity = (
+                json.dumps({key: value for key, value in record.items() if key != "text"},
+                           ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                record["text"],
+            )
+            if identity in seen_evidence:
+                continue
+            seen_evidence.add(identity)
             remaining = max(0, evidence_budget - consumed)
             if not remaining:
                 break
-            evidence_text = str(hit.get("text", ""))[: min(per_document_limit, remaining)]
+            evidence_text = record["text"][: min(per_document_limit, remaining)]
             consumed += len(evidence_text)
-            evidence.append(
-                {
-                    "document_id": citation["document_id"],
-                    "title": citation["title"],
-                    "source_type": citation["source_type"],
-                    "narrative_scope": source_layer(citation["source_type"], bool((hit.get("metadata") or {}).get("requires_costume_context"))),
-                    "evidence_date": evidence_date or None,
-                    "temporal_scope": "dated_background" if evidence_date else "undated_background",
-                    "text": evidence_text,
-                }
-            )
+            evidence.append({**record, "text": evidence_text})
         provisional = [
             {
                 "candidate_id": item.get("candidate_id"),
@@ -6463,7 +6561,7 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
             for item in context["provisional_relations"]
         ]
         relationship_background = context.get("relationship_background_for_prompt") or {}
-        dialogue_profile = self._dialogue_profile_prompt_context(context.get("dialogue_profile"))
+        dialogue_profile = self._cached_dialogue_profile_prompt_context(character.character_id, context.get("dialogue_profile"))
         relationship_answer_contract = None
         if relationship_background:
             if relationship_background.get("status") == "explicit":
@@ -6591,6 +6689,15 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
                 else "openai-compatible"
             )
         request_fields = dict((thinking_decision or {}).get("request_fields") or {})
+        model_policy = None
+        if (thinking_decision or {}).get("chat_latency_v2") and mode == "immersive":
+            model_policy = immersive_model_policy(provider_kind, model)
+            request_fields = dict(model_policy["request_fields"])
+            if model_policy["omit_temperature"]:
+                body.pop("temperature", None)
+            token_parameter = model_policy["token_parameter"]
+            if token_parameter != "max_tokens":
+                body[token_parameter] = body.pop("max_tokens")
         raw_provider_limit = (thinking_decision or {}).get("max_provider_http_calls")
         try:
             max_provider_http_calls = (
@@ -6622,6 +6729,14 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
                 body["enable_thinking"] = False
         timeout = float(os.getenv("MVP_CHAT_TIMEOUT_SECONDS", str(self.settings.mvp_chat_timeout_seconds)))
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        if (thinking_decision or {}).get("verified_block_stream") and model_policy and model_policy["supports_streaming"]:
+            body["stream"] = True
+            if model_policy["stream_include_usage"]:
+                body["stream_options"] = {"include_usage": True}
+            return self._stream_model(
+                endpoint, body=body, headers=headers, timeout=timeout,
+                max_provider_http_calls=max_provider_http_calls,
+            )
         max_attempts = (
             1
             if disable_compatibility_retries
@@ -8979,6 +9094,58 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
         repaired = answer.rstrip(" \t\r\n。！!？?") + "。不过那是过去的状态；后来痛觉已经恢复了，我现在会以恢复后的状态为准。"
         return repaired, True
 
+    @staticmethod
+    def _verified_stream_eligible(context: dict[str, Any], mode: str, *,
+                                  presence_arrival: bool = False,
+                                  movement_candidates: Any = None,
+                                  sticker_candidates: Any = None,
+                                  performance_candidates: Any = None) -> bool:
+        """Only a plain check-in may bypass the whole-turn presentation wait.
+
+        The full memory and evidence context is still built and checked. The
+        allowlist deliberately excludes factual/story/invitation turns and
+        every explicit state proposal; expanding it requires behavior evidence.
+        """
+        return bool(
+            mode == "immersive"
+            and context.get("question_focus") == "casual_check_in"
+            and context.get("conversation_mode") == "natural_chat"
+            and (context.get("dialogue_boundary") or {}).get("kind", "standard") == "standard"
+            and not presence_arrival
+            and not movement_candidates and not sticker_candidates
+            and not context.get("mentioned_characters")
+            and not (context.get("cross_character_story_context") or {}).get("active")
+            and not (context.get("companion_social_context") or {}).get("active")
+            and not (context.get("dual_persona_context") or {}).get("active")
+            and not context.get("interaction_hint")
+            and not (context.get("tool_context") or {}).get("tool_calls")
+            and not context.get("attachment_context")
+            and not context.get("live_scene")
+            and not set(context.get("query_intents") or ()).intersection({"relationship", "experience", "current_state"})
+        )
+
+    def _verify_stream_blocks(self, blocks: list[dict[str, Any]], *, message: str,
+                              context: dict[str, Any], channel: str, character_name: str) -> None:
+        observer = current_generation_observer()
+        if observer is None:
+            return
+        observer.ensure_prefix(blocks)
+        answer = self._render_content_blocks(blocks)
+        normalized, reclassified = self._normalize_content_blocks_with_diagnostics(
+            {"content_blocks": blocks}, channel, answer, character_name
+        )
+        violations = self._answer_guardrail_violations(message, answer, context, "immersive", blocks)
+        repaired, _ = self._repair_explicit_relationship_answer(message, answer, context.get("relationship_background") or {})
+        repaired, _ = self._repair_latest_state_answer(message, repaired, context)
+        repaired, _ = self._normalize_explicit_relationship_address(repaired, context)
+        repaired, _ = self._normalize_response_aliases(repaired, context)
+        if (not answer or reclassified or normalized != blocks or repaired != answer
+                or _clean_renderable_text(answer) != answer or violations):
+            if observer.published_blocks:
+                observer.fail("stream_validation_failed")
+            return
+        observer.publish(blocks)
+
     def chat(
         self,
         character_value: str,
@@ -9008,6 +9175,10 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
     ) -> dict[str, Any]:
         if not self.chat_enabled():
             raise MVPChatDisabled("MVP 对话接口未开启。请设置 MVP_CHAT_ENABLED=true 后重启 API。")
+        context_started = time.perf_counter()
+        observer = current_generation_observer()
+        if observer is not None:
+            observer.phase("context")
         if not message.strip() and not attachment_context:
             raise ValueError("消息不能为空。")
         message = message.strip() or "请查看并说明附件内容。"
@@ -9158,6 +9329,9 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
             costume_context,
             session_context.get("style_context"),
         )
+        retrieval_started = time.perf_counter()
+        if observer is not None:
+            observer.phase("retrieving")
         context = self.retrieve(
             character.character_id,
             message.strip(),
@@ -9168,6 +9342,8 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
             mode=mode,
             world_state=world_state,
         )
+        self._record_generation_duration("retrieval_ms", retrieval_started)
+        prompt_started = time.perf_counter()
         if presence_arrival:
             context["question_focus"] = "casual_check_in"
             context["conversation_mode"] = "natural_chat"
@@ -9231,6 +9407,7 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
                 context.get("tool_context"),
                 context.get("dual_persona_context"),
                 context.get("relationship_address_memory"),
+                compact_public_schema=bool((thinking_decision or {}).get("compact_public_schema")),
             )
             + "\n\n"
             + _PREFERENCE_GUIDANCE
@@ -9297,6 +9474,25 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
 格式："state_updates":[{{"type":"joint_move","location_id":"...","activity_id":"...","commit":"now"}}]
 """
         user_prompt = self._prompt(character, message.strip(), context)
+        self._record_generation_duration("prompt_build_ms", prompt_started)
+        self._record_generation_duration("context_build_ms", context_started)
+        stream_validator = None
+        if ((thinking_decision or {}).get("verified_block_stream")
+                and (thinking_decision or {}).get("compact_public_schema")
+                and observer is not None and observer.on_verified_blocks is not None
+                and not presence_transition
+                and dialogue_transition.get("status") == "none"
+                and self._verified_stream_eligible(
+                    context, mode, presence_arrival=presence_arrival,
+                    movement_candidates=public_state_update_catalog,
+                    sticker_candidates=public_sticker_candidates,
+                    performance_candidates=public_performance_candidates,
+                )):
+            def stream_validator(blocks):
+                self._verify_stream_blocks(
+                    blocks, message=message.strip(), context=context,
+                    channel=active_channel, character_name=character.display_name,
+                )
         if request_key and not self.conversation_store.claim_request(
             request_key, character.character_id
         ):
@@ -9320,15 +9516,26 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
                     *image_inputs,
                 ]
             initial_model_started = time.perf_counter()
+            if observer is not None:
+                observer.phase("generating")
             try:
-                raw_content, usage = self._call_model(system_prompt, user_prompt, **initial_kwargs)
+                with validate_generation_blocks(stream_validator):
+                    raw_content, usage = self._call_model(system_prompt, user_prompt, **initial_kwargs)
             finally:
                 self._record_generation_duration("initial_model_ms", initial_model_started)
         except Exception:
             self.conversation_store.release_request(request_key)
             raise
         generated = _parse_model_json(raw_content)
+        if observer is not None:
+            observer.usage = dict(usage)
+            observer.phase("validating")
+            if observer.published_blocks and generated.get("state_updates") != []:
+                observer.fail("stream_state_proposal_changed")
+        validation_started = time.perf_counter()
         answer_text = self._generated_answer(generated, raw_content)
+        if observer is not None and observer.published_blocks and not answer_text.strip():
+            observer.fail("published_answer_missing")
 
         def has_valid_sticker_output(payload: dict[str, Any]) -> bool:
             allowed_ids = {
@@ -9416,6 +9623,10 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
         guardrail_violations = self._answer_guardrail_violations(
             message.strip(), answer_text, context, mode, raw_blocks
         )
+        if observer is not None and observer.published_blocks:
+            observer.ensure_prefix(raw_blocks or [])
+            if guardrail_violations:
+                observer.fail("stream_validation_failed")
         initial_in_person_block_violations = {
             item for item in guardrail_violations if item.startswith("in_person_")
         }
@@ -9482,6 +9693,8 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
             guardrail_violations = []
             initial_in_person_block_violations = set()
         if guardrail_violations:
+            if observer is not None:
+                observer.phase("rewriting")
             guardrail_retried = True
             original_guard_answer = answer_text
             original_guard_generated = copy.deepcopy(generated)
@@ -10216,6 +10429,18 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
         ]
         if unresolved_hard_violations:
             content_block_guard_rejected = True
+        if observer is not None and observer.published_blocks:
+            observer.ensure_prefix(content_blocks)
+            if final_guardrail_violations:
+                observer.fail("stream_validation_failed")
+        self._record_generation_duration("validation_total_ms", validation_started)
+        timings = self.generation_diagnostics()
+        timings["validation_local_ms"] = max(0, timings.get("validation_total_ms", 0)
+                                              - timings.get("guard_rewrite_ms", 0)
+                                              - timings.get("empty_recovery_ms", 0))
+        self._generation_diagnostics.value = timings
+        if observer is not None:
+            observer.phase("validation_local_ms", timings["validation_local_ms"])
         stage_motion = _normalize_stage_motion(
             generated.get("stage_motion"),
             active_channel,

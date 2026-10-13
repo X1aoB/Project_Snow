@@ -26,6 +26,8 @@ from pydantic import ValidationError
 from .async_store import AsyncPublicStore
 from .config import PublicSettings, Settings
 from .frontend_identity import read_frontend_identity
+from .generation_stream import GenerationObserver, observe_generation
+from .model_capabilities import immersive_model_policy, public_model_profiles
 from .mvp_service import MVPProviderError, _normalize_expression_state, _normalize_stage_motion
 from .public_contracts import (
     ByokSessionRequest,
@@ -37,6 +39,7 @@ from .public_contracts import (
     PresenceTransitionRequest,
     SummarizeRequest,
 )
+from .public_delivery import DeliveryJournal, latency_metrics
 from .public_providers import (
     PROVIDERS,
     ProviderHTTPPool,
@@ -405,6 +408,7 @@ def create_app(
     app.state.async_store = async_store
     app.state.draining = False
     chat_jobs: dict[str, asyncio.Task[dict[str, Any]]] = {}
+    delivery_journals: dict[str, DeliveryJournal] = {}
     active_request_leases: dict[str, asyncio.Task[Any]] = {}
     active_subject_requests: dict[str, str] = {}
     active_subject_tasks: dict[str, asyncio.Task[Any]] = {}
@@ -512,7 +516,7 @@ def create_app(
         allow_origins=list(public_settings.allowed_origins),
         allow_credentials=True,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "Accept"],
+        allow_headers=["Content-Type", "Accept", "X-Snow-Stream-Version"],
     )
 
     @app.middleware("http")
@@ -662,7 +666,14 @@ def create_app(
             "app_version": public_settings.app_version,
             "data_version": public_settings.data_version,
             "language": "zh-CN",
+            "features": {
+                "chat_latency_v2": public_settings.chat_latency_v2,
+                "verified_block_stream": public_settings.verified_block_stream,
+                "verified_block_replay": True,
+                "motion_v2": public_settings.motion_v2,
+            },
             "providers": enabled,
+            "model_profiles": public_model_profiles(),
             "turnstile_site_key": public_settings.turnstile_site_key,
             "limits": {
                 "input_characters": 2000,
@@ -1000,6 +1011,14 @@ def create_app(
 
     @app.post("/public/v1/chat/stream")
     async def chat_stream(request: Request, payload: ChatRequest):
+        request_started = time.monotonic()
+        # The rollout switch controls new upstream publication, never whether
+        # an opted-in client can recover an already durable prefix.
+        stream_v2 = any(
+            key.lower() == b"x-snow-stream-version" and value == b"2"
+            for key, value in request.scope.get("headers", [])
+        )
+        publish_v2 = stream_v2 and public_settings.verified_block_stream
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
         public_model = redact_sensitive_text(payload.model, 200)
         chat_service.ensure_character_available(payload.character_id)
@@ -1048,12 +1067,15 @@ def create_app(
         idempotent_replay = claim_status in {"processing", "completed"}
         result: dict[str, Any] | None = None
         job: asyncio.Task[dict[str, Any]] | None = None
+        journal: DeliveryJournal | None = None
+        remote_processing = False
         if claim_status == "completed" and cached is not None:
             result = {**cached, "idempotent_replay": True}
             if owns_subject:
                 await release_subject_generation(subject, request_id)
         elif claim_status == "processing":
             job = chat_jobs.get(request_id)
+            journal = delivery_journals.get(request_id) if stream_v2 else None
             if job is None:
                 # The original worker may be running in another process (or
                 # the process may have restarted).  The durable claim still
@@ -1061,7 +1083,10 @@ def create_app(
                 # same UUID until the cached terminal result is available.
                 if owns_subject:
                     await release_subject_generation(subject, request_id)
-                raise _error("request_in_progress", 409)
+                if stream_v2:
+                    remote_processing = True
+                else:
+                    raise _error("request_in_progress", 409)
         else:
             try:
                 await async_store.call("consume_limits",
@@ -1075,10 +1100,17 @@ def create_app(
 
             unsafe_category = input_safety_category(payload.message)
             generation_reserved = False
-            if not unsafe_category:
+            queue_started = time.monotonic()
+            queue_ms = 0
+            if stream_v2:
+                journal = DeliveryJournal(request_id, payload.character_id)
+                journal.phase("queued")
+                delivery_journals[request_id] = journal
+            if not unsafe_category and not stream_v2:
                 try:
                     await chat_service.gate.acquire()
                     generation_reserved = True
+                    queue_ms = max(0, int((time.monotonic() - queue_started) * 1000))
                 except BaseException:
                     # Admission happens before the StreamingResponse exists so
                     # queue saturation can carry an HTTP Retry-After header.
@@ -1092,6 +1124,32 @@ def create_app(
                 started_at = time.monotonic()
                 exception_type = ""
                 terminal_stage = "complete"
+                loop = asyncio.get_running_loop()
+                first_committed_ms: int | None = None
+
+                async def commit_blocks(blocks: list[dict[str, Any]]) -> bool:
+                    nonlocal first_committed_ms
+                    if _public_content_blocks_payload(blocks) != blocks:
+                        return False
+                    records = await async_store.call("commit_request_blocks", request_id, subject, blocks)
+                    if journal is not None:
+                        journal.committed(records)
+                    if records and first_committed_ms is None:
+                        first_committed_ms = max(0, int((time.monotonic() - request_started) * 1000))
+                    return True
+
+                def publish_blocks(blocks: list[dict[str, Any]]) -> bool:
+                    # The generator runs on a worker thread. Waiting for the
+                    # transaction ACK prevents an uncommitted preview escaping.
+                    # A timeout never cancels/retries an uncertain transaction.
+                    future = asyncio.run_coroutine_threadsafe(commit_blocks(blocks), loop)
+                    return future.result(timeout=30)
+
+                observer = GenerationObserver(
+                    on_phase=(lambda name, elapsed: loop.call_soon_threadsafe(journal.phase, name, elapsed))
+                    if journal is not None else None,
+                    on_verified_blocks=publish_blocks if publish_v2 else None,
+                )
                 try:
                     if unsafe_category:
                         generated = chat_service.policy_rejection(
@@ -1101,13 +1159,14 @@ def create_app(
                             unsafe_category,
                         )
                     else:
-                        generated = await chat_service.chat(
-                            payload,
-                            request.state.subject_hash,
-                            spec,
-                            str(claims["api_key"]),
-                            gate_reserved=generation_reserved,
-                        )
+                        with observe_generation(observer):
+                            generated = await chat_service.chat(
+                                payload,
+                                request.state.subject_hash,
+                                spec,
+                                str(claims["api_key"]),
+                                gate_reserved=generation_reserved,
+                            )
                 except GenerationBusy as exc:
                     exception_type = type(exc).__name__
                     terminal_stage = "generation_queue"
@@ -1169,6 +1228,15 @@ def create_app(
                         "terminal_error": "generation_failed",
                         "diagnostics": {"error_stage": "generation"},
                     }
+                diagnostics = generated.setdefault("diagnostics", {})
+                timings = diagnostics.setdefault("timings_ms", {})
+                timings.update(observer.timings_ms)
+                timings["queue_ms"] = queue_ms
+                if first_committed_ms is not None:
+                    timings["first_committed_block_ms"] = first_committed_ms
+                durable_started = time.monotonic()
+                if journal is not None:
+                    journal.phase("saving", int((durable_started - started_at) * 1000))
                 try:
                     await complete_owned_request(request_id, generated)
                 except PublicStoreUnavailable as exc:
@@ -1184,6 +1252,8 @@ def create_app(
                         "terminal_error": "public_database_unavailable",
                         "diagnostics": {"error_stage": "idempotency_store"},
                     }
+                timings["durable_commit_ms"] = max(0, int((time.monotonic() - durable_started) * 1000))
+                timings["total"] = max(0, int((time.monotonic() - request_started) * 1000))
                 diagnostics = (
                     generated.get("diagnostics")
                     if isinstance(generated.get("diagnostics"), dict)
@@ -1214,6 +1284,16 @@ def create_app(
                                 and provider_calls >= 0
                                 else 0
                             ),
+                            "provider": spec.provider_id,
+                            "model_profile": payload.model.casefold()
+                            if immersive_model_policy(spec.provider_id, payload.model).get("capability_verified")
+                            else "other",
+                            "channel": payload.communication_channel,
+                            "history_band": "long" if len(payload.recent_history) > 16
+                            else "medium" if len(payload.recent_history) > 8 else "short",
+                            "generation_class": str(diagnostics.get("generation_class") or "unknown"),
+                            "stream_version": 2 if stream_v2 else 1,
+                            "timings_ms": latency_metrics({"timings_ms": timings}),
                         },
                         ensure_ascii=True,
                         separators=(",", ":"),
@@ -1222,7 +1302,22 @@ def create_app(
                 return generated
 
             async def run_reserved_generation() -> dict[str, Any]:
+                nonlocal generation_reserved, queue_ms
                 try:
+                    if stream_v2 and not unsafe_category:
+                        try:
+                            await chat_service.gate.acquire()
+                            generation_reserved = True
+                            queue_ms = max(0, int((time.monotonic() - queue_started) * 1000))
+                        except GenerationBusy as exc:
+                            rejected = {"terminal_error": str(exc), "answer": "", "content_blocks": []}
+                            # Admission failed before any provider call. A
+                            # retry of this UUID must be able to enter later,
+                            # just as it can with the original v1 contract.
+                            await release_owned_request(request_id)
+                            return rejected
+                    if journal is not None:
+                        journal.phase("preparing", queue_ms)
                     return await run_generation()
                 finally:
                     if generation_reserved:
@@ -1233,6 +1328,7 @@ def create_app(
                     run_reserved_generation(), name=f"public-chat:{request_id}"
                 )
             except Exception:
+                delivery_journals.pop(request_id, None)
                 if generation_reserved:
                     chat_service.gate.release()
                 await release_owned_request(request_id)
@@ -1244,6 +1340,9 @@ def create_app(
 
             def forget_job(completed: asyncio.Task[dict[str, Any]]) -> None:
                 chat_jobs.pop(request_id, None)
+                delivery_journals.pop(request_id, None)
+                if journal is not None:
+                    journal.changed.set()
                 if active_request_leases.get(request_id) is completed:
                     active_request_leases.pop(request_id, None)
                 if (
@@ -1272,12 +1371,75 @@ def create_app(
                     "idempotent_replay": idempotent_replay,
                 },
             )
+            sent_sequences: set[int] = set()
+            journal_cursor = 0
+
+            async def stored_blocks():
+                if not stream_v2:
+                    return []
+                return await async_store.call("request_blocks", request_id, subject)
+
+            def block_events(records):
+                for record in records:
+                    sequence = record["sequence"]
+                    if sequence not in sent_sequences:
+                        sent_sequences.add(sequence)
+                        yield _sse("committed_block", {
+                            "request_id": request_id,
+                            "character_id": payload.character_id,
+                            **record,
+                        })
+
+            if stream_v2:
+                for packet in block_events(await stored_blocks()):
+                    yield packet
             resolved = result
             while resolved is None and job is not None:
+                if stream_v2 and journal is not None:
+                    journal.changed.clear()
+                    while journal_cursor < len(journal.events):
+                        event, event_payload = journal.events[journal_cursor]
+                        journal_cursor += 1
+                        if event == "committed_block":
+                            if event_payload["sequence"] in sent_sequences:
+                                continue
+                            sent_sequences.add(event_payload["sequence"])
+                        yield _sse(event, event_payload)
+                    if job.done():
+                        resolved = job.result()
+                        break
+                    wake = asyncio.create_task(journal.changed.wait())
+                    try:
+                        ready, _ = await asyncio.wait((job, wake), timeout=4.0, return_when=asyncio.FIRST_COMPLETED)
+                        if not ready:
+                            yield ": heartbeat\n\n"
+                    finally:
+                        wake.cancel()
+                        await asyncio.gather(wake, return_exceptions=True)
+                    continue
                 try:
                     resolved = await asyncio.wait_for(asyncio.shield(job), timeout=4.0)
                 except TimeoutError:
                     yield ": heartbeat\n\n"
+            # Another owner is still producing this UUID. Poll only durable
+            # state; this connection never acquires a generation slot.
+            while resolved is None and remote_processing:
+                for packet in block_events(await stored_blocks()):
+                    yield packet
+                resolved = await async_store.call("request_result", request_id, subject)
+                if resolved is not None:
+                    break
+                if time.monotonic() - request_started >= 300:
+                    yield _sse("error", {"code": "request_in_progress", "retryable": True,
+                                         "partial": bool(sent_sequences)})
+                    return
+                yield ": heartbeat\n\n"
+                await asyncio.sleep(1)
+            if stream_v2:
+                # Covers completed replays, a lost transaction ACK and a job
+                # finishing between the final wake and journal consumption.
+                for packet in block_events(await stored_blocks()):
+                    yield packet
             if resolved is None:
                 yield _sse("error", {"code": "generation_failed", "retryable": True})
                 return
@@ -1295,6 +1457,8 @@ def create_app(
                             if terminal_error.startswith("generation_queue_")
                             else {}
                         ),
+                        **({"partial": bool(sent_sequences), "retryable": False}
+                           if stream_v2 and sent_sequences else {}),
                     },
                 )
                 return
@@ -1312,6 +1476,8 @@ def create_app(
                 ]
             content_blocks = _public_content_blocks_payload(raw_content_blocks)
             for block_index, block in enumerate(content_blocks):
+                if stream_v2 and block_index in sent_sequences:
+                    continue
                 block_type = str(block.get("type") or "")
                 block_text = str(block.get("text") or "")
                 if block_type == "sticker":
@@ -1432,11 +1598,24 @@ def create_app(
                     "recovery_action": str(
                         result_payload.get("recovery_action") or "none"
                     ),
+                    **({"timings_ms": latency_metrics(internal_diagnostics)} if stream_v2 else {}),
                 },
             )
 
+        async def guarded_events():
+            has_committed = False
+            try:
+                async for packet in events():
+                    has_committed = has_committed or packet.startswith("event: committed_block\n")
+                    yield packet
+            except PublicStoreUnavailable:
+                yield _sse("error", {
+                    "code": "public_database_unavailable", "retryable": not has_committed,
+                    **({"partial": has_committed} if stream_v2 else {}),
+                })
+
         return StreamingResponse(
-            events(),
+            guarded_events(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
