@@ -19,6 +19,7 @@ from maintenance import (
     MaintenanceError,
     Paths,
     active_release,
+    read_environment,
     read_text,
     release_lock,
     require_inherited_release_lock,
@@ -124,6 +125,23 @@ def container_identity(colour: str, image: str, execute: Callable = run) -> dict
     return actual
 
 
+def public_environment_identity(paths: Paths, compose_environment: Path) -> dict:
+    # Compose reads the referenced file again when promoting/recreating an API.
+    # Bind its bytes as well as the pointer; never include credential-bearing
+    # environment values in receipts or Docker diagnostics.
+    environment = read_environment(compose_environment)
+    source = Path(environment.get("PUBLIC_ENV_FILE") or "/etc/project-snow/public.env")
+    allowed = (paths.root / "runtime", Path("/etc/project-snow"), paths.root / "releases" / "anchors")
+    if (
+        not source.is_absolute()
+        or ".." in source.parts
+        or not any(source.is_relative_to(parent) for parent in allowed)
+    ):
+        raise MaintenanceError("Acceptance public environment is outside trusted roots")
+    directory(source.parent)
+    return {"path": str(source), "sha256": sha256(read_payload(source))}
+
+
 def snapshot(paths: Paths, colour: str, commit: str, expected_current: str, execute: Callable = run) -> dict:
     if colour not in {"blue", "green"} or not SHA.fullmatch(commit) or not SHA.fullmatch(expected_current):
         raise MaintenanceError("Acceptance requires exact candidate and current commit identities")
@@ -190,6 +208,12 @@ def snapshot(paths: Paths, colour: str, commit: str, expected_current: str, exec
         raise MaintenanceError("Running candidate frontend differs from the signed release")
     return {
         "files": {name: sha256(payload) for name, payload in payloads.items()},
+        "public_environments": {
+            "current": public_environment_identity(paths, paths.root / "runtime" / "compose.env"),
+            "candidate": public_environment_identity(
+                paths, paths.root / "runtime" / "colours" / f"{colour}.compose.env"
+            ),
+        },
         "candidate_container": candidate,
         "current_container": container_identity(active["colour"], active["image"], execute),
         "frontend": frontend,
