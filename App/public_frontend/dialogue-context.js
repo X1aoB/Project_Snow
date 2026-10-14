@@ -19,7 +19,15 @@ export function mergeDialogueReceipts(previous = [], incoming = []) {
 export function relevantDialogueReceipts(receipts, text = "") {
   const query = String(text).toLowerCase();
   const terms = query.match(/[a-z0-9]{2,}|[\u3400-\u9fff]{2}/g) || [];
-  return receipts.map((receipt, order) => ({ receipt, order, score: terms.reduce((score, term) => score + (String(receipt.memory?.value || "").toLowerCase().includes(term) ? 1 : 0), 0) }))
+  const sharedRecall = /我们|咱们|一起|上次|还记得|共同/.test(query);
+  const placeRecall = /哪[里儿]|哪里|地点|去哪|会合|赴约|上次.*去/.test(query);
+  return receipts.map((receipt, order) => {
+    const memory = receipt.memory || {};
+    const sourceScore = sharedRecall && memory.kind === "shared_scene_event" ? 3 : 0;
+    const locationScore = placeRecall && memory.kind === "shared_scene_event" && memory.location_id ? 8 : 0;
+    return { receipt, order, score: sourceScore + locationScore
+      + terms.reduce((score, term) => score + (String(memory.value || "").toLowerCase().includes(term) ? 1 : 0), 0) };
+  })
     .sort((a, b) => b.score - a.score || b.order - a.order).slice(0, 12).map(item => structuredClone(item.receipt));
 }
 export function isPureRendezvousJoin(text) {

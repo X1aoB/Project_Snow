@@ -6791,6 +6791,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                     "retrieval_pools": context.get("retrieval_pools") or {},
                     "session_experiences": context.get("session_experiences") or [],
                     "experience_provenance_rule": "Only confirmed source-bound session records establish shared events; reported statements and summaries do not.",
+                    "invitation_clarification_rule": "遇到邀约时，只对本轮 movement_catalog 中允许的地点和当前角色给出结构化决定；若人物、目标或时间确有歧义，或没有可执行的目录目标，用角色口吻简短澄清一次，不宣称已经接受、移动或到场。未来邀约可以形成约定，不能立即移动。",
                 } if context.get("turn_frame") is not None else {}),
             },
             ensure_ascii=False,

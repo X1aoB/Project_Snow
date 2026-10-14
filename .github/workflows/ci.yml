@@ -112,6 +112,7 @@ jobs:
           node-version: "22"
       - run: node --check public_frontend/app.js
       - run: node --check public_frontend/dialogue-context.js
+      - run: node --test tests/dialogue_context.test.mjs
       - name: Personal subscription connector protocol and replay contracts
         run: node --test tests/subscription_connector.test.mjs
 

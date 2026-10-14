@@ -129,16 +129,17 @@ class DialogueV2Service:
             world["revision"] += 1
         return world
 
-    def _memory(self, context, request_id, kind, value, location_id=""):
+    def _memory(self, context, request_id, kind, value, location_id="", *, source_message_ids=None):
         memory_id = hashlib.sha256(f"{request_id}:{kind}:{value}".encode()).hexdigest()[:32]
         return SessionMemory(memory_id=memory_id, kind=kind, value=value[:120],
             source_request_id=request_id, segment_id=context.segment_id,
             occurred_at=datetime.now(UTC).isoformat(), location_id=location_id,
-            scene_epoch=context.scene_epoch, source_message_ids=[f"user:{request_id}", f"reply:{request_id}"])
+            scene_epoch=context.scene_epoch, source_message_ids=source_message_ids or [f"user:{request_id}", f"reply:{request_id}"])
 
     def _finish(self, result, context, world, chat, subject, new_memories=(), action=None):
         overlay = context.scene_overlay
         if (action and action.get("action") not in {"open_communicator", "resolve"}
+                and action.get("type") != "invitation"
                 and action.get("status") in {"applied", "character_waiting", "joined", "cancelled"}):
             scene = world["presence"][chat.character_id]
             pending = self.legacy._pending_for_character(world, chat.character_id)
@@ -151,6 +152,12 @@ class DialogueV2Service:
                 pending_rendezvous=PendingRendezvous.model_validate(pending) if pending else None)
         elif overlay is not None and (overlay.schedule_date == world["schedule_date"]
                                       or chat.continuity_decision == "continue_previous"):
+            scene = world["presence"][chat.character_id]
+            pending = self.legacy._pending_for_character(world, chat.character_id)
+            overlay.analyst_location = world.get("analyst_location")
+            overlay.character_location = scene["location"]
+            overlay.character_activity = scene["activity"]
+            overlay.pending_rendezvous = PendingRendezvous.model_validate(pending) if pending else None
             overlay.world_revision = world["revision"]
             overlay.schedule_date = world["schedule_date"]
             overlay.communication_channel = result["communication_channel"]
@@ -203,6 +210,7 @@ class DialogueV2Service:
         chat = envelope.chat
         intent = prepared_intent if self.settings.scene_actions_v2 else None
         catalog = []
+        previous_invitation = context.active_invitation
         if intent:
             context.active_invitation = SceneInvitation(invitation_id=f"invite:{chat.request_id}",
                 location_id=intent.location_id, activity_id=intent.activity_id, time_scope=intent.time_scope)
@@ -244,13 +252,17 @@ class DialogueV2Service:
                     f"约定在{intent.definition['location']}会合" if chat.communication_channel == "text" else f"一起到达{intent.definition['location']}", intent.location_id))
             else:
                 action = {"status": disposition, "location_id": intent.location_id}
-                if intent.operation in {"cancel", "defer"}:
+                if intent.operation in {"cancel", "defer"} or (disposition == "accept_now" and intent.time_scope == "future"):
                     pending = world["pending_rendezvous"].pop(chat.character_id, None)
                     if pending:
                         scene = world["presence"][chat.character_id]
                         scene["activity"] = f"在{scene['location']}休息"
                         world["revision"] += 1
                         action.update(status="cancelled", action=intent.operation)
+                elif disposition == "decline" and world["pending_rendezvous"].get(chat.character_id) and previous_invitation:
+                    context.active_invitation = previous_invitation
+                if disposition == "accept_now" and intent.time_scope == "future":
+                    action.update(status="defer", type="invitation")
         # Statements retain their source rank; they are not invented joint facts.
         if self.settings.session_memory_v2:
             for clause in frame.clauses:
@@ -335,7 +347,12 @@ class DialogueV2Service:
         memories = []
         pending = self.legacy._pending_for_character(world, envelope.character_id)
         if envelope.action in {"join_rendezvous", "cancel_rendezvous"}:
-            if not pending or pending["rendezvous_id"] != envelope.rendezvous_id:
+            active = context.active_invitation
+            valid_pending = pending and pending["rendezvous_id"] == envelope.rendezvous_id
+            valid_invitation = (envelope.action == "cancel_rendezvous" and not pending and active
+                                and active.status in {"proposed", "accepted", "deferred", "clarify"}
+                                and active.invitation_id == envelope.rendezvous_id)
+            if not valid_pending and not valid_invitation:
                 raise ValueError("rendezvous is stale")
         if envelope.action in {"join_character", "join_rendezvous"}:
             scene = world["presence"][envelope.character_id]
@@ -351,19 +368,23 @@ class DialogueV2Service:
                       "location_id": pending["location_id"] if pending else "",
                       "activity_id": pending["activity_id"] if pending else ""}
             memories.append(self._memory(context, envelope.request_id, "shared_scene_event",
-                                         f"在{scene['location']}会合", action["location_id"]))
+                                         f"在{scene['location']}会合", action["location_id"],
+                                         source_message_ids=[f"reply:{envelope.request_id}"]))
         elif envelope.action == "open_communicator":
             channel = "text"
             action = {"status": "applied", "action": envelope.action}
         elif envelope.action == "cancel_rendezvous":
             world["pending_rendezvous"].pop(envelope.character_id, None)
-            scene = world["presence"][envelope.character_id]
-            scene["activity"] = f"在{scene['location']}休息"
+            location_id = pending["location_id"] if pending else context.active_invitation.location_id
+            if pending:
+                scene = world["presence"][envelope.character_id]
+                scene["activity"] = f"在{scene['location']}休息"
             context.active_invitation = None
-            action = {"status": "cancelled", "action": envelope.action, "location_id": pending["location_id"]}
+            action = {"status": "cancelled", "action": envelope.action, "location_id": location_id,
+                      "type": "scene" if pending else "invitation"}
         if envelope.action != "resolve":
             world["revision"] += 1
-            event = StateEvent(event_id=str(envelope.request_id), event_type="arrival" if channel == "in_person" else "communication",
+            event = StateEvent(event_id=str(envelope.request_id), event_type="arrival" if envelope.action in {"join_character", "join_rendezvous"} else "communication",
                                character_id=envelope.character_id, communication_channel=channel,
                                location=world.get("analyst_location"))
             world["recent_events"] = [*world["recent_events"], event.model_dump()][-4:]

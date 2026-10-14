@@ -195,6 +195,7 @@ class DialogueV2ServiceTests(TestCase):
         self.assertIsNone(joined["pending_rendezvous"])
         self.assertEqual(len(self.calls), calls)
         self.assertEqual(joined["usage"]["provider_calls"], 0)
+        self.assertEqual(joined["session_memories"][0]["memory"]["source_message_ids"], [f"reply:{joined['request_id']}"])
 
     def test_information_questions_and_personal_reports_are_not_invitations(self):
         for text in ("来我房间的是谁？", "谁去公园？", "我去公园只是为了买水，不是邀请你。",
@@ -299,6 +300,44 @@ class DialogueV2ServiceTests(TestCase):
             delayed = self.run_chat("今天感觉如何？", previous=delayed)
             self.assertEqual(self.context(delayed).active_invitation.status, "deferred")
             self.assertFalse(delayed["pending_rendezvous"])
+
+    def test_future_and_deferred_invitation_can_be_cancelled_without_join_or_model(self):
+        future = self.run_chat("明天一起去公园吧。")
+        self.assertFalse(future["pending_rendezvous"])
+        world_before = verify_state(self.settings, future["state_package"])
+        invitation = self.context(future).active_invitation
+        with self.assertRaises(ValueError):
+            self.action("join_rendezvous", previous=future, rendezvous_id=invitation.invitation_id)
+        with self.assertRaises(ValueError):
+            self.action("cancel_rendezvous", previous=future, rendezvous_id="stale-invitation")
+        cancelled = self.action("cancel_rendezvous", previous=future, rendezvous_id=invitation.invitation_id)
+        self.assertIsNone(self.context(cancelled).active_invitation)
+        self.assertIsNone(self.context(cancelled).scene_overlay)
+        world_after = verify_state(self.settings, cancelled["state_package"])
+        self.assertEqual(world_after["presence"], world_before["presence"])
+        self.assertEqual(world_after["analyst_location"], world_before["analyst_location"])
+        self.assertEqual(cancelled["usage"]["provider_calls"], 0)
+        self.assertEqual(len(self.calls), 1)
+        waiting = self.run_chat("一起去公园吧。")
+        deferred = self.run_chat("那就明天吧。", previous=waiting)
+        invitation = self.context(deferred).active_invitation
+        cancelled = self.action("cancel_rendezvous", previous=deferred, rendezvous_id=invitation.invitation_id)
+        self.assertIsNone(self.context(cancelled).active_invitation)
+        self.assertFalse(cancelled["pending_rendezvous"])
+        self.assertEqual(len(self.calls), 3)
+
+    def test_accepted_future_replaces_waiting_without_teleport_or_stale_overlay(self):
+        waiting = self.run_chat("一起去公园吧。")
+        future = self.run_chat("明天一起去商场吧。", previous=waiting)
+        self.assertFalse(future["pending_rendezvous"])
+        context = self.context(future)
+        self.assertEqual(context.active_invitation.location_id, "shopping_mall")
+        self.assertEqual(context.active_invitation.time_scope, "future")
+        self.assertIsNone(context.scene_overlay.pending_rendezvous)
+        self.assertEqual(context.scene_overlay.character_location, "公园")
+        self.assertNotIn("等分析员", context.scene_overlay.character_activity)
+        self.assertEqual(context.scene_overlay.analyst_location, "基地休息区")
+        self.assertEqual(len(self.calls), 2)
 
     def test_open_communicator_does_not_promote_daily_seed_to_confirmed_scene(self):
         opened = self.action("open_communicator")
