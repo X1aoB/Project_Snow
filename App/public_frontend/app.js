@@ -5238,6 +5238,9 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     for (let attempt = 0; attempt < backoffs.length; attempt += 1) {
       if (attempt > 0) {
         if (!recoverableChatError(lastError) || requestController.signal.aborted) throw lastError;
+        // Transport recovery is actionable immediately, even while the normal
+        // typing indicator is still inside its natural onset window.
+        updateTypingPhase(characterId, requestId, "recovering");
         setRequestStatus(characterId, `连接中断，正在恢复（${attempt}/3）……`, requestId);
         const retryAfterMs = Number(lastError?.retryAfterSeconds || 0) * 1000;
         await abortableDelay(Math.max(backoffs[attempt], retryAfterMs), requestController.signal);
