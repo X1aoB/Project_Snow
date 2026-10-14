@@ -283,9 +283,27 @@ class DialogueV2Service:
         """A model candidate cannot establish history; both current actions must support it."""
         ordinary = (r"喝|饮|茶|水|咖啡", r"吃|饭|蛋糕|饼", r"玩|棋|游戏")
         not_completed = re.compile(
-            r"如果|假如|明天|昨天|曾经|上次|打算|想要|准备|等会|稍后|没有|不愿|不要|"
+            r"如果|假如|打算|想要|准备|计划|提议|将要|将会|等会|稍后|没有|不愿|不要|"
+            r"(?:没|未).{0,4}(?:完成|结束|走完|散步)|"
             r"主线|剧情|任务|战争|死亡|牺牲|秘密|身份|结婚|婚礼|戒指|恒约|受伤|伤亡|杀死|击杀"
         )
+        completed_walk = re.compile(
+            r"散步[^。！？!?\r\n]{0,16}(?:完成|结束|完毕)|"
+            r"(?:完成|结束)[^。！？!?\r\n]{0,8}散步|"
+            r"走完(?:了)?(?:一(?:小)?圈|这段路)|走了(?:一(?:小)?圈)"
+        )
+        # A walk receipt is not authority for physical intimacy, a new
+        # relationship or a plot outcome embedded in the same action.
+        walk_nonordinary = re.compile(r"牵|握.{0,5}手|拥抱|抱住|亲吻|搂|告白|恋人|伴侣|战斗|战场|击败|打败|摧毁|救出|救回")
+        planned_walk = re.compile(r"(?:会|想|要|能).{0,8}(?:走完|散步)|尚未|还没|未能|没能")
+
+        def current_action(text):
+            return not not_completed.search(text) and all(
+                clause.domain == "casual" and clause.time_scope == "now"
+                and not clause.quoted and not clause.negated
+                for clause in parse_turn_frame(text).clauses
+            )
+
         user_actions = [block.text for block in chat.content_blocks if block.type == "action"]
         response = result.get("content_blocks") or []
         values = []
@@ -306,12 +324,16 @@ class DialogueV2Service:
                 if block.get("type") != "action":
                     continue
                 action = str(block.get("text") or "")
-                if not_completed.search(action):
+                if not current_action(action):
                     continue
                 for user_action in user_actions:
-                    if not_completed.search(user_action):
+                    if not current_action(user_action):
                         continue
-                    if any(re.search(pattern, user_action) and re.search(pattern, action) for pattern in ordinary):
+                    ordinary_pair = any(re.search(pattern, user_action) and re.search(pattern, action) for pattern in ordinary)
+                    walked_together = (completed_walk.search(user_action) and completed_walk.search(action)
+                                       and not walk_nonordinary.search(user_action) and not walk_nonordinary.search(action)
+                                       and not planned_walk.search(user_action) and not planned_walk.search(action))
+                    if ordinary_pair or walked_together:
                         values.append(self._memory(context, chat.request_id, "shared_scene_event",
                             f"当轮互动：{user_action[:48]}；{action[:48]}"))
                         break

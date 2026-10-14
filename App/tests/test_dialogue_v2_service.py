@@ -548,6 +548,47 @@ class DialogueV2ServiceTests(TestCase):
         result = self.run_chat(channel="in_person", content_blocks=[{"type": "action", "text": "递给她结婚戒指。"}])
         self.assertFalse(any(item.kind == "shared_scene_event" for item in self.context(result).memories))
 
+    def test_completed_walk_pair_produces_source_bound_experience_without_model_summary(self):
+        self.memory_candidates = [{"event_type": "ordinary_interaction", "source_clause_ids": ["c0"],
+            "response_block_indices": [0], "summary": "昨天完成主线并结婚了"}]
+        for analyst, character in (("沿路走完一圈。", "她也沿路走完一圈，停下脚步。"),
+                                   ("结束这次散步，停在原地。", "她也结束了这次散步。")):
+            with self.subTest(analyst=analyst):
+                self.reply_blocks = [{"type": "action", "text": character}, {"type": "speech", "text": "刚刚好。"}]
+                result = self.run_chat(channel="in_person", content_blocks=[{"type": "action", "text": analyst}])
+                memories = [item for item in self.context(result).memories if item.kind == "shared_scene_event"]
+                self.assertEqual(len(memories), 1)
+                memory = memories[0]
+                self.assertIn(analyst[:12], memory.value)
+                self.assertNotIn("结婚", memory.value)
+                self.assertEqual(memory.source_message_ids, [f"user:{result['request_id']}", f"reply:{result['request_id']}"])
+                self.assertEqual(str(memory.segment_id), str(self.segment))
+                self.assertEqual(verify_session_memory(self.settings, result["session_memories"][-1]["proof"],
+                    subject_hash=self.subject, character_id=self.character.character_id), memory)
+
+    def test_walk_receipt_requires_both_completed_current_actions(self):
+        self.memory_candidates = [{"event_type": "ordinary_interaction", "source_clause_ids": ["c0"],
+                                   "response_block_indices": [0]}]
+        done = "沿路走完一圈。"
+        cases = [
+            ("明天沿路走完一圈。", done), ("昨天沿路走完一圈。", done),
+            ("假如沿路走完一圈。", done), ("“沿路走完一圈。”", done),
+            ("不愿沿路走完一圈。", done), ("未能完成这次散步。", done),
+            ("刚完成主线任务，沿路走完一圈。", done), (done, "她完成主线任务后走完一圈。"),
+            (done, "她下周也沿路走完一圈。"), (done, "她昨天沿路走完一圈。"),
+            (done, "她假如沿路走完一圈。"), (done, "她说‘沿路走完一圈’。"),
+            (done, "她不愿结束散步。"), (done, "她准备沿路走完一圈。"),
+            ("想沿路走完一圈。", done), (done, "她会慢慢沿路走完一圈。"),
+            ("沿路走一圈。", done), (done, "她开始散步。"),
+            ("牵着她的手走完一圈。", done), (done, "她牵着你的手走完一圈。"),
+            ("递给她一本书。", "她接过那本书。"),
+        ]
+        for analyst, character in cases:
+            with self.subTest(analyst=analyst, character=character):
+                self.reply_blocks = [{"type": "action", "text": character}]
+                result = self.run_chat(channel="in_person", content_blocks=[{"type": "action", "text": analyst}])
+                self.assertFalse(any(item.kind == "shared_scene_event" for item in self.context(result).memories))
+
 
 class DialogueV2RealGenerationStackTests(TestCase):
     """Real adapter -> public service -> MVP validation with a synthetic model."""
@@ -647,6 +688,21 @@ class DialogueV2RealGenerationStackTests(TestCase):
             {"type": "action", "text": "递给她一杯茶。"}, {"type": "speech", "text": "给你。"}])
         self.assertEqual(result["terminal_error"], "")
         self.assertEqual(len([item for item in self.fixture.context(result).memories if item.kind == "shared_scene_event"]), 1)
+        self.assertEqual(self.mvp._call_model.call_count, 1)
+
+    def test_real_completed_walk_is_signed_after_mvp_action_validation_in_one_call(self):
+        name = self.fixture.character.display_name
+        self.reply_blocks = [{"type": "action", "text": f"{name}也沿路走完一圈，停下脚步。"},
+                             {"type": "speech", "text": "这一圈刚刚好。"}]
+        self.memory_candidates = [{"event_type": "ordinary_interaction", "source_clause_ids": ["c0"],
+                                   "response_block_indices": [0], "summary": "未经授权的模型概括"}]
+        result = self.run_chat("走完这一圈。", channel="in_person", content_blocks=[
+            {"type": "action", "text": "沿路走完一圈，停下脚步。"}])
+        self.assertEqual(result["terminal_error"], "")
+        memories = [item for item in self.fixture.context(result).memories if item.kind == "shared_scene_event"]
+        self.assertEqual(len(memories), 1)
+        self.assertIn("走完一圈", memories[0].value)
+        self.assertNotIn("模型概括", memories[0].value)
         self.assertEqual(self.mvp._call_model.call_count, 1)
 
     def test_scene_acceptance_remains_functional_when_domain_routing_is_off(self):
