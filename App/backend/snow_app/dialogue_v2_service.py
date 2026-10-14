@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import replace
 from datetime import datetime, UTC
 from typing import Any
 
@@ -15,6 +16,7 @@ from .public_contracts import (DialogueV2ChatRequest, SceneActionRequest, Sessio
 from .public_security import PublicSecurityError, sign_state, verify_state
 from .public_service import _CONTROLLED_JOINT_LOCATIONS
 from .scene_intent import resolve_invitation
+from .mvp_service import MVPService
 from .session_context import (new_session_context, verify_session_context, sign_session_context,
                               sign_session_memory, verify_session_memory)
 
@@ -79,6 +81,17 @@ class DialogueV2Service:
     def _intent(self, chat, frame, context, world):
         definitions = {key: self._definition(key, chat.character_id) for key in self.catalog}
         location = ((world.get("presence") or {}).get(chat.character_id) or {}).get("location", "")
+        # Mentioning another character does not authorize moving this contact.
+        # Keep canonical questions intact for retrieval; scope only execution.
+        eligible = []
+        for clause in frame.clauses:
+            mentions = MVPService._resolve_character_mentions(clause.text)
+            foreign = any(item["character_id"] != chat.character_id for item in mentions)
+            addressed = any(item["character_id"] == chat.character_id for item in mentions)
+            if foreign and not (addressed or re.search(r"你|我们|咱们", clause.text)):
+                continue
+            eligible.append(clause)
+        frame = replace(frame, clauses=tuple(eligible))
         return resolve_invitation(frame, definitions, selected_location=chat.movement_location_id,
                                   current_location=location, active_invitation=context.active_invitation)
 

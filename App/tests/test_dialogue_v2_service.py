@@ -204,6 +204,18 @@ class DialogueV2ServiceTests(TestCase):
                 self.assertFalse(result["pending_rendezvous"])
                 self.assertEqual(result["scene_action"]["status"], "not_requested")
 
+    def test_inviting_another_person_does_not_move_current_contact(self):
+        for message in (f"{self.other.display_name}陪我去公园吧。",
+                        f"我和{self.other.display_name}一起去公园吧。"):
+            with self.subTest(message=message):
+                result = self.run_chat(message)
+                self.assertFalse(result["pending_rendezvous"])
+                self.assertEqual(result["scene_action"]["status"], "not_requested")
+        result = self.run_chat(f"你陪我去公园找{self.other.display_name}吧。")
+        self.assertEqual(result["pending_rendezvous"]["location_id"], "park")
+        world = verify_state(self.settings, result["state_package"])
+        self.assertEqual(world["presence"][self.other.character_id]["location"], "观景区")
+
     def test_explicit_replacement_destination_wins_over_cancel_of_previous_place(self):
         waiting = self.run_chat("一起去公园吧。")
         result = self.run_chat("不去公园，那就去商场吧。", previous=waiting)
