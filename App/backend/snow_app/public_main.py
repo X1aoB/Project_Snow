@@ -35,11 +35,14 @@ from .mvp_service import MVPProviderError, _normalize_expression_state, _normali
 from .public_contracts import (
     ByokSessionRequest,
     ChatRequest,
+    DialogueV2ChatRequest,
     FeedbackRequest,
     ModelDiscoveryRequest,
     PresenceArrivalRequest,
     PresenceResolveRequest,
     PresenceTransitionRequest,
+    SceneActionRequest,
+    SessionMemoryCandidate,
     SummarizeRequest,
 )
 from .public_delivery import DeliveryJournal, latency_metrics
@@ -145,9 +148,15 @@ _ERROR_STAGE_BY_CODE = {
     "public_database_unavailable": "idempotency_store",
     "request_id_conflict": "idempotency_store",
     "request_in_progress": "idempotency_store",
+    "request_result_unavailable": "idempotency_store",
     "state_invalid": "state_validation",
     "state_subject_mismatch": "state_validation",
     "invalid_presence_transition": "state_validation",
+    "session_context_invalid": "state_validation",
+    "session_context_subject_mismatch": "state_validation",
+    "session_context_conflict": "state_validation",
+    "invalid_dialogue_context": "content_validation",
+    "invalid_scene_action": "state_validation",
     "character_unavailable": "character_data",
 }
 _NON_RETRYABLE_ERROR_CODES = frozenset(
@@ -158,6 +167,12 @@ _NON_RETRYABLE_ERROR_CODES = frozenset(
         "invalid_presence_request",
         "request_too_large",
         "request_id_conflict",
+        "request_result_unavailable",
+        "session_context_invalid",
+        "session_context_subject_mismatch",
+        "session_context_conflict",
+        "invalid_dialogue_context",
+        "invalid_scene_action",
         "generation_interrupted",
         "generation_partial",
         "provider_not_enabled",
@@ -196,7 +211,10 @@ def _request_id_from_request(request: Request) -> str:
         return ""
     if not isinstance(payload, dict):
         return ""
-    return _safe_request_id(payload.get("request_id") or payload.get("arrival_id"))
+    request_id = payload.get("request_id") or payload.get("arrival_id")
+    if not request_id and request.url.path == "/public/v2/chat/stream" and isinstance(payload.get("chat"), dict):
+        request_id = payload["chat"].get("request_id")
+    return _safe_request_id(request_id)
 
 
 def _error_stage(code: str, explicit: Any = "") -> str:
@@ -471,6 +489,45 @@ def _model_request_body(payload: ChatRequest | PresenceArrivalRequest | Summariz
     return body
 
 
+def _dialogue_v2_request_body(payload: DialogueV2ChatRequest) -> dict[str, Any]:
+    body = payload.model_dump(mode="json")
+    body["chat"] = _model_request_body(payload.chat)
+    return body
+
+
+def _dialogue_v2_metadata(result: dict[str, Any]) -> dict[str, Any]:
+    """Project only the bounded final metadata supplied by the v2 adapter."""
+    metadata: dict[str, Any] = {}
+    if isinstance(result.get("evidence_sources"), list):
+        metadata["evidence_sources"] = [
+            {key: str(item.get(key) or "")[:160] for key in ("document_id", "title", "source_type")}
+            for item in result["evidence_sources"][:8] if isinstance(item, dict)
+        ]
+    package = result.get("session_context_package")
+    if package is not None:
+        if not isinstance(package, str) or len(package) > 8192:
+            raise ValueError("invalid session context response")
+        metadata["session_context_package"] = package
+    if "session_memories" in result:
+        candidates = result["session_memories"]
+        if not isinstance(candidates, list) or len(candidates) > 12:
+            raise ValueError("invalid session memory response")
+        metadata["session_memories"] = [
+            SessionMemoryCandidate.model_validate(item).model_dump(mode="json") for item in candidates
+        ]
+    if isinstance(result.get("scene_action"), dict):
+        action = result["scene_action"]
+        metadata["scene_action"] = {
+            key: value for key, value in action.items()
+            if key in {
+                "status", "type", "action", "action_id", "scene_id", "scene_epoch",
+                "location_id", "location_name", "activity_id", "rendezvous_id", "communication_channel",
+            } and ((isinstance(value, str) and len(value) <= 160)
+                   or (key == "scene_epoch" and isinstance(value, int) and not isinstance(value, bool) and value >= 0))
+        }
+    return metadata
+
+
 def _feedback_blocks(blocks: list[Any], limit: int) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     remaining = limit
@@ -509,6 +566,12 @@ def _public_security_disposition(exc: PublicSecurityError) -> tuple[str, int]:
         return "state_invalid", 422
     if message.startswith("PUBLIC_"):
         return "security_configuration_unavailable", 503
+    if message == "Session context belongs to another anonymous session":
+        return "session_context_subject_mismatch", 409
+    if message == "Session context scope does not match request":
+        return "session_context_conflict", 409
+    if message.startswith("Session context"):
+        return "session_context_invalid", 422
     return "credential_invalid", 401
 
 
@@ -517,6 +580,7 @@ def create_app(
     internal_settings: Settings | None = None,
     store: PublicStore | None = None,
     chat_service: PublicChatService | None = None,
+    dialogue_v2_service: Any | None = None,
 ) -> FastAPI:
     public_settings = public_settings or PublicSettings.from_environment()
     subscription_broker = SubscriptionBroker(public_settings.subscription_enabled)
@@ -632,6 +696,7 @@ def create_app(
     app.state.public_settings = public_settings
     app.state.public_store = store
     app.state.chat_service = chat_service
+    app.state.dialogue_v2_service = dialogue_v2_service
     app.state.provider_http = provider_http
     app.state.subscription_broker = subscription_broker
     app.state.async_store = async_store
@@ -754,7 +819,7 @@ def create_app(
         allow_origins=list(public_settings.allowed_origins),
         allow_credentials=True,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "Accept", "X-Snow-Stream-Version"],
+        allow_headers=["Content-Type", "Accept", "X-Snow-Stream-Version", "X-Snow-Recovery-Only"],
     )
 
     @app.middleware("http")
@@ -972,6 +1037,15 @@ def create_app(
                 "verified_block_stream": public_settings.verified_block_stream,
                 "verified_block_replay": True,
                 "motion_v2": public_settings.motion_v2,
+                "dialogue_domains_v2": public_settings.dialogue_domains_v2,
+                "scene_actions_v2": public_settings.scene_actions_v2,
+                "session_memory_v2": public_settings.session_memory_v2,
+            },
+            "capabilities": {
+                "dialogue_protocol": "public-dialogue-v2",
+                "scene_action_protocol": "public-scene-action-v2",
+                "session_context_schema": "public-session-context-1",
+                "recovery_only": True,
             },
             "providers": enabled,
             "model_profiles": public_model_profiles(),
@@ -1321,8 +1395,107 @@ def create_app(
             if owns_subject:
                 await release_subject_generation(subject, cache_id)
 
+    def get_dialogue_v2_service():
+        if app.state.dialogue_v2_service is None:
+            from .dialogue_v2_service import DialogueV2Service
+            app.state.dialogue_v2_service = DialogueV2Service(chat_service, public_settings)
+        return app.state.dialogue_v2_service
+
+    def recovery_only(request: Request) -> bool:
+        value = request.headers.get("X-Snow-Recovery-Only")
+        if value not in {None, "1"}:
+            raise _error("invalid_request", 422, retryable=False)
+        return value == "1"
+
+    @app.post("/public/v2/scene/action")
+    async def dialogue_v2_scene_action(request: Request, envelope: SceneActionRequest):
+        replay_only = recovery_only(request)
+        cache_id = "scene-action:" + str(envelope.request_id)
+        request.state.public_request_id = str(envelope.request_id)
+        subject = request.state.subject_hash
+        request_hash = _request_hash(envelope.model_dump(mode="json"))
+        if replay_only:
+            status, cached = await async_store.call("lookup_request", cache_id, subject, request_hash)
+            if status == "conflict":
+                raise _error("request_id_conflict", 409)
+            if status == "completed" and cached is not None:
+                return {**cached, "idempotent_replay": True}
+            if status == "processing":
+                raise _error("request_in_progress", 409, request_id=str(envelope.request_id))
+            raise _error("request_result_unavailable", 410,
+                         request_id=str(envelope.request_id), retryable=False)
+        if not public_settings.scene_actions_v2 and envelope.action != "resolve":
+            raise _error("scene_actions_v2_disabled", 503, retryable=False)
+        if not any((public_settings.dialogue_domains_v2, public_settings.scene_actions_v2,
+                    public_settings.session_memory_v2)):
+            raise _error("dialogue_v2_disabled", 503, retryable=False)
+        owns_subject = await acquire_subject_generation(subject, cache_id)
+        request_claimed = False
+        try:
+            status, cached = await claim_owned_request(cache_id, subject, request_hash)
+            request_claimed = status == "claimed"
+            owns_subject = owns_subject or request_claimed
+            if status == "conflict":
+                raise _error("request_id_conflict", 409)
+            if status == "processing":
+                raise _error("request_in_progress", 409)
+            if status == "completed" and cached is not None:
+                return {**cached, "idempotent_replay": True}
+            result = await asyncio.to_thread(get_dialogue_v2_service().scene_action, envelope, subject)
+            _dialogue_v2_metadata(result)
+            await complete_owned_request(cache_id, result)
+            return result
+        except PublicSecurityError as exc:
+            if request_claimed:
+                await release_owned_request(cache_id)
+            code, http_status = _public_security_disposition(exc)
+            raise _error(code, http_status, retryable=False) from exc
+        except ValueError as exc:
+            if request_claimed:
+                await release_owned_request(cache_id)
+            raise _error("invalid_scene_action", 422, retryable=False) from exc
+        except Exception:
+            if request_claimed:
+                await release_owned_request(cache_id)
+            raise
+        finally:
+            if owns_subject:
+                await release_subject_generation(subject, cache_id)
+
     @app.post("/public/v1/chat/stream")
     async def chat_stream(request: Request, payload: ChatRequest):
+        return await chat_stream_impl(request, payload)
+
+    @app.post("/public/v2/chat/stream")
+    async def dialogue_v2_chat_stream(request: Request, envelope: DialogueV2ChatRequest):
+        request.state.public_request_id = str(envelope.chat.request_id)
+        replay_only = recovery_only(request)
+        if not replay_only:
+            if not any((public_settings.dialogue_domains_v2, public_settings.scene_actions_v2,
+                        public_settings.session_memory_v2)):
+                raise _error("dialogue_v2_disabled", 503, retryable=False)
+            try:
+                get_dialogue_v2_service().validate_chat(envelope, request.state.subject_hash)
+            except PublicSecurityError as exc:
+                code, status = _public_security_disposition(exc)
+                raise _error(code, status, retryable=False) from exc
+            except ValueError as exc:
+                raise _error("invalid_dialogue_context", 422, retryable=False) from exc
+
+        async def generate(subject, spec, api_key, *, gate_reserved=False):
+            return await get_dialogue_v2_service().chat(
+                envelope, subject, spec, api_key, gate_reserved=gate_reserved,
+            )
+
+        return await chat_stream_impl(
+            request, envelope.chat, business_body=_dialogue_v2_request_body(envelope),
+            generate_callback=generate, recovery=replay_only, dialogue_v2=True,
+        )
+
+    async def chat_stream_impl(
+        request: Request, payload: ChatRequest, *, business_body=None,
+        generate_callback=None, recovery=False, dialogue_v2=False,
+    ):
         request_started = time.monotonic()
         # The rollout switch controls new upstream publication, never whether
         # an opted-in client can recover an already durable prefix.
@@ -1330,50 +1503,53 @@ def create_app(
             key.lower() == b"x-snow-stream-version" and value == b"2"
             for key, value in request.scope.get("headers", [])
         )
-        publish_v2 = stream_v2 and public_settings.verified_block_stream
-        spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        # Scene/context mutations require complete validation and one durable
+        # result ACK. Existing v1 verified publication remains unchanged.
+        publish_v2 = stream_v2 and public_settings.verified_block_stream and not dialogue_v2
+        spec = provider_spec(payload.provider, tuple(PROVIDERS) if recovery else public_settings.enabled_providers)
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported", 422)
         public_model = redact_sensitive_text(payload.model, 200)
-        chat_service.ensure_character_available(payload.character_id)
+        if not recovery:
+            chat_service.ensure_character_available(payload.character_id)
         try:
             # Validate a structured invitation before opening BYOK, claiming
             # idempotency, or reserving provider budget. Hidden, forged, and
             # message-mismatched destinations therefore cost no model call.
-            chat_service.validate_movement_request(payload)
+            if not recovery and not dialogue_v2:
+                chat_service.validate_movement_request(payload)
         except ValueError as exc:
             raise _error("invalid_movement_location", 422) from exc
         try:
-            canonical_blocks = chat_service.validate_content_blocks(
-                payload.content_blocks,
-                payload.communication_channel,
+            canonical_blocks = (
+                [block.model_dump() for block in payload.content_blocks] if recovery
+                else chat_service.validate_content_blocks(payload.content_blocks, payload.communication_channel)
             )
         except ValueError as exc:
             raise _error("sticker_unavailable", 422) from exc
         for original, canonical in zip(payload.content_blocks, canonical_blocks):
             if canonical.get("type") == "sticker":
                 original.caption = str(canonical.get("caption") or "")
-        claims = open_byok_credential(
-            public_settings,
-            anonymous_id=request.state.anonymous_id,
-            token=payload.credential,
-            expected_provider=spec.provider_id,
-        )
-        request_body = _model_request_body(payload)
+        claims = ({"api_key": ""} if recovery else open_byok_credential(
+            public_settings, anonymous_id=request.state.anonymous_id,
+            token=payload.credential, expected_provider=spec.provider_id,
+        ))
+        request_body = business_body if business_body is not None else _model_request_body(payload)
         request_id = str(payload.request_id)
         request.state.public_request_id = request_id
         subject = request.state.subject_hash
-        owns_subject = await acquire_subject_generation(subject, request_id)
+        owns_subject = False if recovery else await acquire_subject_generation(subject, request_id)
         try:
-            claim_status, cached = await claim_owned_request(
-                request_id,
-                subject,
-                _request_hash(request_body),
+            claim_status, cached = (
+                await async_store.call("lookup_request", request_id, subject, _request_hash(request_body))
+                if recovery else await claim_owned_request(request_id, subject, _request_hash(request_body))
             )
         except Exception:
             if owns_subject:
                 await release_subject_generation(subject, request_id)
             raise
+        if claim_status == "missing":
+            raise _error("request_result_unavailable", 410, request_id=request_id, retryable=False)
         owns_subject = owns_subject or claim_status == "claimed"
         if claim_status == "conflict":
             if owns_subject:
@@ -1398,7 +1574,7 @@ def create_app(
                 # same UUID until the cached terminal result is available.
                 if owns_subject:
                     await release_subject_generation(subject, request_id)
-                if stream_v2:
+                if stream_v2 or dialogue_v2:
                     remote_processing = True
                 else:
                     raise _error("request_in_progress", 409)
@@ -1479,13 +1655,18 @@ def create_app(
                         )
                     else:
                         with observe_generation(observer):
-                            generated = await chat_service.chat(
-                                payload,
-                                request.state.subject_hash,
-                                spec,
-                                str(claims["api_key"]),
-                                gate_reserved=generation_reserved,
-                            )
+                            if generate_callback is not None:
+                                generated = await generate_callback(
+                                    request.state.subject_hash, spec, str(claims["api_key"]),
+                                    gate_reserved=generation_reserved,
+                                )
+                            else:
+                                generated = await chat_service.chat(
+                                    payload, request.state.subject_hash, spec,
+                                    str(claims["api_key"]), gate_reserved=generation_reserved,
+                                )
+                            if dialogue_v2:
+                                _dialogue_v2_metadata(generated)
                 except GenerationBusy as exc:
                     exception_type = type(exc).__name__
                     terminal_stage = "generation_queue"
@@ -1879,6 +2060,8 @@ def create_app(
                 )
                 if safe_state_event:
                     state_event_payload["state_event"] = safe_state_event
+                if dialogue_v2:
+                    state_event_payload.update(_dialogue_v2_metadata(result_payload))
                 yield _sse("state", state_event_payload)
             internal_diagnostics = (
                 result_payload.get("diagnostics")
@@ -1955,6 +2138,7 @@ def create_app(
                         result_payload.get("recovery_action") or "none"
                     ),
                     **({"timings_ms": latency_metrics(internal_diagnostics)} if stream_v2 else {}),
+                    **(_dialogue_v2_metadata(result_payload) if dialogue_v2 else {}),
                 },
             )
 
@@ -2139,12 +2323,13 @@ def create_app(
             reference_id = str(payload.chat_request_id)
             context["chat_request_id"] = reference_id
             chat_result = None
-            # Arrival reactions keep the public UUID but use a separate cache
-            # namespace. Both lookups retain the same subject ownership check;
+            # Scene and arrival actions keep the public UUID but use separate
+            # cache namespaces. All retain the same subject ownership check;
             # feedback never regenerates or replays a provider request.
             for cache_id, request_kind in (
                 (reference_id, "chat"),
                 ("presence-arrival:" + reference_id, "presence_arrival"),
+                ("scene-action:" + reference_id, "scene_action"),
             ):
                 candidate = await async_store.call(
                     "request_result", cache_id, request.state.subject_hash

@@ -192,6 +192,9 @@ class PublicSettings:
     verified_block_stream: bool = False
     motion_v2: bool = True
     subscription_enabled: bool = False
+    dialogue_domains_v2: bool = False
+    scene_actions_v2: bool = False
+    session_memory_v2: bool = False
 
     @classmethod
     def from_environment(cls) -> "PublicSettings":
@@ -301,6 +304,9 @@ class PublicSettings:
             verified_block_stream=os.getenv("PUBLIC_VERIFIED_BLOCK_STREAM", "false").casefold() == "true",
             motion_v2=os.getenv("PUBLIC_MOTION_V2", "true").casefold() == "true",
             subscription_enabled=os.getenv("PUBLIC_SUBSCRIPTION_ENABLED", "false").casefold() == "true",
+            dialogue_domains_v2=os.getenv("PUBLIC_DIALOGUE_DOMAINS_V2", "false").casefold() == "true",
+            scene_actions_v2=os.getenv("PUBLIC_SCENE_ACTIONS_V2", "false").casefold() == "true",
+            session_memory_v2=os.getenv("PUBLIC_SESSION_MEMORY_V2", "false").casefold() == "true",
         )
 
     @property
