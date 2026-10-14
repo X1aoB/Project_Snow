@@ -17,10 +17,16 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/dialogue-context.js",
+      "public_url": "/dialogue-context.js",
+      "required_html": false
+    },
+    {
       "source": "public_frontend/app.js",
       "public_url": "/app.js",
       "dependencies": [
         "/modules/runtime.js",
+        "/dialogue-context.js",
         "/assets/avatars/longyan-neutral-96.webp",
         "/assets/avatars/longyan-neutral-200.webp"
       ]

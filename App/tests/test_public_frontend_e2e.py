@@ -311,7 +311,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             self._json(manifest)
             return
         assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
-        if (path.startswith("/modules/") and path.endswith(".js")) or (path.startswith("/statistics/") and path.endswith((".mjs", ".css"))):
+        if path == "/dialogue-context.js" or (path.startswith("/modules/") and path.endswith(".js")) or (path.startswith("/statistics/") and path.endswith((".mjs", ".css"))):
             candidate = (PUBLIC_ROOT / path.lstrip("/")).resolve()
             if candidate.is_relative_to(PUBLIC_ROOT.resolve()) and candidate.is_file():
                 assets[path] = candidate.relative_to(PUBLIC_ROOT.resolve()).as_posix()
