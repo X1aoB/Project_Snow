@@ -38,6 +38,15 @@ Version 0.9.6 reuses without modification the 18 content-hashed, lossless WebP M
 
 ## Candidate and public-access gate
 
+Before preparing an acceptance receipt or promoting production, complete the
+[release-announcement checklist](announcements.md#上线前必做检查). Commit the
+announcement with the release, run `scripts/check_release_announcement.py`
+against the exact current and candidate SHAs, and retain the report/hash in the
+acceptance evidence. Check the actual candidate feed, its unread notice and
+`no-store` policy; repeat the feed/content check through public HTTPS after
+promotion. Preserve historical notices. Do not announce unverified targets or
+disabled capabilities as shipped, or overwrite a retained release's frontend.
+
 Preserve the currently configured Cloudflare Access policy throughout inactive-colour staging, candidate acceptance and promotion; the 0.9.6 release must not add, remove or alter an Access policy. Do not add or modify a MyWebsite play button. Test the candidate through the private SSH tunnel, then exercise the public site using the access state already in force. A security or abuse anomaly restores Access first; an application failure rolls back the exact prior colour and release pins. Do not modify or reload SSH configuration, and verify a fresh root key session immediately before and after traffic promotion.
 
 `PUBLIC_ENABLED_PROVIDERS` starts empty; add a provider ID only after a real-key smoke test for that provider succeeds. Every user action is capped at two provider HTTP calls. Compatibility probes and uncertain-timeout retries are disabled so a browser recovery can reuse the original request ID and server idempotency result without duplicate billing.
