@@ -24,27 +24,42 @@ def resolve_invitation(frame: TurnFrame, catalog: dict[str, dict[str, Any]], *,
                        selected_location: str = "", current_location: str = "",
                        active_invitation: Any = None) -> SceneIntent | None:
     candidates: dict[str, tuple[dict[str, Any], str]] = {}
+    control = None
     # A short refusal/defer applies only to an independently signed agreement,
     # never to a destination reconstructed from a transcript.
     if active_invitation and active_invitation.status in {"proposed", "accepted", "deferred", "clarify"}:
         key = active_invitation.location_id
         controls = [clause for clause in frame.clauses if clause.domain == "casual"
                     and not clause.quoted and clause.time_scope in {"now", "future"}]
+        controls = [clause for clause in controls if not (
+            (places := {location_id for location_id, definition in catalog.items()
+                        if any(alias and alias in clause.text for alias in definition.get("explicit_aliases") or ())})
+            and key not in places)]
         cancel = any(clause.action == "movement_decline"
                      and (clause.time_scope == "now" or active_invitation.time_scope == "future")
                      and not re.search(r"[？?]|要不要|能不能", clause.text)
+                     and ("取消" not in clause.text or re.search(r"邀请|邀约|约定|见面|赴约", clause.text)
+                          or re.fullmatch(r"(?:那就|还是|我们|我|先)?取消(?:吧|了)?[。！!\s]*", clause.text))
                      for clause in controls)
         defer = any(clause.time_scope == "future" and re.search(r"那就|改成|改到|改天|下次|换到|改为", clause.text)
                     for clause in controls)
         if key in catalog and (cancel or defer):
             definition = catalog[key]
-            return SceneIntent(key, active_invitation.activity_id, definition,
-                               "now" if cancel else "future", "cancel" if cancel else "defer")
+            control = SceneIntent(key, active_invitation.activity_id, definition,
+                                  "now" if cancel else "future", "cancel" if cancel else "defer")
+    if any(not clause.quoted and clause.domain == "casual" and clause.time_scope == "now"
+           and re.search(r"(?:不是|并非|不算).{0,6}(?:邀请|邀约|叫你|让你)", clause.text)
+           for clause in frame.clauses):
+        return None
     for clause in frame.clauses:
         if clause.domain != "casual" or clause.time_scope not in {"now", "future"} or clause.quoted or clause.negated:
             continue
         text = clause.text
         if not _MOVE.search(text):
+            continue
+        if re.search(r"谁|哪位|是谁|怎么走|如何去|路线|(?:要|需).{0,3}多久", text):
+            continue
+        if clause.action == "none" and not re.match(r"^(?:(?:那就|现在|一起|我们)[，,\s]*)?(?:去|来|走|出发)", text):
             continue
         if re.search(r"喜欢|习惯|经常|通常|为什么|意思|怎么去|怎样去", text) and not re.search(
             r"一起|陪我|跟我|和我|要不要|想不想|邀请|走吧|好吗|好不好|吧", text
@@ -68,9 +83,12 @@ def resolve_invitation(frame: TurnFrame, catalog: dict[str, dict[str, Any]], *,
                     matches = [(key, catalog[key])]
             elif re.search(r"你那里|你那边|去找你|来找你", text):
                 matches = [(key, value) for key, value in catalog.items()
-                           if current_location and current_location == value.get("location")]
+                           if current_location and current_location in {value.get("location"),
+                               *(value.get("explicit_aliases") or ())}]
         for key, definition in matches:
             candidates[key] = (definition, clause.time_scope)
+    if not candidates and control is not None:
+        return control
     if len(candidates) != 1:
         return None
     location_id, (definition, time_scope) = next(iter(candidates.items()))
