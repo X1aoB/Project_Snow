@@ -65,6 +65,7 @@ const state = {
   modeTransitionController: null,
   requestStatusByCharacter: new Map(),
   requestRecoveryByCharacter: new Map(),
+  requestStatusOwnerByCharacter: new Map(),
   feedbackMessageId: "",
   arrivalPending: false,
   autoSummaryEnabled: true,
@@ -722,18 +723,20 @@ function finishReceivedPresentation() {
   if (state.typewriter.fullText) finishTypewriter(state.typewriter.key, state.typewriter.fullText);
   syncFastForward();
 }
-async function deliverCompletedReply(characterId, requestId, message) {
-  const ready = { requestId, messageId: message.id, controller: new AbortController() };
+async function deliverCompletedReply(characterId, requestId, message, visibleCount = 0) {
+  const ready = { requestId, messageId: message.id, visibleCount, controller: new AbortController() };
   state.completedPresentationByCharacter.set(characterId, ready);
   syncFastForward();
   try {
     await waitForNaturalReply(requestId, ready.controller.signal);
     state.readyReplyIds.delete(message.id);
     if (!ownsTypingState(characterId, requestId)) return;
-    updateTypingPhase(characterId, requestId, "presenting");
-    await presentAssistantTurn(characterId, requestId, message);
+    await presentAssistantTurn(characterId, requestId, message, { visibleCount });
   } catch (error) {
-    if (error?.name !== "AbortError") showBanner("回复已经保存，可在记录中查看。");
+    if (error?.name !== "AbortError") {
+      cancelPresentationQueue(characterId, requestId, { render: false });
+      showBanner("回复已经保存，可在记录中查看。");
+    }
   } finally {
     state.readyReplyIds.delete(message.id);
     if (state.completedPresentationByCharacter.get(characterId) === ready) state.completedPresentationByCharacter.delete(characterId);
@@ -1404,7 +1407,7 @@ function statePackageOrder(token) {
   const scheduleDate = plain(decoded.schedule_date || decoded.world?.schedule_date || decoded.date).match(/^\d{4}-\d{2}-\d{2}$/)?.[0] || "";
   return { scheduleDate, revision: Number(decoded.revision || decoded.world?.revision || 0) };
 }
-async function saveWorldPackage(token) {
+async function saveWorldPackage(token, { persist = true } = {}) {
   if (!token) return false;
   const incoming = statePackageOrder(token);
   const current = statePackageOrder(state.worldPackage || "");
@@ -1415,7 +1418,7 @@ async function saveWorldPackage(token) {
   if (state.worldPackage && incoming.scheduleDate && current.scheduleDate && incoming.scheduleDate < current.scheduleDate) return false;
   if (state.worldPackage && incoming.scheduleDate && current.scheduleDate && incoming.scheduleDate > current.scheduleDate) {
     state.worldPackage = token;
-    await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
+    if (persist) await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
     return true;
   }
   if (state.worldPackage && incoming.scheduleDate !== current.scheduleDate) {
@@ -1423,7 +1426,7 @@ async function saveWorldPackage(token) {
     // late response must never replace a dated package from the current day.
     if (!incoming.scheduleDate) return false;
     state.worldPackage = token;
-    await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
+    if (persist) await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
     return true;
   }
   if (state.worldPackage && incoming.revision < current.revision) return false;
@@ -1431,7 +1434,7 @@ async function saveWorldPackage(token) {
     return token === state.worldPackage;
   }
   state.worldPackage = token;
-  await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
+  if (persist) await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
   return true;
 }
 function statePackageRecoveryError(error) {
@@ -2409,7 +2412,7 @@ function globalRequestBusy() {
 function presentationFor(characterId = state.selected) {
   return characterId ? state.presentationByCharacter.get(characterId) || null : null;
 }
-function cancelPresentationQueue(characterId = state.selected, requestId = "") {
+function cancelPresentationQueue(characterId = state.selected, requestId = "", { render = true } = {}) {
   const ready = state.completedPresentationByCharacter.get(characterId);
   if (ready && (!requestId || ready.requestId === requestId)) {
     state.readyReplyIds.delete(ready.messageId);
@@ -2427,7 +2430,7 @@ function cancelPresentationQueue(characterId = state.selected, requestId = "") {
   if (queue.timer) window.clearTimeout(queue.timer);
   cancelStageMotion(characterId);
   state.presentationByCharacter.delete(characterId);
-  if (characterId === state.selected) {
+  if (render && characterId === state.selected) {
     window.clearTimeout(state.typewriter.timer);
     state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
     renderTimeline();
@@ -2542,6 +2545,10 @@ function inPersonSurfaceText(blocks, type) {
 function visibleBlocksFor(message) {
   const queue = message ? presentationFor(message.characterId || state.selected) : null;
   if (queue && queue.messageId === message?.id) return queue.blocks.slice(0, queue.visibleCount);
+  const ready = state.completedPresentationByCharacter.get(message?.characterId);
+  if (ready?.messageId === message?.id) return presentationBlocks(message).slice(0, ready.visibleCount);
+  const streaming = state.streamingPresentationByCharacter.get(message?.characterId);
+  if (streaming?.requestId === message?.requestId) return presentationBlocks(message).slice(0, streaming.visibleCount);
   if (message?.communicationChannel === "in_person") {
     return message?.contentBlocks?.length ? message.contentBlocks : message?.displayBlocks || [];
   }
@@ -2578,18 +2585,18 @@ async function preloadStickerBlock(block, timeoutMs = 900, signal = undefined) {
   });
   await Promise.race([loading, abortableDelay(timeoutMs, signal)]);
 }
-async function presentAssistantTurn(characterId, requestId, message) {
+async function presentAssistantTurn(characterId, requestId, message, { visibleCount = 0 } = {}) {
   if (!ownsTypingState(characterId, requestId)) return false;
   const blocks = presentationBlocks(message);
   const inPerson = message.communicationChannel === "in_person";
-  cancelPresentationQueue(characterId);
+  cancelPresentationQueue(characterId, "", { render: false });
   if (!blocks.length || !ownsTypingState(characterId, requestId)) return false;
   const queue = {
     characterId,
     requestId,
     messageId: message.id,
     blocks,
-    visibleCount: inPerson || message.committedBlocks?.length ? blocks.length : 1,
+    visibleCount: inPerson ? blocks.length : Math.max(1, Math.min(blocks.length, visibleCount)),
     timer: 0,
     cancelled: false,
     controller: new AbortController(),
@@ -2601,6 +2608,7 @@ async function presentAssistantTurn(characterId, requestId, message) {
     ? blocks.map((_block, index) => index + 1)
     : [1, 2, 3, blocks.length];
   state.presentationByCharacter.set(characterId, queue);
+  updateTypingPhase(characterId, requestId, "presenting");
   syncFastForward();
   if (characterId === state.selected) {
     renderTimeline();
@@ -2617,11 +2625,13 @@ async function presentAssistantTurn(characterId, requestId, message) {
         );
       }
     } else {
-      let spent = 0;
+      const metrics = replyTiming(requestId);
+      let spent = metrics?.segmentSpent || 0;
       for (let step = 1; step < revealCounts.length && queue.visibleCount < blocks.length; step += 1) {
         if (!ownsPresentation()) return false;
         const previousCount = revealCounts[step - 1];
         const visibleCount = revealCounts[step];
+        if (visibleCount <= queue.visibleCount) continue;
         const revealed = blocks.slice(previousCount, visibleCount);
         const hasSticker = revealed.some((item) => item.type === "sticker");
         const previousTextLength = [...plain(blocks[Math.max(0, previousCount - 1)]?.text)].length;
@@ -2640,16 +2650,18 @@ async function presentAssistantTurn(characterId, requestId, message) {
           // Artwork decoding never holds back already available text.
           void preload.catch(() => {});
           const began = performance.now();
-          while (!queue.skip && !quietPresentation() && performance.now() - began < totalWait) {
-            await abortableDelay(Math.min(32, totalWait - (performance.now() - began)), queue.controller.signal);
+          const wait = Math.max(0, totalWait - (metrics?.lastBodyPaintAt ? began - metrics.lastBodyPaintAt : 0));
+          while (!queue.skip && !quietPresentation() && performance.now() - began < wait) {
+            await abortableDelay(Math.min(32, wait - (performance.now() - began)), queue.controller.signal);
           }
-          const metrics = replyTiming(requestId);
           if (metrics) metrics.naturalWaitMs += performance.now() - began;
           spent += totalWait;
+          if (metrics) metrics.segmentSpent = spent;
         } else if (!reducedMotion()) await Promise.all([abortableDelay(totalWait - readingWait, queue.controller.signal), preload]);
         else await preload;
         if (!ownsPresentation()) return false;
         queue.visibleCount = queue.skip ? blocks.length : visibleCount;
+        if (metrics) metrics.lastBodyPaintAt = performance.now();
         updateTypingPhase(characterId, requestId, "presenting");
         if (characterId === state.selected) {
           renderTimeline();
@@ -2686,11 +2698,17 @@ function typingIndicatorMarkup(character, { includeAvatar = true } = {}) {
 function renderRequestStatus() {
   const target = $("request-status");
   if (!target) return;
-  const pending = typingStateFor();
+  const thread = currentThread();
+  const channel = thread?.channel || "text";
+  const pendingState = typingStateFor();
+  const pending = pendingState?.channel === channel ? pendingState : null;
+  const statusKey = requestStatusKey(state.selected, channel);
+  const owner = state.requestStatusOwnerByCharacter.get(statusKey);
+  const belongsToSegment = !owner?.segmentId || owner.segmentId === thread?.conversationSegmentId;
   target.className = "request-status";
   target.setAttribute("aria-busy", pending ? "true" : "false");
-  target.textContent = state.requestStatusByCharacter.get(state.selected) || "";
-  if (state.requestRecoveryByCharacter.get(state.selected) === "refresh_scene") {
+  target.textContent = belongsToSegment ? state.requestStatusByCharacter.get(statusKey) || "" : "";
+  if (belongsToSegment && state.requestRecoveryByCharacter.get(statusKey) === "refresh_scene") {
     const refresh = document.createElement("button");
     refresh.type = "button";
     refresh.className = "request-recovery";
@@ -2701,7 +2719,7 @@ function renderRequestStatus() {
       refresh.disabled = true;
       try {
         await resolvePresence();
-        state.requestRecoveryByCharacter.delete(state.selected);
+        state.requestRecoveryByCharacter.delete(statusKey);
         setRequestStatus(state.selected, "场景已重新读取");
       } catch (error) {
         setRequestStatus(state.selected, `重新读取失败：${displayError(error)}`, "", "refresh_scene");
@@ -2716,8 +2734,9 @@ function renderRequestStatus() {
   if (!pending && currentThread()?.channel === "in_person") {
     const failedMessage = [...(currentThread()?.messages || [])]
       .reverse()
-      .find((message) => message.role === "user" && message.status === "failed");
-    if (failedMessage) {
+      .find((message) => message.role === "user" && message.communicationChannel === channel
+        && (!thread.conversationSegmentId || message.conversationSegmentId === thread.conversationSegmentId));
+    if (failedMessage?.status === "failed") {
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "request-retry";
@@ -2729,18 +2748,30 @@ function renderRequestStatus() {
     }
   }
   const stop = $("stop-waiting");
-  if (stop) stop.hidden = !pending || ["arrival", "presenting"].includes(pending.phase);
+  if (stop) stop.hidden = !pending || ["waiting", "arrival", "presenting"].includes(pending.phase);
   const row = target.closest(".request-status-row");
   if (row) row.hidden = !target.textContent.trim() && (!stop || stop.hidden);
   syncFastForward();
 }
+function requestStatusKey(characterId, channel = currentThread()?.channel || "text") {
+  return `${characterId}:${channel === "in_person" ? "in_person" : "text"}`;
+}
 function setRequestStatus(characterId, message, requestId = "", recoveryAction = "") {
   if (!characterId) return;
   if (requestId && !ownsTypingState(characterId, requestId)) return;
-  if (message) state.requestStatusByCharacter.set(characterId, plain(message));
-  else state.requestStatusByCharacter.delete(characterId);
-  if (recoveryAction) state.requestRecoveryByCharacter.set(characterId, recoveryAction);
-  else state.requestRecoveryByCharacter.delete(characterId);
+  const thread = state.threads.get(characterId);
+  const requestMessage = requestId ? thread?.messages.find(item => item.requestId === requestId) : null;
+  const channel = requestMessage?.communicationChannel || typingStateFor(characterId)?.channel || thread?.channel || "text";
+  const key = requestStatusKey(characterId, channel);
+  if (message) {
+    state.requestStatusByCharacter.set(key, plain(message));
+    state.requestStatusOwnerByCharacter.set(key, { requestId, segmentId: requestMessage?.conversationSegmentId || thread?.conversationSegmentId || "" });
+  } else {
+    state.requestStatusByCharacter.delete(key);
+    state.requestStatusOwnerByCharacter.delete(key);
+  }
+  if (recoveryAction) state.requestRecoveryByCharacter.set(key, recoveryAction);
+  else state.requestRecoveryByCharacter.delete(key);
   if (characterId === state.selected) renderRequestStatus();
 }
 function setTypingState({ characterId, requestId, channel, phase = "typing" }) {
@@ -4117,6 +4148,33 @@ function timelineNearBottom() {
   const timeline = $("timeline");
   return !timeline || timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 72;
 }
+let timelineScrollSnapshot = null;
+function rememberTimelineViewport() {
+  const timeline = $("timeline");
+  if (!timeline || $("text-surface").hidden) return;
+  const top = timeline.getBoundingClientRect().top;
+  const anchor = [...timeline.querySelectorAll("[data-message-id]")].find(node => node.getBoundingClientRect().bottom > top);
+  timelineScrollSnapshot = { characterId: state.selected, top: timeline.scrollTop, nearBottom: timelineNearBottom(), width: timeline.clientWidth, height: timeline.clientHeight,
+    anchorId: anchor?.dataset.messageId || "", anchorOffset: anchor ? anchor.getBoundingClientRect().top - top : null };
+}
+const timelineResizeObserver = new ResizeObserver(() => {
+  const timeline = $("timeline");
+  const snapshot = timelineScrollSnapshot;
+  if (!snapshot || snapshot.characterId !== state.selected || $("text-surface").hidden) return;
+  if (snapshot.nearBottom && !state.timelineEndId) timeline.scrollTop = timeline.scrollHeight;
+  else {
+    const anchor = [...timeline.querySelectorAll("[data-message-id]")].find(node => node.dataset.messageId === snapshot.anchorId);
+    timeline.scrollTop = snapshot.top;
+    if (anchor && snapshot.anchorOffset !== null) timeline.scrollTop += anchor.getBoundingClientRect().top - timeline.getBoundingClientRect().top - snapshot.anchorOffset;
+  }
+  rememberTimelineViewport();
+});
+function observeTimelineViewport() {
+  timelineResizeObserver.disconnect();
+  timelineResizeObserver.observe($("timeline"));
+  $("timeline").querySelectorAll(".message-body").forEach(node => timelineResizeObserver.observe(node));
+  rememberTimelineViewport();
+}
 function starterPromptsMarkup() {
   return `<div class="starter-prompts" aria-label="开场建议"><button type="button" data-starter-prompt="晚上好，今天过得怎么样？">问候近况</button><button type="button" data-starter-prompt="最近有什么想聊的事吗？">聊聊最近</button><button type="button" data-starter-prompt="要一起去休息区喝杯茶吗？">邀请喝茶</button></div>`;
 }
@@ -4221,8 +4279,17 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   const window = historyWindow(allMessages, state.timelineEndId, state.timelineVisibleLimit);
   const messages = window.messages;
   const timeline = $("timeline");
-  const wasNearBottom = timelineNearBottom();
-  const previousDistance = timeline.scrollHeight - timeline.scrollTop;
+  timeline.style.overflowAnchor = "none";
+  // Automatic anchoring is immediate. CSS smooth scrolling can otherwise
+  // leave every render reading an intermediate position from the last update.
+  timeline.style.scrollBehavior = "auto";
+  const viewport = timelineScrollSnapshot?.characterId === state.selected ? timelineScrollSnapshot : null;
+  const wasNearBottom = viewport ? viewport.nearBottom : timelineNearBottom();
+  const previousTop = viewport?.top ?? timeline.scrollTop;
+  const timelineTop = timeline.getBoundingClientRect().top;
+  const anchorNode = [...timeline.querySelectorAll("[data-message-id]")].find(node => node.getBoundingClientRect().bottom > timelineTop);
+  const anchorId = viewport?.anchorId || anchorNode?.dataset.messageId;
+  const anchorOffset = viewport?.anchorOffset ?? (anchorNode ? anchorNode.getBoundingClientRect().top - timelineTop : null);
   const previousCount = Number(timeline.dataset.messageCount || 0);
   const older = thread?.hasOlderMessages || window.start > 0 ? '<button id="load-older-messages" class="secondary-button load-older-messages" type="button">加载更早的 40 条</button>' : "";
   const newer = window.hasNewer ? '<button id="load-newer-messages" class="secondary-button load-older-messages" type="button">查看较新的 40 条</button>' : "";
@@ -4230,6 +4297,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     reconcileMarkup(timeline, `${older}${timelineTypingMarkup()}<div class="empty-conversation"><p>从一句问候开始吧。历史只保存在此浏览器。</p>${starterPromptsMarkup()}</div>`);
     timeline.dataset.messageCount = "0";
     bindTimelineActions();
+    observeTimelineViewport();
     return;
   }
   // Resolve the device locale/timezone once per render, keeping live changes
@@ -4266,10 +4334,15 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     timeline.scrollTop = timeline.scrollHeight;
     $("new-replies").hidden = !window.hasNewer;
   } else if (!preserveScroll) {
-    timeline.scrollTop = Math.max(0, timeline.scrollHeight - previousDistance);
+    // Keep the same historical row at the same viewport position when reply
+    // bubbles, media or time labels are appended below the reader.
+    const anchor = [...timeline.querySelectorAll("[data-message-id]")].find(node => node.dataset.messageId === anchorId);
+    timeline.scrollTop = previousTop;
+    if (anchor && anchorOffset !== null) timeline.scrollTop += anchor.getBoundingClientRect().top - timeline.getBoundingClientRect().top - anchorOffset;
     if (newMessages && messages[messages.length - 1]?.role === "assistant") $("new-replies").hidden = false;
   }
   sampleVisibleReplyPaints();
+  observeTimelineViewport();
   const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant" && message.status === "sent" && !presentationFor()?.messageId);
   if (latestAssistant && timeline.dataset.announcedMessageId !== latestAssistant.id) {
     timeline.dataset.announcedMessageId = latestAssistant.id;
@@ -4277,7 +4350,10 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   }
 }
 function latestInPersonMessage(role = "") {
-  return [...(currentThread()?.messages || [])].reverse().find((message) => !state.readyReplyIds.has(message.id) && message.communicationChannel === "in_person" && (message.status !== "failed" || message.partial) && (!role || message.role === role)) || null;
+  const thread = currentThread();
+  return [...(thread?.messages || [])].reverse().find((message) => !state.readyReplyIds.has(message.id)
+    && (!thread.conversationSegmentId || message.conversationSegmentId === thread.conversationSegmentId)
+    && message.communicationChannel === "in_person" && (message.status !== "failed" || message.partial) && (!role || message.role === role)) || null;
 }
 function typewriterCompleted(key, value) {
   const announcement = value
@@ -4491,8 +4567,10 @@ function renderStageSpeech(assistantMessage) {
   const visibleAssistantBlocks = assistantMessage ? visibleBlocksFor(assistantMessage) : [];
   const action = inPersonSurfaceText(visibleAssistantBlocks, "action");
   const completeSpeech = inPersonSurfaceText(visibleAssistantBlocks, "speech");
-  $("stage-narration").textContent = action || plain(state.scene?.character_activity);
-  const speech = completeSpeech || "场景已经建立。你可以说些什么，也可以只描述一个动作。";
+  const conversationStarted = (currentThread()?.messages || []).some(message => message.communicationChannel === "in_person"
+    && message.source !== "presence_arrival" && message.conversationSegmentId === currentThread()?.conversationSegmentId);
+  $("stage-narration").textContent = action || (!assistantMessage && !conversationStarted ? plain(state.scene?.character_activity) : "");
+  const speech = completeSpeech || (!assistantMessage && !conversationStarted ? "场景已经建立。你可以说些什么，也可以只描述一个动作。" : "");
   const speechKey = assistantMessage
     ? completeSpeech
       ? speechTypewriterKey(assistantMessage)
@@ -4652,6 +4730,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   // Only the selected thread owns the visible surface and composer controls.
   if (thread && thread.characterId !== state.selected) return;
   const composerChanged = state.composerDraftKey !== draftKey(state.selected, channel);
+  if (channel === "in_person" && !$("text-surface").hidden) rememberTimelineViewport();
   const snapshot = prepareSurfaceMotion(channel);
   if (composerChanged) state.actionComposerOpen = false;
   if (channel === "in_person") state.selectedSticker = null;
@@ -4836,6 +4915,7 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
   let stageMotion = "none";
   let performanceId = "";
   let serverTimings = null;
+  let statePersistence = Promise.resolve();
   const handlePacket = async (packet) => {
     const event = (packet.match(/^event: (.+)$/m) || [])[1];
     const data = (packet.match(/^data: (.+)$/m) || [])[1];
@@ -4843,7 +4923,11 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
     const payload = JSON.parse(data);
     if (committedReply && event === "progress" && ownsTypingState(characterId, requestId)) {
       const labels = { queued: "正在排队…", preparing: "正在整理这次对话…", retrieving: "正在回想相关的事…", generating: "正在回复…", validating: "正在确认回复…", saving: "正在保存回复…" };
-      if (labels[payload.phase]) setRequestStatus(characterId, labels[payload.phase], requestId);
+      const timing = replyTiming(requestId);
+      if (labels[payload.phase]) {
+        if (timing) timing.pendingProgressText = labels[payload.phase];
+        if (timing?.feedbackAllowed) setRequestStatus(characterId, labels[payload.phase], requestId);
+      }
     }
     if (committedReply && event === "committed_block") {
       if (committedReply.accept(payload)) onCommitted?.();
@@ -4866,10 +4950,18 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
     }
     if (event === "state") {
       if (ownsTypingState(characterId, requestId)) {
-        const accepted = await saveWorldPackage(payload.state_package);
+        // Apply the same signed-package ordering gate in memory first. Local
+        // disk failures cannot interrupt reading a server-confirmed done packet.
+        const accepted = await saveWorldPackage(payload.state_package, { persist: false });
         if (accepted) {
           pendingSceneState = payload.scene_state || pendingSceneState;
           pendingStateEvent = payload.state_event || pendingStateEvent;
+          const token = payload.state_package;
+          statePersistence = statePersistence.then(async () => {
+            if (state.worldPackage !== token) return;
+            const order = statePackageOrder(token);
+            await storePut("app_state", { key: "world", statePackage: token, revision: order.revision, scheduleDate: order.scheduleDate });
+          }).catch(() => { useMemoryStorage(); });
         }
       }
     }
@@ -4884,7 +4976,8 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       expressionState = normalizeExpressionState(payload.expression_state, returnedChannel);
       stageMotion = normalizeStageMotion(payload.stage_motion, returnedChannel);
       performanceId = normalizePerformanceId(payload.performance_id, returnedChannel);
-      contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
+      contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel);
+      if (!contentBlocks.length) contentBlocks = normalizeBlocks([...streamedBlocks.values()], returnedChannel);
     }
     if (event === "error") {
       const error = chatError(payload.code || "chat_failed", payload);
@@ -4893,19 +4986,29 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       throw error;
     }
   };
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const packets = buffer.split("\n\n");
-    buffer = packets.pop() || "";
-    for (const packet of packets) await handlePacket(packet);
+  try {
+    while (!completed) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const packets = buffer.split("\n\n");
+      buffer = packets.pop() || "";
+      for (const packet of packets) {
+        await handlePacket(packet);
+        if (completed) break;
+      }
+    }
+    if (!completed && buffer.trim()) await handlePacket(buffer);
+  } finally {
+    // A verified done packet completes the request. Waiting for a socket EOF
+    // can otherwise turn a saved reply into a timeout and offer a paid resend.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  if (buffer.trim()) await handlePacket(buffer);
   if (!completed) throw new Error("stream_disconnected");
-  if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, renderBlocksText([...streamedBlocks.values()]));
+  if (!contentBlocks.length) contentBlocks = normalizeBlocks([...streamedBlocks.values()], returnedChannel);
   if (!contentBlocks.length) throw new Error("upstream_invalid_response");
-  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction, expressionState, stageMotion, performanceId, serverTimings };
+  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction, expressionState, stageMotion, performanceId, serverTimings, statePersistence };
 }
 
 function recoverableChatError(error) {
@@ -4929,7 +5032,7 @@ function shouldReuseChatRequest(error) {
   const code = error instanceof Error ? error.message : plain(error);
   // retryable=false prevents another generation; uncertain results still need
   // their original UUID so a later reconciliation cannot charge a new request.
-  if (["public_database_unavailable", "subscription_result_unknown"].includes(code)) return true;
+  if (["public_database_unavailable", "subscription_result_unknown", "stream_commit_invalid", "stream_commit_conflict", "stream_commit_sequence", "upstream_invalid_response"].includes(code) || error instanceof SyntaxError) return true;
   if (error instanceof Error && error.retryable === false) return false;
   return error instanceof TypeError || [
     "stream_disconnected",
@@ -5061,6 +5164,12 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   const committedReply = streamV2 ? new CommittedReply(requestId, characterId) : null;
   let provisionalReply = thread.messages.find(message => message.role === "assistant" && message.requestId === requestId && message.committedBlocks?.length) || null;
   for (const event of provisionalReply?.committedBlocks || []) committedReply?.accept(event);
+  if (provisionalReply && committedReply?.blocks.length) {
+    // A manual recovery keeps its already delivered prefix on screen even if
+    // replay accepts only duplicate blocks before the terminal reply arrives.
+    state.streamingPresentationByCharacter.set(characterId, { requestId, receivedCount: committedReply.blocks.length,
+      visibleCount: Math.min(provisionalReply.contentBlocks.length, committedReply.blocks.length) });
+  }
   let commitDisplay = Promise.resolve();
   const commitPresentationController = new AbortController();
   const materializeCommitted = (count = committedReply?.blocks.length) => {
@@ -5106,18 +5215,22 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   const feedbackController = new AbortController();
   const typingGate = (async () => {
     try {
-      if (!quietPresentation()) await abortableDelay(requestDelay(requestId, "initial", latencyV2 ? 250 : 1800, latencyV2 ? 400 : 2600), feedbackController.signal);
+      if (!quietPresentation()) await abortableDelay(requestDelay(requestId, "initial", latencyV2 ? 500 : 1800, latencyV2 ? 750 : 2600), feedbackController.signal);
     } catch (error) {
       if (error?.name === "AbortError") return;
       throw error;
     }
-    if (!ownsRequest() || metrics.presented) return;
+    if (!ownsRequest() || metrics.presented || typingStateFor(characterId)?.networkDone) return;
+    metrics.feedbackAllowed = true;
     timing.shownAt = performance.now();
     updateTypingPhase(characterId, requestId, "typing");
+    if (metrics.pendingProgressText) setRequestStatus(characterId, metrics.pendingProgressText, requestId);
   })();
   userMessage.requestSnapshot = structuredClone(requestSnapshot);
   state.retrySnapshots.set(userMessage.id, { requestId, payload: structuredClone(requestSnapshot) });
   const userPersistence = dbPutThread(thread);
+  let terminalResult = null;
+  let confirmedAssistant = null;
   try {
     let result = null;
     let lastError = null;
@@ -5153,11 +5266,13 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       }
     }
     if (!result) throw lastError || new Error("stream_disconnected");
+    terminalResult = result;
     // A confirmed terminal reply is a completed business action. Cosmetic waiting
     // can no longer cancel it or expose a retry with a fresh paid-request ID.
     window.clearTimeout(requestTimeout);
     const activeRequest = state.chatRequestByCharacter.get(characterId);
     if (activeRequest?.requestId === requestId) activeRequest.completed = true;
+    await result.statePersistence;
     commitPresentationController.abort();
     metrics.serverTimings = result.serverTimings;
     if (!metrics.bodyReceivedAt) metrics.bodyReceivedAt = performance.now();
@@ -5174,8 +5289,10 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     userMessage.status = "sent";
     const completedReply = normalizeMessage({ id: provisionalReply?.id || id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, committedBlocks: committedReply?.snapshot || [], communicationChannel: result.returnedChannel, expressionState: result.expressionState, stageMotion: result.stageMotion, performanceId: result.performanceId, createdAt: provisionalReply?.createdAt || Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
     const assistantMessage = provisionalReply || completedReply;
+    confirmedAssistant = assistantMessage;
     metrics.messageId = assistantMessage.id;
-    if (latencyV2 && !provisionalReply) state.readyReplyIds.add(assistantMessage.id);
+    const receivedPresentationCount = state.streamingPresentationByCharacter.get(characterId)?.visibleCount || 0;
+    if (latencyV2 && !receivedPresentationCount) state.readyReplyIds.add(assistantMessage.id);
     if (provisionalReply) Object.assign(provisionalReply, completedReply);
     else { thread.messages.push(assistantMessage); thread.messageCount = Number(thread.messageCount || 0) + 1; }
     thread.turnCount += 1;
@@ -5189,7 +5306,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     if (latencyV2) {
       const pending = typingStateFor(characterId);
       if (pending?.requestId === requestId) pending.networkDone = true;
-      void deliverCompletedReply(characterId, requestId, assistantMessage);
+      void deliverCompletedReply(characterId, requestId, assistantMessage, receivedPresentationCount);
     } else {
       updateTypingPhase(characterId, requestId, "presenting");
       await presentAssistantTurn(characterId, requestId, assistantMessage);
@@ -5217,6 +5334,34 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     commitPresentationController.abort();
     await commitDisplay.catch(() => {});
     await userPersistence.catch(() => {});
+    if (terminalResult) {
+      // UI or storage faults after a verified terminal reply cannot downgrade
+      // the completed business action or create a fresh paid-request retry.
+      userMessage.status = "sent";
+      userMessage.errorCode = "";
+      userMessage.errorStage = "";
+      userMessage.requestSnapshot = null;
+      state.retrySnapshots.delete(userMessage.id);
+      if (!confirmedAssistant) {
+        confirmedAssistant = normalizeMessage({ id: provisionalReply?.id || id(), characterId, role: "assistant", contentBlocks: terminalResult.contentBlocks,
+          committedBlocks: committedReply?.snapshot || [], communicationChannel: terminalResult.returnedChannel, requestId,
+          expressionState: terminalResult.expressionState, stageMotion: terminalResult.stageMotion, performanceId: terminalResult.performanceId, movementStatus: terminalResult.movementStatus,
+          conversationSegmentId: thread.conversationSegmentId, createdAt: provisionalReply?.createdAt || Date.now(), usage: terminalResult.usage });
+        if (provisionalReply) Object.assign(provisionalReply, confirmedAssistant);
+        else { thread.messages.push(confirmedAssistant); thread.messageCount = Number(thread.messageCount || 0) + 1; }
+        thread.turnCount += 1;
+        thread.continuityDecision = "";
+        thread.lastActiveAt = Date.now();
+      }
+      cancelPresentationQueue(characterId, requestId, { render: false });
+      state.readyReplyIds.delete(confirmedAssistant.id);
+      state.latest.set(characterId, { requestId, errorCode: "", errorStage: "", usage: terminalResult.usage });
+      await dbPutThread(thread).catch(() => {});
+      completeReplyTiming(metrics, "success");
+      if (ownsRequest()) setRequestStatus(characterId, "回复已完成，已保留收到的内容。", requestId);
+      if (state.selected === characterId) showBanner("回复已经收到并保留。请重新打开记录查看。");
+      return;
+    }
     const error = caught?.name === "AbortError" ? new Error(requestTimedOut ? "provider_timeout" : "request_cancelled") : caught;
     if (!latencyV2 && !committedReply?.blocks.length && requestSnapshot.provider !== SUBSCRIPTION_PROVIDER && stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
       cancelPresentationQueue(characterId, requestId);
@@ -5688,13 +5833,21 @@ function openFeedback(messageId = "") {
 }
 function feedbackContextSelection() {
   const thread = currentThread() || { messages: [] };
-  const target = thread.messages.find((message) => message.id === state.feedbackMessageId) || [...thread.messages].reverse().find((message) => message.role === "assistant") || null;
+  const currentMessages = thread.messages.filter(message => message.communicationChannel === (thread.channel || "text")
+    && (!thread.conversationSegmentId || message.conversationSegmentId === thread.conversationSegmentId));
+  const selectedTurn = thread.messages.find(message => message.id === state.feedbackMessageId);
+  const lastUser = [...currentMessages].reverse().find(message => message.role === "user");
+  const target = selectedTurn || (lastUser?.status === "failed" ? lastUser : [...currentMessages].reverse().find(message => message.role === "assistant") || lastUser) || null;
   const targetIndex = target ? thread.messages.indexOf(target) : thread.messages.length;
-  const userMessage = [...thread.messages.slice(0, targetIndex)].reverse().find((message) => message.role === "user") || [...thread.messages].reverse().find((message) => message.role === "user") || {};
-  const latest = state.latest.get(state.selected) || {};
+  const userMessage = target?.role === "user" ? target : target?.source === "presence_arrival" ? {} : [...thread.messages.slice(0, targetIndex)].reverse()
+    .find(message => message.role === "user" && message.communicationChannel === target?.communicationChannel
+      && message.conversationSegmentId === target?.conversationSegmentId && (!target?.requestId || message.requestId === target.requestId)) || {};
+  const chatRequestId = target?.requestId || userMessage.requestId || null;
+  const latest = { requestId: chatRequestId, errorCode: target?.errorCode || userMessage.errorCode || "", errorStage: target?.errorStage || userMessage.errorStage || "" };
   const userBlocks = wireBlocks(normalizeBlocks(userMessage.contentBlocks, userMessage.communicationChannel || thread.channel || "text", userMessage.content || ""));
-  const assistantBlocks = wireBlocks(normalizeBlocks(target?.contentBlocks, target?.communicationChannel || thread.channel || "text", target?.content || ""));
-  return { thread, target, userMessage, latest, userBlocks, assistantBlocks, chatRequestId: target?.requestId || latest.requestId || userMessage.requestId || null };
+  const assistantBlocks = target?.role === "assistant"
+    ? wireBlocks(normalizeBlocks(target.contentBlocks, target.communicationChannel || thread.channel || "text", target.content || "")) : [];
+  return { thread, target, userMessage, latest, userBlocks, assistantBlocks, chatRequestId };
 }
 function renderFeedbackContextPreview() {
   const include = $("feedback-include-context").checked;
@@ -5704,12 +5857,12 @@ function renderFeedbackContextPreview() {
     $("feedback-context").textContent = "不会附带对话、角色、模型或请求诊断，只提交你填写的反馈正文与可选 QQ。";
     return;
   }
-  $("feedback-context").textContent = target ? `将附带 ${target.communicationChannel === "text" ? "文字通讯" : "面对面"}中的相关一问一答及请求编号。` : "将附带当前一问一答和请求编号；服务端会按编号关联内部诊断。";
+  $("feedback-context").textContent = target ? `将附带 ${target.communicationChannel === "text" ? "文字通讯" : "面对面"}中${target.source === "presence_arrival" ? "这次到场回应" : target.role === "user" && target.status === "failed" ? "这次失败请求的消息" : "相关一问一答"}及请求编号。` : "将附带当前一问一答和请求编号；服务端会按编号关联内部诊断。";
   const preview = [
-    userMessage.content || userBlocks.map((block) => block.text || `〔表情〕${block.caption || "表情"}`).join("\n"),
-    assistantBlocks.map((block) => block.text || `〔表情〕${block.caption || "表情"}`).join("\n"),
-  ].filter(Boolean);
-  $("feedback-context-preview-text").textContent = preview.length ? preview.map((text, index) => `${index ? "角色" : "你"}：${text}`).join("\n\n") : "当前没有可附带的对话内容。";
+    { role: "你", text: userMessage.content || userBlocks.map((block) => block.text || `〔表情〕${block.caption || "表情"}`).join("\n") },
+    { role: "角色", text: assistantBlocks.map((block) => block.text || `〔表情〕${block.caption || "表情"}`).join("\n") },
+  ].filter(item => item.text);
+  $("feedback-context-preview-text").textContent = preview.length ? preview.map(item => `${item.role}：${item.text}`).join("\n\n") : "当前没有可附带的对话内容。";
 }
 async function submitFeedback(event) {
   event.preventDefault();
@@ -5802,6 +5955,7 @@ $("new-replies").onclick = () => {
   $("new-replies").hidden = true;
 };
 $("timeline").addEventListener("scroll", () => {
+  rememberTimelineViewport();
   if (timelineNearBottom() && !state.timelineEndId) $("new-replies").hidden = true;
   sampleVisibleReplyPaints();
 }, { passive: true });
