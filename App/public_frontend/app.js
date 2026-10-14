@@ -1432,9 +1432,19 @@ async function loadDialogueRecord(characterId) {
     let stored = await storeGet("app_state", dialogueRecordKey(characterId));
     // An older v4 client can delete a character without knowing the sidecar
     // key. Do not revive experiences or a scene whose transcript was erased.
-    if (stored?.memories?.length && !(await messageCount(characterId))) {
-      stored = { ...stored, sessionContextPackage: "", memories: [], sceneActionSnapshot: null };
-      if (state.writerOwned) await storePut("app_state", stored);
+    if ((stored?.memories?.length || stored?.sessionContextPackage) && !(await messageCount(characterId))) {
+      const snapshot = stored.sceneActionSnapshot;
+      const metadata = snapshot ? await storeGet("threads", characterId) : null;
+      const reconcilable = snapshot?.endpoint === "/public/v2/scene/action"
+        && snapshot.envelope?.protocol === SCENE_PROTOCOL && snapshot.envelope.character_id === characterId
+        && metadata?.conversationSegmentId === snapshot.envelope.segment_id;
+      // A newly created empty thread can have its first join in flight. Its
+      // real metadata distinguishes it from an older client's deletion; query
+      // that immutable UUID before deciding whether a scene was established.
+      if (!reconcilable) {
+        stored = { ...stored, sessionContextPackage: "", memories: [], sceneActionSnapshot: null };
+        if (state.writerOwned) await storePut("app_state", stored);
+      }
     }
     state.dialogueByCharacter.set(characterId, stored || { key: dialogueRecordKey(characterId), characterId, sessionContextPackage: "", memories: [] });
   }
@@ -4381,14 +4391,24 @@ function bindTimelineActions() {
 function renderCurrentRendezvous() {
   const root = $("current-rendezvous");
   if (!root) return;
+  const parent = currentThread()?.channel === "in_person" ? $("composer") : $("text-surface");
+  if (root.parentElement !== parent) {
+    if (parent === $("composer")) parent.prepend(root);
+    else parent.insertBefore(root, $("timeline"));
+  }
   const pending = sceneActionsV2Enabled() ? signedPendingRendezvous().value : null;
-  root.hidden = !pending;
-  if (!pending) { root.replaceChildren(); return; }
-  const key = plain(pending.rendezvous_id);
+  const thread = currentThread();
+  const active = sceneActionsV2Enabled() && thread ? decodeSidecar(dialoguePackage(thread)).active_invitation : null;
+  const invitation = active && ["accepted", "deferred", "proposed", "clarify"].includes(active.status) ? active : null;
+  root.hidden = !pending && !invitation;
+  if (!pending && !invitation) { root.replaceChildren(); return; }
+  const key = plain(pending?.rendezvous_id || invitation.invitation_id);
+  const location = pending?.location_name || (state.config?.movement_catalog || []).find(item => item.location_id === invitation?.location_id)?.display_name || "地点待定";
+  const title = pending ? "约定" : ({ accepted: "稍后约定", deferred: "暂缓约定", proposed: "邀请待确认", clarify: "邀请待澄清" }[invitation.status]);
   const collapsed = state.rendezvousDismissals.has(key);
-  root.innerHTML = `<div><strong>约定 · ${escapeHtml(pending.location_name || "会合地点")}</strong>${collapsed
+  root.innerHTML = `<div><strong>${title} · ${escapeHtml(location)}</strong>${!pending && !collapsed ? '<small>时间待定 · 确认后再赴约</small>' : ""}${collapsed
     ? '<button type="button" class="secondary-button" data-current-rendezvous="open">查看约定</button>'
-    : '<button type="button" class="primary-button" data-current-rendezvous="go">赴约</button><button type="button" class="secondary-button" data-current-rendezvous="stay">留在通讯器</button><button type="button" class="secondary-button" data-current-rendezvous="cancel">取消约定</button>'}</div>`;
+    : `${pending ? '<button type="button" class="primary-button" data-current-rendezvous="go">赴约</button>' : ""}<button type="button" class="secondary-button" data-current-rendezvous="stay">留在通讯器</button><button type="button" class="secondary-button" data-current-rendezvous="cancel">取消约定</button>`}</div>`;
   root.querySelectorAll("[data-current-rendezvous]").forEach(button => {
     button.disabled = globalRequestBusy() || !state.writerOwned;
     button.onclick = async () => {
@@ -4396,12 +4416,16 @@ function renderCurrentRendezvous() {
       const action = button.dataset.currentRendezvous;
       if (action === "open" || action === "stay") {
         if (action === "open") state.rendezvousDismissals.delete(key); else state.rendezvousDismissals.add(key);
-        renderCurrentRendezvous(); await saveUiPreferences(); return;
+        renderCurrentRendezvous();
+        root.querySelector(`[data-current-rendezvous="${action === "stay" ? "open" : pending ? "go" : "cancel"}"]`)?.focus({ preventScroll: true });
+        await saveUiPreferences(); return;
       }
       if (action === "go") return arriveInPerson();
       try {
-        await runModeTransition(signal => performSceneAction("cancel_rendezvous", state.selected, signal, { rendezvousId: key }), "正在取消约定……");
+        const characterId = state.selected;
+        await runModeTransition(signal => performSceneAction("cancel_rendezvous", characterId, signal, { rendezvousId: key }), "正在取消约定……");
         renderCurrentRendezvous();
+        if (state.selected === characterId) $("message-input").focus({ preventScroll: true });
       } catch (error) { showBanner(displayError(error)); }
     };
   });
@@ -5852,7 +5876,8 @@ async function performSceneAction(action, characterId = state.selected, signal =
     }
     return result;
   } catch (error) {
-    if (owns() && ["request_result_unavailable", "invalid_scene_action", "session_context_invalid", "session_context_conflict", "session_context_subject_mismatch", "state_subject_mismatch", "state_invalid"].includes(error.message)) {
+    if (owns() && (["request_result_unavailable", "invalid_scene_action", "session_context_invalid", "session_context_conflict", "session_context_subject_mismatch", "state_subject_mismatch", "state_invalid"].includes(error.message)
+      || error.message === "request_id_conflict" && error.httpStatus === 409)) {
       const cleaned = { ...state.dialogueByCharacter.get(characterId), sceneActionSnapshot: null };
       state.dialogueByCharacter.set(characterId, cleaned);
       await storePut("app_state", cleaned);

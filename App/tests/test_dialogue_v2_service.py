@@ -339,6 +339,16 @@ class DialogueV2ServiceTests(TestCase):
         self.assertEqual(context.scene_overlay.analyst_location, "基地休息区")
         self.assertEqual(len(self.calls), 2)
 
+    def test_matching_future_acceptance_is_not_misread_as_current_refusal(self):
+        for reply in ("好呀，明天一起去公园。", "今天我没空，不过明天一起去公园。"):
+            with self.subTest(reply=reply):
+                self.reply = reply
+                future = self.run_chat("明天一起去公园吧。")
+                self.assertEqual(self.context(future).active_invitation.status, "accepted")
+                self.assertEqual(self.context(future).active_invitation.time_scope, "future")
+                self.assertFalse(future["pending_rendezvous"])
+                self.assertEqual(future["scene_state"]["character_location"], "观景区")
+
     def test_open_communicator_does_not_promote_daily_seed_to_confirmed_scene(self):
         opened = self.action("open_communicator")
         self.assertIsNone(self.context(opened).scene_overlay)

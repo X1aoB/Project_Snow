@@ -35,6 +35,9 @@ class DialogueHandler(fixture.PublicFrontendHandler):
     results = {}
     counter = 0
     scope_rejected = False
+    memory_enabled = True
+    join_started = threading.Event()
+    join_release = threading.Event()
 
     def do_POST(self):  # noqa: N802
         if self.path not in {"/public/v2/scene/action", "/public/v2/chat/stream"}:
@@ -45,6 +48,8 @@ class DialogueHandler(fixture.PublicFrontendHandler):
         cls.requests.append({"path": self.path, "payload": copy.deepcopy(payload), "recovery": recovery})
         chat = payload.get("chat", payload)
         request_id = chat["request_id"]
+        if recovery and cls.scenario == "scene_conflict" and self.path.endswith("/scene/action"):
+            return self._json({"detail": {"code": "request_id_conflict", "retryable": False, "stage": "idempotency_store"}}, status=409)
         if recovery and cls.scenario == "unavailable":
             return self._json({"detail": {"code": "request_result_unavailable", "retryable": False}}, status=410)
         if recovery and request_id not in cls.results:
@@ -74,6 +79,7 @@ class DialogueHandler(fixture.PublicFrontendHandler):
             if chat.get("continuity_decision") == "start_today":
                 world["pending_rendezvous"].pop(character, None)
                 context["scene_overlay"] = None
+                context["active_invitation"] = None
             location = world["presence"][character]["location"]
             channel = chat.get("communication_channel", context.get("scene_overlay", {}).get("communication_channel", "text") if context.get("scene_overlay") else "text")
             action = {"status": "not_requested"}
@@ -92,7 +98,13 @@ class DialogueHandler(fixture.PublicFrontendHandler):
                     action = {"status": "applied"}
                 elif operation == "cancel_rendezvous":
                     world["pending_rendezvous"].pop(character, None)
+                    context["active_invitation"] = None
                     action = {"status": "cancelled"}
+            elif "合成未来邀请" in chat["message"]:
+                status = next((value for value in ("deferred", "proposed", "clarify", "accepted") if value in chat["message"]), "accepted")
+                context["active_invitation"] = {"invitation_id": f"invite:{request_id}", "location_id": "base_restaurant",
+                    "activity_id": "eat", "status": status, "time_scope": "future"}
+                action = {"status": "deferred", "location_id": "base_restaurant"}
             elif chat.get("movement_location_id") or "合成邀请" in chat["message"]:
                 location = "基地餐厅"
                 world["presence"][character]["location"] = location
@@ -102,7 +114,7 @@ class DialogueHandler(fixture.PublicFrontendHandler):
                 world["pending_rendezvous"][character] = pending
                 action = {"status": "character_waiting", "location_id": pending["location_id"], "location_name": location}
             memories = []
-            if self.path.endswith("/chat/stream") or action["status"] == "joined":
+            if (self.path.endswith("/chat/stream") and "合成未来邀请" not in chat["message"]) or action["status"] == "joined":
                 cls.counter += 1
                 memory = {"memory_id": f"synthetic-memory-{cls.counter:04d}", "kind": "shared_scene_event" if action["status"] == "joined" else "user_statement",
                     "value": f"合成经历{cls.counter}", "source_request_id": request_id, "segment_id": payload["segment_id"],
@@ -110,6 +122,9 @@ class DialogueHandler(fixture.PublicFrontendHandler):
                     "source_message_ids": [f"user:{request_id}", f"reply:{request_id}"], "location_id": ""}
                 memories = [{"memory": memory, "proof": "synthetic-proof"}]
             context["memories"] = (previous_memories + [receipt["memory"] for receipt in memories])[-12:]
+            if not cls.memory_enabled:
+                memories = []
+                context["memories"] = []
             context["scene_overlay"] = {"communication_channel": channel, "scene_epoch": context["scene_epoch"]}
             scene = {"character_location": location, "character_activity": world["presence"][character]["activity"],
                 "analyst_location": world["analyst_location"], "co_located": world["analyst_location"] == location,
@@ -123,6 +138,13 @@ class DialogueHandler(fixture.PublicFrontendHandler):
                 result["evidence_sources"] = [{"document_id": "synthetic-canon-1", "title": "合成原作 <img src=x>", "source_type": "personal_story", "local_path": "private-test-path"}]
             cls.results[request_id] = result
         if self.path.endswith("/scene/action"):
+            if cls.scenario == "first_join_pending" and not recovery and payload["action"] in {"join_character", "join_rendezvous"}:
+                cls.join_started.set()
+                cls.join_release.wait(timeout=12)
+                try:
+                    return self._json(result)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
             if cls.scenario == "scene_disconnect" and not recovery and payload["action"] != "resolve":
                 return self._json({"detail": {"code": "request_failed", "retryable": True}}, status=503)
             return self._json(result)
@@ -159,6 +181,9 @@ class DialogueV2FrontendTests(TestCase):
         fixture.PublicFrontendE2ETests.setUp(self)
         DialogueHandler.requests = []; DialogueHandler.results = {}; DialogueHandler.counter = 0
         DialogueHandler.scope_rejected = False
+        DialogueHandler.memory_enabled = True
+        DialogueHandler.join_started = threading.Event()
+        DialogueHandler.join_release = threading.Event()
         DialogueHandler.scenario = "success"
         self.playwright = fixture.sync_playwright().start()
         self.browser = fixture._launch_browser(self.playwright)
@@ -168,13 +193,15 @@ class DialogueV2FrontendTests(TestCase):
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
 
     def tearDown(self):
+        DialogueHandler.join_release.set()
         self.browser.close(); self.playwright.stop()
 
-    def open(self, v2=True, motion=True):
+    def open(self, v2=True, motion=True, memory=True):
+        DialogueHandler.memory_enabled = memory
         def config(route):
             payload = route.fetch().json()
             payload["features"] = {"chat_latency_v2": True, "motion_v2": motion, "verified_block_replay": True,
-                "dialogue_domains_v2": v2, "scene_actions_v2": v2, "session_memory_v2": v2}
+                "dialogue_domains_v2": v2, "scene_actions_v2": v2, "session_memory_v2": v2 and memory}
             payload["capabilities"] = {"dialogue_protocol": "public-dialogue-v2", "scene_action_protocol": "public-scene-action-v2", "recovery_only": True}
             route.fulfill(json=payload)
         self.page.route("**/public/v1/config", config)
@@ -498,4 +525,158 @@ class DialogueV2FrontendTests(TestCase):
         self.assertEqual(next(row for row in after["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")["memories"], old_memories)
         self.assertEqual(len(self.rows()), 1)
         self.assertTrue(self.page.locator("#current-rendezvous").is_hidden())
+        self.assertFalse(self.errors)
+
+    def test_future_invitation_can_reopen_and_cancel_without_join_or_fact_memory(self):
+        self.open(); self.send("合成未来邀请 accepted 明天去餐厅")
+        card = self.page.locator("#current-rendezvous")
+        self.assertIn("基地餐厅", card.inner_text())
+        self.assertIn("时间待定", card.inner_text())
+        self.assertEqual(card.locator('[data-current-rendezvous="go"]').count(), 0)
+        record = next(row for row in self.local()["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")
+        self.assertEqual(record["memories"], [])
+        invite = untoken(record["sessionContextPackage"])["active_invitation"]
+        self.page.locator('[data-current-rendezvous="stay"]').click()
+        self.assertTrue(self.page.locator('[data-current-rendezvous="open"]').is_visible())
+        self.page.wait_for_function("""key => new Promise(resolve=>{const r=indexedDB.open('project-snow-public',4);
+          r.onsuccess=()=>{const db=r.result;const q=db.transaction('app_state','readonly').objectStore('app_state').get('ui_preferences');
+          q.onsuccess=()=>{resolve((q.result?.rendezvousDismissals||[]).includes(key));db.close();};};})""", arg=invite["invitation_id"])
+        self.page.reload(wait_until="networkidle")
+        self.page.locator('[data-current-rendezvous="open"]').click()
+        self.assertIn("时间待定", card.inner_text())
+        count = len(self.rows())
+        self.send("我过去了")
+        self.assertEqual(len(self.rows()), count + 1)
+        self.assertEqual(self.page.locator("#chat-app").get_attribute("data-channel"), "text")
+        self.assertEqual(card.locator('[data-current-rendezvous="go"]').count(), 0)
+        self.page.locator('[data-current-rendezvous="cancel"]').click()
+        self.page.wait_for_function("document.querySelector('#current-rendezvous').hidden")
+        cancellation = self.rows("/public/v2/scene/action")[-1]
+        self.assertEqual(cancellation["payload"]["action"], "cancel_rendezvous")
+        self.assertEqual(cancellation["payload"]["rendezvous_id"], invite["invitation_id"])
+        self.assertFalse(any(row["payload"]["action"] in {"join_character", "join_rendezvous"} for row in self.rows("/public/v2/scene/action")))
+        self.assertEqual(len(self.rows()), count + 1)
+        self.assertFalse(self.errors)
+
+    def test_proposed_deferred_and_clarify_invitation_cards_never_offer_join(self):
+        self.open()
+        for status in ("proposed", "deferred", "clarify"):
+            with self.subTest(status=status):
+                self.send(f"合成未来邀请 {status} 以后再去餐厅")
+                card = self.page.locator("#current-rendezvous")
+                self.assertTrue(card.is_visible())
+                self.assertIn("时间待定", card.inner_text())
+                self.assertEqual(card.locator('[data-current-rendezvous="go"]').count(), 0)
+                self.page.locator('[data-current-rendezvous="cancel"]').click()
+                self.page.wait_for_function("document.querySelector('#current-rendezvous').hidden")
+        self.assertFalse(self.errors)
+
+    def test_old_v4_delete_retires_future_or_memory_disabled_context_without_other_world_deletion(self):
+        self.open()
+        for mode in ("future", "memory_disabled"):
+            with self.subTest(mode=mode):
+                if mode == "future": self.send("合成未来邀请 accepted 明天去餐厅")
+                else:
+                    DialogueHandler.memory_enabled = False
+                    self.send("合成不生成经历的普通聊天")
+                before = self.local()
+                old_record = next(row for row in before["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")
+                self.assertEqual(old_record["memories"], [])
+                self.assertTrue(old_record["sessionContextPackage"])
+                old_world = untoken(next(row for row in before["state"] if row["key"] == "world")["statePackage"])
+                self.page.evaluate("""() => new Promise(resolve=>{const r=indexedDB.open('project-snow-public',4);r.onsuccess=()=>{
+                  const db=r.result;const tx=db.transaction(['threads','messages'],'readwrite');tx.objectStore('threads').delete('25b23cb64398');
+                  const q=tx.objectStore('messages').openCursor();q.onsuccess=()=>{const cursor=q.result;if(!cursor)return;
+                    if(cursor.value.characterId==='25b23cb64398')cursor.delete();cursor.continue();};tx.oncomplete=()=>{db.close();resolve();};};})""")
+                count = len(self.rows("/public/v2/scene/action"))
+                self.page.reload(wait_until="networkidle")
+                resolves = self.rows("/public/v2/scene/action")[count:]
+                self.assertEqual(resolves[0]["payload"]["session_context_package"], "")
+                self.assertEqual(resolves[0]["payload"]["memory_candidates"], [])
+                after = self.local()
+                record = next(row for row in after["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")
+                self.assertEqual(record["memories"], [])
+                self.assertIsNone(untoken(record["sessionContextPackage"]).get("active_invitation"))
+                self.assertTrue(self.page.locator("#current-rendezvous").is_hidden())
+                new_world = untoken(next(row for row in after["state"] if row["key"] == "world")["statePackage"])
+                self.assertEqual(new_world["presence"][OTHER], old_world["presence"][OTHER])
+                self.assertEqual(after["version"], 4)
+        self.assertFalse(self.errors)
+
+    def test_face_future_invitation_card_is_visible_and_cancel_keeps_confirmed_location(self):
+        self.open()
+        self.page.locator("#go-in-person").click(); self.page.locator("#confirm-presence-transition").click()
+        self.page.wait_for_function("document.querySelector('#chat-app').dataset.channel==='in_person' && !document.querySelector('#send-message').disabled")
+        before_location = self.page.locator("#stage-location").inner_text()
+        self.send("合成未来邀请 accepted 明天去餐厅")
+        card = self.page.locator("#current-rendezvous")
+        self.assertTrue(card.is_visible())
+        self.assertEqual(card.evaluate("node=>node.parentElement.id"), "composer")
+        self.assertEqual(card.locator('[data-current-rendezvous="go"]').count(), 0)
+        self.page.locator('[data-current-rendezvous="stay"]').focus()
+        self.page.keyboard.press("Enter")
+        self.assertEqual(self.page.evaluate("document.activeElement.dataset.currentRendezvous"), "open")
+        self.page.keyboard.press("Enter")
+        self.assertEqual(self.page.evaluate("document.activeElement.dataset.currentRendezvous"), "cancel")
+        self.page.keyboard.press("Enter")
+        self.page.wait_for_function("document.querySelector('#current-rendezvous').hidden")
+        self.assertEqual(self.page.locator("#chat-app").get_attribute("data-channel"), "in_person")
+        self.assertEqual(self.page.locator("#stage-location").inner_text(), before_location)
+        self.page.wait_for_function("document.activeElement.id==='message-input'")
+        self.assertFalse(self.errors)
+
+    def test_first_join_pending_without_history_recovers_original_uuid_before_orphan_cleanup(self):
+        self.open()
+        self.assertEqual(self.local()["messages"], [])
+        DialogueHandler.scenario = "first_join_pending"
+        self.page.locator("#go-in-person").click(); self.page.locator("#confirm-presence-transition").click()
+        self.assertTrue(DialogueHandler.join_started.wait(timeout=5))
+        pending = self.local()
+        self.assertEqual(pending["messages"], [])
+        record = next(row for row in pending["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")
+        original = record["sceneActionSnapshot"]["envelope"]
+        self.assertTrue(record["sessionContextPackage"])
+        self.assertTrue(any(row["conversationSegmentId"] == original["segment_id"] for row in pending["threads"]))
+        self.page.reload(wait_until="networkidle")
+        self.page.wait_for_function("document.querySelector('#chat-app').dataset.channel==='in_person'")
+        joins = [row for row in self.rows("/public/v2/scene/action") if row["payload"]["action"] == "join_character"]
+        self.assertEqual(len(joins), 2)
+        self.assertFalse(joins[0]["recovery"]); self.assertTrue(joins[1]["recovery"])
+        self.assertEqual(joins[1]["payload"], original)
+        after = self.local()
+        self.assertTrue(any(row["id"] == f"reply:{original['request_id']}" for row in after["messages"]))
+        record = next(row for row in after["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")
+        self.assertIsNone(record["sceneActionSnapshot"])
+        self.assertEqual(len(self.rows()), 0)
+        self.assertFalse(self.errors)
+
+    def test_scene_recovery_conflict_clears_only_snapshot_without_silent_action(self):
+        self.open(); self.send()
+        DialogueHandler.scenario = "manual"; self.send("合成未确认聊天保留快照")
+        DialogueHandler.scenario = "scene_disconnect"
+        self.page.route("**/public/v2/scene/action", lambda route: route.abort("failed"))
+        self.page.locator("#go-in-person").click()
+        self.page.wait_for_function("!document.querySelector('#go-in-person').disabled")
+        before = self.local()
+        old_context = next(row for row in before["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")
+        self.assertIsNotNone(old_context["sceneActionSnapshot"])
+        old_world = next(row for row in before["state"] if row["key"] == "world")["statePackage"]
+        paid_snapshot = next(row for row in before["messages"] if row["status"] == "failed")["requestSnapshot"]
+        count = len(self.rows("/public/v2/scene/action"))
+        self.page.unroute("**/public/v2/scene/action")
+        DialogueHandler.scenario = "scene_conflict"
+        self.page.locator("#go-in-person").click()
+        self.page.wait_for_function("!document.querySelector('#go-in-person').disabled")
+        after = self.local()
+        record = next(row for row in after["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")
+        self.assertIsNone(record["sceneActionSnapshot"])
+        self.assertEqual(record["sessionContextPackage"], old_context["sessionContextPackage"])
+        self.assertEqual(record["memories"], old_context["memories"])
+        self.assertEqual(next(row for row in after["state"] if row["key"] == "world")["statePackage"], old_world)
+        self.assertEqual(next(row for row in after["messages"] if row["status"] == "failed")["requestSnapshot"], paid_snapshot)
+        recovery = self.rows("/public/v2/scene/action")[count:]
+        self.assertEqual(len(recovery), 1)
+        self.assertTrue(recovery[0]["recovery"])
+        self.assertEqual(recovery[0]["payload"], old_context["sceneActionSnapshot"]["envelope"])
+        self.assertEqual(len(self.rows()), 2)
         self.assertFalse(self.errors)

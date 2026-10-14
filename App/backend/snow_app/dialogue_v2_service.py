@@ -189,18 +189,23 @@ class DialogueV2Service:
 
     def _reply_refuses_invitation(self, answer, intent):
         refusal = re.compile(
-            r"(?:不想|不愿|不能|不方便|没空|改天|下次|明天)[^，。！？!?；;\n]{0,24}(?:去|来|见面|出发)|"
+            r"(?:不想|不愿|不能|不方便|没空)[^，。！？!?；;\n]{0,24}(?:去|来|见面|出发)|"
             r"(?:不|别|不要)(?:去|来|走|出发|见面)|"
+            r"(?:不方便|没空)(?:[。！!；;,，\s]|$)|"
             r"(?:今天|现在)[^，。！？!?；;\n]{0,12}(?:不行|不方便|没空)|"
             r"(?:去|见面|出发)[^，。！？!?；;\n]{0,8}(?:不了|取消)"
         )
         for clause in parse_turn_frame(str(answer or "")).clauses:
             if clause.quoted or clause.domain != "casual" or clause.time_scope not in {"now", "future"}:
                 continue
+            if intent.time_scope == "future" and clause.time_scope == "now" and re.search(r"今天|现在", clause.text):
+                continue
             places = {key for key, definition in self.catalog.items()
                       if any(alias and alias in clause.text for alias in definition.get("explicit_aliases") or ())}
             if places and intent.location_id not in places:
                 continue
+            if intent.time_scope == "now" and clause.time_scope == "future" and re.search(r"去|来|见面|出发", clause.text):
+                return True
             if refusal.search(clause.text):
                 return True
         return False
