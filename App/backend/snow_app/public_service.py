@@ -1907,6 +1907,7 @@ class PublicChatService:
                     persist_exchange=False,
                     remember_session=False,
                     presence_arrival=True,
+                    allow_dialogue_channel_transition=False,
                 )
             except SubscriptionError as exc:
                 return self.failed_presence_arrival(
@@ -2288,6 +2289,7 @@ class PublicChatService:
                         max_tokens_override=1600,
                         persist_exchange=False,
                         remember_session=False,
+                        allow_dialogue_channel_transition=False,
                         public_sticker_candidates=sticker_candidates,
                         public_performance_candidates=self.media.performance_catalog(request.character_id),
                         # Do not ask the model to invent movement. The catalog is

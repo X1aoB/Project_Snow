@@ -18,9 +18,9 @@ from sqlalchemy import text
 from backend.snow_app.config import PublicSettings, Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from backend.snow_app.public_contracts import ChatRequest, HistoryTurn, SummarizeRequest
-from backend.snow_app.public_main import create_app
+from backend.snow_app.public_main import _anonymous_cookie_name, create_app
 from backend.snow_app.public_providers import PROVIDERS
-from backend.snow_app.public_security import sign_state, verify_state
+from backend.snow_app.public_security import sign_state, subject_hash, verify_state
 from backend.snow_app.public_service import (
     GenerationBusy,
     PublicChatService,
@@ -904,7 +904,7 @@ class PublicAPITests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        return response.json()["credential"], self.client.cookies.get("snow_anon")
+        return response.json()["credential"], self.client.cookies.get(_anonymous_cookie_name(self.settings))
 
     def test_byok_credential_is_bound_to_cookie(self) -> None:
         credential, _ = self._byok()
@@ -1431,6 +1431,90 @@ class PublicAPITests(TestCase):
         self.assertIn("total", context["generation_diagnostics"]["timings_ms"])
         self.assertIn("model_calls", context["generation_diagnostics"]["timings_ms"])
         self.assertNotIn("sk-test-never-log-this", json.dumps(context, ensure_ascii=False))
+
+    def test_feedback_arrival_uuid_attaches_owned_namespaced_diagnostics_without_generation(self) -> None:
+        _credential, anonymous_id = self._byok()
+        reference_id = str(uuid4())
+        character_id = MVP_CHARACTERS[0].character_id
+        result = {
+            "arrival_id": reference_id,
+            "character_id": character_id,
+            "reaction": {"character_id": character_id, "communication_channel": "in_person"},
+            "diagnostics": {"generation_class": "valid_initial", "timings_ms": {"total": 37, "model_calls": 1}},
+            "terminal_error": "",
+        }
+        cache_id = "presence-arrival:" + reference_id
+        self.store.claim_request(cache_id, subject_hash(anonymous_id), "a" * 64)
+        self.store.complete_request(cache_id, result)
+        with patch.object(self.app.state.chat_service.mvp, "chat") as generation:
+            response = self.client.post("/public/v1/feedback", headers={"Origin": "http://testserver"}, json={
+                "request_id": str(uuid4()), "chat_request_id": reference_id,
+                "character_id": character_id, "request_stage": "in_person",
+                "body": "Synthetic arrival presentation issue", "turnstile_token": "development-bypass",
+            })
+        self.assertEqual(response.status_code, 200)
+        generation.assert_not_called()
+        context = self.store.feedback_rows()[0]["context"]
+        self.assertEqual(context["chat_request_id"], reference_id)
+        self.assertEqual(context["related_request_kind"], "presence_arrival")
+        self.assertEqual(context["generation_outcome"], "valid_initial")
+        self.assertEqual(context["generation_diagnostics"]["timings_ms"]["total"], 37)
+
+    def test_feedback_arrival_does_not_attach_foreign_subject_result(self) -> None:
+        self._byok()
+        reference_id = str(uuid4())
+        cache_id = "presence-arrival:" + reference_id
+        self.store.claim_request(cache_id, "foreign-synthetic-subject", "a" * 64)
+        self.store.complete_request(cache_id, {
+            "character_id": MVP_CHARACTERS[0].character_id,
+            "diagnostics": {"generation_class": "valid_initial", "timings_ms": {"total": 999}},
+        })
+        response = self.client.post("/public/v1/feedback", headers={"Origin": "http://testserver"}, json={
+            "request_id": str(uuid4()), "chat_request_id": reference_id,
+            "body": "Synthetic subject isolation issue", "turnstile_token": "development-bypass",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("generation_diagnostics", self.store.feedback_rows()[0]["context"])
+
+    def test_feedback_rejects_result_for_another_character_or_medium(self) -> None:
+        _credential, anonymous_id = self._byok()
+        reference_id = str(uuid4())
+        self.store.claim_request(reference_id, subject_hash(anonymous_id), "a" * 64)
+        self.store.complete_request(reference_id, {
+            "character_id": MVP_CHARACTERS[0].character_id, "communication_channel": "text",
+            "diagnostics": {"generation_class": "valid_initial", "timings_ms": {"total": 999}},
+        })
+        for character_id, channel in ((MVP_CHARACTERS[1].character_id, "text"), (MVP_CHARACTERS[0].character_id, "in_person")):
+            response = self.client.post("/public/v1/feedback", headers={"Origin": "http://testserver"}, json={
+                "request_id": str(uuid4()), "chat_request_id": reference_id,
+                "character_id": character_id, "request_stage": channel,
+                "body": "Synthetic context mismatch " + character_id + channel,
+                "turnstile_token": "development-bypass",
+            })
+            self.assertEqual(response.status_code, 200)
+            context = self.store.feedback_rows()[0]["context"]
+            self.assertNotIn("generation_diagnostics", context)
+            self.assertNotIn("related_request_kind", context)
+
+    def test_feedback_same_uuid_prefers_matching_arrival_over_other_medium_chat(self) -> None:
+        _credential, anonymous_id = self._byok()
+        reference_id = str(uuid4())
+        character_id = MVP_CHARACTERS[0].character_id
+        for cache_id, result in (
+            (reference_id, {"character_id": character_id, "communication_channel": "text", "diagnostics": {"model_calls": 99}}),
+            ("presence-arrival:" + reference_id, {"character_id": character_id, "diagnostics": {"generation_class": "valid_initial", "model_calls": 1}}),
+        ):
+            self.store.claim_request(cache_id, subject_hash(anonymous_id), "a" * 64)
+            self.store.complete_request(cache_id, result)
+        response = self.client.post("/public/v1/feedback", headers={"Origin": "http://testserver"}, json={
+            "request_id": str(uuid4()), "chat_request_id": reference_id,
+            "character_id": character_id, "request_stage": "in_person",
+            "body": "Synthetic namespace collision issue", "turnstile_token": "development-bypass",
+        })
+        self.assertEqual(response.status_code, 200)
+        context = self.store.feedback_rows()[0]["context"]
+        self.assertEqual(context["related_request_kind"], "presence_arrival")
+        self.assertEqual(context["generation_diagnostics"]["model_calls"], 1)
 
     def test_chat_idempotency_record_redacts_forged_model_metadata(self) -> None:
         credential, _ = self._byok()

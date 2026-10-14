@@ -2136,10 +2136,39 @@ def create_app(
             "ui_surface": redact_sensitive_text(payload.ui_surface, 80),
         }
         if payload.chat_request_id:
-            chat_result = await async_store.call("request_result",
-                str(payload.chat_request_id), request.state.subject_hash
-            )
-            context["chat_request_id"] = str(payload.chat_request_id)
+            reference_id = str(payload.chat_request_id)
+            context["chat_request_id"] = reference_id
+            chat_result = None
+            # Arrival reactions keep the public UUID but use a separate cache
+            # namespace. Both lookups retain the same subject ownership check;
+            # feedback never regenerates or replays a provider request.
+            for cache_id, request_kind in (
+                (reference_id, "chat"),
+                ("presence-arrival:" + reference_id, "presence_arrival"),
+            ):
+                candidate = await async_store.call(
+                    "request_result", cache_id, request.state.subject_hash
+                )
+                if not isinstance(candidate, dict) or not candidate:
+                    continue
+                reaction = candidate.get("reaction")
+                reaction = reaction if isinstance(reaction, dict) else {}
+                character_id = str(candidate.get("character_id") or reaction.get("character_id") or "")
+                channel = (
+                    "in_person" if request_kind == "presence_arrival"
+                    else str(candidate.get("communication_channel") or "")
+                )
+                if payload.character_id and character_id and payload.character_id != character_id:
+                    continue
+                if payload.request_stage in {"text", "in_person"} and channel and payload.request_stage != channel:
+                    continue
+                chat_result = candidate
+                context["related_request_kind"] = request_kind
+                if character_id:
+                    context["character_id"] = character_id
+                if channel:
+                    context["request_stage"] = channel
+                break
             if chat_result:
                 context["generation_diagnostics"] = chat_result.get("diagnostics") or {}
                 retrieval = chat_result.get("retrieval")
@@ -2147,7 +2176,12 @@ def create_app(
                     safe_retrieval = retrieval.get("diagnostics")
                     if isinstance(safe_retrieval, dict):
                         context["retrieval_diagnostics"] = safe_retrieval
-                context["generation_outcome"] = chat_result.get("generation_outcome") or ""
+                diagnostics = context["generation_diagnostics"]
+                context["generation_outcome"] = chat_result.get("generation_outcome") or (
+                    diagnostics.get("generation_class", "")
+                    if context.get("related_request_kind") == "presence_arrival" and isinstance(diagnostics, dict)
+                    else ""
+                )
                 context["response_adjustments"] = chat_result.get("response_adjustments") or []
                 context["chat_error_code"] = chat_result.get("terminal_error") or ""
         try:

@@ -9275,6 +9275,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         public_sticker_candidates: list[dict[str, Any]] | None = None,
         public_state_update_catalog: list[dict[str, Any]] | None = None,
         public_performance_candidates: list[dict[str, Any]] | None = None,
+        allow_dialogue_channel_transition: bool = True,
     ) -> dict[str, Any]:
         if not self.chat_enabled():
             raise MVPChatDisabled("MVP 对话接口未开启。请设置 MVP_CHAT_ENABLED=true 后重启 API。")
@@ -9340,7 +9341,14 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 "to": requested_channel,
                 "trigger": "ui",
             }
-        dialogue_transition = self._dialogue_channel_transition(message.strip(), active_channel)
+        # Public chat keeps the explicit request medium until its separate
+        # presence transition completes. A text invitation to meet must remain
+        # valid while the analyst and character are still in different places.
+        dialogue_transition = (
+            self._dialogue_channel_transition(message.strip(), active_channel)
+            if allow_dialogue_channel_transition
+            else {"status": "none", "from": active_channel, "to": active_channel, "trigger": "none"}
+        )
         next_channel = active_channel
         if dialogue_transition["status"] == "applied_immediately":
             active_channel = str(dialogue_transition["to"])
