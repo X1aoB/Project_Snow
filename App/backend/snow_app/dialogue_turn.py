@@ -142,7 +142,7 @@ def parse_turn_frame(message: str, *, communication_channel: str = "text") -> Tu
             time_scope = "now"
         # A heading such as “主线那一章里，...” scopes its following question.
         reset = bool(re.search(r"现在|此刻|这会儿|今天|眼下|目前|回到(?:现在|今天)|说回现在", text))
-        invitation_requested = bool(_INVITATION.search(text)) and not _MOVEMENT_ATTRIBUTION.search(text)
+        invitation_requested = not quoted and bool(_INVITATION.search(text)) and not _MOVEMENT_ATTRIBUTION.search(text)
         present_invitation = bool(invitation_requested and re.search(r"我们|要不要|想不想|陪我|好吗|来我(?:的)?房间", text))
         future_invitation = bool(invitation_requested and _FUTURE.search(text))
         if (present_invitation or future_invitation) and not (explicit_canon or canon_past or session or _PAST.search(text) or _HYPOTHETICAL.search(text)):
@@ -159,6 +159,11 @@ def parse_turn_frame(message: str, *, communication_channel: str = "text") -> Tu
                 # “明天，去商场坐坐好吗” is one future invitation, not a
                 # present action merely because punctuation split the phrase.
                 time_scope = inherited_time
+        if quoted and inherited_domain != "casual":
+            # “现在去…” inside an original-story quote describes that
+            # recalled scene. It remains useful retrieval text but cannot
+            # reset the outer question to the user's present-day scene.
+            domain, time_scope = inherited_domain, inherited_time
         if not quoted and not negated:
             inherited_domain, inherited_time = domain, time_scope
         action: Action = "none"

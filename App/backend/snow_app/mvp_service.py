@@ -5813,7 +5813,9 @@ class MVPService:
         retrieval_started = time.perf_counter()
         mode = self._normalize_mode(mode)
         frame = coerce_turn_frame(turn_frame, message) if turn_frame is not None else None
-        canon_clauses = [item for item in frame.clauses if item.domain == "canon_recall" and not item.quoted] if frame else []
+        # Quoted original-story dialogue supplies the event/person query;
+        # quote execution is prohibited separately by the frame/scene gate.
+        canon_clauses = [item for item in frame.clauses if item.domain == "canon_recall"] if frame else []
         session_clauses = [item for item in frame.clauses if item.domain == "session_recall" and not item.quoted] if frame else []
         current_clauses = [item for item in frame.clauses if item.domain == "casual" and item.time_scope == "now" and not item.quoted and not item.negated] if frame else []
         evidence_query = " ".join(item.text for item in canon_clauses) if canon_clauses else message
@@ -6256,7 +6258,7 @@ class MVPService:
         if "canon_recall" in scopes:
             rules.append("原作回忆只依据本轮原作文档和已审核角色资料回答；当时的位置与活动不能由此刻场景替代。没有能支持细节的原作证据时自然说明记不清，不补写新剧情。")
         if "session_recall" in scopes:
-            rules.append("共同经历只从 session_experiences 中 status=confirmed 且有来源标识的记录回忆。reported 只是分析员说过的内容，可说你提到过，不得说双方已做过；摘要和普通历史对白不是已确认经历。无相关记录时自然问一次具体指哪次。")
+            rules.append("共同经历只从 session_experiences 中 status=confirmed 且有来源标识的记录回忆。reported 按 provenance 区分：user_statement 是分析员自述，可说你提到过；assistant_commitment 是角色尚未履约的承诺，可说我答应过。两者都不得说成双方已经会合或完成的共同经历；摘要和普通历史对白不是已确认经历。无相关记录时自然问一次具体指哪次。")
         if "casual" in scopes:
             rules.append("日常陪伴直接回应眼前话题，使用稳定人格、当前已确认场景和相关会话经历，不主动背诵剧情。过去、未来、假设和否定内容不触发当前地点或活动变更。")
         if scene and scene.get("status") == "active":
@@ -9745,7 +9747,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             system_prompt += """
 
 【分域连续性｜本轮优先】
-turn_frame 只描述本轮分句的意图，不是事实。原作事实只能来自 evidence 与已审核角色资料；live_scene 只能证明当前会话场景。session_experiences 中 confirmed 且带来源标识的条目才是共同经历；reported 只是用户说过，摘要、旧助手对白和模型自己的推测不得升格为事实。混合问题按分句自然衔接，不用当前场景替代原作当时的地点。不确定的指代只澄清一次。
+turn_frame 只描述本轮分句的意图，不是事实。原作事实只能来自 evidence 与已审核角色资料；live_scene 只能证明当前会话场景。session_experiences 中 confirmed 且带来源标识的条目才是共同经历；reported 按 provenance 区分分析员自述 user_statement 和角色尚未履约的承诺 assistant_commitment，不得升格为已经共同完成的事实。摘要、旧助手对白和模型自己的推测也不能成为事实。混合问题按分句自然衔接，不用当前场景替代原作当时的地点。不确定的指代只澄清一次。
 日常即兴只在普通、当前、成立的场景中描写小动作与对话，不创作重大剧情结果。通讯器中不能执行触碰、同行或共同抵达；邀约接受仅形成约定，赴约由已确认场景事件完成。邀请可自然接受、拒绝、延后或澄清，不要求任何固定等待句式。
 同一次回复返回 interaction_decision；没有邀请或续接邀请时为 null。有邀请时仅使用受控地点，返回 {"decision":"accept_now|decline|defer|clarify","location_id":"...","activity_id":"..."}。accept_now 只适用于本轮现在的明确邀请及角色自愿接受；未来计划返回 defer，过去、假设、否定或引用不返回立即行动。该字段只是候选，不能自行修改状态。
 memory_candidates 是普通当前互动的候选，最多四条，可为空；仅返回 {"event_type":"ordinary_interaction","source_clause_ids":["c0"],"response_block_indices":[0]}。只关联本轮分析员真正完成的普通动作分句和本轮独立 action 块的对应低风险互动；不能自称已确认，不能把原作、假设、约定、对白中的计划或杜撰的过去经历当作双方完成事件。摘要和来源由服务端从这些块确定。

@@ -85,6 +85,26 @@ class DialogueDomainRetrievalTests(TestCase):
             "原作当时你做了什么？现在你在哪里？", "当时在码头。现在我在观景区。",
             {**result, "raw_scene_state": {"character_location": "观景区", "analyst_location": "观景区", "character_activity": "看雪"}}), [])
 
+    def test_original_quote_supplies_retrieval_event_and_person_but_not_current_scene(self):
+        event = document("doc_synthetic_quoted_event", "main_story", "原作中芙提雅在公园接到消息。")
+        service = retrieval_service([event, self.persona])
+        queries = []
+
+        def hybrid(query, character_id, limit):
+            queries.append(query)
+            return [], False, [hit(event)] if "公园" in query and "芙提雅" in query else []
+
+        service.repository.hybrid_search.side_effect = hybrid
+        message = '原作里，她说“现在去公园找芙提雅”，当时发生什么？现在一起去商场吧。'
+        result = self.retrieve(service, message)
+        self.assertEqual(len(queries), 1)
+        self.assertIn("公园", queries[0])
+        self.assertIn("芙提雅", queries[0])
+        self.assertNotIn("商场", queries[0])
+        self.assertIn(event["document_id"], result["retrieval_pools"]["canon"])
+        self.assertIsNone(result["live_scene"])
+        self.assertEqual(result["conversation_mode"], "mixed_dialogue")
+
     def test_casual_without_stable_match_never_backfills_story(self):
         service = retrieval_service([self.story])
         result = self.retrieve(service, "陪我聊聊天好吗")
@@ -112,7 +132,6 @@ class DialogueDomainRetrievalTests(TestCase):
         self.assertEqual(result["retrieval_pools"]["canon"], [])
         self.assertEqual(result["session_experiences"], [confirmed, reported])
         self.assertEqual(result["retrieval_diagnostics"]["session_confirmed_count"], 1)
-        self.assertIn("reported 只是分析员说过", result["response_contract"])
 
     def test_legacy_none_keeps_old_scene_routing(self):
         service = retrieval_service([self.story, self.persona])

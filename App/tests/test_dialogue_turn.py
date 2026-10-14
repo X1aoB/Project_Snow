@@ -91,6 +91,16 @@ class DialogueTurnTests(unittest.TestCase):
                 frame = parse_turn_frame(text)
                 self.assertEqual((frame.domain, frame.time_scope), ("casual", "now"))
 
+    def test_quoted_current_words_keep_original_story_scope_without_executing(self):
+        frame = parse_turn_frame('原作里，她说“现在去公园找芙提雅”，当时发生什么？现在一起去商场吧。')
+        quote = next(item for item in frame.clauses if item.quoted)
+        self.assertEqual((quote.domain, quote.time_scope), ("canon_recall", "past"))
+        self.assertFalse(quote.actionable)
+        self.assertEqual(quote.action, "none")
+        current = frame.clauses[-1]
+        self.assertEqual((current.domain, current.time_scope), ("casual", "now"))
+        self.assertTrue(current.actionable)
+
     def test_current_cancellation_and_past_refusal_have_different_time(self):
         for text in ("不去了", "我们先不去了", "今天先不去了", "我不想去公园了"):
             with self.subTest(text=text):
