@@ -10,6 +10,12 @@ IndexedDB and Electron application identifiers remain Project Snow identifiers.
 - Preserve baseline commit 502ec99412bef843c37e4b31a53df8fa9faeb33c (0.9.6).
 - Production promotion is manual after a concrete candidate acceptance receipt.
   Automated builds, verification and safe candidate preparation are allowed.
+- Before every normal forward production promotion, fill and review the release
+  announcement in `App/public_frontend/announcements.json`. Run the committed-feed preflight in
+  `App/scripts/check_release_announcement.py` against the exact current and
+  candidate SHAs, include its report in candidate acceptance, and verify the
+  candidate announcement is visible. Preserve past announcements and describe
+  only shipped behavior; unverified targets must not be presented as achieved.
 - On 2026-09-09 the user explicitly authorized this coordinating task to monitor
   the approved U4 character delivery and begin production rollout when it is
   complete. This scoped authorization permits promotion after fresh, exact
