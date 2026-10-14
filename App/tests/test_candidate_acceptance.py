@@ -129,6 +129,33 @@ def ready(staged, **options):
     )
 
 
+@pytest.mark.parametrize("enabled", (False, True))
+def test_dialogue_rollout_receipt_names_exact_candidate_flags(staged, enabled):
+    paths, _, _, _, evidence, _, write = staged
+    values = dict.fromkeys(acceptance.DIALOGUE_FLAGS.values(), enabled)
+    write("runtime/public-candidate.env", "".join(f"{key}={str(enabled).lower()}\n" for key in acceptance.DIALOGUE_FLAGS))
+    evidence["rollout_features"] = values
+    receipt = ready(staged)
+    document = acceptance.load_receipt(paths, receipt["receipt_id"])
+    assert document["evidence"]["rollout_features"] == values
+    assert document["snapshot"]["public_environments"]["candidate"]["rollout_features"] == values
+    assert "rollout_features" not in document["snapshot"]["public_environments"]["current"]
+    write("runtime/public-candidate.env", "".join(f"{key}={str(not enabled).lower()}\n" for key in acceptance.DIALOGUE_FLAGS))
+    with pytest.raises(maintenance.MaintenanceError):
+        acceptance.approve(paths, receipt["receipt_id"], CURRENT, now=NOW, execute=staged[1])
+
+
+@pytest.mark.parametrize("expected", (None, {}, {"scene_actions_v2": True},
+    {"dialogue_domains_v2": 1, "scene_actions_v2": True, "session_memory_v2": True}))
+def test_dialogue_receipt_rejects_missing_or_inexact_expected_flags(staged, expected):
+    write = staged[-1]
+    write("runtime/public-candidate.env", "".join(f"{key}=true\n" for key in acceptance.DIALOGUE_FLAGS))
+    if expected is not None:
+        staged[4]["rollout_features"] = expected
+    with pytest.raises(maintenance.MaintenanceError):
+        ready(staged)
+
+
 def approved(staged):
     receipt = ready(staged)
     acceptance.approve(staged[0], receipt["receipt_id"], CURRENT, now=NOW, execute=staged[1])

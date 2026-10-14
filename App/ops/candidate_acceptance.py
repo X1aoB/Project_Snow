@@ -29,6 +29,11 @@ from release_state import atomic_write, pending_candidate, sync
 RECEIPT_SCHEMA = "project-snow-candidate-acceptance-1"
 APPROVAL_SCHEMA = "project-snow-candidate-approval-1"
 CHECKS = ("api_health", "build_identity", "data_media", "browser_smoke", "rollback_baseline")
+DIALOGUE_FLAGS = {
+    "PUBLIC_DIALOGUE_DOMAINS_V2": "dialogue_domains_v2",
+    "PUBLIC_SCENE_ACTIONS_V2": "scene_actions_v2",
+    "PUBLIC_SESSION_MEMORY_V2": "session_memory_v2",
+}
 HASH = re.compile(r"^[0-9a-f]{64}$")
 FRONTEND_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -139,7 +144,14 @@ def public_environment_identity(paths: Paths, compose_environment: Path) -> dict
     ):
         raise MaintenanceError("Acceptance public environment is outside trusted roots")
     directory(source.parent)
-    return {"path": str(source), "sha256": sha256(read_payload(source))}
+    payload = read_payload(source)
+    identity = {"path": str(source), "sha256": sha256(payload)}
+    values = read_environment(source)
+    if any(key in values for key in DIALOGUE_FLAGS):
+        if any(values.get(key) not in {"true", "false"} for key in DIALOGUE_FLAGS):
+            raise MaintenanceError("Acceptance requires all dialogue rollout flags as strict booleans")
+        identity["rollout_features"] = {name: values[key] == "true" for key, name in DIALOGUE_FLAGS.items()}
+    return identity
 
 
 def snapshot(paths: Paths, colour: str, commit: str, expected_current: str, execute: Callable = run) -> dict:
@@ -276,6 +288,11 @@ def prepare(
         or any((evidence.get("checks") or {}).get(name) is not True for name in CHECKS)
     ):
         raise MaintenanceError("Candidate evidence must identify this release and pass every required check")
+    observed = snapshot(paths, colour, commit, expected_current, execute)
+    rollout = observed["public_environments"]["candidate"].get("rollout_features")
+    if rollout is not None and (evidence.get("rollout_features") != rollout
+                                or any(type(value) is not bool for value in (evidence.get("rollout_features") or {}).values())):
+        raise MaintenanceError("Candidate evidence must name the exact observed dialogue rollout flags")
     document = {
         "schema_version": RECEIPT_SCHEMA,
         "colour": colour,
@@ -283,7 +300,7 @@ def prepare(
         "expected_current": expected_current,
         "prepared_at": now.isoformat(),
         "expires_at": (now + timedelta(seconds=ttl_seconds)).isoformat(),
-        "snapshot": snapshot(paths, colour, commit, expected_current, execute),
+        "snapshot": observed,
         "evidence": evidence,
     }
     payload = encoded(document)

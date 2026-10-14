@@ -811,6 +811,7 @@ validate_mailer_env() {
 build_candidate_public_env() {
   source_file="$1"
   output_file="$2"
+  public_candidate_sha="${3:-}"
   [ -f "$source_file" ] && [ ! -L "$source_file" ] && [ -r "$source_file" ] || {
     echo 'Public environment must be a readable regular file.' >&2
     return 1
@@ -837,6 +838,9 @@ build_candidate_public_env() {
   public_chat_latency_v2=true
   public_verified_block_stream=false
   public_motion_v2=true
+  public_dialogue_domains_v2=false
+  public_scene_actions_v2=false
+  public_session_memory_v2=false
   carriage_return="$(printf '\r')"
   while IFS= read -r public_line || [ -n "$public_line" ]; do
     case "$public_line" in
@@ -859,6 +863,7 @@ build_candidate_public_env() {
       PUBLIC_AUTO_CREATE_SCHEMA|PUBLIC_TRUST_PROXY_HEADERS|PUBLIC_ENABLED_PROVIDERS|\
       PUBLIC_SUBSCRIPTION_ENABLED|PUBLIC_STATISTICS_ENABLED|WEB_CONCURRENCY|\
       PUBLIC_CHAT_LATENCY_V2|PUBLIC_VERIFIED_BLOCK_STREAM|PUBLIC_MOTION_V2|\
+      PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2|\
       PUBLIC_APP_VERSION|PUBLIC_DATA_VERSION|PUBLIC_MEDIA_VERSION|PUBLIC_MEDIA_ROOT|\
       PUBLIC_EXPERIENCE_NOTICE_VERSION|PUBLIC_ARRIVAL_PROBABILITY|\
       PUBLIC_STICKER_VERSION|PUBLIC_STICKER_ROOT|TURNSTILE_SITE_KEY|\
@@ -902,8 +907,90 @@ build_candidate_public_env() {
       PUBLIC_CHAT_LATENCY_V2) public_chat_latency_v2="$public_value" ;;
       PUBLIC_VERIFIED_BLOCK_STREAM) public_verified_block_stream="$public_value" ;;
       PUBLIC_MOTION_V2) public_motion_v2="$public_value" ;;
+      PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2)
+        case "$public_value" in
+          true|false) ;;
+          *) echo 'Public dialogue flags must be true or false.' >&2; return 1 ;;
+        esac
+        case "$public_key" in
+          PUBLIC_DIALOGUE_DOMAINS_V2) public_dialogue_domains_v2="$public_value" ;;
+          PUBLIC_SCENE_ACTIONS_V2) public_scene_actions_v2="$public_value" ;;
+          PUBLIC_SESSION_MEMORY_V2) public_session_memory_v2="$public_value" ;;
+        esac
+        ;;
     esac
   done < "$source_file"
+
+  # The root release runner intentionally discards caller environment. A
+  # fixed, exact-SHA operator file enables only these three reviewed features
+  # in the inactive colour; shared public.env and old snapshots are untouched.
+  # The resulting per-release env is self-contained, so later changes to this
+  # input cannot change a running candidate or its rollback anchor.
+  if [ -n "$public_candidate_sha" ]; then
+    printf '%s\n' "$public_candidate_sha" | grep -Eq '^[0-9a-f]{40}$' || {
+      echo 'Candidate dialogue flags require an exact lowercase release SHA.' >&2
+      return 1
+    }
+    public_override_root=/etc/project-snow/candidate-flags
+    public_override_path="$public_override_root/$public_candidate_sha.env"
+    if [ -e "$public_override_root" ] || [ -L "$public_override_root" ]; then
+      for public_override_parent in /etc /etc/project-snow "$public_override_root"; do
+        [ -d "$public_override_parent" ] && [ ! -L "$public_override_parent" ] || {
+          echo 'Candidate dialogue flag directories must be real root-controlled directories.' >&2
+          return 1
+        }
+        case "$(stat -c %u:%g:%a "$public_override_parent")" in
+          0:0:500|0:0:550|0:0:555|0:0:700|0:0:750|0:0:755) ;;
+          *) echo 'Candidate dialogue flag directories must be root-controlled without group/world writes.' >&2; return 1 ;;
+        esac
+      done
+      if [ -e "$public_override_path" ] || [ -L "$public_override_path" ]; then
+        [ -f "$public_override_path" ] && [ ! -L "$public_override_path" ] &&
+          [ "$(stat -c %u:%g:%a:%h "$public_override_path")" = 0:0:600:1 ] || {
+          echo 'Candidate dialogue flags must be a root-owned mode-0600 single regular file.' >&2
+          return 1
+        }
+        public_override_size="$(wc -c < "$public_override_path" | tr -d '[:space:]')"
+        case "$public_override_size" in ''|*[!0-9]*) return 1 ;; esac
+        [ "$public_override_size" -le 1024 ] || {
+          echo 'Candidate dialogue flags exceed the bounded settings size.' >&2
+          return 1
+        }
+        public_override_seen='|'
+        public_override_count=0
+        while IFS= read -r public_override_line || [ -n "$public_override_line" ]; do
+          case "$public_override_line" in
+            *"$carriage_return"*) echo 'Candidate dialogue flags contain a carriage return.' >&2; return 1 ;;
+            ''|'#'*) continue ;;
+            *=*) public_override_key="${public_override_line%%=*}"; public_override_value="${public_override_line#*=}" ;;
+            *) echo 'Candidate dialogue flags contain a malformed line.' >&2; return 1 ;;
+          esac
+          case "$public_override_key" in
+            PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2) ;;
+            *) echo 'Candidate dialogue flags contain a disallowed key.' >&2; return 1 ;;
+          esac
+          case "$public_override_seen" in
+            *"|$public_override_key|"*) echo 'Candidate dialogue flags contain a duplicate key.' >&2; return 1 ;;
+          esac
+          case "$public_override_value" in
+            true|false) ;;
+            *) echo 'Candidate dialogue flags must be true or false.' >&2; return 1 ;;
+          esac
+          public_override_seen="$public_override_seen$public_override_key|"
+          public_override_count=$((public_override_count + 1))
+          case "$public_override_key" in
+            PUBLIC_DIALOGUE_DOMAINS_V2) public_dialogue_domains_v2="$public_override_value" ;;
+            PUBLIC_SCENE_ACTIONS_V2) public_scene_actions_v2="$public_override_value" ;;
+            PUBLIC_SESSION_MEMORY_V2) public_session_memory_v2="$public_override_value" ;;
+          esac
+        done < "$public_override_path"
+        [ "$public_override_count" -gt 0 ] || {
+          echo 'Candidate dialogue flags must define at least one approved switch.' >&2
+          return 1
+        }
+      fi
+    fi
+  fi
 
   case "$public_subscription_enabled" in
     true|false) ;;
@@ -967,6 +1054,8 @@ build_candidate_public_env() {
       "$public_subscription_enabled" || return 1
     printf 'PUBLIC_CHAT_LATENCY_V2=%s\nPUBLIC_VERIFIED_BLOCK_STREAM=%s\nPUBLIC_MOTION_V2=%s\n' \
       "$public_chat_latency_v2" "$public_verified_block_stream" "$public_motion_v2" || return 1
+    printf 'PUBLIC_DIALOGUE_DOMAINS_V2=%s\nPUBLIC_SCENE_ACTIONS_V2=%s\nPUBLIC_SESSION_MEMORY_V2=%s\n' \
+      "$public_dialogue_domains_v2" "$public_scene_actions_v2" "$public_session_memory_v2" || return 1
     printf 'PUBLIC_APP_VERSION=%s\nPUBLIC_DATA_VERSION=%s\n' \
       "$candidate_app_version" "$candidate_data_version" || return 1
     printf 'PUBLIC_MEDIA_VERSION=%s\nPUBLIC_MEDIA_ROOT=%s\n' \
@@ -1421,7 +1510,7 @@ chmod 0600 "$candidate_env"
 
 if [ -n "$candidate_media_root" ]; then
   candidate_public_env="$(mktemp "$public_env_root/public-$sha.candidate.XXXXXX")"
-  build_candidate_public_env "$public_env_source" "$candidate_public_env" || exit 66
+  build_candidate_public_env "$public_env_source" "$candidate_public_env" "$sha" || exit 66
   sed -i '/^PUBLIC_ENV_FILE=/d' "$candidate_env"
   printf 'PUBLIC_ENV_FILE=%s\n' "$candidate_public_env" >> "$candidate_env"
   sed -i '/^PUBLIC_DATA_ROOT=/d' "$candidate_env"
