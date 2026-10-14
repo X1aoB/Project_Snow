@@ -37,7 +37,9 @@ textarea { resize: none; }
 .footer-command:hover, .icon-button:hover { border-color: #c5d4dd; background: #edf4f7; }
 
 .chat-panel { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; height: 100dvh; overflow: hidden; }
-.text-surface { position: relative; display: grid; grid-template-rows: var(--topbar-height) minmax(0, 1fr); min-width: 0; min-height: 0; background: linear-gradient(180deg, #f6fafc, #eaf2f7); }
+.text-surface { position: relative; display: grid; grid-template-rows: var(--topbar-height) auto minmax(0, 1fr); min-width: 0; min-height: 0; background: linear-gradient(180deg, #f6fafc, #eaf2f7); }
+.text-surface > .timeline { grid-row: 3; }
+.current-rendezvous { grid-row: 2; }
 .chat-header { display: flex; align-items: center; gap: 13px; min-width: 0; min-height: var(--topbar-height); padding: 10px clamp(12px, 2.2vw, 24px); border-bottom: 1px solid var(--snow-line); background: rgba(251, 253, 254, .94); backdrop-filter: blur(12px); }
 .contact-toggle { display: none; flex: 0 0 var(--control-min-size); }
 .active-character { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -90,6 +92,13 @@ textarea { resize: none; }
 .rendezvous-card { display: grid; gap: 10px; width: min(100%, 520px); margin-top: 10px; padding: 13px; border: 1px solid #9eb8c7; border-radius: 14px; background: linear-gradient(145deg,#f8fcfe,#e7f1f6); box-shadow: 0 9px 22px rgba(53,85,103,.11); }
 .rendezvous-card > div:first-child { display: grid; gap: 4px; }
 .rendezvous-card strong { color: #315c73; font-size: .9rem; }
+.current-rendezvous { padding: 8px 14px; border-bottom: 1px solid var(--snow-line); background: #edf5f9; font-size: .85rem; }
+.current-rendezvous > div { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.current-rendezvous strong { margin-right: auto; color: #315c73; }
+.current-rendezvous button { font-size: .8rem; min-height: 36px; }
+.evidence-sources { margin-top: 8px; color: var(--snow-muted); font-size: .75rem; }
+.evidence-sources summary { cursor: pointer; }
+.evidence-sources ul { margin-block: 6px; padding-left: 20px; }
 .rendezvous-card small { color: var(--snow-muted); font-size: .73rem; line-height: 1.55; }
 .rendezvous-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .rendezvous-actions button { min-height: 40px; padding: 8px 12px; }

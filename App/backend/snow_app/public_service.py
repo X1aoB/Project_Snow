@@ -1907,6 +1907,7 @@ class PublicChatService:
                     persist_exchange=False,
                     remember_session=False,
                     presence_arrival=True,
+                    allow_dialogue_channel_transition=False,
                 )
             except SubscriptionError as exc:
                 return self.failed_presence_arrival(
@@ -2108,6 +2109,7 @@ class PublicChatService:
         api_key: str,
         *,
         gate_reserved: bool = False,
+        v2_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         observer = current_generation_observer()
         original_publish = observer.on_verified_blocks if observer else None
@@ -2127,7 +2129,9 @@ class PublicChatService:
                 return original_publish(blocks)
             observer.on_verified_blocks = checked_publish
         async def generate():
-            return await asyncio.to_thread(self._chat_sync, request, subject_hash, provider, api_key)
+            if v2_context is None:
+                return await asyncio.to_thread(self._chat_sync, request, subject_hash, provider, api_key)
+            return await asyncio.to_thread(self._chat_sync, request, subject_hash, provider, api_key, v2_context=v2_context)
 
         try:
             if gate_reserved:
@@ -2205,6 +2209,8 @@ class PublicChatService:
         subject_hash: str,
         provider: ProviderSpec,
         api_key: str,
+        *,
+        v2_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if request.character_id not in self.mvp._views():
             raise CharacterUnavailable(request.character_id)
@@ -2241,8 +2247,12 @@ class PublicChatService:
             else []
         )
         with self._request_state(request, subject_hash) as (session_id, world_id, prior_state):
-            movement_intent = self._movement_intent_for_request(request, prior_state)
+            movement_intent = (
+                None if v2_context is not None else self._movement_intent_for_request(request, prior_state)
+            )
             movement_catalog: list[dict[str, Any]] = []
+            if v2_context is not None:
+                movement_catalog = list(v2_context.get("movement_catalog") or [])
             if movement_intent:
                 location_id, definition = movement_intent
                 activity_id = str(
@@ -2288,12 +2298,18 @@ class PublicChatService:
                         max_tokens_override=1600,
                         persist_exchange=False,
                         remember_session=False,
+                        allow_dialogue_channel_transition=False,
                         public_sticker_candidates=sticker_candidates,
                         public_performance_candidates=self.media.performance_catalog(request.character_id),
                         # Do not ask the model to invent movement. The catalog is
                         # exposed only after the server has resolved an eligible
                         # current invitation or bounded-history continuation.
                         public_state_update_catalog=movement_catalog,
+                        **({
+                            "turn_frame": v2_context.get("turn_frame"),
+                            "domain_routing": v2_context.get("domain_routing", True),
+                            "session_experiences": v2_context.get("session_experiences") or [],
+                        } if v2_context is not None else {}),
                     )
                 result = self.engine.generate(context, budget, generate).payload
             except GenerationStreamPartialError as exc:
@@ -2401,11 +2417,15 @@ class PublicChatService:
                 world_snapshot=world_snapshot,
             )
             try:
-                next_state, movement_event, state_update_diagnostics = self._apply_joint_movement(
-                    next_state,
-                    request,
-                    {**result, "answer": answer},
-                )
+                if v2_context is None:
+                    next_state, movement_event, state_update_diagnostics = self._apply_joint_movement(
+                        next_state, request, {**result, "answer": answer},
+                    )
+                else:
+                    # The v2 adapter applies one validated, structured decision.
+                    # Never run the legacy natural-language matcher as well.
+                    movement_event = None
+                    state_update_diagnostics = {"state_update_status": "not_requested"}
             except Exception:
                 # State is presentation metadata. A signing or state-shape
                 # regression must never discard a valid model reply.
@@ -2529,6 +2549,14 @@ class PublicChatService:
                     **sticker_diagnostics,
                     **state_update_diagnostics,
                 },
+                **({
+                    "_v2_interaction_decision": result.get("interaction_decision"),
+                    "_v2_memory_candidates": result.get("memory_candidates") or [],
+                    "evidence_sources": [
+                        {key: str(citation.get(key) or "")[:160] for key in ("document_id", "title", "source_type")}
+                        for citation in (result.get("citations") or [])[:8] if isinstance(citation, dict)
+                    ],
+                } if v2_context is not None else {}),
             }
 
     def _allows_public_activity_fallback(

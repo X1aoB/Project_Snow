@@ -663,6 +663,51 @@ class PublicStore:
             return None
         return payload if isinstance(payload, dict) else None
 
+    def lookup_request(
+        self, request_id: str, subject_hash: str, request_hash: str
+    ) -> tuple[str, dict[str, Any] | None]:
+        """Reconcile an existing UUID without claiming, deleting, or generating.
+
+        In particular, a completed cache entry that expired ten minutes ago
+        must not be recreated by a recovery request. Ownership and its exact
+        business snapshot are checked even on this read-only path.
+        """
+        with self.begin() as connection:
+            row = connection.execute(text("""
+                SELECT cache.subject_hash, cache.request_hash, cache.status,
+                       cache.response_json, cache.expires_at, lease.lease_expires_at
+                FROM public_request_cache AS cache
+                LEFT JOIN public_request_leases AS lease ON lease.request_id = cache.request_id
+                WHERE cache.request_id = :request_id
+            """), {"request_id": request_id}).mappings().first()
+        if not row:
+            return "missing", None
+        if row["subject_hash"] != subject_hash or row["request_hash"] != request_hash:
+            return "conflict", None
+
+        def expired(value: Any) -> bool:
+            if value is None:
+                return False
+            parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed <= _utcnow()
+
+        if expired(row["expires_at"]):
+            return "missing", None
+        if row["status"] == "completed" and row["response_json"]:
+            try:
+                response = json.loads(row["response_json"])
+            except (ValueError, TypeError):
+                return "missing", None
+            return ("completed", response) if isinstance(response, dict) else ("missing", None)
+        if row["status"] == "processing" and expired(row["lease_expires_at"]):
+            return "completed", {
+                "request_id": request_id, "terminal_error": "generation_interrupted",
+                "answer": "", "content_blocks": [],
+            }
+        return "processing", None
+
     def verification_required(self, subject_hash: str, purpose: str) -> bool:
         now = _utcnow()
         with self.begin() as connection:

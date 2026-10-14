@@ -49,6 +49,7 @@ from .dialogue_core import (
     WorldState,
     active_generation_budget,
 )
+from .dialogue_turn import TurnFrame, coerce_turn_frame
 from .dialogue_output import (
     _communication_block_violations,
     _normalize_content_blocks,
@@ -5806,9 +5807,18 @@ class MVPService:
         style_context: dict[str, Any] | None = None,
         mode: str = "immersive",
         world_state: dict[str, Any] | None = None,
+        turn_frame: TurnFrame | dict[str, Any] | None = None,
+        session_experiences: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         retrieval_started = time.perf_counter()
         mode = self._normalize_mode(mode)
+        frame = coerce_turn_frame(turn_frame, message) if turn_frame is not None else None
+        # Quoted original-story dialogue supplies the event/person query;
+        # quote execution is prohibited separately by the frame/scene gate.
+        canon_clauses = [item for item in frame.clauses if item.domain == "canon_recall"] if frame else []
+        session_clauses = [item for item in frame.clauses if item.domain == "session_recall" and not item.quoted] if frame else []
+        current_clauses = [item for item in frame.clauses if item.domain == "casual" and item.time_scope == "now" and not item.quoted and not item.negated] if frame else []
+        evidence_query = " ".join(item.text for item in canon_clauses) if canon_clauses else message
         dialogue_boundary = self._dialogue_boundary(message, mode)
         mentioned_characters = self._resolve_character_mentions(message)
         character = self.character(character_value)
@@ -5826,7 +5836,8 @@ class MVPService:
             or style_context.get("raw")
             or ""
         ).strip()
-        retrieval_query = self._expanded_retrieval_query(message, mentioned_characters)
+        query_mentions = self._resolve_character_mentions(evidence_query) if frame is not None and canon_clauses else mentioned_characters
+        retrieval_query = self._expanded_retrieval_query(evidence_query, query_mentions)
         if active_style_label:
             retrieval_query = f"{retrieval_query} {active_style_label}".strip()
         runtime_documents = self._runtime_documents_by_id()
@@ -5855,6 +5866,7 @@ class MVPService:
                 for document in runtime_documents.values()
                 if document.get("document_id") not in existing
                 and self._allowed_document(document, view, style_context, character.character_id)
+                and (frame is None or canon_clauses or source_layer(document.get("source_type")) == "stable")
             ]
             fallback_documents.sort(
                 key=lambda item: (
@@ -5899,7 +5911,7 @@ class MVPService:
             character.character_id,
             view,
             style_context,
-            message,
+            evidence_query,
             limit,
         )
         graph_context = {"status": "not_requested", "nodes": [], "edges": []}
@@ -5908,13 +5920,21 @@ class MVPService:
         ):
             try:
                 graph_context = self.repository.serving_graph_context(
-                    message,
+                    evidence_query,
                     character.character_id,
                     tuple(query_intents),
                 )
             except Exception:
                 graph_context = {"status": "degraded", "nodes": [], "edges": []}
         question_focus = self._question_focus(message, query_intents)
+        frame_domains = {item.domain for item in frame.clauses if not item.quoted} if frame else set()
+        if frame is not None:
+            if frame_domains == {"canon_recall"}:
+                question_focus = "narrative_recall"
+            elif frame_domains == {"session_recall"}:
+                question_focus = "session_recall"
+            elif canon_clauses or session_clauses:
+                question_focus = "mixed_dialogue"
         if question_focus == "current_condition":
             latest_state_hits = self._latest_state_hits(
                 character.character_id,
@@ -5934,12 +5954,18 @@ class MVPService:
                     if len(promoted_hits) >= max(1, min(limit, 12)):
                         break
                 filtered = promoted_hits
-        live_scene = self._live_scene_context(
-            character,
-            question_focus,
-            mentioned_characters,
-            world_state,
-        )
+        live_scene = None
+        scene_question_focus = question_focus
+        if frame is None:
+            live_scene = self._live_scene_context(character, question_focus, mentioned_characters, world_state)
+        else:
+            for clause in current_clauses:
+                clause_focus = self._question_focus(clause.text)
+                if clause_focus in {"location", "current_activity"}:
+                    scene_question_focus = clause_focus
+                    live_scene = self._live_scene_context(
+                        character, clause_focus, self._resolve_character_mentions(clause.text), world_state,
+                    )
         companion_mentions = [
             item
             for item in mentioned_characters
@@ -5965,7 +5991,7 @@ class MVPService:
                 if len(promoted_social_hits) >= max(1, min(limit, 12)):
                     break
             filtered = promoted_social_hits
-        if question_focus in {
+        if (frame is not None and not canon_clauses) or (frame is None and question_focus in {
             "food_or_drink",
             "shared_meal",
             "current_activity",
@@ -5975,7 +6001,7 @@ class MVPService:
             "casual_check_in",
             "general",
             "open_invitation",
-        }:
+        }):
             # Keep situational story/mail records out of the default casual
             # prompt.  They remain searchable when the user explicitly asks
             # about a story, but should not force a historical meal or lab
@@ -5986,6 +6012,10 @@ class MVPService:
                 "character_voice",
                 "character_affection",
             }
+            if frame is not None and question_focus == "costume_detail" and style_context.get("resolution") == "exact":
+                # An explicitly selected, reviewed outfit is a current fact,
+                # not an excuse to backfill a dated story into daily chat.
+                stable_sources.update({"character_costume", "character_costumes", "character_armor"})
             if question_focus == "casual_check_in":
                 # A greeting needs the character's voice, not a relationship
                 # gift, a dated affection scene or a current-world fact.
@@ -5999,7 +6029,7 @@ class MVPService:
                 for hit in filtered
                 if hit.get("citation", {}).get("source_type") in stable_sources
             ]
-            if stable_chat_hits or question_focus == "casual_check_in":
+            if frame is not None or stable_chat_hits or question_focus == "casual_check_in":
                 if question_focus in {"current_activity", "routine_activity"}:
                     scene_terms = ("\u5b9e\u9a8c\u5ba4", "\u57fa\u5730", "\u8bad\u7ec3\u5ba4", "\u623f\u95f4", "\u524d\u7ebf", "\u9910\u5385")
                     normalized_message = _compact(message)
@@ -6019,7 +6049,8 @@ class MVPService:
                         ]
                 filtered = stable_chat_hits[: max(1, min(limit, 5))]
         cross_character_story_hits, cross_character_story_context = (
-            self._cross_character_main_story_hits(character, message)
+            self._cross_character_main_story_hits(character, evidence_query)
+            if frame is None or canon_clauses else ([], {})
         )
         if cross_character_story_hits:
             # These chunks pass a stricter test than ordinary global search:
@@ -6045,7 +6076,7 @@ class MVPService:
             character.character_id,
             message,
         )
-        if live_scene:
+        if live_scene and frame is None:
             # Present-time simulation state is authoritative for this session.
             # Historical story locations are deliberately omitted so they
             # cannot drag every answer back to a lab or training scene.
@@ -6083,6 +6114,13 @@ class MVPService:
             if "experience" in query_intents
             else "evidence_answer"
         )
+        if frame is not None:
+            if len(frame_domains) > 1:
+                conversation_mode = "mixed_dialogue"
+            elif canon_clauses:
+                conversation_mode = "narrative_recall"
+            elif session_clauses:
+                conversation_mode = "session_recall"
         relationship_background = self._relationship_background(
             self.repository.documents(),
             character.character_id,
@@ -6094,7 +6132,10 @@ class MVPService:
             if candidate_ids.intersection(candidate.get("evidence_document_ids", []))
         ][:12]
         response_contract = self._response_contract(message, query_intents, dialogue_boundary)
-        if live_scene and live_scene.get("status") == "active":
+        session_evidence = self._session_experience_pool(session_experiences) if frame is not None else []
+        if frame is not None:
+            response_contract = self._framed_response_contract(frame, live_scene, scene_question_focus, response_contract)
+        elif live_scene and live_scene.get("status") == "active":
             if question_focus == "location":
                 response_contract = (
                     "这是当前会话中的位置问题。第一句直接说出 live_scene.location；可以用一句 live_scene.activity 补充，"
@@ -6149,6 +6190,12 @@ class MVPService:
             "cross_character_hits": len(cross_character_story_hits),
             "provisional_relation_count": len(provisional),
         }
+        if frame is not None:
+            retrieval_diagnostics.update({
+                "turn_domain": frame.domain, "turn_time_scope": frame.time_scope,
+                "turn_clause_count": len(frame.clauses), "mixed_domains": len(frame_domains) > 1,
+                "session_confirmed_count": sum(item["status"] == "confirmed" for item in session_evidence),
+            })
         return {
             "character": character,
             "view": view,
@@ -6175,7 +6222,86 @@ class MVPService:
             "dialogue_profile": self._dialogue_profiles().get(character.character_id),
             "session_context": session_context or self._empty_session_context(),
             "retrieval_diagnostics": retrieval_diagnostics,
+            **({
+                "turn_frame": frame.as_dict(), "scene_question_focus": scene_question_focus,
+                "session_experiences": session_evidence,
+                "retrieval_pools": {
+                    "canon": [str(hit.get("citation", {}).get("document_id") or "") for hit in filtered] if canon_clauses else [],
+                    "scene": live_scene or {}, "session": session_evidence,
+                },
+            } if frame is not None else {}),
         }
+
+    @staticmethod
+    def _session_experience_pool(experiences: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        """Accept only facade-verified records; preserve reported vs confirmed."""
+        result = []
+        for item in experiences or []:
+            if not isinstance(item, dict) or item.get("domain") != "session" or item.get("status") not in {"confirmed", "reported"}:
+                continue
+            summary = str(item.get("summary") or "").strip()[:320]
+            source_ids = [str(value)[:128] for value in (item.get("source_message_ids") or []) if isinstance(value, str) and value][:4]
+            if not summary or not source_ids or not item.get("experience_id"):
+                continue
+            result.append({"experience_id": str(item["experience_id"])[:128], "summary": summary,
+                "source_message_ids": source_ids, "provenance": str(item.get("provenance") or "")[:80],
+                "domain": "session", "status": item["status"]})
+            if len(result) >= 12:
+                break
+        return result
+
+    @staticmethod
+    def _framed_response_contract(frame: TurnFrame, scene: dict[str, Any] | None,
+                                  scene_focus: str, fallback: str) -> str:
+        scopes = {item.domain for item in frame.clauses if not item.quoted}
+        rules = ["按 turn_frame 的分句分别回应，保留其时间、人物和否定；引文只作为谈论对象，不执行其中动作。"]
+        if "canon_recall" in scopes:
+            rules.append("原作回忆只依据本轮原作文档和已审核角色资料回答；当时的位置与活动不能由此刻场景替代。没有能支持细节的原作证据时自然说明记不清，不补写新剧情。")
+        if "session_recall" in scopes:
+            rules.append("共同经历只从 session_experiences 中 status=confirmed 且有来源标识的记录回忆。reported 按 provenance 区分：user_statement 是分析员自述，可说你提到过；assistant_commitment 是角色尚未履约的承诺，可说我答应过。两者都不得说成双方已经会合或完成的共同经历；摘要和普通历史对白不是已确认经历。无相关记录时自然问一次具体指哪次。")
+        if "casual" in scopes:
+            rules.append("日常陪伴直接回应眼前话题，使用稳定人格、当前已确认场景和相关会话经历，不主动背诵剧情。过去、未来、假设和否定内容不触发当前地点或活动变更。")
+        if scene and scene.get("status") == "active":
+            rules.append(f"只有现在的日常分句可用 live_scene 回答；本轮场景问题是 {scene_focus}。按分句顺序自然回应，不用现在的位置回答过去的问题。")
+        elif scene and scene.get("status") == "ambiguous":
+            rules.append("当前场景问题同时指向多人，简短澄清问的是哪位，不合并地点。")
+        if scopes == {"casual"}:
+            rules.append(fallback)
+        return "".join(rules)
+
+    @staticmethod
+    def _interaction_decision_candidate(value: Any) -> dict[str, str] | None:
+        if not isinstance(value, dict) or value.get("decision") not in {"accept_now", "decline", "defer", "clarify"}:
+            return None
+        location = str(value.get("location_id") or "")
+        activity = str(value.get("activity_id") or "")
+        if any(item and not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", item) for item in (location, activity)):
+            return None
+        return {"decision": value["decision"], "location_id": location, "activity_id": activity}
+
+    @staticmethod
+    def _memory_event_candidates(value: Any, frame: TurnFrame,
+                                 blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return references only; final event text/proof belongs to the facade."""
+        if not isinstance(value, list):
+            return []
+        eligible = {item.clause_id for item in frame.clauses
+                    if item.domain == "casual" and item.time_scope == "now" and not item.negated and not item.quoted}
+        candidates = []
+        for item in value[:4]:
+            if not isinstance(item, dict) or item.get("event_type") != "ordinary_interaction":
+                continue
+            clauses = item.get("source_clause_ids")
+            indices = item.get("response_block_indices")
+            if not isinstance(clauses, list) or not isinstance(indices, list) or not clauses or not indices:
+                continue
+            if len(clauses) > 4 or len(indices) > 4 or any(not isinstance(value, str) or value not in eligible for value in clauses):
+                continue
+            if any(type(index) is not int or index < 0 or index >= len(blocks) or blocks[index].get("type") != "action" for index in indices):
+                continue
+            candidates.append({"event_type": "ordinary_interaction", "source_clause_ids": list(dict.fromkeys(clauses)),
+                               "response_block_indices": list(dict.fromkeys(indices))})
+        return candidates
 
     def _system_prompt(
         self,
@@ -6196,6 +6322,7 @@ class MVPService:
         dual_persona_context: dict[str, Any] | None = None,
         relationship_address_memory: dict[str, Any] | None = None,
         compact_public_schema: bool = False,
+        dialogue_v2: bool = False,
     ) -> str:
         mode = self._normalize_mode(mode)
         communication_channel = self._normalize_communication_channel(communication_channel)
@@ -6528,12 +6655,15 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
 {{"answer":"中文回答","content_blocks":[{{"type":"speech|action|message|sticker","text":"...","asset_id":"仅在 sticker 时填写","caption":"仅在 sticker 时填写"}}],"expression_state":"neutral|gentle_smile|happy|amused|teasing|relieved|serious|focused|thinking|confused|skeptical|concerned|surprised|embarrassed|sad|disappointed|annoyed|angry","stage_motion":"none|lean_in|tremble|recoil|startle","state_updates":[],"analysis_process":{{"title":"角色口吻的分析标题","overview":"先概括任务、主要矛盾与处理方向","sections":[{{"title":"问题拆解","content":"明确用户目标、输入条件和可能歧义"}},{{"title":"已知条件与证据","content":"区分用户给定内容、模型已有知识和工具核验结果"}},{{"title":"方案比较","content":"说明候选方案、关键取舍与为何排除不合适方案"}},{{"title":"校验与边界","content":"说明公式、数字、来源或产物如何被检查，以及尚存限制"}},{{"title":"形成结论","content":"说明最终答案为何适合当前任务"}}]}},"work_summary":"供旧客户端显示的短摘要","work_steps":["已确认…","已比较…","已校验…"],"confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":["doc_..."],"used_relation_candidate_ids":["relation_candidate_..."],"uncertainties":["..."],"citation_notes":["..." ]}}
 """
 
-        if compact_public_schema and mode == "immersive":
+        if (compact_public_schema or dialogue_v2) and mode == "immersive":
             prompt = prompt.split("仅返回 JSON 对象，不要输出 Markdown 代码围栏。", 1)[0]
             prompt += """仅返回一个 JSON 对象，不要 Markdown 代码围栏。正文只写入 content_blocks，服务端会按顺序拼接 answer；不要重复生成 answer，也不要输出 analysis_process、work_summary、work_steps 或思考过程。保留完整自然回复与必要动作，不为节省字段缩短或删减有用对白。每个块必须完整表达一句话或一个自然消息；content_blocks 必须是对象最后一个字段。其余字段先输出：
 {"state_updates":[],"expression_state":"neutral","stage_motion":"none","performance_id":"","confidence":"high|medium|low","narrative_scope":"stable|situational|costume_specific|mixed|unknown","used_document_ids":[],"used_relation_candidate_ids":[],"uncertainties":[],"citation_notes":[],"content_blocks":[{"type":"speech|action|message|sticker","text":"..."}]}
 expression_state、stage_motion、performance_id 仍须遵守上文角色和媒介规则。只有 sticker 块使用 asset_id 与 caption；普通正文块仅含 type 和 text。state_updates 仅允许本轮明确获准的提案；没有提案时必须为空数组。
 """
+            if dialogue_v2:
+                prompt = prompt.replace('{"state_updates":[],"expression_state":',
+                    '{"interaction_decision":null,"memory_candidates":[],"state_updates":[],"expression_state":', 1)
         return prompt
 
     def _prompt(self, character: Any, message: str, context: dict[str, Any]) -> str:
@@ -6658,6 +6788,13 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 "evidence": evidence,
                 "provisional_relation_evidence": provisional,
                 "verified_graph_context": context.get("graph_context") or {},
+                **({
+                    "turn_frame": context["turn_frame"],
+                    "retrieval_pools": context.get("retrieval_pools") or {},
+                    "session_experiences": context.get("session_experiences") or [],
+                    "experience_provenance_rule": "Only confirmed source-bound session records establish shared events; reported statements and summaries do not.",
+                    "invitation_clarification_rule": "遇到邀约时，只对本轮 movement_catalog 中允许的地点和当前角色给出结构化决定；若人物、目标或时间确有歧义，或没有可执行的目录目标，用角色口吻简短澄清一次，不宣称已经接受、移动或到场。未来邀约可以形成约定，不能立即移动。",
+                } if context.get("turn_frame") is not None else {}),
             },
             ensure_ascii=False,
         )
@@ -7233,9 +7370,13 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         profile = MVPService._dialogue_profile_prompt_context(context.get("dialogue_profile"))
         if profile:
             texts.append(json.dumps(profile, ensure_ascii=False))
-        session = context.get("session_context") or {}
-        for turn in session.get("turns") or []:
-            texts.extend((str(turn.get("user") or ""), str(turn.get("assistant") or "")))
+        if context.get("turn_frame") is not None:
+            texts.extend(str(item.get("summary") or "") for item in context.get("session_experiences") or []
+                         if item.get("status") == "confirmed")
+        else:
+            session = context.get("session_context") or {}
+            for turn in session.get("turns") or []:
+                texts.extend((str(turn.get("user") or ""), str(turn.get("assistant") or "")))
         return [text for text in texts if text]
 
     @classmethod
@@ -7254,6 +7395,9 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         evidence_texts = [
             str(hit.get("text") or "") for hit in (context.get("hits") or [])
         ]
+        if context.get("turn_frame") is not None:
+            evidence_texts.extend(str(item.get("summary") or "") for item in context.get("session_experiences") or []
+                                  if item.get("status") == "confirmed")
         relationship = context.get("relationship_background") or {}
         evidence_texts.extend(
             str(item.get("excerpt") or "") for item in (relationship.get("evidence") or [])
@@ -7632,8 +7776,15 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         if not scene_state:
             return []
         focus = str(context.get("question_focus") or "general")
+        if context.get("turn_frame") is not None and context.get("live_scene"):
+            focus = str(context.get("scene_question_focus") or focus)
         if focus in {"location", "visit_followup"}:
             return []
+        confirmed_sources = []
+        if context.get("turn_frame") is not None:
+            confirmed_sources.extend(str(hit.get("text") or "") for hit in context.get("hits") or [])
+            confirmed_sources.extend(str(item.get("summary") or "") for item in context.get("session_experiences") or []
+                                     if item.get("status") == "confirmed")
         violations: list[str] = []
         for field in ("character_location", "analyst_location"):
             location = str(scene_state.get(field) or "").strip()
@@ -7641,6 +7792,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 location
                 and not _contains_term(message, location)
                 and _contains_term(answer, location)
+                and not any(_contains_term(source, location) for source in confirmed_sources)
             ):
                 violations.append(f"unprompted_scene_disclosure:{field}:{location}")
         activity = str(scene_state.get("character_activity") or "").strip()
@@ -7649,6 +7801,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             and activity
             and not _contains_term(message, activity)
             and _contains_term(answer, activity)
+            and not any(_contains_term(source, activity) for source in confirmed_sources)
         ):
             violations.append(f"unprompted_scene_disclosure:character_activity:{activity}")
         return violations
@@ -7669,6 +7822,10 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         """
 
         if not MVPService._is_visit_request(message):
+            return False
+        if context.get("turn_frame") is not None:
+            # V2 proposals reference authoritative location IDs and don't
+            # require a particular visible location phrase to be accepted.
             return False
         if str(context.get("question_focus") or "") == "visit_followup":
             return False
@@ -7815,11 +7972,33 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         """
 
         answer_premises = cls._meeting_premises(answer)
+        if context.get("turn_frame") is not None and context.get("question_focus") == "session_recall":
+            confirmed = [item for item in context.get("session_experiences") or [] if item.get("status") == "confirmed"]
+            if not confirmed:
+                # No source-backed shared event exists. A prior model or a
+                # reported assertion cannot fill that gap with a new memory.
+                pattern = re.compile(r"(?:(?:我们|咱们|你我)(?:上次|昨天|之前|那次|刚才|曾经)|(?:上次|昨天|之前|那次|刚才).{0,10}(?:我们|咱们|你我))[^。！？!?\r\n]{0,64}")
+                for match in pattern.finditer(answer):
+                    prefix = answer[max(0, match.start() - 12):match.start()]
+                    phrase = match.group(0)
+                    uncertain = any(marker in prefix + phrase for marker in ("你说", "你提到", "听你说", "如果", "假如", "没有", "不确定", "记不清", "哪次", "哪一次", "哪里", "什么"))
+                    if not uncertain:
+                        answer_premises.append(match.group(0).strip())
         if not answer_premises:
             return []
         user_texts = [str(message or "")]
-        for turn in (context.get("session_context") or {}).get("turns") or []:
-            user_texts.append(str(turn.get("user") or ""))
+        if context.get("turn_frame") is not None:
+            # A signed completed event can establish a shared past. Model
+            # summaries and reported user claims remain continuity hints only.
+            frame = coerce_turn_frame(context["turn_frame"], message)
+            user_texts = [item.text for item in frame.clauses if item.actionable]
+            user_texts.extend(str(item.get("summary") or "") for item in context.get("session_experiences") or []
+                              if item.get("status") == "confirmed")
+            if context.get("question_focus") == "narrative_recall":
+                user_texts.extend(str(item.get("text") or "") for item in context.get("hits") or [])
+        else:
+            for turn in (context.get("session_context") or {}).get("turns") or []:
+                user_texts.append(str(turn.get("user") or ""))
         established_text = "\n".join(user_texts)
         established = cls._meeting_premises(established_text)
         # A direct request such as “我们见面吧” establishes the current plan,
@@ -8608,6 +8787,12 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
     ) -> list[str]:
         """Keep an accepted remote invitation from claiming joint arrival."""
 
+        if context.get("turn_frame") is not None:
+            # V2 uses the final structured decision and authoritative scene
+            # validation. A specific waiting catchphrase is no longer a gate;
+            # medium and physical-action checks still run independently.
+            return []
+
         catalog = [
             item
             for item in (context.get("public_state_update_catalog") or [])
@@ -9275,6 +9460,10 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         public_sticker_candidates: list[dict[str, Any]] | None = None,
         public_state_update_catalog: list[dict[str, Any]] | None = None,
         public_performance_candidates: list[dict[str, Any]] | None = None,
+        allow_dialogue_channel_transition: bool = True,
+        turn_frame: TurnFrame | dict[str, Any] | None = None,
+        session_experiences: list[dict[str, Any]] | None = None,
+        domain_routing: bool = True,
     ) -> dict[str, Any]:
         if not self.chat_enabled():
             raise MVPChatDisabled("MVP 对话接口未开启。请设置 MVP_CHAT_ENABLED=true 后重启 API。")
@@ -9285,6 +9474,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         if not message.strip() and not attachment_context:
             raise ValueError("消息不能为空。")
         message = message.strip() or "请查看并说明附件内容。"
+        frame = coerce_turn_frame(turn_frame, message) if turn_frame is not None else None
         mode = self._normalize_mode(mode)
         character = self.character(character_value)
         performance_catalog = [
@@ -9340,7 +9530,14 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 "to": requested_channel,
                 "trigger": "ui",
             }
-        dialogue_transition = self._dialogue_channel_transition(message.strip(), active_channel)
+        # Public chat keeps the explicit request medium until its separate
+        # presence transition completes. A text invitation to meet must remain
+        # valid while the analyst and character are still in different places.
+        dialogue_transition = (
+            self._dialogue_channel_transition(message.strip(), active_channel)
+            if allow_dialogue_channel_transition
+            else {"status": "none", "from": active_channel, "to": active_channel, "trigger": "none"}
+        )
         next_channel = active_channel
         if dialogue_transition["status"] == "applied_immediately":
             active_channel = str(dialogue_transition["to"])
@@ -9356,9 +9553,9 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             active_channel,
         )
 
-        confirmed_location = self._recent_confirmed_location(
-            session_context,
-            character.character_id,
+        confirmed_location = (
+            self._recent_confirmed_location(session_context, character.character_id)
+            if frame is None else None
         )
         if confirmed_location:
             current_location = str(
@@ -9435,6 +9632,8 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         retrieval_started = time.perf_counter()
         if observer is not None:
             observer.phase("retrieving")
+        frame_kwargs = ({"turn_frame": frame, "session_experiences": session_experiences}
+                        if frame is not None and domain_routing else {})
         context = self.retrieve(
             character.character_id,
             message.strip(),
@@ -9444,6 +9643,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             style_context=style_context,
             mode=mode,
             world_state=world_state,
+            **frame_kwargs,
         )
         self._record_generation_duration("retrieval_ms", retrieval_started)
         prompt_started = time.perf_counter()
@@ -9468,10 +9668,17 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         prompt_scene_state = self._scene_state_for_prompt(
             scene_state,
             message.strip(),
-            str(context.get("question_focus") or "general"),
+            str((context.get("scene_question_focus") if frame is not None else None)
+                or context.get("question_focus") or "general"),
         )
         communication_context = self._communication_context(active_channel, prompt_scene_state)
         continuity_card = self._continuity_card(session_context, active_channel)
+        if frame is not None:
+            # This legacy card derives premises from chat text. Keep its
+            # conversational rhythm without presenting summaries as facts.
+            continuity_card = {**continuity_card, "shared_premises": []}
+            context["turn_frame"] = frame.as_dict()
+            context["session_experiences"] = self._session_experience_pool(session_experiences)
         context["communication_context"] = communication_context
         context["scene_state"] = prompt_scene_state
         context["raw_scene_state"] = scene_state
@@ -9511,6 +9718,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 context.get("dual_persona_context"),
                 context.get("relationship_address_memory"),
                 compact_public_schema=bool((thinking_decision or {}).get("compact_public_schema")),
+                **({"dialogue_v2": True} if frame is not None else {}),
             )
             + "\n\n"
             + _PREFERENCE_GUIDANCE
@@ -9535,6 +9743,16 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             '文字通讯或没有适合的条目时必须返回空字符串。候选数据：'
             + json.dumps(performance_catalog if active_channel == "in_person" else [], ensure_ascii=False)
         )
+        if frame is not None:
+            system_prompt += """
+
+【分域连续性｜本轮优先】
+turn_frame 只描述本轮分句的意图，不是事实。原作事实只能来自 evidence 与已审核角色资料；live_scene 只能证明当前会话场景。session_experiences 中 confirmed 且带来源标识的条目才是共同经历；reported 按 provenance 区分分析员自述 user_statement 和角色尚未履约的承诺 assistant_commitment，不得升格为已经共同完成的事实。摘要、旧助手对白和模型自己的推测也不能成为事实。混合问题按分句自然衔接，不用当前场景替代原作当时的地点。不确定的指代只澄清一次。
+日常即兴只在普通、当前、成立的场景中描写小动作与对话，不创作重大剧情结果。通讯器中不能执行触碰、同行或共同抵达；邀约接受仅形成约定，赴约由已确认场景事件完成。邀请可自然接受、拒绝、延后或澄清，不要求任何固定等待句式。
+同一次回复返回 interaction_decision；没有邀请或续接邀请时为 null。有邀请时仅使用受控地点，返回 {"decision":"accept_now|decline|defer|clarify","location_id":"...","activity_id":"..."}。accept_now 只适用于本轮现在的明确邀请及角色自愿接受；未来计划返回 defer，过去、假设、否定或引用不返回立即行动。该字段只是候选，不能自行修改状态。
+memory_candidates 是普通当前互动的候选，最多四条，可为空；仅返回 {"event_type":"ordinary_interaction","source_clause_ids":["c0"],"response_block_indices":[0]}。只关联本轮分析员真正完成的普通动作分句和本轮独立 action 块的对应低风险互动；不能自称已确认，不能把原作、假设、约定、对白中的计划或杜撰的过去经历当作双方完成事件。摘要和来源由服务端从这些块确定。
+interaction_decision、memory_candidates 等元数据必须先于 content_blocks；content_blocks 始终为 JSON 对象最后一个字段，正文仍只写其中，不输出判别过程。
+"""
         if active_channel == "text" and public_sticker_candidates:
             # The public facade supplies a small deterministic, role-filtered
             # candidate set after applying the context probability and
@@ -9563,6 +9781,9 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 if isinstance(item, dict)
             )
             movement_semantics = (
+                "本轮使用 interaction_decision 返回接受、拒绝、延后或澄清。state_updates 保持空数组，由服务端核验结构化决定后处理场景；不要求固定措辞。"
+                if frame is not None
+                else
                 "当前是文字通讯。角色若接受，必须明确回答‘我先过去等你’这一语义：角色先行到目的地等待，"
                 "分析员此刻仍留在原处；不得写成双方已经一起出发、同行或共同抵达。"
                 if rendezvous_mode
@@ -9576,6 +9797,8 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
 {movement_semantics}
 格式："state_updates":[{{"type":"joint_move","location_id":"...","activity_id":"...","commit":"now"}}]
 """
+            if frame is not None:
+                system_prompt += "\n上面的旧 state_updates 格式仅供兼容说明；本轮只使用 interaction_decision，state_updates=[]，正文最后输出 content_blocks。\n"
         user_prompt = self._prompt(character, message.strip(), context)
         self._record_generation_duration("prompt_build_ms", prompt_started)
         self._record_generation_duration("context_build_ms", context_started)
@@ -10683,7 +10906,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         resolved_style = context.get("style_context") or {}
         style_active = resolved_style.get("status") in {"active", "unresolved"}
         state_updates = []
-        for item in generated.get("state_updates") or []:
+        for item in (generated.get("state_updates") or []) if frame is None else []:
             if not isinstance(item, dict) or str(item.get("type") or "") != "joint_move":
                 continue
             state_updates.append({
@@ -10701,6 +10924,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             "guard_violation_count": len(guardrail_violations),
             "final_guard_violation_count": len(final_guardrail_violations),
         }
+        candidate_envelope_valid = not (content_block_guard_rejected or deterministic_fallback or session_premise_guard)
         result = {
             "message_id": "mvp_message_" + sha256(
                 f"{resolved_session}\x1f{request_key or _utc_now()}\x1f{message}".encode()
@@ -10720,6 +10944,13 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             "analyst_content_blocks": normalized_analyst_blocks,
             "content_blocks": content_blocks,
             "state_updates": state_updates,
+            **({
+                "interaction_decision": self._interaction_decision_candidate(generated.get("interaction_decision"))
+                    if candidate_envelope_valid else None,
+                "memory_candidates": self._memory_event_candidates(generated.get("memory_candidates"), frame, content_blocks)
+                    if candidate_envelope_valid else [],
+                "turn_frame": frame.as_dict(),
+            } if frame is not None else {}),
             "channel_transition": channel_transition,
             "scene_state": {
                 **scene_state,

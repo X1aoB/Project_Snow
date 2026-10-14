@@ -1,9 +1,11 @@
 import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope, anonymousServerTimings } from "/modules/runtime.js";
+import { DIALOGUE_PROTOCOL, SCENE_PROTOCOL, dialogueRecordKey, decodeSidecar, mergeDialogueReceipts, relevantDialogueReceipts, fitDialogueContext, isPureRendezvousJoin, sceneVisualKey } from "/dialogue-context.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
 const apiRoot = "/public/v1";
 const publicHttp = createHttpClient(apiRoot);
+const dialogueHttp = createHttpClient("/public/v2");
 const dbName = "project-snow-public";
 const dbVersion = 4;
 const SUBSCRIPTION_PROVIDER = "codex_subscription";
@@ -52,6 +54,8 @@ const state = {
   worldPackage: "",
   scene: null,
   sceneByCharacter: new Map(),
+  dialogueByCharacter: new Map(),
+  sceneActionByCharacter: new Map(),
   latest: new Map(),
   typingByCharacter: new Map(),
   presentationByCharacter: new Map(),
@@ -65,6 +69,7 @@ const state = {
   modeTransitionController: null,
   requestStatusByCharacter: new Map(),
   requestRecoveryByCharacter: new Map(),
+  requestStatusOwnerByCharacter: new Map(),
   feedbackMessageId: "",
   arrivalPending: false,
   autoSummaryEnabled: true,
@@ -350,6 +355,12 @@ const errorMessages = {
   request_id_conflict: "请求编号冲突，请重新操作。",
   invalid_presence_transition: "场景转换参数不正确。",
   invalid_presence_request: "当前场景请求无效。",
+  request_result_unavailable: "原请求的恢复窗口已结束，无法找回结果。不会自动重新生成，请确认后发送新消息。",
+  session_context_invalid: "会话凭证已失效。历史仍保留，请从今天重新开始场景。",
+  session_context_subject_mismatch: "当前会话凭证不属于此浏览器会话。历史仍保留，请重新建立场景。",
+  session_context_conflict: "场景已更新，请重新读取当前场景后继续。",
+  invalid_scene_action: "这个约定已变更，请重新查看当前约定。",
+  invalid_dialogue_context: "这次邀请需要澄清，请确认地点和时间后再发送。",
   turnstile_required: "人机验证未完成，请稍后重试。",
   turnstile_expired: "人机验证已过期，请重新验证。",
   turnstile_timeout: "人机验证超时，请再次点击按钮重试。",
@@ -722,18 +733,20 @@ function finishReceivedPresentation() {
   if (state.typewriter.fullText) finishTypewriter(state.typewriter.key, state.typewriter.fullText);
   syncFastForward();
 }
-async function deliverCompletedReply(characterId, requestId, message) {
-  const ready = { requestId, messageId: message.id, controller: new AbortController() };
+async function deliverCompletedReply(characterId, requestId, message, visibleCount = 0) {
+  const ready = { requestId, messageId: message.id, visibleCount, controller: new AbortController() };
   state.completedPresentationByCharacter.set(characterId, ready);
   syncFastForward();
   try {
     await waitForNaturalReply(requestId, ready.controller.signal);
     state.readyReplyIds.delete(message.id);
     if (!ownsTypingState(characterId, requestId)) return;
-    updateTypingPhase(characterId, requestId, "presenting");
-    await presentAssistantTurn(characterId, requestId, message);
+    await presentAssistantTurn(characterId, requestId, message, { visibleCount });
   } catch (error) {
-    if (error?.name !== "AbortError") showBanner("回复已经保存，可在记录中查看。");
+    if (error?.name !== "AbortError") {
+      cancelPresentationQueue(characterId, requestId, { render: false });
+      showBanner("回复已经保存，可在记录中查看。");
+    }
   } finally {
     state.readyReplyIds.delete(message.id);
     if (state.completedPresentationByCharacter.get(characterId) === ready) state.completedPresentationByCharacter.delete(characterId);
@@ -746,7 +759,7 @@ function prepareSurfaceMotion(channel) {
   const previous = $("chat-app").dataset.channel;
   if (previous === channel) return null;
   surfaceMotion.cancel();
-  if (!featureEnabled("motion_v2") || quietPresentation()) return null;
+  if (!(featureEnabled("motion_v2") || sceneActionsV2Enabled()) || quietPresentation()) return null;
   const outgoing = $(previous === "in_person" ? "in-person-surface" : "text-surface");
   if (!outgoing || outgoing.hidden) return null;
   const bounds = outgoing.getBoundingClientRect();
@@ -1229,6 +1242,10 @@ function normalizeMessage(message) {
     committedBlocks: Array.isArray(message.committedBlocks) ? message.committedBlocks : [],
     errorStage: normalizedErrorStage(message.errorStage || message.error_stage),
     source: message.source || "chat",
+    evidenceSources: Array.isArray(message.evidenceSources || message.evidence_sources)
+      ? (message.evidenceSources || message.evidence_sources).slice(0, 8).map(source => ({
+        document_id: plain(source.document_id).slice(0, 160), title: plain(source.title).slice(0, 160), source_type: plain(source.source_type).slice(0, 160),
+      })).filter(source => source.title || source.document_id) : [],
     conversationSegmentId: plain(message.conversationSegmentId || message.conversation_segment_id),
     usage: message.usage && typeof message.usage === "object" ? { ...message.usage } : null,
     movementStatus: message.movementStatus && typeof message.movementStatus === "object"
@@ -1289,7 +1306,7 @@ async function dbGetThread(characterId, initialLimit = 60) {
   state.threads.set(characterId, thread);
   return thread;
 }
-async function dbPutThread(thread) {
+async function dbPutThread(thread, { appState = [] } = {}) {
   if (state.writerReady && !state.writerOwned) return;
   if (thread.historyEpoch !== state.historyEpoch) return;
   const epoch = state.historyEpoch;
@@ -1315,17 +1332,20 @@ async function dbPutThread(thread) {
   const changes = thread.messages.map((message) => ({ message, signature: JSON.stringify(message) }))
     .filter(({ message, signature }) => state.persistedMessages.get(message.id) !== signature);
   for (const { message } of changes) state.memoryStores.messages.set(message.id, structuredClone(message));
+  for (const entry of appState) state.memoryStores.app_state.set(entry.key, structuredClone(entry));
   const db = await openDB();
   if (epoch !== state.historyEpoch || thread.historyEpoch !== epoch) return;
   if (!db) {
     await storePut("threads", metadata);
     await Promise.all(changes.map(({ message }) => storePut("messages", message)));
+    await Promise.all(appState.map(entry => storePut("app_state", entry)));
   } else {
     try {
       await new Promise((resolve, reject) => {
-        const tx = db.transaction(["threads", "messages"], "readwrite");
+        const tx = db.transaction(["threads", "messages", ...(appState.length ? ["app_state"] : [])], "readwrite");
         tx.objectStore("threads").put(metadata);
         for (const { message } of changes) tx.objectStore("messages").put(message);
+        for (const entry of appState) tx.objectStore("app_state").put(entry);
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error || new Error("indexeddb_write_aborted"));
@@ -1399,12 +1419,96 @@ function decodeStatePackage(token) {
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch { return {}; }
 }
+function dialogueV2Enabled() {
+  return state.config?.capabilities?.dialogue_protocol === DIALOGUE_PROTOCOL
+    && ["dialogue_domains_v2", "scene_actions_v2", "session_memory_v2"].some(featureEnabled);
+}
+function sceneActionsV2Enabled() {
+  return dialogueV2Enabled() && featureEnabled("scene_actions_v2")
+    && state.config?.capabilities?.scene_action_protocol === SCENE_PROTOCOL;
+}
+async function loadDialogueRecord(characterId) {
+  if (!state.dialogueByCharacter.has(characterId)) {
+    let stored = await storeGet("app_state", dialogueRecordKey(characterId));
+    // An older v4 client can delete a character without knowing the sidecar
+    // key. Do not revive experiences or a scene whose transcript was erased.
+    if ((stored?.memories?.length || stored?.sessionContextPackage) && !(await messageCount(characterId))) {
+      const snapshot = stored.sceneActionSnapshot;
+      const metadata = snapshot ? await storeGet("threads", characterId) : null;
+      const reconcilable = snapshot?.endpoint === "/public/v2/scene/action"
+        && snapshot.envelope?.protocol === SCENE_PROTOCOL && snapshot.envelope.character_id === characterId
+        && metadata?.conversationSegmentId === snapshot.envelope.segment_id;
+      // A newly created empty thread can have its first join in flight. Its
+      // real metadata distinguishes it from an older client's deletion; query
+      // that immutable UUID before deciding whether a scene was established.
+      if (!reconcilable) {
+        stored = { ...stored, sessionContextPackage: "", memories: [], sceneActionSnapshot: null };
+        if (state.writerOwned) await storePut("app_state", stored);
+      }
+    }
+    state.dialogueByCharacter.set(characterId, stored || { key: dialogueRecordKey(characterId), characterId, sessionContextPackage: "", memories: [] });
+  }
+  return state.dialogueByCharacter.get(characterId);
+}
+function dialogueCandidates(characterId, text = "") {
+  if (!featureEnabled("session_memory_v2")) return [];
+  return relevantDialogueReceipts(state.dialogueByCharacter.get(characterId)?.memories || [], text);
+}
+function dialoguePackage(thread) {
+  const token = state.dialogueByCharacter.get(thread.characterId)?.sessionContextPackage || "";
+  const context = decodeSidecar(token);
+  return context.segment_id === thread.conversationSegmentId && context.character_id === thread.characterId ? token : "";
+}
+async function commitDialogueResult(thread, result, owns = () => true) {
+  if (!owns() || !state.writerOwned || thread.historyEpoch !== state.historyEpoch) return false;
+  const token = plain(result.sessionContextPackage || result.session_context_package);
+  const context = decodeSidecar(token);
+  if (!token || token.length > 8192 || context.character_id !== thread.characterId || context.segment_id !== thread.conversationSegmentId) return false;
+  const previous = await loadDialogueRecord(thread.characterId);
+  if (!owns() || !state.writerOwned || thread.historyEpoch !== state.historyEpoch) return false;
+  const before = decodeSidecar(previous.sessionContextPackage);
+  if (before.segment_id === context.segment_id && (Number(before.scene_epoch) > Number(context.scene_epoch)
+    || Number(before.revision) > Number(context.revision)
+    || Number(before.revision) === Number(context.revision) && previous.sessionContextPackage !== token)) return false;
+  const world = plain(result.statePackage || result.state_package);
+  const accepted = world ? await saveWorldPackage(world, { persist: false }) : true;
+  if (!accepted || !owns() || thread.historyEpoch !== state.historyEpoch || !state.writerOwned) return false;
+  const record = { ...previous, key: dialogueRecordKey(thread.characterId), characterId: thread.characterId,
+    sessionContextPackage: token, memories: mergeDialogueReceipts(previous.memories, result.sessionMemories || result.session_memories || []) };
+  const appState = [record];
+  if (world) { const order = statePackageOrder(world); appState.push({ key: "world", statePackage: world, revision: order.revision, scheduleDate: order.scheduleDate }); }
+  await dbPutThread(thread, { appState });
+  if (!owns() || thread.historyEpoch !== state.historyEpoch || !state.writerOwned) return false;
+  state.dialogueByCharacter.set(thread.characterId, record);
+  return true;
+}
+async function retireRejectedDialogueContext(error, thread, envelope, owns) {
+  if (!owns() || error?.terminal || error?.errorStage !== "state_validation"
+    || ![409, 422].includes(error.httpStatus)) return false;
+  const contextErrors = ["session_context_invalid", "session_context_subject_mismatch", "session_context_conflict"];
+  const record = await loadDialogueRecord(thread.characterId);
+  if (!owns()) return false;
+  if (contextErrors.includes(error.message)) {
+    // A rejected historical recovery must not retire a newer active scene.
+    if ((record.sessionContextPackage || "") !== (envelope?.session_context_package || "")) return false;
+    const retired = { ...record, sessionContextPackage: "" };
+    state.dialogueByCharacter.set(thread.characterId, retired);
+    await storePut("app_state", retired);
+    return true;
+  }
+  if (STATE_PACKAGE_RECOVERY_CODES.has(error.message)
+    && state.worldPackage === (envelope?.chat?.state_package || envelope?.state_package)) {
+    await clearPersistedWorldPackage();
+    return true;
+  }
+  return false;
+}
 function statePackageOrder(token) {
   const decoded = typeof token === "string" ? decodeStatePackage(token) : (token || {});
   const scheduleDate = plain(decoded.schedule_date || decoded.world?.schedule_date || decoded.date).match(/^\d{4}-\d{2}-\d{2}$/)?.[0] || "";
   return { scheduleDate, revision: Number(decoded.revision || decoded.world?.revision || 0) };
 }
-async function saveWorldPackage(token) {
+async function saveWorldPackage(token, { persist = true } = {}) {
   if (!token) return false;
   const incoming = statePackageOrder(token);
   const current = statePackageOrder(state.worldPackage || "");
@@ -1415,7 +1519,7 @@ async function saveWorldPackage(token) {
   if (state.worldPackage && incoming.scheduleDate && current.scheduleDate && incoming.scheduleDate < current.scheduleDate) return false;
   if (state.worldPackage && incoming.scheduleDate && current.scheduleDate && incoming.scheduleDate > current.scheduleDate) {
     state.worldPackage = token;
-    await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
+    if (persist) await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
     return true;
   }
   if (state.worldPackage && incoming.scheduleDate !== current.scheduleDate) {
@@ -1423,7 +1527,7 @@ async function saveWorldPackage(token) {
     // late response must never replace a dated package from the current day.
     if (!incoming.scheduleDate) return false;
     state.worldPackage = token;
-    await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
+    if (persist) await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
     return true;
   }
   if (state.worldPackage && incoming.revision < current.revision) return false;
@@ -1431,7 +1535,7 @@ async function saveWorldPackage(token) {
     return token === state.worldPackage;
   }
   state.worldPackage = token;
-  await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
+  if (persist) await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
   return true;
 }
 function statePackageRecoveryError(error) {
@@ -1442,6 +1546,11 @@ async function clearPersistedWorldPackage() {
   state.worldPackage = "";
   state.scene = null;
   state.sceneByCharacter.clear();
+  for (const [characterId, record] of state.dialogueByCharacter) {
+    const cleaned = { ...record, sessionContextPackage: "" };
+    state.dialogueByCharacter.set(characterId, cleaned);
+    await storePut("app_state", cleaned);
+  }
   await storeDelete("app_state", "world");
   // v3 stored a signed world package inside each thread. The v4 migration
   // intentionally stopped writing it, but old metadata can still survive an
@@ -1553,6 +1662,16 @@ async function pruneExpiredMessages() {
   for (const thread of state.threads.values()) {
     thread.messageCount = counts.get(thread.characterId) || 0;
     thread.hasOlderMessages = thread.messages.length < thread.messageCount;
+  }
+  for (const stored of await storeAll("app_state")) {
+    if (!plain(stored.key).startsWith("dialogue_context_v1:")) continue;
+    const cleaned = { ...stored, memories: (stored.memories || []).filter(receipt => {
+      const occurred = Date.parse(receipt.memory?.occurred_at || "");
+      return Number.isFinite(occurred) && occurred >= cutoff;
+    }) };
+    if (cleaned.memories.length !== (stored.memories || []).length) cleaned.sessionContextPackage = "";
+    await storePut("app_state", cleaned);
+    state.dialogueByCharacter.set(cleaned.characterId, cleaned);
   }
   if (state.selected) renderAll();
 }
@@ -2409,7 +2528,7 @@ function globalRequestBusy() {
 function presentationFor(characterId = state.selected) {
   return characterId ? state.presentationByCharacter.get(characterId) || null : null;
 }
-function cancelPresentationQueue(characterId = state.selected, requestId = "") {
+function cancelPresentationQueue(characterId = state.selected, requestId = "", { render = true } = {}) {
   const ready = state.completedPresentationByCharacter.get(characterId);
   if (ready && (!requestId || ready.requestId === requestId)) {
     state.readyReplyIds.delete(ready.messageId);
@@ -2427,7 +2546,7 @@ function cancelPresentationQueue(characterId = state.selected, requestId = "") {
   if (queue.timer) window.clearTimeout(queue.timer);
   cancelStageMotion(characterId);
   state.presentationByCharacter.delete(characterId);
-  if (characterId === state.selected) {
+  if (render && characterId === state.selected) {
     window.clearTimeout(state.typewriter.timer);
     state.typewriter = { key: "", timer: 0, fullText: "", displayedText: "" };
     renderTimeline();
@@ -2542,6 +2661,10 @@ function inPersonSurfaceText(blocks, type) {
 function visibleBlocksFor(message) {
   const queue = message ? presentationFor(message.characterId || state.selected) : null;
   if (queue && queue.messageId === message?.id) return queue.blocks.slice(0, queue.visibleCount);
+  const ready = state.completedPresentationByCharacter.get(message?.characterId);
+  if (ready?.messageId === message?.id) return presentationBlocks(message).slice(0, ready.visibleCount);
+  const streaming = state.streamingPresentationByCharacter.get(message?.characterId);
+  if (streaming?.requestId === message?.requestId) return presentationBlocks(message).slice(0, streaming.visibleCount);
   if (message?.communicationChannel === "in_person") {
     return message?.contentBlocks?.length ? message.contentBlocks : message?.displayBlocks || [];
   }
@@ -2578,18 +2701,18 @@ async function preloadStickerBlock(block, timeoutMs = 900, signal = undefined) {
   });
   await Promise.race([loading, abortableDelay(timeoutMs, signal)]);
 }
-async function presentAssistantTurn(characterId, requestId, message) {
+async function presentAssistantTurn(characterId, requestId, message, { visibleCount = 0 } = {}) {
   if (!ownsTypingState(characterId, requestId)) return false;
   const blocks = presentationBlocks(message);
   const inPerson = message.communicationChannel === "in_person";
-  cancelPresentationQueue(characterId);
+  cancelPresentationQueue(characterId, "", { render: false });
   if (!blocks.length || !ownsTypingState(characterId, requestId)) return false;
   const queue = {
     characterId,
     requestId,
     messageId: message.id,
     blocks,
-    visibleCount: inPerson || message.committedBlocks?.length ? blocks.length : 1,
+    visibleCount: inPerson ? blocks.length : Math.max(1, Math.min(blocks.length, visibleCount)),
     timer: 0,
     cancelled: false,
     controller: new AbortController(),
@@ -2601,6 +2724,7 @@ async function presentAssistantTurn(characterId, requestId, message) {
     ? blocks.map((_block, index) => index + 1)
     : [1, 2, 3, blocks.length];
   state.presentationByCharacter.set(characterId, queue);
+  updateTypingPhase(characterId, requestId, "presenting");
   syncFastForward();
   if (characterId === state.selected) {
     renderTimeline();
@@ -2617,11 +2741,13 @@ async function presentAssistantTurn(characterId, requestId, message) {
         );
       }
     } else {
-      let spent = 0;
+      const metrics = replyTiming(requestId);
+      let spent = metrics?.segmentSpent || 0;
       for (let step = 1; step < revealCounts.length && queue.visibleCount < blocks.length; step += 1) {
         if (!ownsPresentation()) return false;
         const previousCount = revealCounts[step - 1];
         const visibleCount = revealCounts[step];
+        if (visibleCount <= queue.visibleCount) continue;
         const revealed = blocks.slice(previousCount, visibleCount);
         const hasSticker = revealed.some((item) => item.type === "sticker");
         const previousTextLength = [...plain(blocks[Math.max(0, previousCount - 1)]?.text)].length;
@@ -2640,16 +2766,18 @@ async function presentAssistantTurn(characterId, requestId, message) {
           // Artwork decoding never holds back already available text.
           void preload.catch(() => {});
           const began = performance.now();
-          while (!queue.skip && !quietPresentation() && performance.now() - began < totalWait) {
-            await abortableDelay(Math.min(32, totalWait - (performance.now() - began)), queue.controller.signal);
+          const wait = Math.max(0, totalWait - (metrics?.lastBodyPaintAt ? began - metrics.lastBodyPaintAt : 0));
+          while (!queue.skip && !quietPresentation() && performance.now() - began < wait) {
+            await abortableDelay(Math.min(32, wait - (performance.now() - began)), queue.controller.signal);
           }
-          const metrics = replyTiming(requestId);
           if (metrics) metrics.naturalWaitMs += performance.now() - began;
           spent += totalWait;
+          if (metrics) metrics.segmentSpent = spent;
         } else if (!reducedMotion()) await Promise.all([abortableDelay(totalWait - readingWait, queue.controller.signal), preload]);
         else await preload;
         if (!ownsPresentation()) return false;
         queue.visibleCount = queue.skip ? blocks.length : visibleCount;
+        if (metrics) metrics.lastBodyPaintAt = performance.now();
         updateTypingPhase(characterId, requestId, "presenting");
         if (characterId === state.selected) {
           renderTimeline();
@@ -2686,11 +2814,17 @@ function typingIndicatorMarkup(character, { includeAvatar = true } = {}) {
 function renderRequestStatus() {
   const target = $("request-status");
   if (!target) return;
-  const pending = typingStateFor();
+  const thread = currentThread();
+  const channel = thread?.channel || "text";
+  const pendingState = typingStateFor();
+  const pending = pendingState?.channel === channel ? pendingState : null;
+  const statusKey = requestStatusKey(state.selected, channel);
+  const owner = state.requestStatusOwnerByCharacter.get(statusKey);
+  const belongsToSegment = !owner?.segmentId || owner.segmentId === thread?.conversationSegmentId;
   target.className = "request-status";
   target.setAttribute("aria-busy", pending ? "true" : "false");
-  target.textContent = state.requestStatusByCharacter.get(state.selected) || "";
-  if (state.requestRecoveryByCharacter.get(state.selected) === "refresh_scene") {
+  target.textContent = belongsToSegment ? state.requestStatusByCharacter.get(statusKey) || "" : "";
+  if (belongsToSegment && state.requestRecoveryByCharacter.get(statusKey) === "refresh_scene") {
     const refresh = document.createElement("button");
     refresh.type = "button";
     refresh.className = "request-recovery";
@@ -2701,7 +2835,7 @@ function renderRequestStatus() {
       refresh.disabled = true;
       try {
         await resolvePresence();
-        state.requestRecoveryByCharacter.delete(state.selected);
+        state.requestRecoveryByCharacter.delete(statusKey);
         setRequestStatus(state.selected, "场景已重新读取");
       } catch (error) {
         setRequestStatus(state.selected, `重新读取失败：${displayError(error)}`, "", "refresh_scene");
@@ -2716,8 +2850,9 @@ function renderRequestStatus() {
   if (!pending && currentThread()?.channel === "in_person") {
     const failedMessage = [...(currentThread()?.messages || [])]
       .reverse()
-      .find((message) => message.role === "user" && message.status === "failed");
-    if (failedMessage) {
+      .find((message) => message.role === "user" && message.communicationChannel === channel
+        && (!thread.conversationSegmentId || message.conversationSegmentId === thread.conversationSegmentId));
+    if (failedMessage?.status === "failed" && failedMessage.errorCode !== "request_result_unavailable") {
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "request-retry";
@@ -2729,18 +2864,30 @@ function renderRequestStatus() {
     }
   }
   const stop = $("stop-waiting");
-  if (stop) stop.hidden = !pending || ["arrival", "presenting"].includes(pending.phase);
+  if (stop) stop.hidden = !pending || ["waiting", "arrival", "presenting"].includes(pending.phase);
   const row = target.closest(".request-status-row");
   if (row) row.hidden = !target.textContent.trim() && (!stop || stop.hidden);
   syncFastForward();
 }
+function requestStatusKey(characterId, channel = currentThread()?.channel || "text") {
+  return `${characterId}:${channel === "in_person" ? "in_person" : "text"}`;
+}
 function setRequestStatus(characterId, message, requestId = "", recoveryAction = "") {
   if (!characterId) return;
   if (requestId && !ownsTypingState(characterId, requestId)) return;
-  if (message) state.requestStatusByCharacter.set(characterId, plain(message));
-  else state.requestStatusByCharacter.delete(characterId);
-  if (recoveryAction) state.requestRecoveryByCharacter.set(characterId, recoveryAction);
-  else state.requestRecoveryByCharacter.delete(characterId);
+  const thread = state.threads.get(characterId);
+  const requestMessage = requestId ? thread?.messages.find(item => item.requestId === requestId) : null;
+  const channel = requestMessage?.communicationChannel || typingStateFor(characterId)?.channel || thread?.channel || "text";
+  const key = requestStatusKey(characterId, channel);
+  if (message) {
+    state.requestStatusByCharacter.set(key, plain(message));
+    state.requestStatusOwnerByCharacter.set(key, { requestId, segmentId: requestMessage?.conversationSegmentId || thread?.conversationSegmentId || "" });
+  } else {
+    state.requestStatusByCharacter.delete(key);
+    state.requestStatusOwnerByCharacter.delete(key);
+  }
+  if (recoveryAction) state.requestRecoveryByCharacter.set(key, recoveryAction);
+  else state.requestRecoveryByCharacter.delete(key);
   if (characterId === state.selected) renderRequestStatus();
 }
 function setTypingState({ characterId, requestId, channel, phase = "typing" }) {
@@ -2924,17 +3071,7 @@ async function loadCharacters() {
   }
 }
 function sceneKeyForLocation(location) {
-  const value = plain(location);
-  if (/商业街|商场|购物中心|公园/.test(value)) return "observation";
-  if (/档案|资料|图书/.test(value)) return "archive";
-  if (/食堂|餐厅|厨房/.test(value)) return "canteen";
-  if (/走廊|通道/.test(value)) return "corridor";
-  if (/休息|客厅|休憩/.test(value)) return "lounge";
-  if (/医务|医疗/.test(value)) return "medical";
-  if (/观景|观测|天台/.test(value)) return "observation";
-  if (/宿舍|房间|寝室/.test(value)) return "quarters";
-  if (/训练|演习/.test(value)) return "training";
-  return "generic";
+  return sceneVisualKey(location);
 }
 function cachedSceneForCharacter(characterId) {
   const decoded = decodeStatePackage(state.worldPackage || "");
@@ -3768,6 +3905,13 @@ function playStageMotion(node, message, presentation, requestSequence = state.st
   return true;
 }
 async function resolvePresenceAttempt(characterId, signal, stateRecoveryAttempt = 0) {
+  if (dialogueV2Enabled()) {
+    const thread = await dbGetThread(characterId);
+    await ensureContinuityDecision(thread);
+    const result = await performSceneAction("resolve", characterId, signal);
+    if (characterId === state.selected && state.writerOwned) await setChannel(thread.channel, false, thread);
+    return result;
+  }
   try {
     const result = await api("/presence/resolve", { method: "POST", signal, body: JSON.stringify({ request_id: id(), character_id: characterId, state_package: state.worldPackage || "" }) });
     await saveWorldPackage(result.state_package);
@@ -3887,7 +4031,7 @@ async function runModeTransition(operation, title = "正在打开通讯器") {
   const owner = ++state.modeTransitionSequence;
   const controller = new AbortController();
   state.modeTransitionController = controller;
-  if (featureEnabled("motion_v2")) {
+  if (featureEnabled("motion_v2") || sceneActionsV2Enabled()) {
     const characterId = state.selected;
     setRequestStatus(characterId, title);
     try {
@@ -3983,6 +4127,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   if (previousId && previousId !== characterId) cancelStageArt();
   try {
     const thread = await dbGetThread(characterId);
+    if (dialogueV2Enabled()) await loadDialogueRecord(characterId);
     if (sequence !== state.selectionSequence) return;
     const previousReply = [...thread.messages].reverse().find(message => message.role === "assistant" && message.communicationChannel === "in_person");
     if (previousReply && (expressionStateForMessage(previousReply) !== "neutral" || previousReply.performanceId)) {
@@ -4005,7 +4150,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
       updateComposerAvailability();
       try {
         const operation = preparePresenceCandidate(characterId, controller.signal);
-        const candidate = switchingFromStage
+        const candidate = switchingFromStage && !dialogueV2Enabled()
           ? await runSceneTransition(operation, "正在前往……", sequence)
           : await operation;
         if (sequence !== state.selectionSequence || controller.signal.aborted) return;
@@ -4051,6 +4196,8 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     if (globalRequestBusy() && !preparedPackage) {
       await setChannel("text", false, thread);
       setRequestStatus(characterId, "上一位角色仍在回复，完成后会重新读取当前场景。");
+    } else if (dialogueV2Enabled()) {
+      await setChannel(thread.channel === "in_person" && preparedScene?.co_located ? "in_person" : "text", false, thread);
     } else if (switchingFromStage && !preparedScene?.co_located) {
       await setChannel("in_person", false);
       window.setTimeout(() => { if (sequence === state.selectionSequence) openPresenceDialog(); }, 0);
@@ -4117,6 +4264,33 @@ function timelineNearBottom() {
   const timeline = $("timeline");
   return !timeline || timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 72;
 }
+let timelineScrollSnapshot = null;
+function rememberTimelineViewport() {
+  const timeline = $("timeline");
+  if (!timeline || $("text-surface").hidden) return;
+  const top = timeline.getBoundingClientRect().top;
+  const anchor = [...timeline.querySelectorAll("[data-message-id]")].find(node => node.getBoundingClientRect().bottom > top);
+  timelineScrollSnapshot = { characterId: state.selected, top: timeline.scrollTop, nearBottom: timelineNearBottom(), width: timeline.clientWidth, height: timeline.clientHeight,
+    anchorId: anchor?.dataset.messageId || "", anchorOffset: anchor ? anchor.getBoundingClientRect().top - top : null };
+}
+const timelineResizeObserver = new ResizeObserver(() => {
+  const timeline = $("timeline");
+  const snapshot = timelineScrollSnapshot;
+  if (!snapshot || snapshot.characterId !== state.selected || $("text-surface").hidden) return;
+  if (snapshot.nearBottom && !state.timelineEndId) timeline.scrollTop = timeline.scrollHeight;
+  else {
+    const anchor = [...timeline.querySelectorAll("[data-message-id]")].find(node => node.dataset.messageId === snapshot.anchorId);
+    timeline.scrollTop = snapshot.top;
+    if (anchor && snapshot.anchorOffset !== null) timeline.scrollTop += anchor.getBoundingClientRect().top - timeline.getBoundingClientRect().top - snapshot.anchorOffset;
+  }
+  rememberTimelineViewport();
+});
+function observeTimelineViewport() {
+  timelineResizeObserver.disconnect();
+  timelineResizeObserver.observe($("timeline"));
+  $("timeline").querySelectorAll(".message-body").forEach(node => timelineResizeObserver.observe(node));
+  rememberTimelineViewport();
+}
 function starterPromptsMarkup() {
   return `<div class="starter-prompts" aria-label="开场建议"><button type="button" data-starter-prompt="晚上好，今天过得怎么样？">问候近况</button><button type="button" data-starter-prompt="最近有什么想聊的事吗？">聊聊最近</button><button type="button" data-starter-prompt="要一起去休息区喝杯茶吗？">邀请喝茶</button></div>`;
 }
@@ -4131,6 +4305,7 @@ function usageMarkup(message) {
 }
 
 async function preparePresenceCandidate(characterId, signal, stateRecoveryAttempt = 0, statePackage = state.worldPackage || "") {
+  if (dialogueV2Enabled()) return { result: await performSceneAction("resolve", characterId, signal), recoveredState: false };
   try {
     const result = await api("/presence/resolve", { method: "POST", signal, body: JSON.stringify({ request_id: id(), character_id: characterId, state_package: statePackage }) });
     return { result, recoveredState: stateRecoveryAttempt > 0 };
@@ -4167,6 +4342,7 @@ async function dismissCurrentRendezvous(thread = currentThread()) {
   await saveUiPreferences();
 }
 function rendezvousCardMarkup(message, presenting = false) {
+  if (sceneActionsV2Enabled()) return "";
   const movement = message?.movementStatus;
   const pending = signedPendingRendezvous(message?.characterId);
   if (
@@ -4212,7 +4388,50 @@ function bindTimelineActions() {
   if ($("load-older-messages")) $("load-older-messages").onclick = () => { void loadOlderMessages(); };
   if ($("load-newer-messages")) $("load-newer-messages").onclick = () => loadNewerMessages();
 }
+function renderCurrentRendezvous() {
+  const root = $("current-rendezvous");
+  if (!root) return;
+  const parent = currentThread()?.channel === "in_person" ? $("composer") : $("text-surface");
+  if (root.parentElement !== parent) {
+    if (parent === $("composer")) parent.prepend(root);
+    else parent.insertBefore(root, $("timeline"));
+  }
+  const pending = sceneActionsV2Enabled() ? signedPendingRendezvous().value : null;
+  const thread = currentThread();
+  const active = sceneActionsV2Enabled() && thread ? decodeSidecar(dialoguePackage(thread)).active_invitation : null;
+  const invitation = active && ["accepted", "deferred", "proposed", "clarify"].includes(active.status) ? active : null;
+  root.hidden = !pending && !invitation;
+  if (!pending && !invitation) { root.replaceChildren(); return; }
+  const key = plain(pending?.rendezvous_id || invitation.invitation_id);
+  const location = pending?.location_name || (state.config?.movement_catalog || []).find(item => item.location_id === invitation?.location_id)?.display_name || "地点待定";
+  const title = pending ? "约定" : ({ accepted: "稍后约定", deferred: "暂缓约定", proposed: "邀请待确认", clarify: "邀请待澄清" }[invitation.status]);
+  const collapsed = state.rendezvousDismissals.has(key);
+  root.innerHTML = `<div><strong>${title} · ${escapeHtml(location)}</strong>${!pending && !collapsed ? '<small>时间待定 · 确认后再赴约</small>' : ""}${collapsed
+    ? '<button type="button" class="secondary-button" data-current-rendezvous="open">查看约定</button>'
+    : `${pending ? '<button type="button" class="primary-button" data-current-rendezvous="go">赴约</button>' : ""}<button type="button" class="secondary-button" data-current-rendezvous="stay">留在通讯器</button><button type="button" class="secondary-button" data-current-rendezvous="cancel">取消约定</button>`}</div>`;
+  root.querySelectorAll("[data-current-rendezvous]").forEach(button => {
+    button.disabled = globalRequestBusy() || !state.writerOwned;
+    button.onclick = async () => {
+      if (globalRequestBusy() || !state.writerOwned) return;
+      const action = button.dataset.currentRendezvous;
+      if (action === "open" || action === "stay") {
+        if (action === "open") state.rendezvousDismissals.delete(key); else state.rendezvousDismissals.add(key);
+        renderCurrentRendezvous();
+        root.querySelector(`[data-current-rendezvous="${action === "stay" ? "open" : pending ? "go" : "cancel"}"]`)?.focus({ preventScroll: true });
+        await saveUiPreferences(); return;
+      }
+      if (action === "go") return arriveInPerson();
+      try {
+        const characterId = state.selected;
+        await runModeTransition(signal => performSceneAction("cancel_rendezvous", characterId, signal, { rendezvousId: key }), "正在取消约定……");
+        renderCurrentRendezvous();
+        if (state.selected === characterId) $("message-input").focus({ preventScroll: true });
+      } catch (error) { showBanner(displayError(error)); }
+    };
+  });
+}
 function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
+  renderCurrentRendezvous();
   // Render the saved window when the communicator becomes visible. Rebuilding
   // hidden history during a stage transition adds work and loses scroll geometry.
   if (featureEnabled("motion_v2") && $("text-surface").hidden) return;
@@ -4221,8 +4440,17 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   const window = historyWindow(allMessages, state.timelineEndId, state.timelineVisibleLimit);
   const messages = window.messages;
   const timeline = $("timeline");
-  const wasNearBottom = timelineNearBottom();
-  const previousDistance = timeline.scrollHeight - timeline.scrollTop;
+  timeline.style.overflowAnchor = "none";
+  // Automatic anchoring is immediate. CSS smooth scrolling can otherwise
+  // leave every render reading an intermediate position from the last update.
+  timeline.style.scrollBehavior = "auto";
+  const viewport = timelineScrollSnapshot?.characterId === state.selected ? timelineScrollSnapshot : null;
+  const wasNearBottom = viewport ? viewport.nearBottom : timelineNearBottom();
+  const previousTop = viewport?.top ?? timeline.scrollTop;
+  const timelineTop = timeline.getBoundingClientRect().top;
+  const anchorNode = [...timeline.querySelectorAll("[data-message-id]")].find(node => node.getBoundingClientRect().bottom > timelineTop);
+  const anchorId = viewport?.anchorId || anchorNode?.dataset.messageId;
+  const anchorOffset = viewport?.anchorOffset ?? (anchorNode ? anchorNode.getBoundingClientRect().top - timelineTop : null);
   const previousCount = Number(timeline.dataset.messageCount || 0);
   const older = thread?.hasOlderMessages || window.start > 0 ? '<button id="load-older-messages" class="secondary-button load-older-messages" type="button">加载更早的 40 条</button>' : "";
   const newer = window.hasNewer ? '<button id="load-newer-messages" class="secondary-button load-older-messages" type="button">查看较新的 40 条</button>' : "";
@@ -4230,6 +4458,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     reconcileMarkup(timeline, `${older}${timelineTypingMarkup()}<div class="empty-conversation"><p>从一句问候开始吧。历史只保存在此浏览器。</p>${starterPromptsMarkup()}</div>`);
     timeline.dataset.messageCount = "0";
     bindTimelineActions();
+    observeTimelineViewport();
     return;
   }
   // Resolve the device locale/timezone once per render, keeping live changes
@@ -4239,14 +4468,16 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     const failed = message.status === "failed";
     const presenting = message.role === "assistant" && presentationFor()?.messageId === message.id;
     const tools = failed && message.role === "user"
-      ? message.errorCode === "subscription_result_unknown"
+      ? message.errorCode === "request_result_unavailable"
+        ? '<span class="message-recovery-note">恢复窗口已结束，未重新生成。</span>'
+        : message.errorCode === "subscription_result_unknown"
         ? '<span class="message-recovery-note">结果尚未确认，请先检查个人连接器，避免重复发送。</span>'
         : `<button type="button" data-retry-message="${escapeHtml(message.id)}"${globalRequestBusy() ? " disabled" : ""}>重试</button>`
       : message.role === "assistant" && !presenting ? `<button type="button" data-feedback-message="${escapeHtml(message.id)}">反馈本条</button>` : "";
     const time = formatMessageTime(message.createdAt, messages[index - 1]?.createdAt || 0, message.createdAtEstimated, clockFormatter);
     const avatar = message.role === "user" ? analystAvatarMarkup({ priority: index === messages.length - 1 }) : avatarMarkup(currentCharacter(), { thumbnail: true, priority: index === messages.length - 1 });
     const blocks = message.role === "assistant" ? visibleBlocksFor(message) : message.contentBlocks;
-    return `${time ? `<div class="message-time" data-ui-key="time:${escapeHtml(message.id)}" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${message.partial ? "回复未完成 · 已保留收到的内容" : failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div>${message.role === "assistant" ? rendezvousCardMarkup(message, presenting) : ""}<div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
+    return `${time ? `<div class="message-time" data-ui-key="time:${escapeHtml(message.id)}" aria-label="${escapeHtml(time)}">${escapeHtml(time)}</div>` : ""}<article class="message ${message.role} ${message.status}" data-message-id="${escapeHtml(message.id)}"><div class="message-avatar">${avatar}</div><div class="message-body"><span class="meta"><span>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")}</span><span>${message.partial ? "回复未完成 · 已保留收到的内容" : failed ? "生成失败" : "文字通讯"}</span></span><div class="message-content-stack">${blocks.map(blockHtml).join("")}</div>${message.role === "assistant" ? rendezvousCardMarkup(message, presenting) + evidenceSourcesMarkup(message) : ""}<div class="message-tools">${tools}${usageMarkup(message)}</div></div></article>`;
   }).join("") + newer + (window.hasNewer ? "" : timelineTypingMarkup()));
   timeline.dataset.messageCount = String(messages.length);
   bindTimelineActions();
@@ -4266,10 +4497,15 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     timeline.scrollTop = timeline.scrollHeight;
     $("new-replies").hidden = !window.hasNewer;
   } else if (!preserveScroll) {
-    timeline.scrollTop = Math.max(0, timeline.scrollHeight - previousDistance);
+    // Keep the same historical row at the same viewport position when reply
+    // bubbles, media or time labels are appended below the reader.
+    const anchor = [...timeline.querySelectorAll("[data-message-id]")].find(node => node.dataset.messageId === anchorId);
+    timeline.scrollTop = previousTop;
+    if (anchor && anchorOffset !== null) timeline.scrollTop += anchor.getBoundingClientRect().top - timeline.getBoundingClientRect().top - anchorOffset;
     if (newMessages && messages[messages.length - 1]?.role === "assistant") $("new-replies").hidden = false;
   }
   sampleVisibleReplyPaints();
+  observeTimelineViewport();
   const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant" && message.status === "sent" && !presentationFor()?.messageId);
   if (latestAssistant && timeline.dataset.announcedMessageId !== latestAssistant.id) {
     timeline.dataset.announcedMessageId = latestAssistant.id;
@@ -4277,7 +4513,10 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   }
 }
 function latestInPersonMessage(role = "") {
-  return [...(currentThread()?.messages || [])].reverse().find((message) => !state.readyReplyIds.has(message.id) && message.communicationChannel === "in_person" && (message.status !== "failed" || message.partial) && (!role || message.role === role)) || null;
+  const thread = currentThread();
+  return [...(thread?.messages || [])].reverse().find((message) => !state.readyReplyIds.has(message.id)
+    && (!thread.conversationSegmentId || message.conversationSegmentId === thread.conversationSegmentId)
+    && message.communicationChannel === "in_person" && (message.status !== "failed" || message.partial) && (!role || message.role === role)) || null;
 }
 function typewriterCompleted(key, value) {
   const announcement = value
@@ -4491,8 +4730,10 @@ function renderStageSpeech(assistantMessage) {
   const visibleAssistantBlocks = assistantMessage ? visibleBlocksFor(assistantMessage) : [];
   const action = inPersonSurfaceText(visibleAssistantBlocks, "action");
   const completeSpeech = inPersonSurfaceText(visibleAssistantBlocks, "speech");
-  $("stage-narration").textContent = action || plain(state.scene?.character_activity);
-  const speech = completeSpeech || "场景已经建立。你可以说些什么，也可以只描述一个动作。";
+  const conversationStarted = (currentThread()?.messages || []).some(message => message.communicationChannel === "in_person"
+    && message.source !== "presence_arrival" && message.conversationSegmentId === currentThread()?.conversationSegmentId);
+  $("stage-narration").textContent = action || (!assistantMessage && !conversationStarted ? plain(state.scene?.character_activity) : "");
+  const speech = completeSpeech || (!assistantMessage && !conversationStarted ? "场景已经建立。你可以说些什么，也可以只描述一个动作。" : "");
   const speechKey = assistantMessage
     ? completeSpeech
       ? speechTypewriterKey(assistantMessage)
@@ -4510,6 +4751,10 @@ function renderStageSpeech(assistantMessage) {
   $("stage-open-feedback").disabled = !assistantMessage || Boolean(presentationFor()?.messageId === assistantMessage?.id);
   $("stage-open-feedback").dataset.messageId = assistantMessage?.id || "";
 }
+function evidenceSourcesMarkup(message) {
+  const sources = message?.evidenceSources || [];
+  return sources.length ? `<details class="evidence-sources"><summary>查看原作来源</summary><ul>${sources.map(source => `<li>${escapeHtml(source.title || "公开原作资料")}</li>`).join("")}</ul></details>` : "";
+}
 function renderTranscript() {
   if (!$("transcript-panel").classList.contains("open")) return;
   const messages = surfaceHistory("transcript");
@@ -4518,7 +4763,7 @@ function renderTranscript() {
   const newer = window.hasNewer ? '<button id="transcript-newer" class="secondary-button load-older-messages" type="button">查看较新的 40 条</button>' : "";
   reconcileMarkup($("transcript-content"), older + (window.messages.length ? window.messages.map((message) => {
     const blocks = message.role === "assistant" && message.displayBlocks?.length ? message.displayBlocks : message.contentBlocks;
-    return `<article class="transcript-entry" data-message-id="${escapeHtml(message.id)}"><strong>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")} · ${message.communicationChannel === "text" ? "文字通讯" : "面对面"} · ${escapeHtml(new Date(message.createdAt || Date.now()).toLocaleString())}</strong><p>${blocks.map((block) => block.type === "sticker" ? `〔表情〕${escapeHtml(block.caption || "表情")}` : `${block.type === "action" ? "〔动作〕" : ""}${escapeHtml(block.text)}`).join("\n\n")}</p></article>`;
+    return `<article class="transcript-entry" data-message-id="${escapeHtml(message.id)}"><strong>${message.role === "user" ? "你" : escapeHtml(currentCharacter()?.display_name || "角色")} · ${message.communicationChannel === "text" ? "文字通讯" : "面对面"} · ${escapeHtml(new Date(message.createdAt || Date.now()).toLocaleString())}</strong><p>${blocks.map((block) => block.type === "sticker" ? `〔表情〕${escapeHtml(block.caption || "表情")}` : `${block.type === "action" ? "〔动作〕" : ""}${escapeHtml(block.text)}`).join("\n\n")}</p>${evidenceSourcesMarkup(message)}</article>`;
   }).join("") : "<p>当前角色还没有本地记录。</p>") + newer);
   if ($("transcript-older")) $("transcript-older").onclick = () => { void loadOlderMessages("transcript"); };
   if ($("transcript-newer")) $("transcript-newer").onclick = () => loadNewerMessages("transcript");
@@ -4629,6 +4874,7 @@ function updateComposerAvailability() {
   if ($("clear-all-history")) $("clear-all-history").disabled = requestPending;
   document.querySelectorAll("[data-retry-message]").forEach((button) => { button.disabled = requestPending; });
   document.querySelectorAll(".request-recovery").forEach((button) => { button.disabled = requestPending; });
+  $("current-rendezvous")?.querySelectorAll("button").forEach(button => { button.disabled = requestPending; });
   $("analyst-action-field").hidden = !inPerson || !state.actionComposerOpen;
   $("toggle-action").setAttribute("aria-expanded", String(inPerson && state.actionComposerOpen));
   $("message-input").placeholder = !selected ? "选择角色后输入消息……" : configured() ? (inPerson ? "说些什么，也可只填写动作……" : "输入文字通讯……") : "可浏览历史；发送前请在设置中配置模型";
@@ -4652,6 +4898,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   // Only the selected thread owns the visible surface and composer controls.
   if (thread && thread.characterId !== state.selected) return;
   const composerChanged = state.composerDraftKey !== draftKey(state.selected, channel);
+  if (channel === "in_person" && !$("text-surface").hidden) rememberTimelineViewport();
   const snapshot = prepareSurfaceMotion(channel);
   if (composerChanged) state.actionComposerOpen = false;
   if (channel === "in_person") state.selectedSticker = null;
@@ -4818,7 +5065,7 @@ async function selectStickerSection(section) {
   renderStickerPicker();
   await loadStickers({ reset: true });
 }
-async function consumeChatStream(response, { characterId, requestId, fallbackChannel, committedReply = null, onCommitted = null }) {
+async function consumeChatStream(response, { characterId, requestId, fallbackChannel, committedReply = null, onCommitted = null, dialogueV2 = false }) {
   if (!response.body) throw new Error("stream_disconnected");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -4836,6 +5083,12 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
   let stageMotion = "none";
   let performanceId = "";
   let serverTimings = null;
+  let statePersistence = Promise.resolve();
+  let statePackage = "";
+  let sessionContextPackage = "";
+  let sessionMemories = [];
+  let sceneAction = null;
+  let evidenceSources = [];
   const handlePacket = async (packet) => {
     const event = (packet.match(/^event: (.+)$/m) || [])[1];
     const data = (packet.match(/^data: (.+)$/m) || [])[1];
@@ -4843,7 +5096,11 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
     const payload = JSON.parse(data);
     if (committedReply && event === "progress" && ownsTypingState(characterId, requestId)) {
       const labels = { queued: "正在排队…", preparing: "正在整理这次对话…", retrieving: "正在回想相关的事…", generating: "正在回复…", validating: "正在确认回复…", saving: "正在保存回复…" };
-      if (labels[payload.phase]) setRequestStatus(characterId, labels[payload.phase], requestId);
+      const timing = replyTiming(requestId);
+      if (labels[payload.phase]) {
+        if (timing) timing.pendingProgressText = labels[payload.phase];
+        if (timing?.feedbackAllowed) setRequestStatus(characterId, labels[payload.phase], requestId);
+      }
     }
     if (committedReply && event === "committed_block") {
       if (committedReply.accept(payload)) onCommitted?.();
@@ -4865,11 +5122,29 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       streamedBlocks.set(blockIndex, current);
     }
     if (event === "state") {
+      if (dialogueV2) {
+        statePackage = plain(payload.state_package);
+        pendingSceneState = payload.scene_state || pendingSceneState;
+        pendingStateEvent = payload.state_event || pendingStateEvent;
+        sessionContextPackage = plain(payload.session_context_package);
+        sessionMemories = payload.session_memories || sessionMemories;
+        sceneAction = payload.scene_action || sceneAction;
+        evidenceSources = payload.evidence_sources || evidenceSources;
+        return;
+      }
       if (ownsTypingState(characterId, requestId)) {
-        const accepted = await saveWorldPackage(payload.state_package);
+        // Apply the same signed-package ordering gate in memory first. Local
+        // disk failures cannot interrupt reading a server-confirmed done packet.
+        const accepted = await saveWorldPackage(payload.state_package, { persist: false });
         if (accepted) {
           pendingSceneState = payload.scene_state || pendingSceneState;
           pendingStateEvent = payload.state_event || pendingStateEvent;
+          const token = payload.state_package;
+          statePersistence = statePersistence.then(async () => {
+            if (state.worldPackage !== token) return;
+            const order = statePackageOrder(token);
+            await storePut("app_state", { key: "world", statePackage: token, revision: order.revision, scheduleDate: order.scheduleDate });
+          }).catch(() => { useMemoryStorage(); });
         }
       }
     }
@@ -4884,7 +5159,15 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       expressionState = normalizeExpressionState(payload.expression_state, returnedChannel);
       stageMotion = normalizeStageMotion(payload.stage_motion, returnedChannel);
       performanceId = normalizePerformanceId(payload.performance_id, returnedChannel);
-      contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel, renderBlocksText([...streamedBlocks.values()]));
+      contentBlocks = normalizeBlocks(payload.content_blocks, returnedChannel);
+      if (dialogueV2) {
+        statePackage = plain(payload.state_package) || statePackage;
+        sessionContextPackage = plain(payload.session_context_package) || sessionContextPackage;
+        sessionMemories = payload.session_memories || sessionMemories;
+        sceneAction = payload.scene_action || sceneAction;
+        evidenceSources = payload.evidence_sources || evidenceSources;
+      }
+      if (!contentBlocks.length) contentBlocks = normalizeBlocks([...streamedBlocks.values()], returnedChannel);
     }
     if (event === "error") {
       const error = chatError(payload.code || "chat_failed", payload);
@@ -4893,19 +5176,29 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
       throw error;
     }
   };
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const packets = buffer.split("\n\n");
-    buffer = packets.pop() || "";
-    for (const packet of packets) await handlePacket(packet);
+  try {
+    while (!completed) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const packets = buffer.split("\n\n");
+      buffer = packets.pop() || "";
+      for (const packet of packets) {
+        await handlePacket(packet);
+        if (completed) break;
+      }
+    }
+    if (!completed && buffer.trim()) await handlePacket(buffer);
+  } finally {
+    // A verified done packet completes the request. Waiting for a socket EOF
+    // can otherwise turn a saved reply into a timeout and offer a paid resend.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-  if (buffer.trim()) await handlePacket(buffer);
   if (!completed) throw new Error("stream_disconnected");
-  if (!contentBlocks.length) contentBlocks = normalizeBlocks([], returnedChannel, renderBlocksText([...streamedBlocks.values()]));
+  if (!contentBlocks.length) contentBlocks = normalizeBlocks([...streamedBlocks.values()], returnedChannel);
   if (!contentBlocks.length) throw new Error("upstream_invalid_response");
-  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction, expressionState, stageMotion, performanceId, serverTimings };
+  return { contentBlocks, usage, returnedChannel, pendingSceneState, pendingStateEvent, movementStatus, recoveryAction, expressionState, stageMotion, performanceId, serverTimings, statePersistence, statePackage, sessionContextPackage, sessionMemories, sceneAction, evidenceSources };
 }
 
 function recoverableChatError(error) {
@@ -4929,7 +5222,7 @@ function shouldReuseChatRequest(error) {
   const code = error instanceof Error ? error.message : plain(error);
   // retryable=false prevents another generation; uncertain results still need
   // their original UUID so a later reconciliation cannot charge a new request.
-  if (["public_database_unavailable", "subscription_result_unknown"].includes(code)) return true;
+  if (["public_database_unavailable", "subscription_result_unknown", "stream_commit_invalid", "stream_commit_conflict", "stream_commit_sequence", "upstream_invalid_response"].includes(code) || error instanceof SyntaxError) return true;
   if (error instanceof Error && error.retryable === false) return false;
   return error instanceof TypeError || [
     "stream_disconnected",
@@ -4955,14 +5248,17 @@ function compatibleRetrySnapshot(userMessage) {
   if (!candidate?.requestId || !candidate.payload || typeof candidate.payload !== "object") return null;
   const candidateRequestId = plain(candidate.requestId);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidateRequestId)) return null;
-  if (plain(candidate.payload.request_id) !== candidateRequestId) return null;
-  if (plain(candidate.payload.character_id) !== plain(userMessage.characterId)) return null;
-  if (plain(candidate.payload.message) !== plain(userMessage.content)) return null;
-  if (plain(candidate.payload.communication_channel) !== plain(userMessage.communicationChannel)) return null;
-  if (plain(candidate.payload.movement_location_id) !== plain(userMessage.movementLocationId)) return null;
-  if (plain(candidate.payload.provider) !== state.provider || plain(candidate.payload.model) !== state.model) return null;
-  if (state.provider === SUBSCRIPTION_PROVIDER && snapshotSubscriptionEffort(candidate.payload) !== state.reasoningEffort) return null;
-  return { requestId: candidateRequestId, payload: structuredClone(candidate.payload) };
+  const v2 = candidate.payload.endpoint === "/public/v2/chat/stream" && candidate.payload.envelope?.protocol === DIALOGUE_PROTOCOL;
+  const chat = v2 ? candidate.payload.envelope.chat : candidate.payload;
+  if (!chat || plain(chat.request_id) !== candidateRequestId) return null;
+  if (plain(chat.character_id) !== plain(userMessage.characterId)) return null;
+  if (plain(chat.message) !== plain(userMessage.content)) return null;
+  if (plain(chat.communication_channel) !== plain(userMessage.communicationChannel)) return null;
+  if (plain(chat.movement_location_id) !== plain(userMessage.movementLocationId)) return null;
+  if (plain(chat.provider) !== state.provider || plain(chat.model) !== state.model) return null;
+  if (state.provider === SUBSCRIPTION_PROVIDER && snapshotSubscriptionEffort(chat) !== state.reasoningEffort) return null;
+  return { requestId: candidateRequestId, payload: structuredClone(chat), endpoint: v2 ? candidate.payload.endpoint : `${apiRoot}/chat/stream`,
+    envelope: v2 ? structuredClone(candidate.payload.envelope) : null };
 }
 
 async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
@@ -4970,6 +5266,11 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   let retrySnapshot = stateRecoveryAttempt ? null : compatibleRetrySnapshot(userMessage);
   let requestId = plain(retrySnapshot?.requestId) || id();
   const characterId = thread.characterId;
+  const requestEpoch = state.historyEpoch;
+  const requestSegment = retrySnapshot?.envelope?.segment_id || thread.conversationSegmentId;
+  const dialogueV2 = retrySnapshot ? Boolean(retrySnapshot.envelope) : dialogueV2Enabled();
+  if (dialogueV2 && !retrySnapshot) userMessage.id = `user:${requestId}`;
+  if (dialogueV2) await loadDialogueRecord(characterId);
   const buildRequestSnapshot = () => ({
     request_id: requestId,
     provider: state.provider,
@@ -4987,26 +5288,33 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     ...(userMessage.movementLocationId ? { movement_location_id: userMessage.movementLocationId } : {}),
   });
   let requestSnapshot = retrySnapshot?.payload || buildRequestSnapshot();
-  if (retrySnapshot && jsonBodyBytes({ ...requestSnapshot, credential: state.credential }) > PUBLIC_REQUEST_LIMIT_BYTES) {
+  if (!dialogueV2 && retrySnapshot && jsonBodyBytes({ ...requestSnapshot, credential: state.credential }) > PUBLIC_REQUEST_LIMIT_BYTES) {
     state.retrySnapshots.delete(userMessage.id);
     retrySnapshot = null;
     requestId = id();
     requestSnapshot = buildRequestSnapshot();
   }
   let boundedRequest;
+  let envelope = dialogueV2 ? retrySnapshot?.envelope || { protocol: DIALOGUE_PROTOCOL, chat: requestSnapshot,
+    session_context_package: dialoguePackage(thread), segment_id: requestSegment,
+    memory_candidates: dialogueCandidates(characterId, userMessage.content) } : null;
   try {
-    boundedRequest = fitPublicRequestPayload(
+    if (dialogueV2 && !retrySnapshot) envelope = { ...envelope, ...fitDialogueContext(envelope) };
+    if (dialogueV2 && retrySnapshot) {
+      boundedRequest = { ...requestSnapshot, credential: state.credential };
+      if (jsonBodyBytes({ ...envelope, chat: boundedRequest }) > PUBLIC_REQUEST_LIMIT_BYTES) throw new Error("request_too_large");
+    } else boundedRequest = fitPublicRequestPayload(
       { ...requestSnapshot, credential: state.credential },
       {
         arrays: [{ key: "recent_history", minimum: 0 }],
         texts: ["history_summary"],
-        targetBytes: retrySnapshot ? PUBLIC_REQUEST_LIMIT_BYTES : PUBLIC_REQUEST_TARGET_BYTES,
+        targetBytes: retrySnapshot ? PUBLIC_REQUEST_LIMIT_BYTES : PUBLIC_REQUEST_TARGET_BYTES - (dialogueV2 ? jsonBodyBytes({ ...envelope, chat: {} }) : 0),
       },
     );
   } catch (error) {
-    state.retrySnapshots.delete(userMessage.id);
+    if (!dialogueV2 || !retrySnapshot) state.retrySnapshots.delete(userMessage.id);
     userMessage.requestId = requestId;
-    userMessage.requestSnapshot = null;
+    if (!dialogueV2 || !retrySnapshot) userMessage.requestSnapshot = null;
     userMessage.status = "failed";
     userMessage.errorCode = error instanceof Error ? error.message : "request_too_large";
     userMessage.errorStage = "content_validation";
@@ -5021,12 +5329,16 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   }
   requestSnapshot = { ...boundedRequest };
   delete requestSnapshot.credential;
-  const requestBody = JSON.stringify(boundedRequest);
+  if (envelope && !retrySnapshot) envelope = { ...envelope, chat: structuredClone(requestSnapshot) };
+  const storedSnapshot = envelope ? { endpoint: "/public/v2/chat/stream", envelope: structuredClone(envelope) } : requestSnapshot;
+  const requestBody = JSON.stringify(envelope ? { ...envelope, chat: boundedRequest } : boundedRequest);
+  const requestEndpoint = retrySnapshot?.endpoint || (dialogueV2 ? "/public/v2/chat/stream" : `${apiRoot}/chat/stream`);
   // Optional, isolated analytics signal: identifiers only; never inspect requestBody.
   try {
     window.snowStatisticsRequest?.(requestId);
   } catch { /* Analytics must not affect chat submission. */ }
-  const ownsRequest = () => ownsTypingState(characterId, requestId);
+  const ownsRequest = () => ownsTypingState(characterId, requestId) && thread.historyEpoch === state.historyEpoch
+    && state.historyEpoch === requestEpoch && thread.conversationSegmentId === requestSegment && state.writerOwned;
   const ownsVisibleRequest = () => ownsRequest() && state.selected === characterId;
   cancelPresentationQueue(characterId);
   state.chatRequestByCharacter.get(characterId)?.controller.abort();
@@ -5038,7 +5350,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   }, CHAT_STREAM_TIMEOUT_MS);
   state.chatRequestByCharacter.set(characterId, { requestId, controller: requestController });
   userMessage.requestId = requestId;
-  userMessage.conversationSegmentId = thread.conversationSegmentId;
+  userMessage.conversationSegmentId = requestSegment;
   userMessage.status = "pending";
   userMessage.errorCode = "";
   userMessage.errorStage = "";
@@ -5061,13 +5373,19 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   const committedReply = streamV2 ? new CommittedReply(requestId, characterId) : null;
   let provisionalReply = thread.messages.find(message => message.role === "assistant" && message.requestId === requestId && message.committedBlocks?.length) || null;
   for (const event of provisionalReply?.committedBlocks || []) committedReply?.accept(event);
+  if (provisionalReply && committedReply?.blocks.length) {
+    // A manual recovery keeps its already delivered prefix on screen even if
+    // replay accepts only duplicate blocks before the terminal reply arrives.
+    state.streamingPresentationByCharacter.set(characterId, { requestId, receivedCount: committedReply.blocks.length,
+      visibleCount: Math.min(provisionalReply.contentBlocks.length, committedReply.blocks.length) });
+  }
   let commitDisplay = Promise.resolve();
   const commitPresentationController = new AbortController();
   const materializeCommitted = (count = committedReply?.blocks.length) => {
     if (!committedReply?.blocks.length) return;
     const record = normalizeMessage({ id: provisionalReply?.id || `reply:${requestId}`, characterId, role: "assistant", contentBlocks: committedReply.blocks.slice(0, count),
       committedBlocks: committedReply.snapshot.slice(0, count), communicationChannel: userMessage.communicationChannel, createdAt: provisionalReply?.createdAt || Date.now(),
-      requestId, status: "pending", conversationSegmentId: thread.conversationSegmentId });
+      requestId, status: "pending", conversationSegmentId: requestSegment });
     if (provisionalReply) Object.assign(provisionalReply, record);
     else { provisionalReply = record; thread.messages.push(record); thread.messageCount = Number(thread.messageCount || 0) + 1; }
     metrics.messageId = record.id;
@@ -5106,18 +5424,22 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   const feedbackController = new AbortController();
   const typingGate = (async () => {
     try {
-      if (!quietPresentation()) await abortableDelay(requestDelay(requestId, "initial", latencyV2 ? 250 : 1800, latencyV2 ? 400 : 2600), feedbackController.signal);
+      if (!quietPresentation()) await abortableDelay(requestDelay(requestId, "initial", latencyV2 ? 500 : 1800, latencyV2 ? 750 : 2600), feedbackController.signal);
     } catch (error) {
       if (error?.name === "AbortError") return;
       throw error;
     }
-    if (!ownsRequest() || metrics.presented) return;
+    if (!ownsRequest() || metrics.presented || typingStateFor(characterId)?.networkDone) return;
+    metrics.feedbackAllowed = true;
     timing.shownAt = performance.now();
     updateTypingPhase(characterId, requestId, "typing");
+    if (metrics.pendingProgressText) setRequestStatus(characterId, metrics.pendingProgressText, requestId);
   })();
-  userMessage.requestSnapshot = structuredClone(requestSnapshot);
-  state.retrySnapshots.set(userMessage.id, { requestId, payload: structuredClone(requestSnapshot) });
+  userMessage.requestSnapshot = structuredClone(storedSnapshot);
+  state.retrySnapshots.set(userMessage.id, { requestId, payload: structuredClone(storedSnapshot) });
   const userPersistence = dbPutThread(thread);
+  let terminalResult = null;
+  let confirmedAssistant = null;
   try {
     let result = null;
     let lastError = null;
@@ -5125,12 +5447,15 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     for (let attempt = 0; attempt < backoffs.length; attempt += 1) {
       if (attempt > 0) {
         if (!recoverableChatError(lastError) || requestController.signal.aborted) throw lastError;
+        // Transport recovery is actionable immediately, even while the normal
+        // typing indicator is still inside its natural onset window.
+        updateTypingPhase(characterId, requestId, "recovering");
         setRequestStatus(characterId, `连接中断，正在恢复（${attempt}/3）……`, requestId);
         const retryAfterMs = Number(lastError?.retryAfterSeconds || 0) * 1000;
         await abortableDelay(Math.max(backoffs[attempt], retryAfterMs), requestController.signal);
       }
       try {
-        const response = await fetch(`${apiRoot}/chat/stream`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", ...(streamV2 ? { "X-Snow-Stream-Version": "2" } : {}) }, signal: requestController.signal, body: requestBody });
+        const response = await fetch(requestEndpoint, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", ...(streamV2 ? { "X-Snow-Stream-Version": "2" } : {}), ...(dialogueV2 && (retrySnapshot || attempt > 0) ? { "X-Snow-Recovery-Only": "1" } : {}) }, signal: requestController.signal, body: requestBody });
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));
           const detail = payload?.detail && typeof payload.detail === "object" ? payload.detail : {};
@@ -5145,7 +5470,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
           }
           throw error;
         }
-        result = await consumeChatStream(response, { characterId, requestId, fallbackChannel: userMessage.communicationChannel, committedReply, onCommitted });
+        result = await consumeChatStream(response, { characterId, requestId, fallbackChannel: userMessage.communicationChannel, committedReply, onCommitted, dialogueV2 });
         break;
       } catch (error) {
         lastError = error;
@@ -5153,11 +5478,13 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       }
     }
     if (!result) throw lastError || new Error("stream_disconnected");
+    terminalResult = result;
     // A confirmed terminal reply is a completed business action. Cosmetic waiting
     // can no longer cancel it or expose a retry with a fresh paid-request ID.
     window.clearTimeout(requestTimeout);
     const activeRequest = state.chatRequestByCharacter.get(characterId);
     if (activeRequest?.requestId === requestId) activeRequest.completed = true;
+    await result.statePersistence;
     commitPresentationController.abort();
     metrics.serverTimings = result.serverTimings;
     if (!metrics.bodyReceivedAt) metrics.bodyReceivedAt = performance.now();
@@ -5172,29 +5499,36 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       if (visibleFor < 1200) await abortableDelay(1200 - visibleFor, requestController.signal);
     }
     userMessage.status = "sent";
-    const completedReply = normalizeMessage({ id: provisionalReply?.id || id(), characterId, role: "assistant", contentBlocks: result.contentBlocks, committedBlocks: committedReply?.snapshot || [], communicationChannel: result.returnedChannel, expressionState: result.expressionState, stageMotion: result.stageMotion, performanceId: result.performanceId, createdAt: provisionalReply?.createdAt || Date.now(), requestId, conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
+    const completedReply = normalizeMessage({ id: provisionalReply?.id || (dialogueV2 ? `reply:${requestId}` : id()), characterId, role: "assistant", contentBlocks: result.contentBlocks, committedBlocks: committedReply?.snapshot || [], communicationChannel: dialogueV2 ? userMessage.communicationChannel : result.returnedChannel, expressionState: result.expressionState, stageMotion: result.stageMotion, performanceId: result.performanceId, createdAt: provisionalReply?.createdAt || Date.now(), requestId, conversationSegmentId: requestSegment, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
     const assistantMessage = provisionalReply || completedReply;
+    completedReply.evidenceSources = normalizeMessage({ evidenceSources: result.evidenceSources }).evidenceSources;
+    confirmedAssistant = assistantMessage;
     metrics.messageId = assistantMessage.id;
-    if (latencyV2 && !provisionalReply) state.readyReplyIds.add(assistantMessage.id);
+    const receivedPresentationCount = state.streamingPresentationByCharacter.get(characterId)?.visibleCount || 0;
+    if (latencyV2 && !receivedPresentationCount) state.readyReplyIds.add(assistantMessage.id);
     if (provisionalReply) Object.assign(provisionalReply, completedReply);
     else { thread.messages.push(assistantMessage); thread.messageCount = Number(thread.messageCount || 0) + 1; }
     thread.turnCount += 1;
-    thread.continuityDecision = "";
+    if (!dialogueV2 || requestSegment === thread.conversationSegmentId) thread.continuityDecision = "";
     thread.lastActiveAt = Date.now();
     if (ownsRequest() || !typingStateFor(characterId)) state.latest.set(characterId, { requestId, errorCode: "", errorStage: "", usage: result.usage });
-    await dbPutThread(thread);
     state.retrySnapshots.delete(userMessage.id);
     userMessage.requestSnapshot = null;
-    await dbPutThread(thread);
+    if (dialogueV2) {
+      result.sceneAccepted = await commitDialogueResult(thread, result, ownsRequest);
+      if (!result.sceneAccepted) await dbPutThread(thread);
+    }
+    else await dbPutThread(thread);
+    if (dialogueV2 && result.sceneAccepted && result.returnedChannel !== thread.channel && ownsRequest()) await setChannel(result.returnedChannel, true, thread);
     if (latencyV2) {
       const pending = typingStateFor(characterId);
       if (pending?.requestId === requestId) pending.networkDone = true;
-      void deliverCompletedReply(characterId, requestId, assistantMessage);
+      void deliverCompletedReply(characterId, requestId, assistantMessage, receivedPresentationCount);
     } else {
       updateTypingPhase(characterId, requestId, "presenting");
       await presentAssistantTurn(characterId, requestId, assistantMessage);
     }
-    if (ownsRequest() && result.pendingSceneState) {
+    if (ownsRequest() && result.pendingSceneState && (!dialogueV2 || result.sceneAccepted)) {
       state.sceneByCharacter.set(characterId, result.pendingSceneState);
       if (ownsVisibleRequest()) {
         state.scene = result.pendingSceneState;
@@ -5217,15 +5551,45 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     commitPresentationController.abort();
     await commitDisplay.catch(() => {});
     await userPersistence.catch(() => {});
+    if (terminalResult) {
+      // UI or storage faults after a verified terminal reply cannot downgrade
+      // the completed business action or create a fresh paid-request retry.
+      userMessage.status = "sent";
+      userMessage.errorCode = "";
+      userMessage.errorStage = "";
+      userMessage.requestSnapshot = null;
+      state.retrySnapshots.delete(userMessage.id);
+      if (!confirmedAssistant) {
+        confirmedAssistant = normalizeMessage({ id: provisionalReply?.id || (dialogueV2 ? `reply:${requestId}` : id()), characterId, role: "assistant", contentBlocks: terminalResult.contentBlocks,
+          committedBlocks: committedReply?.snapshot || [], communicationChannel: dialogueV2 ? userMessage.communicationChannel : terminalResult.returnedChannel, requestId,
+          expressionState: terminalResult.expressionState, stageMotion: terminalResult.stageMotion, performanceId: terminalResult.performanceId, movementStatus: terminalResult.movementStatus,
+          conversationSegmentId: requestSegment, createdAt: provisionalReply?.createdAt || Date.now(), usage: terminalResult.usage });
+        if (provisionalReply) Object.assign(provisionalReply, confirmedAssistant);
+        else { thread.messages.push(confirmedAssistant); thread.messageCount = Number(thread.messageCount || 0) + 1; }
+        thread.turnCount += 1;
+        if (!dialogueV2 || requestSegment === thread.conversationSegmentId) thread.continuityDecision = "";
+        thread.lastActiveAt = Date.now();
+      }
+      confirmedAssistant.evidenceSources = normalizeMessage({ evidenceSources: terminalResult.evidenceSources }).evidenceSources;
+      cancelPresentationQueue(characterId, requestId, { render: false });
+      state.readyReplyIds.delete(confirmedAssistant.id);
+      state.latest.set(characterId, { requestId, errorCode: "", errorStage: "", usage: terminalResult.usage });
+      await dbPutThread(thread).catch(() => {});
+      completeReplyTiming(metrics, "success");
+      if (ownsRequest()) setRequestStatus(characterId, "回复已完成，已保留收到的内容。", requestId);
+      if (state.selected === characterId) showBanner("回复已经收到并保留。请重新打开记录查看。");
+      return;
+    }
     const error = caught?.name === "AbortError" ? new Error(requestTimedOut ? "provider_timeout" : "request_cancelled") : caught;
-    if (!latencyV2 && !committedReply?.blocks.length && requestSnapshot.provider !== SUBSCRIPTION_PROVIDER && stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
+    const contextRetired = dialogueV2 && await retireRejectedDialogueContext(error, thread, envelope, ownsRequest);
+    if (!dialogueV2 && !latencyV2 && !committedReply?.blocks.length && requestSnapshot.provider !== SUBSCRIPTION_PROVIDER && stateRecoveryAttempt < 1 && statePackageRecoveryError(error) && !requestController.signal.aborted) {
       cancelPresentationQueue(characterId, requestId);
       state.retrySnapshots.delete(userMessage.id);
       await clearPersistedWorldPackage();
       if (characterId === state.selected) renderScene();
       return await runChat(thread, userMessage, { stateRecoveryAttempt: stateRecoveryAttempt + 1 });
     }
-    if (!committedReply?.blocks.length && !shouldReuseChatRequest(error)) {
+    if (!committedReply?.blocks.length && !dialogueV2 && !shouldReuseChatRequest(error)) {
       state.retrySnapshots.delete(userMessage.id);
       userMessage.requestSnapshot = null;
     }
@@ -5247,7 +5611,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     await dbPutThread(thread);
     if (ownsVisibleRequest()) renderAll();
     if (ownsRequest()) {
-      setRequestStatus(characterId, provisionalReply?.partial ? "回复未完成，已保留收到的内容。可用原请求恢复结果。" : displayError(error), requestId);
+      setRequestStatus(characterId, provisionalReply?.partial ? "回复未完成，已保留收到的内容。可用原请求恢复结果。" : displayError(error), requestId, contextRetired ? "refresh_scene" : "");
       clearTypingState(characterId, requestId);
     }
     completeReplyTiming(metrics, provisionalReply?.partial ? "partial" : "failed");
@@ -5270,6 +5634,17 @@ async function submitUserBlocks(blocks, { clearComposer = false, onAccepted = nu
   if (total > 2000) {
     showBanner("单轮动作与对白合计不能超过 2,000 字。");
     return false;
+  }
+  if (sceneActionsV2Enabled() && !movementLocationId && blocks.length === 1 && blocks[0].type === "message"
+    && isPureRendezvousJoin(renderBlocksText(blocks)) && signedPendingRendezvous().value) {
+    const original = { message: $("message-input").value, action: $("action-input").value };
+    const success = await arriveSceneAction(renderBlocksText(blocks));
+    if (success && clearComposer) {
+      if ($("message-input").value === original.message) $("message-input").value = "";
+      if ($("action-input").value === original.action) $("action-input").value = "";
+      await saveDraftNow(); updateInputCount();
+    }
+    return success;
   }
   if (!configured()) {
     openSettings("models");
@@ -5324,22 +5699,28 @@ async function retryMessage(messageId) {
   const thread = currentThread();
   const message = thread?.messages.find((item) => item.id === messageId && item.role === "user");
   if (!message || message.status !== "failed") return;
+  if (message.errorCode === "request_result_unavailable") return showBanner(displayError(new Error(message.errorCode)));
   const snapshot = state.retrySnapshots.get(message.id)
     || (message.requestId && message.requestSnapshot ? { requestId: message.requestId, payload: message.requestSnapshot } : null);
+  const v2 = snapshot?.payload?.endpoint === "/public/v2/chat/stream";
+  const chat = v2 ? snapshot.payload.envelope?.chat : snapshot?.payload;
+  if (v2 && message.errorCode === "request_result_unavailable") return showBanner(displayError(new Error(message.errorCode)));
   if (snapshot && (
-    plain(snapshot.payload?.provider) !== state.provider
-    || plain(snapshot.payload?.model) !== state.model
-    || (state.provider === SUBSCRIPTION_PROVIDER && snapshotSubscriptionEffort(snapshot.payload) !== state.reasoningEffort)
+    plain(chat?.provider) !== state.provider
+    || plain(chat?.model) !== state.model
+    || (state.provider === SUBSCRIPTION_PROVIDER && snapshotSubscriptionEffort(chat) !== state.reasoningEffort)
   )) {
+    if (v2) return showBanner("请切回原请求的模型会话后恢复。未确认的请求不会自动重新生成。");
     state.retrySnapshots.delete(message.id);
     message.requestId = "";
     message.requestSnapshot = null;
     await dbPutThread(thread);
   }
+  if (v2 && !compatibleRetrySnapshot(message)) return showBanner("原请求快照不完整，不能安全恢复。不会重新生成，请发送新消息。");
   await runChat(thread, message);
 }
 function successfulChatMessages(thread) {
-  return (thread.messages || []).filter((message) => message.conversationSegmentId === thread.conversationSegmentId && message.role === "assistant" && message.status === "sent" && message.source !== "presence_arrival");
+  return (thread.messages || []).filter((message) => message.conversationSegmentId === thread.conversationSegmentId && message.role === "assistant" && message.status === "sent" && !["presence_arrival", "scene_action"].includes(message.source));
 }
 function remainingProviderCallBudget(usage) {
   const used = Number(usage?.provider_calls);
@@ -5430,9 +5811,136 @@ async function runAutoSummary(thread) {
   }
 }
 
+async function performSceneAction(action, characterId = state.selected, signal = undefined, { rendezvousId = "", userText = "", scopeRecoveryAttempt = 0 } = {}) {
+  const thread = await dbGetThread(characterId);
+  const epoch = state.historyEpoch;
+  const segment = thread.conversationSegmentId;
+  const record = await loadDialogueRecord(characterId);
+  const previous = record.sceneActionSnapshot;
+  const envelope = previous?.envelope || {
+    protocol: SCENE_PROTOCOL, request_id: id(), character_id: characterId, action,
+    state_package: state.worldPackage || "", continuity_decision: thread.continuityDecision || "",
+    local_day_key: thread.localDayKey || localDayKey(), rendezvous_id: rendezvousId,
+    ...fitDialogueContext({ segment_id: segment, session_context_package: dialoguePackage(thread),
+      memory_candidates: dialogueCandidates(characterId) }),
+  };
+  const snapshot = previous || { endpoint: "/public/v2/scene/action", envelope: structuredClone(envelope) };
+  const owner = envelope.request_id;
+  state.sceneActionByCharacter.set(characterId, owner);
+  const owns = () => state.writerOwned && state.historyEpoch === epoch && thread.historyEpoch === epoch
+    && thread.conversationSegmentId === segment && state.sceneActionByCharacter.get(characterId) === owner;
+  const saved = { ...record, sceneActionSnapshot: snapshot };
+  state.dialogueByCharacter.set(characterId, saved);
+  await storePut("app_state", saved);
+  try {
+    let result;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt) await abortableDelay(attempt * 600, signal);
+      try {
+        result = await dialogueHttp.request("/scene/action", { method: "POST", signal,
+          headers: previous || attempt ? { "X-Snow-Recovery-Only": "1" } : {}, body: JSON.stringify(envelope) });
+        break;
+      } catch (error) {
+        if (attempt === 2 || error?.name === "AbortError" || !recoverableChatError(error)) throw error;
+      }
+    }
+    if (!owns()) return result;
+    if (envelope.segment_id !== segment) {
+      const reconciled = { ...state.dialogueByCharacter.get(characterId), sceneActionSnapshot: null };
+      state.dialogueByCharacter.set(characterId, reconciled);
+      await storePut("app_state", reconciled);
+      return performSceneAction(action, characterId, signal, { rendezvousId, userText });
+    }
+    thread.channel = result.communication_channel === "in_person" && result.scene_state?.co_located ? "in_person" : "text";
+    thread.continuityDecision = "";
+    const cleared = { ...state.dialogueByCharacter.get(characterId), sceneActionSnapshot: null };
+    state.dialogueByCharacter.set(characterId, cleared);
+    if (result.scene_action?.status === "joined") {
+      const requestId = envelope.request_id;
+      if (userText && !thread.messages.some(message => message.id === `user:${requestId}`)) {
+        thread.messages.push(normalizeMessage({ id: `user:${requestId}`, characterId, role: "user", content: userText,
+          requestId, communicationChannel: "text", status: "sent", conversationSegmentId: segment }));
+      }
+      if (!thread.messages.some(message => message.id === `reply:${requestId}`)) {
+        thread.messages.push(normalizeMessage({ id: `reply:${requestId}`, characterId, role: "assistant", requestId,
+          communicationChannel: "in_person", contentBlocks: [{ type: "action", text: `你已来到${result.scene_state?.character_location || "她身边"}。` }],
+          source: "scene_action", status: "sent", conversationSegmentId: segment, usage: { provider_calls: 0 } }));
+      }
+      thread.messageCount = Math.max(thread.messageCount, thread.messages.length);
+    }
+    if (await commitDialogueResult(thread, result, owns)) {
+      state.sceneByCharacter.set(characterId, result.scene_state || {});
+      if (characterId === state.selected) { state.scene = result.scene_state; renderScene(); }
+    } else throw new Error("session_context_conflict");
+    if (previous && envelope.action !== action && action !== "resolve") {
+      return performSceneAction(action, characterId, signal, { rendezvousId, userText });
+    }
+    return result;
+  } catch (error) {
+    if (owns() && (["request_result_unavailable", "invalid_scene_action", "session_context_invalid", "session_context_conflict", "session_context_subject_mismatch", "state_subject_mismatch", "state_invalid"].includes(error.message)
+      || error.message === "request_id_conflict" && error.httpStatus === 409)) {
+      const cleaned = { ...state.dialogueByCharacter.get(characterId), sceneActionSnapshot: null };
+      state.dialogueByCharacter.set(characterId, cleaned);
+      await storePut("app_state", cleaned);
+    }
+    const retired = await retireRejectedDialogueContext(error, thread, envelope, owns);
+    if (retired && action === "resolve" && !previous && scopeRecoveryAttempt < 2 && !signal?.aborted) {
+      // Scope rejection is confirmed before generation. Re-establish only the
+      // model-free scene read; the immutable chat request is never resubmitted.
+      return performSceneAction("resolve", characterId, signal, { scopeRecoveryAttempt: scopeRecoveryAttempt + 1 });
+    }
+    if (retired && characterId === state.selected) setRequestStatus(characterId, displayError(error), "", "refresh_scene");
+    throw error;
+  } finally {
+    if (state.sceneActionByCharacter.get(characterId) === owner) state.sceneActionByCharacter.delete(characterId);
+  }
+}
+async function arriveSceneAction(userText = "") {
+  const characterId = state.selected;
+  const thread = currentThread();
+  const previousChannel = thread?.channel || "text";
+  state.arrivalPending = true;
+  setRequestStatus(characterId, "正在确认会合地点……");
+  updateComposerAvailability();
+  try {
+    await saveDraftNow();
+    const hadRendezvous = Boolean(signedPendingRendezvous(characterId).value);
+    await ensureContinuityDecision(thread);
+    if (thread.continuityDecision) {
+      await performSceneAction("resolve", characterId);
+      if (hadRendezvous && !signedPendingRendezvous(characterId).value) {
+        showBanner("从今天开始后，昨天尚未赴约的约定已结束。你可以重新发起邀请。");
+        return false;
+      }
+    }
+    const pending = signedPendingRendezvous(characterId).value;
+    const result = await performSceneAction(pending ? "join_rendezvous" : "join_character", characterId, undefined,
+      { rendezvousId: plain(pending?.rendezvous_id), userText });
+    if (state.selected !== characterId || thread.historyEpoch !== state.historyEpoch) return false;
+    await setChannel(result.communication_channel === "in_person" ? "in_person" : "text", true, thread);
+    renderScene();
+    setRequestStatus(characterId, `已来到${result.scene_state?.character_location || "她身边"}，可以继续聊天。`);
+    showBanner(`已来到${result.scene_state?.character_location || "她身边"}。`);
+    return true;
+  } catch (error) {
+    if (state.selected === characterId && thread.historyEpoch === state.historyEpoch) {
+      await setChannel(previousChannel, false, thread);
+      showBanner(displayError(error));
+    }
+    return false;
+  } finally {
+    state.arrivalPending = false;
+    updateComposerAvailability();
+  }
+}
 async function transitionPresence(targetChannel, characterId = state.selected, targetThread = null, signal = undefined) {
   cancelBackgroundSummaries();
   const thread = targetThread || state.threads.get(characterId) || currentThread();
+  if (sceneActionsV2Enabled()) {
+    const result = await performSceneAction(targetChannel === "in_person" ? "join_character" : "open_communicator", characterId, signal);
+    await setChannel(result.communication_channel || targetChannel, true, thread);
+    return result;
+  }
   const result = await api("/presence/transition", { method: "POST", signal, body: JSON.stringify({ request_id: id(), character_id: characterId, target_channel: targetChannel, action: targetChannel === "in_person" ? "join_character" : "open_communicator", state_package: state.worldPackage || "" }) });
   await saveWorldPackage(result.state_package);
   state.sceneByCharacter.set(characterId, result.scene_state || {});
@@ -5453,6 +5961,7 @@ function arrivalReactionUnavailableMessage(code = "") {
 async function arriveInPerson() {
   cancelBackgroundSummaries();
   if (!state.selected || globalRequestBusy()) return;
+  if (sceneActionsV2Enabled()) return arriveSceneAction();
   state.arrivalPending = true;
   const started = performance.now();
   const characterId = state.selected;
@@ -5688,13 +6197,21 @@ function openFeedback(messageId = "") {
 }
 function feedbackContextSelection() {
   const thread = currentThread() || { messages: [] };
-  const target = thread.messages.find((message) => message.id === state.feedbackMessageId) || [...thread.messages].reverse().find((message) => message.role === "assistant") || null;
+  const currentMessages = thread.messages.filter(message => message.communicationChannel === (thread.channel || "text")
+    && (!thread.conversationSegmentId || message.conversationSegmentId === thread.conversationSegmentId));
+  const selectedTurn = thread.messages.find(message => message.id === state.feedbackMessageId);
+  const lastUser = [...currentMessages].reverse().find(message => message.role === "user");
+  const target = selectedTurn || (lastUser?.status === "failed" ? lastUser : [...currentMessages].reverse().find(message => message.role === "assistant") || lastUser) || null;
   const targetIndex = target ? thread.messages.indexOf(target) : thread.messages.length;
-  const userMessage = [...thread.messages.slice(0, targetIndex)].reverse().find((message) => message.role === "user") || [...thread.messages].reverse().find((message) => message.role === "user") || {};
-  const latest = state.latest.get(state.selected) || {};
+  const userMessage = target?.role === "user" ? target : target?.source === "presence_arrival" ? {} : [...thread.messages.slice(0, targetIndex)].reverse()
+    .find(message => message.role === "user" && message.communicationChannel === target?.communicationChannel
+      && message.conversationSegmentId === target?.conversationSegmentId && (!target?.requestId || message.requestId === target.requestId)) || {};
+  const chatRequestId = target?.requestId || userMessage.requestId || null;
+  const latest = { requestId: chatRequestId, errorCode: target?.errorCode || userMessage.errorCode || "", errorStage: target?.errorStage || userMessage.errorStage || "" };
   const userBlocks = wireBlocks(normalizeBlocks(userMessage.contentBlocks, userMessage.communicationChannel || thread.channel || "text", userMessage.content || ""));
-  const assistantBlocks = wireBlocks(normalizeBlocks(target?.contentBlocks, target?.communicationChannel || thread.channel || "text", target?.content || ""));
-  return { thread, target, userMessage, latest, userBlocks, assistantBlocks, chatRequestId: target?.requestId || latest.requestId || userMessage.requestId || null };
+  const assistantBlocks = target?.role === "assistant"
+    ? wireBlocks(normalizeBlocks(target.contentBlocks, target.communicationChannel || thread.channel || "text", target.content || "")) : [];
+  return { thread, target, userMessage, latest, userBlocks, assistantBlocks, chatRequestId };
 }
 function renderFeedbackContextPreview() {
   const include = $("feedback-include-context").checked;
@@ -5704,12 +6221,12 @@ function renderFeedbackContextPreview() {
     $("feedback-context").textContent = "不会附带对话、角色、模型或请求诊断，只提交你填写的反馈正文与可选 QQ。";
     return;
   }
-  $("feedback-context").textContent = target ? `将附带 ${target.communicationChannel === "text" ? "文字通讯" : "面对面"}中的相关一问一答及请求编号。` : "将附带当前一问一答和请求编号；服务端会按编号关联内部诊断。";
+  $("feedback-context").textContent = target ? `将附带 ${target.communicationChannel === "text" ? "文字通讯" : "面对面"}中${target.source === "presence_arrival" ? "这次到场回应" : target.role === "user" && target.status === "failed" ? "这次失败请求的消息" : "相关一问一答"}及请求编号。` : "将附带当前一问一答和请求编号；服务端会按编号关联内部诊断。";
   const preview = [
-    userMessage.content || userBlocks.map((block) => block.text || `〔表情〕${block.caption || "表情"}`).join("\n"),
-    assistantBlocks.map((block) => block.text || `〔表情〕${block.caption || "表情"}`).join("\n"),
-  ].filter(Boolean);
-  $("feedback-context-preview-text").textContent = preview.length ? preview.map((text, index) => `${index ? "角色" : "你"}：${text}`).join("\n\n") : "当前没有可附带的对话内容。";
+    { role: "你", text: userMessage.content || userBlocks.map((block) => block.text || `〔表情〕${block.caption || "表情"}`).join("\n") },
+    { role: "角色", text: assistantBlocks.map((block) => block.text || `〔表情〕${block.caption || "表情"}`).join("\n") },
+  ].filter(item => item.text);
+  $("feedback-context-preview-text").textContent = preview.length ? preview.map(item => `${item.role}：${item.text}`).join("\n\n") : "当前没有可附带的对话内容。";
 }
 async function submitFeedback(event) {
   event.preventDefault();
@@ -5802,6 +6319,7 @@ $("new-replies").onclick = () => {
   $("new-replies").hidden = true;
 };
 $("timeline").addEventListener("scroll", () => {
+  rememberTimelineViewport();
   if (timelineNearBottom() && !state.timelineEndId) $("new-replies").hidden = true;
   sampleVisibleReplyPaints();
 }, { passive: true });
@@ -6086,6 +6604,7 @@ async function refreshStoredHistory() {
   state.persistedMessages.clear();
   for (const store of Object.values(state.memoryStores)) store.clear();
   state.worldPackage = "";
+  state.dialogueByCharacter.clear();
   await migrateBrowserState();
   const selected = state.selected;
   state.selected = "";
@@ -6140,6 +6659,10 @@ async function deleteCharacterHistory() {
   state.threads.delete(characterId);
   await deleteMessagesForCharacter(characterId);
   await storeDelete("threads", characterId);
+  await storeDelete("app_state", dialogueRecordKey(characterId));
+  state.dialogueByCharacter.delete(characterId);
+  state.sceneActionByCharacter.delete(characterId);
+  state.sceneByCharacter.delete(characterId);
   for (const key of state.drafts.keys()) if (key.startsWith(`${characterId}:`)) state.drafts.delete(key);
   await persistDrafts();
   if (characterId === state.selected) { await dbGetThread(characterId); restoreDraft(); renderAll(); }
@@ -6157,6 +6680,7 @@ async function clearAllHistory() {
     ? { key: "writer_lease", owner: state.writerId, expiresAt: Date.now() + 15000 } : undefined);
   for (const store of Object.values(state.memoryStores)) store.clear();
   state.threads.clear(); state.persistedMessages.clear(); state.worldPackage = "";
+  state.dialogueByCharacter.clear(); state.sceneActionByCharacter.clear(); state.sceneByCharacter.clear();
   state.drafts.clear(); state.pinnedCharacters.clear(); state.favoriteStickerIds.clear();
   state.favoriteStickers.clear(); state.recentStickerIds = []; state.rendezvousDismissals.clear();
   if (state.selected) { await dbGetThread(state.selected); restoreDraft(); await resolvePresence(); }
@@ -6171,7 +6695,9 @@ async function exportHistory() {
   await saveDraftNow();
   const backup = portableCopy({
     schema: "project-snow-history-1", databaseVersion: 4, exportedAt: new Date().toISOString(),
-    threads: await storeAll("threads"), messages: await storeAll("messages"),
+    threads: await storeAll("threads"), messages: (await storeAll("messages")).map(message => ({ ...message,
+      ...(message.requestSnapshot?.envelope && message.status !== "sent" ? { errorCode: "request_result_unavailable", status: "failed" } : {}),
+      requestSnapshot: message.requestSnapshot?.envelope ? null : message.requestSnapshot })),
     appState: (await storeAll("app_state")).filter((entry) => ["drafts", "preferences", "ui_preferences"].includes(entry.key)),
   });
   const url = URL.createObjectURL(new Blob([JSON.stringify(backup)], { type: "application/json" }));
@@ -6187,7 +6713,9 @@ async function importHistory(backup) {
   await saveDraftNow();
   const db = await openDB();
   if (!db) throw new Error("history_storage_required");
-  await mergeHistoryDatabase(db, backup, normalizeMessage);
+  await mergeHistoryDatabase(db, { ...backup, messages: backup.messages.map(message => ({ ...message,
+    ...((message.requestSnapshot?.envelope || plain(message.id).startsWith("user:")) && message.status !== "sent" ? { errorCode: "request_result_unavailable", status: "failed" } : {}),
+    requestSnapshot: message.requestSnapshot?.envelope ? null : message.requestSnapshot })) }, normalizeMessage);
   await refreshStoredHistory();
   broadcastHistoryChange();
 }

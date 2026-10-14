@@ -269,3 +269,4 @@ credentials/
 
 # Agent scratch evidence and transient packaging scripts.
 /.tmp/
+/App/.tmp/

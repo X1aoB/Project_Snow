@@ -318,3 +318,106 @@ class StatePayload(StrictModel):
         if any(character_id != item.character_id for character_id, item in value.items()):
             raise ValueError("pending_rendezvous key must match character_id")
         return value
+
+
+class SessionMemory(StrictModel):
+    """A bounded session observation; its source never becomes canon evidence."""
+
+    memory_id: str = Field(min_length=8, max_length=80)
+    kind: Literal["user_statement", "assistant_commitment", "shared_scene_event"]
+    value: str = Field(min_length=1, max_length=160)
+    source_request_id: UUID
+    segment_id: UUID
+    occurred_at: str = Field(default="", max_length=64)
+    location_id: str = Field(default="", max_length=64)
+    scene_epoch: int = Field(default=0, ge=0)
+    source_message_ids: list[str] = Field(default_factory=list, max_length=2)
+
+
+class SceneInvitation(StrictModel):
+    invitation_id: str = Field(min_length=8, max_length=160)
+    location_id: str = Field(min_length=1, max_length=64)
+    activity_id: str = Field(min_length=1, max_length=64)
+    status: Literal["proposed", "accepted", "declined", "deferred", "clarify"] = "proposed"
+    time_scope: Literal["now", "future"] = "now"
+
+
+class SceneOverlay(StrictModel):
+    """Only a verified conversation scene can outlive the daily schedule."""
+
+    scene_id: str = Field(min_length=8, max_length=80)
+    scene_epoch: int = Field(default=0, ge=0)
+    world_revision: int = Field(default=0, ge=0)
+    schedule_date: str = Field(default="", max_length=16)
+    communication_channel: Literal["text", "in_person"] = "text"
+    analyst_location: str | None = Field(default=None, max_length=120)
+    character_location: str | None = Field(default=None, max_length=120)
+    character_activity: str = Field(default="", max_length=240)
+    location_id: str = Field(default="", max_length=64)
+    activity_id: str = Field(default="", max_length=64)
+    source_event_id: str = Field(default="", max_length=160)
+    pending_rendezvous: PendingRendezvous | None = None
+
+
+class SessionContext(StrictModel):
+    schema_version: Literal["public-session-context-1"] = "public-session-context-1"
+    subject_binding: str = Field(min_length=1, max_length=64)
+    character_id: str = Field(min_length=12, max_length=32)
+    segment_id: UUID
+    revision: int = Field(default=0, ge=0)
+    scene_epoch: int = Field(default=0, ge=0)
+    data_version: str = Field(min_length=1, max_length=160)
+    catalog_version: str = Field(min_length=1, max_length=160)
+    local_day_key: str = Field(default="", max_length=32)
+    issued_at: str = Field(default="", max_length=64)
+    state_key_id: str = Field(default="", max_length=32)
+    scene_overlay: SceneOverlay | None = None
+    memories: list[SessionMemory] = Field(default_factory=list, max_length=12)
+    active_invitation: SceneInvitation | None = None
+
+    @model_validator(mode="after")
+    def validate_scopes(self) -> "SessionContext":
+        if len({memory.memory_id for memory in self.memories}) != len(self.memories):
+            raise ValueError("session memory ids must be unique")
+        if self.scene_overlay and self.scene_overlay.scene_epoch != self.scene_epoch:
+            raise ValueError("scene overlay epoch must match context")
+        if (
+            self.scene_overlay
+            and self.scene_overlay.pending_rendezvous
+            and self.scene_overlay.pending_rendezvous.character_id != self.character_id
+        ):
+            raise ValueError("scene rendezvous belongs to another character")
+        return self
+
+
+class SessionMemoryCandidate(StrictModel):
+    memory: SessionMemory
+    proof: str = Field(default="", max_length=1536)
+
+
+class DialogueV2ChatRequest(StrictModel):
+    """Coarse caps remain replay-compatible; fresh routes check total UTF-8 context bytes."""
+
+    protocol: Literal["public-dialogue-v2"] = "public-dialogue-v2"
+    chat: ChatRequest
+    session_context_package: str = Field(default="", max_length=8192)
+    segment_id: UUID
+    memory_candidates: list[SessionMemoryCandidate] = Field(default_factory=list, max_length=12)
+
+
+class SceneActionRequest(StrictModel):
+    """Use the same context budget as chat, without rewriting old recovery envelopes."""
+
+    protocol: Literal["public-scene-action-v2"] = "public-scene-action-v2"
+    request_id: UUID
+    character_id: str = Field(min_length=12, max_length=32)
+    action: Literal[
+        "resolve", "join_character", "open_communicator", "join_rendezvous", "cancel_rendezvous"
+    ]
+    state_package: str = Field(default="", max_length=32768)
+    session_context_package: str = Field(default="", max_length=8192)
+    segment_id: UUID
+    continuity_decision: Literal["", "continue_previous", "start_today"] = ""
+    local_day_key: str = Field(default="", max_length=32)
+    rendezvous_id: str = Field(default="", max_length=160)
+    memory_candidates: list[SessionMemoryCandidate] = Field(default_factory=list, max_length=12)

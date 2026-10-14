@@ -311,7 +311,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             self._json(manifest)
             return
         assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
-        if (path.startswith("/modules/") and path.endswith(".js")) or (path.startswith("/statistics/") and path.endswith((".mjs", ".css"))):
+        if path == "/dialogue-context.js" or (path.startswith("/modules/") and path.endswith(".js")) or (path.startswith("/statistics/") and path.endswith((".mjs", ".css"))):
             candidate = (PUBLIC_ROOT / path.lstrip("/")).resolve()
             if candidate.is_relative_to(PUBLIC_ROOT.resolve()) and candidate.is_file():
                 assets[path] = candidate.relative_to(PUBLIC_ROOT.resolve()).as_posix()
@@ -2266,7 +2266,10 @@ class PublicFrontendE2ETests(TestCase):
             )
             self.assertTrue((art.get_attribute("data-stage-motion-key") or "").endswith(":lean_in"))
             self.assertEqual(art.get_attribute("data-expression-state"), "surprised")
-            self.assertEqual(page.locator("#stage-narration").inner_text(), "正在看雪")
+            # This reply has only speech and a motion cue. Once conversation
+            # starts, the initial scene activity must not become narration.
+            self.assertEqual(page.locator("#stage-narration").inner_text(), "")
+            page.locator("#stage-speech").get_by_text("我想离你近一点说。").wait_for(state="visible")
             self.assertNotIn("stage_motion", page.locator("#stage-speech").inner_text())
             page.evaluate("() => { window.__projectSnowTest.renderStage(); window.__projectSnowTest.renderStage(); }")
             page.wait_for_timeout(700)
@@ -3263,6 +3266,7 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#message-input").fill("取消重连测试")
             page.locator("#send-message").click()
             page.locator("#request-status").get_by_text("连接中断，正在恢复（1/3）").wait_for(state="visible")
+            self.assertTrue(page.locator("#stop-waiting").is_visible())
             page.locator("#stop-waiting").click()
             page.locator("#request-status").get_by_text("已停止等待").wait_for(state="visible")
             page.wait_for_timeout(1300)
