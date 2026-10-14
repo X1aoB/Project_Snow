@@ -72,6 +72,7 @@ from .public_service import (
     PublicChatService,
     _normalize_public_immersive_punctuation,
 )
+from .session_context import validate_session_context_transfer
 from .public_store import (
     DuplicateFeedback,
     PublicStore,
@@ -1429,6 +1430,11 @@ def create_app(
         if not any((public_settings.dialogue_domains_v2, public_settings.scene_actions_v2,
                     public_settings.session_memory_v2)):
             raise _error("dialogue_v2_disabled", 503, retryable=False)
+        try:
+            validate_session_context_transfer(envelope)
+        except PublicSecurityError as exc:
+            code, http_status = _public_security_disposition(exc)
+            raise _error(code, http_status, retryable=False) from exc
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
         try:
@@ -1475,6 +1481,7 @@ def create_app(
                         public_settings.session_memory_v2)):
                 raise _error("dialogue_v2_disabled", 503, retryable=False)
             try:
+                validate_session_context_transfer(envelope)
                 get_dialogue_v2_service().validate_chat(envelope, request.state.subject_hash)
             except PublicSecurityError as exc:
                 code, status = _public_security_disposition(exc)

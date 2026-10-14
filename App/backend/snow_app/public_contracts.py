@@ -396,6 +396,8 @@ class SessionMemoryCandidate(StrictModel):
 
 
 class DialogueV2ChatRequest(StrictModel):
+    """Coarse caps remain replay-compatible; fresh routes check total UTF-8 context bytes."""
+
     protocol: Literal["public-dialogue-v2"] = "public-dialogue-v2"
     chat: ChatRequest
     session_context_package: str = Field(default="", max_length=8192)
@@ -404,6 +406,8 @@ class DialogueV2ChatRequest(StrictModel):
 
 
 class SceneActionRequest(StrictModel):
+    """Use the same context budget as chat, without rewriting old recovery envelopes."""
+
     protocol: Literal["public-scene-action-v2"] = "public-scene-action-v2"
     request_id: UUID
     character_id: str = Field(min_length=12, max_length=32)

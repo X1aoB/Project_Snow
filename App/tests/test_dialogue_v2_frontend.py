@@ -29,6 +29,11 @@ def untoken(value):
         return {}
 
 
+def context_bytes(envelope):
+    value = {key: envelope[key] for key in ("segment_id", "session_context_package", "memory_candidates")}
+    return len(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
 class DialogueHandler(fixture.PublicFrontendHandler):
     requests = []
     scenario = "success"
@@ -216,6 +221,23 @@ class DialogueV2FrontendTests(TestCase):
         self.page.wait_for_function("!document.querySelector('#send-message').disabled")
         self.page.wait_for_timeout(80)
 
+    def recover_chat(self, request_id):
+        with self.page.expect_response(lambda response: response.url.endswith("/public/v2/chat/stream")
+                and response.request.post_data_json["chat"]["request_id"] == request_id
+                and response.request.headers.get("x-snow-recovery-only") == "1"):
+            self.page.locator("[data-retry-message]").click()
+        # Retry first awaits IndexedDB before marking the composer busy. Its
+        # initial enabled state is not evidence that reconciliation finished.
+        self.page.wait_for_function("""requestId => new Promise(resolve => {
+          const r = indexedDB.open('project-snow-public', 4);
+          r.onsuccess = () => {
+            const db = r.result, tx = db.transaction('messages', 'readonly'), store = tx.objectStore('messages');
+            const user = store.get(`user:${requestId}`), reply = store.get(`reply:${requestId}`);
+            tx.oncomplete = () => { resolve(user.result?.status === 'sent' && !user.result.requestSnapshot
+              && reply.result?.status === 'sent'); db.close(); };
+          };
+        })""", arg=request_id)
+
     def rows(self, path="/public/v2/chat/stream"):
         return [row for row in DialogueHandler.requests if row["path"] == path]
 
@@ -283,7 +305,77 @@ class DialogueV2FrontendTests(TestCase):
         sidecar = next(row for row in local["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")
         self.assertEqual(len(sidecar["memories"]), 14)
         self.assertTrue(all(len(row["payload"]["memory_candidates"]) <= 12 for row in self.rows()))
-        self.assertEqual(len(self.rows()[-1]["payload"]["memory_candidates"]), 12)
+        self.assertGreater(len(self.rows()[-1]["payload"]["memory_candidates"]), 0)
+        self.assertTrue(all(context_bytes(row["payload"]) <= 8192 for row in self.rows()))
+
+    def test_new_chat_and_scene_context_budget_keeps_large_receipts_only_in_local_index(self):
+        self.open(); self.send()
+        record = next(row for row in self.local()["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")
+        original_token = record["sessionContextPackage"]
+        receipts = []
+        for index in range(15):
+            receipt = copy.deepcopy(record["memories"][0])
+            receipt["memory"].update(memory_id=f"large-memory-{index:04d}", value="雪" * 160)
+            receipt["proof"] = "s" * 1450
+            receipts.append(receipt)
+        self.page.evaluate("""receipts => new Promise(resolve => {
+          const r = indexedDB.open('project-snow-public', 4);
+          r.onsuccess = () => { const db = r.result, tx = db.transaction('app_state', 'readwrite');
+            const store = tx.objectStore('app_state'), q = store.get('dialogue_context_v1:25b23cb64398');
+            q.onsuccess = () => store.put({ ...q.result, memories: receipts });
+            tx.oncomplete = () => { db.close(); resolve(); };
+          };
+        })""", receipts)
+        count = len(self.rows("/public/v2/scene/action"))
+        self.page.reload(wait_until="networkidle")
+        scene = self.rows("/public/v2/scene/action")[count]["payload"]
+        self.assertEqual(scene["session_context_package"], original_token)
+        self.send("合成中文上下文预算")
+        chat = self.rows()[-1]["payload"]
+        for envelope in (scene, chat):
+            with self.subTest(protocol=envelope["protocol"]):
+                candidates = envelope["memory_candidates"]
+                self.assertGreater(len(candidates), 0)
+                self.assertLess(len(candidates), 12)
+                self.assertLessEqual(context_bytes(envelope), 8192)
+                self.assertEqual(candidates, list(reversed(receipts))[:len(candidates)])
+                larger = {**envelope, "memory_candidates": list(reversed(receipts))[:len(candidates) + 1]}
+                self.assertGreater(context_bytes(larger), 8192)
+        saved = next(row for row in self.local()["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")
+        self.assertEqual(saved["memories"][:len(receipts)], receipts)
+        self.assertEqual(len(saved["memories"]), len(receipts) + 1)
+        self.assertFalse(self.errors)
+
+    def test_legacy_pending_above_new_context_budget_recovers_original_envelope_after_reload(self):
+        self.open(); DialogueHandler.scenario = "manual"; self.send()
+        original = copy.deepcopy(self.rows()[0]["payload"])
+        memory = copy.deepcopy(DialogueHandler.results[original["chat"]["request_id"]]["session_memories"][0])
+        # Emulate a durable envelope written by the preceding client, which
+        # allowed twelve large signed proofs before the total transfer cap.
+        original["memory_candidates"] = []
+        for index in range(12):
+            receipt = copy.deepcopy(memory)
+            receipt["memory"].update(memory_id=f"legacy-memory-{index:04d}", value="雪" * 160)
+            receipt["proof"] = "s" * 1450
+            original["memory_candidates"].append(receipt)
+        self.assertGreater(context_bytes(original), 8192)
+        self.page.evaluate("""envelope => new Promise(resolve => {
+          const r = indexedDB.open('project-snow-public', 4);
+          r.onsuccess = () => { const db = r.result, tx = db.transaction('messages', 'readwrite');
+            const store = tx.objectStore('messages'), q = store.get(`user:${envelope.chat.request_id}`);
+            q.onsuccess = () => store.put({ ...q.result, requestSnapshot: { endpoint: '/public/v2/chat/stream', envelope } });
+            tx.oncomplete = () => { db.close(); resolve(); };
+          };
+        })""", original)
+        self.page.reload(wait_until="networkidle")
+        DialogueHandler.scenario = "success"
+        self.recover_chat(original["chat"]["request_id"])
+        rows = self.rows()
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(rows[1]["recovery"])
+        self.assertEqual(rows[1]["payload"], original)
+        self.assertFalse(fixture.PublicFrontendHandler.chat_payloads)
+        self.assertFalse(self.errors)
 
     def test_switch_contact_does_not_join_or_show_remote_face(self):
         self.open(); self.page.locator("#go-in-person").click(); self.page.locator("#confirm-presence-transition").click()
@@ -327,8 +419,7 @@ class DialogueV2FrontendTests(TestCase):
         self.page.route("**/public/v1/config", config)
         self.page.reload(wait_until="networkidle")
         DialogueHandler.scenario = "success"
-        self.page.locator("[data-retry-message]").click()
-        self.page.wait_for_function("!document.querySelector('#send-message').disabled")
+        self.recover_chat(original["chat"]["request_id"])
         rows = self.rows()
         self.assertEqual(len(rows), 2)
         self.assertTrue(rows[1]["recovery"])
@@ -472,8 +563,7 @@ class DialogueV2FrontendTests(TestCase):
         context_before = next(row for row in before["state"] if row["key"] == f"dialogue_context_v1:{CHARACTER}")["sessionContextPackage"]
         world_before = next(row for row in before["state"] if row["key"] == "world")["statePackage"]
         DialogueHandler.scenario = "success"
-        self.page.locator("[data-retry-message]").click()
-        self.page.wait_for_function("!document.querySelector('#send-message').disabled")
+        self.recover_chat(original["chat"]["request_id"])
         rows = self.rows()
         self.assertEqual(len(rows), 2)
         self.assertTrue(rows[1]["recovery"]); self.assertEqual(rows[1]["payload"], original)

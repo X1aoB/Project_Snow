@@ -30,6 +30,18 @@ export function relevantDialogueReceipts(receipts, text = "") {
   })
     .sort((a, b) => b.score - a.score || b.order - a.order).slice(0, 12).map(item => structuredClone(item.receipt));
 }
+export function fitDialogueContext({ segment_id, session_context_package = "", memory_candidates = [] }) {
+  // Match the server's complete SessionMemory JSON, including optional defaults.
+  // The opaque token is never rewritten, and selection leaves the local index intact.
+  const context = { segment_id: String(segment_id).toLowerCase(), session_context_package,
+    memory_candidates: memory_candidates.slice(0, 12).map(receipt => ({ ...structuredClone(receipt),
+      memory: { occurred_at: "", location_id: "", scene_epoch: 0, source_message_ids: [], ...structuredClone(receipt.memory) },
+      proof: receipt.proof ?? "" })) };
+  const size = () => new TextEncoder().encode(JSON.stringify(context)).byteLength;
+  while (context.memory_candidates.length && size() > 8192) context.memory_candidates.pop();
+  if (size() > 8192) throw new Error("request_too_large");
+  return context;
+}
 export function isPureRendezvousJoin(text) {
   return /^(?:好[的啊]?[，,\s]*)?(?:那(?:就)?[，,\s]*)?(?:我(?:现在|这就|马上)?(?:过去|来找你)(?:了|啦|吧)?|(?:我们)?走吧|那就走吧|这就过去)[。！!～~\s]*$/.test(String(text || "").trim());
 }

@@ -1,5 +1,5 @@
 import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope, anonymousServerTimings } from "/modules/runtime.js";
-import { DIALOGUE_PROTOCOL, SCENE_PROTOCOL, dialogueRecordKey, decodeSidecar, mergeDialogueReceipts, relevantDialogueReceipts, isPureRendezvousJoin, sceneVisualKey } from "/dialogue-context.js";
+import { DIALOGUE_PROTOCOL, SCENE_PROTOCOL, dialogueRecordKey, decodeSidecar, mergeDialogueReceipts, relevantDialogueReceipts, fitDialogueContext, isPureRendezvousJoin, sceneVisualKey } from "/dialogue-context.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
@@ -5299,6 +5299,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     session_context_package: dialoguePackage(thread), segment_id: requestSegment,
     memory_candidates: dialogueCandidates(characterId, userMessage.content) } : null;
   try {
+    if (dialogueV2 && !retrySnapshot) envelope = { ...envelope, ...fitDialogueContext(envelope) };
     if (dialogueV2 && retrySnapshot) {
       boundedRequest = { ...requestSnapshot, credential: state.credential };
       if (jsonBodyBytes({ ...envelope, chat: boundedRequest }) > PUBLIC_REQUEST_LIMIT_BYTES) throw new Error("request_too_large");
@@ -5818,10 +5819,10 @@ async function performSceneAction(action, characterId = state.selected, signal =
   const previous = record.sceneActionSnapshot;
   const envelope = previous?.envelope || {
     protocol: SCENE_PROTOCOL, request_id: id(), character_id: characterId, action,
-    state_package: state.worldPackage || "", session_context_package: dialoguePackage(thread),
-    segment_id: segment, continuity_decision: thread.continuityDecision || "",
+    state_package: state.worldPackage || "", continuity_decision: thread.continuityDecision || "",
     local_day_key: thread.localDayKey || localDayKey(), rendezvous_id: rendezvousId,
-    memory_candidates: dialogueCandidates(characterId),
+    ...fitDialogueContext({ segment_id: segment, session_context_package: dialoguePackage(thread),
+      memory_candidates: dialogueCandidates(characterId) }),
   };
   const snapshot = previous || { endpoint: "/public/v2/scene/action", envelope: structuredClone(envelope) };
   const owner = envelope.request_id;

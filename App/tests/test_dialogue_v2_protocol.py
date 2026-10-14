@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -20,7 +23,7 @@ from sqlalchemy import text
 from backend.snow_app.config import Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from backend.snow_app.public_contracts import (
-    ChatRequest, DialogueV2ChatRequest, SceneActionRequest, SceneOverlay, SessionMemory,
+    ChatRequest, DialogueV2ChatRequest, PendingRendezvous, SceneActionRequest, SceneOverlay, SessionMemory,
 )
 from backend.snow_app.public_main import (
     _anonymous_cookie_name, _dialogue_v2_request_body, _model_request_body, _request_hash, create_app,
@@ -30,6 +33,7 @@ from backend.snow_app.public_store import PublicStore, PublicStoreUnavailable
 from backend.snow_app.session_context import (
     new_session_context, sign_session_context, verify_session_context,
     sign_session_memory, verify_session_memory,
+    session_context_transfer_size, validate_session_context_transfer,
 )
 from tests.test_public_api import _settings
 
@@ -96,8 +100,11 @@ class SessionContextContractTests(TestCase):
             source_request_id=uuid4(), segment_id=self.segment,
         ) for number in range(12)]
         huge = self.context.model_copy(update={"memories": memories})
-        with self.assertRaises(PublicSecurityError):
-            sign_session_context(self.settings, huge)
+        token = sign_session_context(self.settings, huge)
+        self.assertLessEqual(session_context_transfer_size(segment_id=self.segment,
+                             session_context_package=token), 8192)
+        self.assertLess(len(self.verify(token).memories), len(memories))
+        self.assertEqual(len(huge.memories), 12)
         with self.assertRaises(ValidationError):
             self.context.model_validate({**self.context.model_dump(), "scene_epoch": 2,
                 "scene_overlay": SceneOverlay(scene_id="scene-synthetic", scene_epoch=1).model_dump()})
@@ -118,6 +125,91 @@ class SessionContextContractTests(TestCase):
             verify_session_memory(self.settings, proof, subject_hash="other", character_id=self.character)
         with self.assertRaises(PublicSecurityError):
             self.verify(proof)
+
+    def test_legacy_near_limit_token_remains_verifiable_but_new_signing_reserves_wrapper(self):
+        # Reproduce the previous token format without the new signer/transfer
+        # limit, so this is an actual backward-verification regression.
+        legacy_token = None
+        legacy_context = None
+        for width in range(1, 161):
+            memories = [SessionMemory(memory_id=f"memory-{number:04d}", kind="user_statement",
+                value="x" * width, source_request_id=uuid4(), segment_id=self.segment,
+                source_message_ids=[f"user:{uuid4()}", f"reply:{uuid4()}"])
+                for number in range(12)]
+            candidate = self.context.model_copy(update={"memories": memories})
+            raw = json.dumps(candidate.model_dump(mode="json"), ensure_ascii=False,
+                             sort_keys=True, separators=(",", ":")).encode("utf-8")
+            signature = hmac.new(self.settings.state_hmac_key,
+                b"project-snow-public-session-context-1\x00" + raw, hashlib.sha256).digest()
+            encoded = lambda value: base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+            token = encoded(raw) + "." + encoded(signature)
+            if len(token) <= 8192 and session_context_transfer_size(
+                segment_id=self.segment, session_context_package=token,
+            ) > 8192:
+                legacy_token, legacy_context = token, candidate
+                break
+        self.assertIsNotNone(legacy_token)
+        self.assertEqual(self.verify(legacy_token), legacy_context)
+        fresh = sign_session_context(self.settings, legacy_context)
+        self.assertLessEqual(session_context_transfer_size(segment_id=self.segment,
+                             session_context_package=fresh), 8192)
+        self.assertEqual(len(legacy_context.memories), 12)
+        self.assertLess(len(self.verify(fresh).memories), 12)
+
+    def test_utf8_transfer_counts_full_receipts_and_wrapper_not_original_chat(self):
+        memory = SessionMemory(memory_id="unicode-memory", kind="user_statement", value="中文🙂",
+            source_request_id=uuid4(), segment_id=self.segment)
+        proof = sign_session_memory(self.settings, memory, subject_hash="synthetic-subject",
+                                    character_id=self.character)
+        candidates = [{"memory": memory.model_dump(mode="json"), "proof": proof}]
+        envelope = DialogueV2ChatRequest(chat=ChatRequest(request_id=uuid4(), provider="openai",
+            credential="synthetic-credential-value", model="synthetic", character_id=self.character,
+            message="hello", history_summary="原请求" * 1800), segment_id=self.segment,
+            memory_candidates=candidates)
+        expected = json.dumps({"segment_id": str(self.segment), "session_context_package": "",
+                               "memory_candidates": candidates}, ensure_ascii=False,
+                              sort_keys=True, separators=(",", ":"))
+        self.assertEqual(session_context_transfer_size(segment_id=self.segment,
+                         memory_candidates=envelope.memory_candidates), len(expected.encode("utf-8")))
+        self.assertGreater(len(expected.encode("utf-8")), len(expected))
+        self.assertGreater(len(json.dumps(envelope.model_dump(mode="json"), ensure_ascii=False).encode("utf-8")), 8192)
+        validate_session_context_transfer(envelope)
+
+    def test_new_token_soft_target_keeps_recent_audit_copies_and_room_for_long_receipt(self):
+        memories = [SessionMemory(memory_id=f"memory-{number:04d}", kind="user_statement",
+            value="合成记忆" * 40, source_request_id=uuid4(), segment_id=self.segment,
+            source_message_ids=[f"user:{uuid4()}", f"reply:{uuid4()}"])
+            for number in range(12)]
+        context = self.context.model_copy(update={"memories": memories})
+        before = context.model_dump(mode="json")
+        token = sign_session_context(self.settings, context)
+        self.assertLessEqual(len(token), 4096)
+        self.assertEqual(context.model_dump(mode="json"), before)
+        retained = self.verify(token).memories
+        self.assertTrue(retained)
+        self.assertEqual(retained, memories[-len(retained):])
+        memory = memories[-1]
+        receipt = {"memory": memory.model_dump(mode="json"), "proof": sign_session_memory(
+            self.settings, memory, subject_hash="synthetic-subject", character_id=self.character)}
+        self.assertLessEqual(session_context_transfer_size(segment_id=self.segment,
+            session_context_package=token, memory_candidates=[receipt]), 8192)
+        self.assertEqual(verify_session_memory(self.settings, receipt["proof"],
+            subject_hash="synthetic-subject", character_id=self.character), memory)
+
+    def test_large_legal_scene_without_redundant_memories_can_exceed_soft_target(self):
+        pending = PendingRendezvous(rendezvous_id="synthetic-rendezvous", character_id=self.character,
+            location_id="park", location_name="公园", activity_id="strolling_together",
+            waiting_activity="合成等候" * 60, joined_activity="合成散步" * 60)
+        overlay = SceneOverlay(scene_id="synthetic-scene", analyst_location="合成地点" * 30,
+            character_location="合成地点" * 30, character_activity="合成活动" * 60,
+            source_event_id="e" * 160, pending_rendezvous=pending)
+        context = self.context.model_copy(update={"scene_overlay": overlay})
+        token = sign_session_context(self.settings, context)
+        self.assertGreater(len(token), 4096)
+        self.assertLessEqual(session_context_transfer_size(segment_id=self.segment,
+            session_context_package=token), 8192)
+        self.assertEqual(self.verify(token).scene_overlay, overlay)
+        self.assertEqual(context.scene_overlay, overlay)
 
     def test_v1_contract_and_hash_are_unchanged(self):
         request = ChatRequest(request_id=uuid4(), provider="openai", credential="synthetic-credential-value",
@@ -195,6 +287,90 @@ class DialogueV2RouteTests(TestCase):
     def post(self, body, *, recovery=False):
         headers = {**self.headers, **({"X-Snow-Recovery-Only": "1"} if recovery else {})}
         return self.client.post("/public/v2/chat/stream", headers=headers, json=body)
+
+    def large_candidates(self):
+        result = []
+        for number in range(12):
+            memory = SessionMemory(memory_id=f"budget-memory-{number:04d}", kind="user_statement",
+                value="合成记忆" * 40, source_request_id=uuid4(), segment_id=self.segment,
+                source_message_ids=[f"user:{uuid4()}", f"reply:{uuid4()}"])
+            result.append({"memory": memory.model_dump(mode="json"), "proof": sign_session_memory(
+                self.settings, memory, subject_hash=self.subject, character_id=self.character)})
+        return result
+
+    def test_oversize_context_chat_and_scene_are_rejected_before_claim_or_model(self):
+        candidates = self.large_candidates()
+        body = {**self.envelope(), "memory_candidates": candidates}
+        scene_body = {"protocol": "public-scene-action-v2", "request_id": str(uuid4()),
+            "character_id": self.character, "action": "resolve", "segment_id": str(self.segment),
+            "memory_candidates": candidates}
+        with patch.object(self.store, "claim_request", wraps=self.store.claim_request) as claim:
+            chat_response = self.post(body)
+            scene_response = self.client.post("/public/v2/scene/action", headers=self.headers, json=scene_body)
+            claim.assert_not_called()
+        for response in (chat_response, scene_response):
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(response.json()["detail"]["code"], "session_context_invalid")
+            self.assertFalse(response.json()["detail"]["retryable"])
+        self.service.validate_chat.assert_not_called()
+        self.assertEqual(self.calls, 0)
+        self.assertEqual(self.actions, 0)
+
+    def test_unicode_context_cannot_pass_by_counting_characters(self):
+        candidates = self.large_candidates()
+        subset = None
+        for count in range(1, len(candidates) + 1):
+            context = {"segment_id": str(self.segment), "session_context_package": "",
+                       "memory_candidates": candidates[:count]}
+            serialized = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            if len(serialized) <= 8192 < len(serialized.encode("utf-8")):
+                subset = candidates[:count]
+                break
+        self.assertIsNotNone(subset)
+        with patch.object(self.store, "claim_request", wraps=self.store.claim_request) as claim:
+            response = self.post({**self.envelope(), "memory_candidates": subset})
+            claim.assert_not_called()
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.calls, 0)
+
+    def test_underbudget_context_does_not_limit_the_original_chat_request(self):
+        body = {**self.envelope(), "memory_candidates": self.large_candidates()[:1]}
+        body["chat"]["history_summary"] = "原请求" * 1800
+        response = self.post(body)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("synthetic reply", response.text)
+        self.assertEqual(self.calls, 1)
+
+    def test_original_oversize_context_snapshots_recover_without_rewriting_or_claiming(self):
+        candidates = self.large_candidates()
+        body = {**self.envelope(), "memory_candidates": candidates}
+        request_id = body["chat"]["request_id"]
+        envelope = DialogueV2ChatRequest.model_validate(body)
+        request_hash = _request_hash(_dialogue_v2_request_body(envelope))
+        self.store.claim_request(request_id, self.subject, request_hash)
+        self.store.complete_request(request_id, {"request_id": request_id,
+            "character_id": self.character, "communication_channel": "text", "answer": "saved reply",
+            "content_blocks": [{"type": "message", "text": "saved reply"}], **self.metadata(self.subject)})
+        scene_body = {"protocol": "public-scene-action-v2", "request_id": str(uuid4()),
+            "character_id": self.character, "action": "resolve", "segment_id": str(self.segment),
+            "memory_candidates": candidates}
+        scene_hash = _request_hash(SceneActionRequest.model_validate(scene_body).model_dump(mode="json"))
+        cache_id = "scene-action:" + scene_body["request_id"]
+        self.store.claim_request(cache_id, self.subject, scene_hash)
+        self.store.complete_request(cache_id, {"request_id": scene_body["request_id"],
+            "character_id": self.character, **self.metadata(self.subject), "scene_action": {"status": "applied"}})
+        with patch.object(self.store, "claim_request", wraps=self.store.claim_request) as claim:
+            chat = self.post(body, recovery=True)
+            scene = self.client.post("/public/v2/scene/action",
+                headers={**self.headers, "X-Snow-Recovery-Only": "1"}, json=scene_body)
+            claim.assert_not_called()
+        self.assertEqual(chat.status_code, 200)
+        self.assertIn("saved reply", chat.text)
+        self.assertEqual(scene.status_code, 200)
+        self.assertTrue(scene.json()["idempotent_replay"])
+        self.assertEqual(self.calls, 0)
+        self.assertEqual(self.actions, 0)
+        self.service.validate_chat.assert_not_called()
 
     def test_v2_final_context_replay_is_exactly_once(self):
         body = self.envelope()

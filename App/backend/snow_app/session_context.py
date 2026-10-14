@@ -17,6 +17,8 @@ from .public_contracts import SceneOverlay, SessionContext, SessionMemory
 from .public_security import PublicSecurityError
 
 CONTEXT_TOKEN_LIMIT = 8192
+CONTEXT_TRANSFER_LIMIT = 8192
+CONTEXT_TOKEN_TARGET = 4096
 MEMORY_PROOF_LIMIT = 1536
 _CONTEXT_DOMAIN = b"project-snow-public-session-context-1\x00"
 _MEMORY_DOMAIN = b"project-snow-public-session-memory-1\x00"
@@ -90,11 +92,60 @@ def new_session_context(
     )
 
 
+def session_context_transfer_size(
+    *, segment_id: UUID | str, session_context_package: str = "",
+    memory_candidates: Any = (),
+) -> int:
+    """Count the context sidecar on the wire, excluding the original request.
+
+    Keep the legacy token limit separate: old paid-request snapshots may be
+    larger than the new transfer budget and must remain recoverable as-is.
+    """
+    candidates = [item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+                  for item in memory_candidates]
+    value = {
+        "segment_id": str(UUID(str(segment_id))),
+        "session_context_package": session_context_package,
+        "memory_candidates": candidates,
+    }
+    try:
+        return len(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                              separators=(",", ":")).encode("utf-8"))
+    except (UnicodeError, TypeError, ValueError) as exc:
+        raise PublicSecurityError("Session context transfer is malformed") from exc
+
+
+def validate_session_context_transfer(envelope: Any) -> None:
+    if session_context_transfer_size(
+        segment_id=envelope.segment_id,
+        session_context_package=envelope.session_context_package,
+        memory_candidates=envelope.memory_candidates,
+    ) > CONTEXT_TRANSFER_LIMIT:
+        raise PublicSecurityError("Session context transfer exceeds its size limit")
+
+
 def sign_session_context(settings: PublicSettings, value: SessionContext | dict[str, Any]) -> str:
     # model_copy(update=...) intentionally skips Pydantic validation. Reparse
     # a plain payload here so no unvalidated update can gain a signature.
     context = SessionContext.model_validate(value.model_dump(mode="json") if isinstance(value, SessionContext) else value)
-    return _sign(settings, context.model_dump(mode="json"), _CONTEXT_DOMAIN, CONTEXT_TOKEN_LIMIT)
+    # These selected memories have separate signed receipts in the browser.
+    # Drop only redundant copies from this newly parsed signing value, never
+    # mutate the caller's complete local index or its existing receipts.
+    hard_budget = min(CONTEXT_TOKEN_LIMIT, CONTEXT_TRANSFER_LIMIT - session_context_transfer_size(
+        segment_id=context.segment_id,
+    ))
+    while True:
+        try:
+            # Prefer space for independent, relevant proofs on the next turn.
+            # A large scene without duplicate memories can still use the full
+            # transfer budget; scene authority must never be discarded to hit
+            # this soft target.
+            token_budget = min(hard_budget, CONTEXT_TOKEN_TARGET) if context.memories else hard_budget
+            return _sign(settings, context.model_dump(mode="json"), _CONTEXT_DOMAIN, token_budget)
+        except PublicSecurityError as exc:
+            if str(exc) != "Session context exceeds its size limit" or not context.memories:
+                raise
+            context.memories.pop(0)
 
 
 def verify_session_context(
@@ -147,4 +198,5 @@ def verify_session_memory(
 __all__ = [
     "SessionContext", "SceneOverlay", "SessionMemory", "new_session_context",
     "sign_session_context", "verify_session_context", "sign_session_memory", "verify_session_memory",
+    "session_context_transfer_size", "validate_session_context_transfer", "CONTEXT_TRANSFER_LIMIT",
 ]
