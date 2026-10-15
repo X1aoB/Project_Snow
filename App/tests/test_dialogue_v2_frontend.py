@@ -201,12 +201,12 @@ class DialogueV2FrontendTests(TestCase):
         DialogueHandler.join_release.set()
         self.browser.close(); self.playwright.stop()
 
-    def open(self, v2=True, motion=True, memory=True):
+    def open(self, v2=True, motion=True, memory=True, snow=False):
         DialogueHandler.memory_enabled = memory
         def config(route):
             payload = route.fetch().json()
             payload["features"] = {"chat_latency_v2": True, "motion_v2": motion, "verified_block_replay": True,
-                "dialogue_domains_v2": v2, "scene_actions_v2": v2, "session_memory_v2": v2 and memory}
+                "dialogue_domains_v2": v2, "scene_actions_v2": v2, "session_memory_v2": v2 and memory, "ui_snow_adv": snow}
             payload["capabilities"] = {"dialogue_protocol": "public-dialogue-v2", "scene_action_protocol": "public-scene-action-v2", "recovery_only": True}
             route.fulfill(json=payload)
         self.page.route("**/public/v1/config", config)
@@ -713,6 +713,31 @@ class DialogueV2FrontendTests(TestCase):
         self.assertEqual(self.page.locator("#chat-app").get_attribute("data-channel"), "in_person")
         self.assertEqual(self.page.locator("#stage-location").inner_text(), before_location)
         self.page.wait_for_function("document.activeElement.id==='message-input'")
+        self.assertFalse(self.errors)
+
+    def _arrival_notices(self, snow):
+        self.open(snow=snow)
+        self.page.locator("#go-in-person").click(); self.page.locator("#confirm-presence-transition").click()
+        self.page.wait_for_function("document.querySelector('#chat-app').dataset.channel==='in_person'")
+        self.page.wait_for_timeout(400)
+        return self.page.evaluate("""() => {
+          const shown = id => { const node = document.getElementById(id); return node && !node.hidden && !node.closest('[hidden]') ? node.textContent.trim() : ''; };
+          return { banner: shown('system-banner'), status: shown('request-status'), narration: shown('stage-narration') + shown('stage-speech') };
+        }""")
+
+    def test_snow_adv_scene_arrival_keeps_a_single_notice(self):
+        legacy = self._arrival_notices(snow=False)
+        self.assertFalse(self.errors)
+        self.page.close()
+        self.page = self.browser.new_page(viewport={"width": 1200, "height": 850}, reduced_motion="reduce")
+        self.page.on("pageerror", lambda error: self.errors.append(str(error)))
+        snow = self._arrival_notices(snow=True)
+        # Flag off keeps whatever the legacy path shows; flag on drops the duplicate banner/status only.
+        self.assertTrue("已来到" in legacy["banner"] or "已来到" in legacy["status"], legacy)
+        self.assertNotIn("已来到", snow["banner"])
+        self.assertNotIn("已来到", snow["status"])
+        self.assertNotIn("正在确认会合地点", snow["status"])
+        self.assertEqual(bool(legacy["narration"]), bool(snow["narration"]))
         self.assertFalse(self.errors)
 
     def test_first_join_pending_without_history_recovers_original_uuid_before_orphan_cleanup(self):

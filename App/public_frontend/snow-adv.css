@@ -76,7 +76,13 @@ html[data-ui="snow-adv"] {
   font-family: var(--font-ui);
 }
 
-/* 22 character theme colours (draft palette from the P0 mockups). */
+/* 22 character theme colours (draft palette from the P0 mockups).
+   --char-deep/--char-soft must be re-derived where --char changes: a custom
+   property that references another is resolved on the element declaring it. */
+html[data-ui="snow-adv"] [data-snow-character] {
+  --char-deep: color-mix(in oklab, var(--char) 76%, var(--ink-900));
+  --char-soft: color-mix(in oklab, var(--char) 14%, var(--snow-0));
+}
 html[data-ui="snow-adv"] [data-snow-character="702f4375675b"] { --char: #e2738a; --char-deep: #b84f67; --char-soft: #fbe3e8; } /* 米娅 */
 html[data-ui="snow-adv"] [data-snow-character="447ed3c401c9"] { --char: #7c78c8; --char-deep: #5a55a3; --char-soft: #e9e8f8; } /* 胧嫣 */
 html[data-ui="snow-adv"] [data-snow-character="ca0144ccd81b"] { --char: #5d9bc2; } /* 里芙 */
@@ -278,3 +284,175 @@ html[data-ui="snow-adv"] .scene-stage .snow-layer svg {
   height: 100%;
 }
 html[data-ui="snow-adv"] .scene-stage .snow-layer-room[hidden] { display: none; }
+
+
+
+/* ================================================================ P3 面对面主屏
+   仅在 html[data-ui="snow-adv"] 下、面对面界面：把面对面界面升级为 galgame 主屏。
+   每条选择器都限定在 html[data-ui="snow-adv"] 下（测试强制）。开关关闭时本段全部
+   匹配不到；▼ 推进标记与快捷菜单由 app.js 仅在开关开启时建到对白框里，关闭时移除，
+   因此关闭态不新增任何可见元素。 */
+
+/* 1) 全屏舞台：面对面时把永久 304px 的角色栏改成覆盖式抽屉，舞台占满视口宽度。
+   app.js 进入面对面时默认加 sidebar-collapsed（抽屉关闭 = 舞台全宽），
+   #open-stage-contacts 仍用既有 toggleContacts 开合它，不改旧 UI 的侧栏偏好语义。 */
+@media (min-width: 821px) {
+  html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] { grid-template-columns: minmax(0, 1fr); }
+  html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .contact-panel {
+    position: fixed;
+    z-index: 56;
+    inset: 0 auto 0 0;
+    width: min(340px, 90vw);
+    height: 100dvh;
+    border-right: 1px solid var(--snow-200);
+    box-shadow: 18px 0 48px rgba(32, 62, 92, 0.18);
+    opacity: 1;
+    translate: 0 0;
+    transform: none;
+    pointer-events: auto;
+    transition: translate 180ms var(--ease-snow), opacity 180ms var(--ease-snow);
+  }
+  /* 抽屉关闭（侧栏折叠）时整体滑出屏幕外。 */
+  html[data-ui="snow-adv"] .app-shell[data-channel="in_person"].sidebar-collapsed .contact-panel {
+    opacity: 0;
+    translate: -101% 0;
+    pointer-events: none;
+    box-shadow: none;
+  }
+}
+
+/* 2) 对白框：磨砂雪白宽框，不透明到立绘不会透出来（有效 ≥ 0.92），顶部圆角。 */
+html[data-ui="snow-adv"] .stage-dialogue {
+  border-color: color-mix(in srgb, var(--ice-300) 72%, transparent);
+  border-bottom: 0;
+  border-radius: var(--radius-l) var(--radius-l) 0 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(244, 249, 252, 0.985));
+  -webkit-backdrop-filter: blur(16px) saturate(118%);
+  backdrop-filter: blur(16px) saturate(118%);
+  box-shadow: 0 -16px 44px rgba(32, 62, 92, 0.18), inset 0 1px rgba(255, 255, 255, 0.9);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html[data-ui="snow-adv"] .stage-dialogue { background: var(--snow-0); }
+}
+html[data-ui="snow-adv"] .stage-speaker-line { border-bottom-color: color-mix(in srgb, var(--ice-300) 52%, transparent); }
+
+/* 名牌：角色色，左上，背景 var(--char-deep)（角色色由 P1 的 [data-snow-character] 提供）。 */
+html[data-ui="snow-adv"] .stage-speaker-line strong {
+  background: var(--char-deep);
+  letter-spacing: 0.04em;
+}
+
+/* 面对面输入区与对白框连成一体（同一单元，无单独白条）。 */
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .composer { background: transparent; }
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .composer-row {
+  border-color: color-mix(in srgb, var(--ice-300) 72%, transparent);
+  border-top-color: color-mix(in srgb, var(--ice-300) 44%, transparent);
+  border-radius: 0 0 var(--radius-m) var(--radius-m);
+  background: linear-gradient(180deg, rgba(244, 249, 252, 0.985), rgba(238, 244, 248, 0.99));
+  box-shadow: 0 14px 30px rgba(32, 62, 92, 0.12);
+}
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .action-composer {
+  border-color: color-mix(in srgb, var(--ice-300) 72%, transparent);
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
+  background: rgba(247, 251, 253, 0.98);
+}
+
+/* 旁白卡（narration）跟随新色板。 */
+html[data-ui="snow-adv"] .stage-narration {
+  border-color: color-mix(in srgb, var(--ice-300) 60%, transparent);
+  border-radius: var(--radius-s);
+  color: var(--ink-700);
+  background: rgba(248, 252, 254, 0.92);
+}
+
+/* 3) ▼ 推进标记：对白框右下，回复显示完且空闲时出现；打字/揭示/等待时隐藏。
+   仅在动态档位 auto 轻轻上下浮动；light/off 静止。aria-hidden（由 JS 设置）。 */
+html[data-ui="snow-adv"] .stage-advance {
+  position: absolute;
+  right: 16px;
+  bottom: 10px;
+  z-index: 12;
+  display: block;
+  width: 20px;
+  height: 20px;
+  color: var(--char);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--ease-snow);
+}
+html[data-ui="snow-adv"] .stage-advance .snow-icon { width: 20px; height: 20px; stroke-width: 2.2; }
+html[data-ui="snow-adv"] .stage-advance.is-ready { opacity: 0.95; }
+html[data-ui="snow-adv"] .stage-advance.is-ready { animation: snow-advance-bob 1.15s ease-in-out infinite; }
+html[data-ui="snow-adv"][data-motion-level="light"] .stage-advance.is-ready,
+html[data-ui="snow-adv"][data-motion-level="off"] .stage-advance.is-ready { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-ui="snow-adv"] .stage-advance.is-ready { animation: none; }
+}
+
+/* 4) 快捷菜单：对白框右下一排小胶囊按钮（lucide 图标）。重用既有处理函数。 */
+html[data-ui="snow-adv"] .stage-quick-menu {
+  position: absolute;
+  right: 14px;
+  bottom: 8px;
+  z-index: 14;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+html[data-ui="snow-adv"] .stage-quick-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-600);
+  background: rgba(255, 255, 255, 0.72);
+  font-size: var(--fs-13);
+  letter-spacing: 0.04em;
+  transition: background-color 140ms var(--ease-snow), color 140ms var(--ease-snow), border-color 140ms var(--ease-snow);
+}
+html[data-ui="snow-adv"] .stage-quick-menu button:hover:not(:disabled) {
+  border-color: var(--snow-200);
+  color: var(--ice-700);
+  background: var(--snow-100);
+}
+html[data-ui="snow-adv"] .stage-quick-menu button:disabled { opacity: 0.42; cursor: default; }
+html[data-ui="snow-adv"] .stage-quick-menu .snow-icon { width: 16px; height: 16px; }
+/* 既有 ▼ 与快捷菜单同处右下：把 ▼ 抬到菜单上方一点，避免重叠。 */
+html[data-ui="snow-adv"] .stage-dialogue:has(.stage-quick-menu) .stage-advance { bottom: 44px; }
+
+/* 6) 立绘按身体中轴居中：--actor-anchor-x 为中轴在图里的横向位置（0~1），
+   由 app.js 从当前 #stage-character-art 测出并缓存；按它把立绘对齐到舞台中线，
+   而不是按图片外框。换表情沿用缓存值，不会左右跳动。底边仍藏在对白框后。
+   旧定位用 left: var(--stage-character-focus-x) + translate -50%，这里改为按中轴平移。 */
+html[data-ui="snow-adv"] .stage-character-art[data-actor-anchor] {
+  left: 50%;
+  translate: calc(-100% * var(--actor-anchor-x, 0.5)) 0;
+}
+html[data-ui="snow-adv"] .stage-character-art-outgoing[data-actor-anchor] {
+  left: 50%;
+  translate: calc(-100% * var(--actor-anchor-x, 0.5)) 0;
+}
+
+/* 7) 移动端（≤ 860px）：同一对白框；快捷菜单收成仅图标（保留无障碍名）；不与输入重叠；不低于 12px。 */
+@media (max-width: 860px) {
+  html[data-ui="snow-adv"] .stage-quick-menu { gap: 2px; right: 10px; }
+  html[data-ui="snow-adv"] .stage-quick-menu button { min-width: 36px; min-height: 36px; padding: 0; justify-content: center; }
+  html[data-ui="snow-adv"] .stage-quick-menu button .stage-quick-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  html[data-ui="snow-adv"] .stage-dialogue:has(.stage-quick-menu) .stage-advance { bottom: 48px; right: 12px; }
+}
+
+/* ▼ bob, referenced only by the scoped .stage-advance rule above (motion level auto). */
+@keyframes snow-advance-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(4px); } }

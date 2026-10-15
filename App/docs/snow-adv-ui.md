@@ -59,6 +59,27 @@
 - **每帧绘制耗时**：headless Chromium、390×844、`generic` 夜景（远近雪都动画）下约 **0.08–0.09 ms/帧**（EMA），远低于 2 ms/帧预算。
 - **体积**：`snow-world.js` 约 **11.6 KB（gzip）**，低于 12 KB 预算（原始约 36 KB）。开关关闭时不加载该模块、不改任何 DOM 或请求。
 
+## P3 面对面主屏（本阶段）
+
+把面对面界面（`#in-person-surface`，`in_person` 频道）升级为 galgame 主屏，仅在 `html[data-ui="snow-adv"]` 下生效。开关关闭时行为与 DOM 逐字节不变：▼ 推进标记与快捷菜单由 `app.js` 仅在开关开启时建到对白框里、关闭时移除，不新增任何可见元素或图标。
+
+| 文件 | 内容 |
+|---|---|
+| `public_frontend/snow-adv.css` | 追加 P3 段：① 全屏舞台——面对面时把永久 304px 的角色栏改成覆盖式抽屉（桌面 `@media (min-width: 821px)` 下 `.app-shell[data-channel="in_person"]` 用单列网格，`.contact-panel` 改 `position: fixed` 滑入/滑出）；② 磨砂雪白宽对白框（渐变 ≥ 0.96 不透明、顶部圆角）、角色色名牌（`.stage-speaker-line strong` 背景 `var(--char-deep)`）、面对面输入区与对白框连成一体；③ ▼ 推进标记样式（仅 `data-motion-level="auto"` 轻微上下浮动，`light`/`off` 与减少动态时静止）；④ 快捷菜单胶囊按钮；⑥ 立绘按身体中轴 `--actor-anchor-x` 对齐舞台中线；⑦ 移动端（≤ 860px）快捷菜单收成仅图标。每条选择器都限定在 `html[data-ui="snow-adv"]` 下（测试强制）。 |
+| `public_frontend/snow-adv.css`（末尾） | 关键帧 `@keyframes snow-advance-bob`（▼ 的浮动，只被开关开启时的 `.stage-advance` 规则引用）。作用域测试会跳过 `@keyframes` 块，其余规则仍须限定前缀。`app.css` 不变。 |
+| `public_frontend/app.js` | `syncInterfaceSkin()` 调 `syncStageQuickMenuMount()`：开关开启且面对面时，把 `#stage-advance`（▼，`aria-hidden`，图标 `chevron-down`）与 `#stage-quick-menu`（跳过/回看/隐藏/设置四个小胶囊按钮，lucide 图标，各有中文无障碍名、键盘可达、P1 焦点环）建到 `#stage-dialogue` 里，关闭时移除。四个按钮复用既有处理：**跳过**→`finishReceivedPresentation()`（无内容揭示时禁用）、**回看**→`openDrawer("transcript-panel")`、**隐藏**→`#toggle-stage-ui` 行为（经 `#restore-stage-ui`/`H` 恢复）、**设置**→`openSettings("models")`，不新增行为、不新增偏好键，刻意没有「自动」键（自然节奏已是默认）。`syncStageQuickMenu()` 在 `syncFastForward()` 与 `renderStageSpeech()` 中调用：当前回复显示完且空闲（非打字/揭示/等待/排队）时给 ▼ 加 `is-ready`。`applyStageActorAnchor()`/`measureStageActorAnchor()`：开关开启时从当前 `#stage-character-art` 同源图在缩小副本上取头到腰（高度 12%–55%）的不透明像素重心（alpha > 128）得横向中轴 0..1，按角色 id 缓存（换表情沿用、不横跳），画布被污染或出错退回 0.5；并设 `--actor-anchor-x` 让立绘中轴落在舞台中线。`setChannel()`：开关开启进入面对面时默认折叠侧栏（抽屉关闭=舞台全宽，`#open-stage-contacts` 仍用既有 `toggleContacts` 开合），离开面对面时还原自动折叠，不持久化、不改旧 UI 侧栏偏好语义。到场提示去重：`arriveSceneAction()` 与旧版 `arriveInPerson()` 中，开关开启且舞台已有到场反应时抑制重复的横幅与状态行（`suppressArrivalDuplicateNotice()`），只保留舞台旁白/对白这一处可见通知；错误/未注意（无舞台反应）仍保留横幅，屏幕阅读播报仍只发生一次。 |
+
+### 到场提示
+
+今天到场原本有三处：旁白「你已来到X。」、横幅「已来到X。」、状态行「已来到X，可以继续聊天。」。开关开启时只保留舞台通知（旁白 / 对白框），抑制重复的横幅与状态行；无障碍播报由 `#stage-narration` / `#stage-speech` 的 `aria-live` 发出，仍恰好一次。开关关闭时三处保持原样。
+
+### 实测
+
+- **体积（eager，开关关闭也随包下发）**：相对 P2，`snow-adv.css` 约 **+2.4 KB（gzip）**、`app.js` 约 **+3.1 KB（gzip）**，合计约 **+5.5 KB（gzip）**。开关开启不新增网络请求（▼ 与快捷菜单用既有 `snow-icons.js` 的 `chevron-down`/`fast-forward`/`history`/`eye-off`/`settings` 图标，无需重建图标模块）。
+- **立绘中轴**：headless Chromium、1280×820、观景区场景下，立绘身体中轴（测得 anchor≈0.597）落在舞台中线 ±4px 内；换表情沿用缓存值不横跳。
+- **CSP**：无内联 `<style>` 元素、无外链 URL；▼ 与快捷菜单图标用 DOM API 生成（CSP 安全）。
+- 不改 public v1 / `public-state-2` / IndexedDB v4 / 请求负载 / 快照 / 回复计时，不新增模型调用。
+
 ## 资源来源与重新生成
 
 - 字体：npm `lxgw-wenkai-screen-webfont@1.7.0`（包 MIT，字体 SIL OFL 1.1），使用其中的 `lxgwwenkaigbscreen.css` 分片。字体文件逐字节复制，未修改字形；只从 `unicode-range` 中去掉 emoji 与图形符号区段（U+200D、U+2600–27BF、U+2B00–2BFF、U+FE00–FE0F、U+1F000–1FAFF、U+E0000–E007F），让 emoji 继续使用系统彩色字体，并丢弃只含这些字符的 2 个分片。文件名带内容哈希前 16 位，沿用 Caddy 现有的一年 immutable 缓存规则。

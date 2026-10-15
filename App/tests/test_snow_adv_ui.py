@@ -38,6 +38,8 @@ PREFIX = 'html[data-ui="snow-adv"]'
 
 def _rules(css: str) -> list[tuple[str, str]]:
     css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    # @keyframes blocks hold no selectors; they only take effect when a scoped rule references them.
+    css = re.sub(r"@keyframes\s+[\w-]+\s*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}", "", css)
     return [(selector.strip(), body) for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css)]
 
 
@@ -359,3 +361,326 @@ class SnowAdvBrowserTests(TestCase):
         self.assertEqual(self.errors, [])
         self.assertEqual([url for url in self.failed if "snow-adv" in url or "/modules/snow-world" in url], [])
 
+
+
+@skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
+class SnowAdvStageTests(TestCase):
+    """P3 面对面主屏：全屏舞台、磨砂对白框、▼ 推进标记、快捷菜单、到场提示去重、立绘中轴。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), fixture.PublicFrontendHandler)
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+        cls.base_url = f"http://127.0.0.1:{cls.server.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.server_thread.join(timeout=5)
+
+    def setUp(self):
+        fixture.PublicFrontendE2ETests.setUp(self)
+        self.playwright = fixture.sync_playwright().start()
+        self.browser = fixture._launch_browser(self.playwright)
+        self.errors = []
+        self.failed = []
+        self.page = None
+
+    def tearDown(self):
+        self.browser.close()
+        self.playwright.stop()
+
+    def _page(self, width=1280, height=820):
+        page = self.browser.new_page(viewport={"width": width, "height": height})
+        page.on("pageerror", lambda error: self.errors.append(str(error)))
+        page.on("response", lambda response: self.failed.append(response.url) if response.status >= 400 else None)
+        page.set_default_timeout(8000)
+        self.page = page
+        return page
+
+    def _open(self, page, enabled):
+        def configure(route):
+            payload = route.fetch().json()
+            payload["features"] = {**payload.get("features", {}), "ui_snow_adv": enabled}
+            route.fulfill(json=payload)
+        page.route("**/public/v1/config", configure)
+        page.goto(self.base_url, wait_until="networkidle")
+
+    def _reach_in_person(self, page):
+        # Drive the proven e2e path to the in-person surface and arrival reaction.
+        page.locator("#accept-experience-notice").click()
+        # Wait until the scene has loaded (the presence button reads the location)
+        # before opening settings, so the control is settled and actionable.
+        page.locator("#go-in-person-label", has_text="观景区").wait_for(state="visible")
+        if page.locator("#onboarding-guide:not([hidden])").count() and page.locator("#skip-onboarding").is_visible():
+            page.locator("#skip-onboarding").click()
+        # On a narrow viewport the contact panel is an off-screen drawer; the model
+        # settings entry lives inside it, so open it before configuring.
+        narrow = page.viewport_size["width"] <= 820
+        if narrow and page.locator("#contact-panel").get_attribute("aria-hidden") == "true":
+            page.locator("#open-contacts").click()
+            page.locator("#contact-panel.open").wait_for()
+        fixture.PublicFrontendE2ETests._configure_model(page)
+        if narrow and page.locator("#contact-panel.open").count():
+            # Close the drawer again so it does not cover the stage we assert on.
+            if page.locator("#close-contacts").is_visible():
+                page.locator("#close-contacts").click()
+            page.locator("#contact-panel:not(.open)").wait_for()
+        if page.locator("#skip-onboarding").is_visible():
+            page.locator("#skip-onboarding").click()
+        page.locator("#go-in-person").click()
+        page.locator("#confirm-presence-transition").click()
+        page.locator("#in-person-surface:not([hidden])").wait_for()
+        page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+        # The fixture arrival reaction speaks "你来了。"; wait until it has fully revealed.
+        page.wait_for_function("document.getElementById('stage-speech')?.textContent.includes('你来了')", timeout=8000)
+
+    def _failed_skin_requests(self):
+        return [url for url in self.failed if "snow-adv" in url or "/assets/fonts/" in url or "/modules/snow-world" in url]
+
+    def test_flag_off_keeps_legacy_stage_and_shows_quick_menu_nowhere(self):
+        page = self._page()
+        self._open(page, False)
+        self._reach_in_person(page)
+        state = page.evaluate("""() => {
+          const shell = document.querySelector('.app-shell');
+          const panel = document.getElementById('contact-panel');
+          return {
+            ui: document.documentElement.dataset.ui || null,
+            quickMenu: document.querySelectorAll('#stage-dialogue .stage-quick-menu').length,
+            advance: document.querySelectorAll('#stage-dialogue .stage-advance').length,
+            // A permanent sidebar column: the contact panel is in normal flow, not fixed.
+            panelFixed: getComputedStyle(panel).position === 'fixed',
+            sidebarCollapsed: shell.classList.contains('sidebar-collapsed'),
+            dialogueRadius: getComputedStyle(document.getElementById('stage-dialogue')).borderTopLeftRadius,
+            bannerShown: !document.getElementById('system-banner').hidden,
+            bannerText: document.getElementById('system-banner').textContent,
+            speech: document.getElementById('stage-speech').textContent,
+          };
+        }""")
+        self.assertEqual(state["ui"], None)
+        self.assertEqual(state["quickMenu"], 0)
+        self.assertEqual(state["advance"], 0)
+        self.assertFalse(state["panelFixed"])
+        self.assertFalse(state["sidebarCollapsed"])
+        # Legacy arrival notices: the stage reaction AND the system banner are both shown.
+        self.assertTrue(state["bannerShown"])
+        self.assertIn("到来", state["bannerText"])
+        self.assertIn("你来了", state["speech"])
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_flag_on_full_width_stage_frosted_box_and_nameplate_colour(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._reach_in_person(page)
+        state = page.evaluate("""() => {
+          const shell = document.querySelector('.app-shell');
+          const stage = document.getElementById('scene-stage');
+          const dialogue = document.getElementById('stage-dialogue');
+          const nameplate = document.querySelector('#stage-dialogue .stage-speaker-line strong');
+          const chatApp = document.getElementById('chat-app');
+          // Resolve var(--char-deep) to a concrete rgb via a probe, since custom
+          // properties can hold an unresolved color-mix() expression.
+          const paint = document.createElement('canvas').getContext('2d');
+          const toRgb = color => { paint.clearRect(0, 0, 1, 1); paint.fillStyle = '#000'; paint.fillStyle = color; paint.fillRect(0, 0, 1, 1);
+            const [r, g, b] = paint.getImageData(0, 0, 1, 1).data; return `rgb(${r}, ${g}, ${b})`; };
+          const probe = document.createElement('span');
+          probe.style.color = 'var(--char-deep)';
+          chatApp.appendChild(probe);
+          const charDeep = toRgb(getComputedStyle(probe).color);
+          probe.remove();
+          const fallback = document.createElement('span');
+          fallback.style.color = 'var(--char-deep)';
+          document.body.appendChild(fallback);
+          const defaultDeep = toRgb(getComputedStyle(fallback).color);
+          fallback.remove();
+          const bg = getComputedStyle(dialogue).backgroundColor;
+          const bgImage = getComputedStyle(dialogue).backgroundImage;
+          const panel = document.getElementById('contact-panel');
+          return {
+            ui: document.documentElement.dataset.ui,
+            viewportWidth: window.innerWidth,
+            stageWidth: Math.round(stage.getBoundingClientRect().width),
+            dialogueBg: bg,
+            dialogueBgImage: bgImage,
+            dialogueRadius: getComputedStyle(dialogue).borderTopLeftRadius,
+            nameplateBg: toRgb(getComputedStyle(nameplate).backgroundColor),
+            charDeep,
+            defaultDeep,
+            character: chatApp.dataset.snowCharacter || '',
+            panelFixed: getComputedStyle(panel).position === 'fixed',
+            sidebarCollapsed: shell.classList.contains('sidebar-collapsed'),
+          };
+        }""")
+        self.assertEqual(state["ui"], "snow-adv")
+        # Full-screen stage: it spans the whole viewport width on desktop.
+        self.assertEqual(state["stageWidth"], state["viewportWidth"])
+        # Overlay drawer, closed by default -> the sidebar is a fixed overlay and collapsed.
+        self.assertTrue(state["panelFixed"])
+        self.assertTrue(state["sidebarCollapsed"])
+        # Box opaque enough that art never shows through (effective alpha >= 0.92).
+        alpha = _min_background_alpha(state["dialogueBg"], state["dialogueBgImage"])
+        self.assertGreaterEqual(alpha, 0.92, (state["dialogueBg"], state["dialogueBgImage"]))
+        # Rounded top.
+        self.assertNotEqual(state["dialogueRadius"], "0px")
+        # Nameplate uses the character colour var(--char-deep).
+        self.assertEqual(_rgb(state["nameplateBg"]), _rgb_from_any(state["charDeep"]))
+        # ...and that colour is the selected character's, not the default ice tone.
+        self.assertTrue(state["character"])
+        self.assertNotEqual(_rgb_from_any(state["charDeep"]), _rgb_from_any(state["defaultDeep"]))
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_flag_on_quick_menu_invokes_existing_actions(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._reach_in_person(page)
+        names = page.evaluate("""() => [...document.querySelectorAll('#stage-quick-menu button')]
+          .map(button => button.getAttribute('aria-label'))""")
+        self.assertEqual(names, ["跳过", "回看", "隐藏", "设置"])
+        # 回看 opens the transcript drawer, reusing the existing handler.
+        page.locator('#stage-quick-menu [data-stage-quick="backlog"]').click()
+        page.locator("#transcript-panel.open").wait_for()
+        page.locator("#close-transcript").click()
+        page.locator("#transcript-panel:not(.open)").wait_for()
+        # 隐藏 hides the stage UI; the existing restore control + H key bring it back.
+        page.locator('#stage-quick-menu [data-stage-quick="hide"]').click()
+        page.locator("#in-person-surface.ui-hidden").wait_for()
+        self.assertFalse(page.locator("#restore-stage-ui").is_hidden())
+        page.locator("#restore-stage-ui").click()
+        page.locator("#in-person-surface:not(.ui-hidden)").wait_for()
+        # H key toggles hide again (reuses the existing shortcut).
+        page.keyboard.press("h")
+        page.locator("#in-person-surface.ui-hidden").wait_for()
+        page.keyboard.press("h")
+        page.locator("#in-person-surface:not(.ui-hidden)").wait_for()
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_flag_on_advance_marker_shows_when_idle_and_hides_while_revealing(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._reach_in_person(page)
+        # After the reply finished revealing, the advance marker is ready (visible).
+        page.wait_for_function("document.getElementById('stage-advance')?.classList.contains('is-ready')", timeout=8000)
+        # Let the 200ms reveal transition settle before reading the painted opacity.
+        page.wait_for_function(
+            "Number(getComputedStyle(document.getElementById('stage-advance')).opacity) > 0.5", timeout=4000)
+        ready = page.evaluate("""() => {
+          const advance = document.getElementById('stage-advance');
+          return { ready: advance.classList.contains('is-ready'), opacity: Number(getComputedStyle(advance).opacity), aria: advance.getAttribute('aria-hidden') };
+        }""")
+        self.assertTrue(ready["ready"])
+        self.assertGreater(ready["opacity"], 0.5)
+        self.assertEqual(ready["aria"], "true")
+        # While a fresh reply is revealing, the marker hides again. Drive a chat turn.
+        page.locator("#message-input").fill("再说一句")
+        page.locator("#send-message").click()
+        hid = page.wait_for_function(
+            "!document.getElementById('stage-advance').classList.contains('is-ready')", timeout=8000)
+        self.assertTrue(hid)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_flag_on_arrival_shows_one_visible_notice(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._reach_in_person(page)
+        state = page.evaluate("""() => ({
+          bannerShown: !document.getElementById('system-banner').hidden,
+          statusText: document.getElementById('request-status').textContent.trim(),
+          narration: document.getElementById('stage-narration').textContent,
+          speech: document.getElementById('stage-speech').textContent,
+        })""")
+        # The duplicate banner is suppressed; the stage dialogue is the single notice.
+        self.assertFalse(state["bannerShown"])
+        self.assertIn("你来了", state["speech"])
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_flag_on_character_art_axis_is_centred(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._reach_in_person(page)
+        page.wait_for_function(
+            "document.getElementById('stage-character-art') && !document.getElementById('stage-character-art').hidden"
+            " && document.getElementById('stage-character-art').dataset.actorAnchor", timeout=8000)
+        offset = page.evaluate("""() => {
+          const stage = document.getElementById('scene-stage');
+          const art = document.getElementById('stage-character-art');
+          const anchor = Number(art.dataset.actorAnchor);
+          const stageRect = stage.getBoundingClientRect();
+          const artRect = art.getBoundingClientRect();
+          // The body axis sits at `anchor` across the art's own width; it should land on
+          // the stage centre line.
+          const axisX = artRect.left + artRect.width * anchor;
+          const stageCentre = stageRect.left + stageRect.width / 2;
+          return { delta: Math.abs(axisX - stageCentre), anchor };
+        }""")
+        self.assertLessEqual(offset["delta"], 4, offset)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_flag_on_mobile_quick_menu_collapses_to_icons_with_names(self):
+        page = self._page(390, 844)
+        self._open(page, True)
+        self._reach_in_person(page)
+        state = page.evaluate("""() => {
+          const buttons = [...document.querySelectorAll('#stage-quick-menu button')];
+          const input = document.getElementById('message-input').getBoundingClientRect();
+          const menu = document.getElementById('stage-quick-menu').getBoundingClientRect();
+          const smallest = Math.min(...[...document.querySelectorAll('#stage-dialogue, #stage-speech, #stage-quick-menu button')]
+            .map(node => parseFloat(getComputedStyle(node).fontSize)));
+          return {
+            names: buttons.map(button => button.getAttribute('aria-label')),
+            // Icon-only: visible label text is clipped (sr-only), width <= an icon pill.
+            labelsHidden: buttons.every(button => {
+              const label = button.querySelector('.stage-quick-label');
+              return label && getComputedStyle(label).position === 'absolute';
+            }),
+            overlapsInput: menu.bottom > input.top && menu.top < input.bottom && menu.right > input.left && menu.left < input.right,
+            smallest,
+          };
+        }""")
+        self.assertEqual(state["names"], ["跳过", "回看", "隐藏", "设置"])
+        self.assertTrue(state["labelsHidden"])
+        self.assertFalse(state["overlapsInput"])
+        self.assertGreaterEqual(state["smallest"], 12)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+
+def _rgb(value):
+    numbers = re.findall(r"[\d.]+", value or "")
+    return tuple(round(float(number)) for number in numbers[:3])
+
+
+def _rgb_from_any(value):
+    value = (value or "").strip()
+    if value.startswith("#"):
+        hexv = value[1:]
+        if len(hexv) == 3:
+            hexv = "".join(ch * 2 for ch in hexv)
+        return tuple(int(hexv[index:index + 2], 16) for index in (0, 2, 4))
+    return _rgb(value)
+
+
+def _min_background_alpha(background_color, background_image):
+    # The frosted box paints its fill through a linear-gradient, so the opacity
+    # lives in background-image's colour stops, not background-color. Prefer the
+    # gradient stops; only an element with no gradient uses background-color
+    # (where a transparent rgba(0,0,0,0) merely means "colour is in the image").
+    def _alphas(source):
+        found = []
+        for match in re.finditer(r"rgba?\(([^)]*)\)", source or ""):
+            numbers = re.findall(r"[\d.]+", match.group(1))
+            found.append(float(numbers[3]) if len(numbers) >= 4 else 1.0)
+        return found
+    image_alphas = _alphas(background_image)
+    if image_alphas:
+        return min(image_alphas)
+    color_alphas = _alphas(background_color)
+    return min(color_alphas) if color_alphas else 1.0

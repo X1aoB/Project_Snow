@@ -699,6 +699,7 @@ function syncInterfaceSkin() {
   if (enabled) loadSnowAdvFonts();
   applySnowAdvIcons(enabled);
   syncSnowWorld();
+  syncStageQuickMenuMount();
 }
 // 雪境 ADV 世界层 (P2)：开关开启且处于面对面界面时，在 #scene-stage 内挂载程序化
 // 分层雪景与 Canvas 远近雪；关闭或离开面对面时销毁。立绘仍留在原 DOM 位置。
@@ -723,6 +724,145 @@ function syncSnowWorld() {
     snowWorld = null;
     if (stage) delete stage.snowWorld;
   }
+}
+
+// ---------------------------------------------------------------- P3 面对面主屏
+// 全部只在 ui_snow_adv 开启时生效。▼ 推进标记与快捷菜单由 JS 在开关开启时建到对白
+// 框里、关闭时移除，所以关闭态不新增任何 DOM、图标或可见元素（旧界面逐字节不变）。
+
+// 到场提示去重：开关开启时，仅保留舞台通知（旁白 / 对白），抑制重复的横幅与状态行；
+// 屏幕阅读播报仍只发生一次（来自 #stage-narration / #stage-speech 的 aria-live）。
+function suppressArrivalDuplicateNotice() { return featureEnabled("ui_snow_adv"); }
+
+// 立绘中轴：在缩小的同源副本上取头到腰（高度 12%~55%）的不透明像素重心，返回 0~1。
+// 每个角色只测一次（按角色 id 缓存），换表情沿用缓存值，避免人物左右跳动。
+// 画布被污染、读不到像素或任何错误都退回 0.5。
+const stageActorAnchorCache = new Map();
+function applyStageActorAnchor(node) {
+  if (!node || !featureEnabled("ui_snow_adv")) {
+    if (node) { node.style.removeProperty("--actor-anchor-x"); delete node.dataset.actorAnchor; }
+    return;
+  }
+  const characterId = plain(node.dataset.expressionCharacterId);
+  const src = node.getAttribute("src") || "";
+  if (!characterId || !src || node.hidden) return;
+  const cached = stageActorAnchorCache.get(characterId);
+  if (cached !== undefined) {
+    node.style.setProperty("--actor-anchor-x", cached.toFixed(3));
+    node.dataset.actorAnchor = cached.toFixed(3);
+    return;
+  }
+  // 占位：先用 0.5，测出后再更新，避免首帧跳动。
+  node.style.setProperty("--actor-anchor-x", "0.5");
+  node.dataset.actorAnchor = "0.5";
+  measureStageActorAnchor(src).then((anchor) => {
+    stageActorAnchorCache.set(characterId, anchor);
+    const current = $("stage-character-art");
+    if (current && plain(current.dataset.expressionCharacterId) === characterId && !current.hidden) {
+      current.style.setProperty("--actor-anchor-x", anchor.toFixed(3));
+      current.dataset.actorAnchor = anchor.toFixed(3);
+    }
+  });
+}
+function measureStageActorAnchor(src) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      try {
+        const width = 124;
+        const height = Math.max(1, Math.round(width * image.naturalHeight / Math.max(1, image.naturalWidth)));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) return resolve(0.5);
+        context.drawImage(image, 0, 0, width, height);
+        const top = Math.round(height * 0.12);
+        const band = Math.max(1, Math.round(height * 0.55) - top);
+        const data = context.getImageData(0, top, width, band).data;
+        let total = 0;
+        let weighted = 0;
+        for (let index = 3; index < data.length; index += 4) {
+          const alpha = data[index];
+          if (alpha > 128) {
+            const x = ((index - 3) / 4) % width;
+            total += alpha;
+            weighted += alpha * (x + 0.5);
+          }
+        }
+        resolve(total ? Math.min(0.7, Math.max(0.3, weighted / total / width)) : 0.5);
+      } catch { resolve(0.5); } // 画布被污染（跨源）或任何错误都退回居中
+    };
+    image.onerror = () => resolve(0.5);
+    image.src = src;
+  });
+}
+
+// 快捷菜单（跳过 / 回看 / 隐藏 / 设置）与 ▼ 推进标记：开关开启且处于面对面时建一次。
+const STAGE_QUICK_ACTIONS = Object.freeze([
+  { key: "skip", icon: "fast-forward", label: "跳过", title: "立即显示（跳过逐字揭示）" },
+  { key: "backlog", icon: "history", label: "回看", title: "回看对话" },
+  { key: "hide", icon: "eye-off", label: "隐藏", title: "隐藏界面（H）" },
+  { key: "settings", icon: "settings", label: "设置", title: "配置模型与设置" },
+]);
+function stageQuickAction(key) {
+  // Delegate to the existing controls so behaviour stays identical to the legacy UI.
+  if (key === "skip") { finishReceivedPresentation(); return; }
+  if (key === "backlog") { $("open-transcript").click(); return; }
+  if (key === "hide") { $("toggle-stage-ui").click(); return; }
+  if (key === "settings") { $("stage-open-settings").click(); return; }
+}
+function buildStageQuickMenu() {
+  const dialogue = $("stage-dialogue");
+  if (!dialogue || dialogue.querySelector(".stage-quick-menu")) return;
+  const advance = document.createElement("span");
+  advance.className = "stage-advance";
+  advance.id = "stage-advance";
+  advance.setAttribute("aria-hidden", "true");
+  advance.append(createSnowIcon("chevron-down"));
+  const menu = document.createElement("nav");
+  menu.className = "stage-quick-menu";
+  menu.id = "stage-quick-menu";
+  menu.setAttribute("aria-label", "快捷菜单");
+  for (const action of STAGE_QUICK_ACTIONS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.stageQuick = action.key;
+    button.setAttribute("aria-label", action.label);
+    button.title = action.title;
+    button.append(createSnowIcon(action.icon));
+    const label = document.createElement("span");
+    label.className = "stage-quick-label";
+    label.textContent = action.label;
+    button.append(label);
+    button.addEventListener("click", () => stageQuickAction(action.key));
+    menu.append(button);
+  }
+  dialogue.append(advance, menu);
+  syncStageQuickMenu();
+}
+function removeStageQuickMenu() {
+  $("stage-dialogue")?.querySelectorAll(".stage-quick-menu, .stage-advance").forEach(node => node.remove());
+}
+// ▼ 可见 = 当前回复显示完、空闲（非打字 / 揭示 / 等待）；跳过按钮在无内容揭示时禁用。
+function syncStageQuickMenu() {
+  if (!featureEnabled("ui_snow_adv")) return;
+  const advance = $("stage-advance");
+  const speech = $("stage-speech");
+  const pending = typingStateFor();
+  const revealing = Boolean(speech && (speech.classList.contains("is-typing") || speech.classList.contains("is-revealing")));
+  const waiting = pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment", "waiting", "presenting"].includes(pending.phase);
+  const queue = presentationFor();
+  const hasAssistant = Boolean(latestInPersonMessage("assistant"));
+  const inPerson = !$("in-person-surface").hidden;
+  if (advance) advance.classList.toggle("is-ready", Boolean(inPerson && hasAssistant && !revealing && !waiting && !queue));
+  const skip = $("stage-quick-menu")?.querySelector('[data-stage-quick="skip"]');
+  if (skip) skip.disabled = !(revealing || queue || (state.streamingPresentationByCharacter.get(state.selected)?.receivedCount > state.streamingPresentationByCharacter.get(state.selected)?.visibleCount));
+}
+function syncStageQuickMenuMount() {
+  if (featureEnabled("ui_snow_adv")) buildStageQuickMenu();
+  else removeStageQuickMenu();
 }
 function bodyIsVisible(node) {
   if (!node?.isConnected || node.closest("[hidden], [inert]") || document.hidden) return false;
@@ -801,6 +941,7 @@ function syncFastForward() {
   button.hidden = !featureEnabled("chat_latency_v2") || !(queue || revealing || state.completedPresentationByCharacter.has(state.selected) || streaming?.receivedCount > streaming?.visibleCount);
   const row = button.closest(".request-status-row");
   if (!button.hidden && row) row.hidden = false;
+  syncStageQuickMenu();
 }
 function finishReceivedPresentation() {
   const currentTiming = replyTiming(typingStateFor()?.requestId);
@@ -4767,6 +4908,7 @@ function renderStage() {
       if (ready && motionPresentation) {
         playStageMotion(artNode, assistantMessage, motionPresentation, motionRequestSequence);
       }
+      if (ready) applyStageActorAnchor(artNode);
     });
   }
   const pending = typingStateFor();
@@ -4809,6 +4951,7 @@ function renderStageSpeech(assistantMessage) {
     speechNode.innerHTML = typingIndicatorMarkup(characterById(pending.characterId), { includeAvatar: false });
     $("stage-open-feedback").disabled = true;
     $("stage-open-feedback").dataset.messageId = "";
+    syncStageQuickMenu();
     return;
   }
   speechNode.classList.remove("is-typing");
@@ -4836,6 +4979,7 @@ function renderStageSpeech(assistantMessage) {
   if (completeSpeech && quietPresentation()) recordReplyPaint(assistantMessage?.requestId, speechNode);
   $("stage-open-feedback").disabled = !assistantMessage || Boolean(presentationFor()?.messageId === assistantMessage?.id);
   $("stage-open-feedback").dataset.messageId = assistantMessage?.id || "";
+  syncStageQuickMenu();
 }
 function evidenceSourcesMarkup(message) {
   const sources = message?.evidenceSources || [];
@@ -4997,6 +5141,24 @@ async function setChannel(channel, persist = true, targetThread = null) {
   $("text-surface").inert = channel === "in_person";
   $("in-person-surface").inert = channel !== "in_person";
   $("chat-app").dataset.channel = channel === "in_person" ? "in_person" : "text";
+  // 雪境 ADV P3：开关开启进入面对面时，角色栏改为覆盖式抽屉，默认关闭让舞台占满视口；
+  // 桌面端用既有 sidebar-collapsed 机制（#open-stage-contacts 仍用 toggleContacts 开合），
+  // 不持久化、不改旧 UI 的侧栏偏好语义。移动端（≤820px）沿用抽屉逻辑，无需处理。
+  if (featureEnabled("ui_snow_adv") && channel === "in_person" && !window.matchMedia("(max-width: 820px)").matches
+    && !$("chat-app").classList.contains("sidebar-collapsed")) {
+    $("chat-app").classList.add("sidebar-collapsed");
+    $("chat-app").dataset.snowAutoCollapsed = "1";
+    $("contact-panel").setAttribute("aria-hidden", "true");
+    $("contact-panel").inert = true;
+  } else if (channel !== "in_person" && $("chat-app").dataset.snowAutoCollapsed === "1") {
+    // 还原我们为面对面自动折叠的侧栏，避免把文字界面也折叠（不碰用户手动折叠的情况）。
+    delete $("chat-app").dataset.snowAutoCollapsed;
+    if (!window.matchMedia("(max-width: 820px)").matches) {
+      $("chat-app").classList.remove("sidebar-collapsed");
+      $("contact-panel").setAttribute("aria-hidden", "false");
+      $("contact-panel").inert = false;
+    }
+  }
   syncContactToggleState();
   syncSnowWorld();
   renderAll();
@@ -6008,8 +6170,14 @@ async function arriveSceneAction(userText = "") {
     if (state.selected !== characterId || thread.historyEpoch !== state.historyEpoch) return false;
     await setChannel(result.communication_channel === "in_person" ? "in_person" : "text", true, thread);
     renderScene();
-    setRequestStatus(characterId, `已来到${result.scene_state?.character_location || "她身边"}，可以继续聊天。`);
-    showBanner(`已来到${result.scene_state?.character_location || "她身边"}。`);
+    // 雪境 ADV：舞台旁白「你已来到X。」已是到场通知（aria-live 播报一次），
+    // 开关开启时不再重复显示状态行与横幅，只清掉进行中的状态；关闭时保留旧的三处提示。
+    if (!suppressArrivalDuplicateNotice()) {
+      setRequestStatus(characterId, `已来到${result.scene_state?.character_location || "她身边"}，可以继续聊天。`);
+      showBanner(`已来到${result.scene_state?.character_location || "她身边"}。`);
+    } else {
+      setRequestStatus(characterId, "");
+    }
     return true;
   } catch (error) {
     if (state.selected === characterId && thread.historyEpoch === state.historyEpoch) {
@@ -6106,9 +6274,13 @@ async function arriveInPerson() {
     if (ownsVisibleArrival()) {
       updateTypingPhase(characterId, arrivalId, "presenting");
       await setChannel("in_person");
+      // 雪境 ADV：到场反应已显示在舞台对白框（旁白 + 对白，aria-live 播报一次），
+      // 开关开启且确有舞台反应时抑制重复的「她注意到了你的到来。」横幅；错误 / 未注意
+      // （无舞台反应）仍保留横幅，保证至少有一处可见通知。
+      const stageHasArrivalReaction = Boolean(arrivalMessage) && suppressArrivalDuplicateNotice();
       if (result.terminal_error) showBanner(arrivalReactionUnavailableMessage(result.terminal_error));
       else if (result.decision === "unnoticed") showBanner("你来到她身边，她暂时没有注意到。位置切换已经完成。");
-      else showBanner("她注意到了你的到来。");
+      else if (!stageHasArrivalReaction) showBanner("她注意到了你的到来。");
       renderAll();
     }
     if (arrivalMessage && ownsArrival()) {
