@@ -1387,6 +1387,7 @@ function snowMaybePushIntoScene(scene, visualKey, commitScene) {
 
 function bodyIsVisible(node) {
   if (!node?.isConnected || node.closest("[hidden], [inert]") || document.hidden) return false;
+  if (getComputedStyle(node).visibility !== "visible") return false;
   const bounds = node.getBoundingClientRect();
   const clip = node.closest("#timeline")?.getBoundingClientRect() || { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
   return bounds.width > 0 && bounds.height > 0 && bounds.right > Math.max(0, clip.left) && bounds.left < Math.min(innerWidth, clip.right)
@@ -5602,6 +5603,11 @@ function renderStageSpeech(assistantMessage) {
   const livePresentation = presentationFor();
   const liveReply = assistantMessage && (livePresentation?.messageId === assistantMessage.id
     || pending?.channel === "in_person" && pending.requestId === assistantMessage.requestId);
+  // Confirmed replies take priority over decorative arrival/scene transitions,
+  // including recovered replies and legacy arrival reactions. Cancel before
+  // typewriting or measuring paint; renderScene may have just started a veil.
+  if (liveReply && (completeSpeech || action)
+      && (snowPushContext || state.snowVeilAnimation || state.snowVeilTimers.length)) cancelSnowScenePresentation();
   renderTypewriter(speech, speechKey, !featureEnabled("chat_latency_v2") || Boolean(liveReply));
   if (assistantMessage?.partial) {
     $("stage-presence-status").hidden = false;

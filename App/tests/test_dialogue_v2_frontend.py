@@ -939,6 +939,60 @@ class SnowAdvVeilProductionTests(TestCase):
         self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().activeLoops"), 1)
         self.assertFalse(self.errors)
 
+    def test_fast_reply_cancels_camera_and_scene_veil_before_visible_measurement(self):
+        # The second reply changes the scene in renderScene before renderStage;
+        # both that veil and the original arrival camera must yield to the reply.
+        for message, expected_scene in (("合成日常聊天", "observation"), ("合成邀请", "canteen")):
+            with self.subTest(message=message):
+                self._open()
+                self._reach_in_person()
+                self.page.locator('#chat-app[data-snow-pushing="1"]').wait_for()
+                self.page.evaluate("""() => {
+                  window.__firstReplyPaintVisibility = null;
+                  const sample = () => {
+                    const metric = window.__projectSnowPerformance.getSamples()[0];
+                    if (metric?.ready_to_paint_ms !== null && metric?.ready_to_paint_ms !== undefined) {
+                      window.__firstReplyPaintVisibility = {
+                        visibility: getComputedStyle(document.getElementById('stage-speech')).visibility,
+                        pushing: Boolean(document.getElementById('chat-app').dataset.snowPushing),
+                        veilPhase: document.getElementById('snow-scene-veil').dataset.phase,
+                      };
+                    } else requestAnimationFrame(sample);
+                  };
+                  requestAnimationFrame(sample);
+                }""")
+                self.page.locator("#message-input").fill(message)
+                self.page.locator("#send-message").click()
+                self.page.wait_for_function("window.__firstReplyPaintVisibility !== null")
+                self.assertEqual(self.page.evaluate("window.__firstReplyPaintVisibility"),
+                                 {"visibility": "visible", "pushing": False, "veilPhase": "idle"})
+                self.page.wait_for_function("window.__projectSnowPerformance.getSamples()[0].send_to_first_effective_ms > 0")
+                self.assertIn("合成的有效回复。", self.page.locator("#stage-speech").inner_text())
+                self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().worldScene"), expected_scene)
+                self.page.wait_for_timeout(1700)
+                self.assertEqual(self._veil()["phase"], "idle", "cancelled camera must not bring back its delayed title")
+                self.assertFalse(self.errors)
+                self.page.close()
+
+    def test_css_hidden_reply_is_not_counted_until_visible(self):
+        self._open()
+        self._reach_in_person()
+        self.page.wait_for_function("document.getElementById('snow-scene-veil').dataset.phase === 'up'")
+        self.page.wait_for_function("document.getElementById('snow-scene-veil').dataset.phase === 'idle'")
+        # Inherited CSS visibility keeps a nonzero layout rectangle. It must
+        # not count as a visible first glyph or effective reply.
+        self.page.locator("#stage-dialogue").evaluate("node => { node.style.visibility = 'hidden'; }")
+        self.page.locator("#message-input").fill("合成日常聊天")
+        self.page.locator("#send-message").click()
+        self.page.wait_for_function("document.getElementById('stage-speech').textContent.includes('合成的有效回复。')")
+        hidden_sample = self.page.evaluate("window.__projectSnowPerformance.getSamples()[0]")
+        self.assertIsNone(hidden_sample["ready_to_paint_ms"])
+        self.assertIsNone(hidden_sample["send_to_first_effective_ms"])
+        self.page.locator("#stage-dialogue").evaluate("node => { node.style.removeProperty('visibility'); }")
+        self.page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        self.page.wait_for_function("window.__projectSnowPerformance.getSamples()[0].send_to_first_effective_ms > 0")
+        self.assertFalse(self.errors)
+
     def test_reduced_motion_during_push_cancels_camera_and_pending_title(self):
         self._open()
         self._reach_in_person()
