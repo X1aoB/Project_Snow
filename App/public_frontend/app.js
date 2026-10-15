@@ -1,6 +1,7 @@
 import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope, anonymousServerTimings } from "/modules/runtime.js";
 import { DIALOGUE_PROTOCOL, SCENE_PROTOCOL, dialogueRecordKey, decodeSidecar, mergeDialogueReceipts, relevantDialogueReceipts, fitDialogueContext, isPureRendezvousJoin, sceneVisualKey } from "/dialogue-context.js";
 import { createSnowIcon } from "/modules/snow-icons.js";
+import { mountSnowWorld } from "/modules/snow-world.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
@@ -638,6 +639,7 @@ function syncMotionState() {
   document.documentElement.dataset.pageHidden = String(document.hidden);
   const preference = localPreferences.getItem("project-snow-public:motion") || "auto";
   document.documentElement.dataset.motionLevel = reducedMotion() ? "off" : preference;
+  if (snowWorld) snowWorld.setMotion(document.documentElement.dataset.motionLevel);
   if ($("motion-preference")) $("motion-preference").value = preference;
   if ($("motion-preference-setting")) $("motion-preference-setting").hidden = !featureEnabled("motion_v2");
 }
@@ -696,6 +698,31 @@ function syncInterfaceSkin() {
   else delete document.documentElement.dataset.ui;
   if (enabled) loadSnowAdvFonts();
   applySnowAdvIcons(enabled);
+  syncSnowWorld();
+}
+// 雪境 ADV 世界层 (P2)：开关开启且处于面对面界面时，在 #scene-stage 内挂载程序化
+// 分层雪景与 Canvas 远近雪；关闭或离开面对面时销毁。立绘仍留在原 DOM 位置。
+let snowWorld = null;
+function snowWorldScene() {
+  const scene = state.scene || {};
+  return SCENE_KEYS.has(scene.visual_key) ? scene.visual_key : "generic";
+}
+function currentMotionLevel() {
+  return document.documentElement.dataset.motionLevel || "auto";
+}
+function syncSnowWorld() {
+  const stage = $("scene-stage");
+  const wanted = featureEnabled("ui_snow_adv") && stage && !$("in-person-surface").hidden;
+  if (wanted && !snowWorld) {
+    snowWorld = mountSnowWorld(stage, { visualKey: snowWorldScene(), motionLevel: currentMotionLevel() });
+    // 控制器句柄仅挂在 stage 节点上（非全局），供证据截图与帧耗时测量读取；
+    // 关闭开关或离开面对面时随世界一起清除。不新增 DOM、请求或可见行为。
+    stage.snowWorld = snowWorld;
+  } else if (!wanted && snowWorld) {
+    snowWorld.destroy();
+    snowWorld = null;
+    if (stage) delete stage.snowWorld;
+  }
 }
 function bodyIsVisible(node) {
   if (!node?.isConnected || node.closest("[hidden], [inert]") || document.hidden) return false;
@@ -4839,6 +4866,8 @@ function renderScene() {
   $("in-person-surface").dataset.scene = visualKey;
   const backdrop = SCENE_ASSET_URLS[visualKey] || `/assets/immersive/scenes/${visualKey}.svg`;
   if ($("scene-backdrop").getAttribute("src") !== backdrop) $("scene-backdrop").src = backdrop;
+  syncSnowWorld();
+  if (snowWorld) snowWorld.setScene(visualKey);
   $("stage-location").textContent = scene.character_location || "场景尚未建立";
   $("stage-activity").textContent = scene.character_activity || "选择角色后读取当前位置";
   const presenceLabel = scene.character_location ? `去见她 · ${scene.character_location}` : "去见她";
@@ -4969,6 +4998,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   $("in-person-surface").inert = channel !== "in_person";
   $("chat-app").dataset.channel = channel === "in_person" ? "in_person" : "text";
   syncContactToggleState();
+  syncSnowWorld();
   renderAll();
   animateSurface(channel, snapshot);
   // Arrival can confirm the already-visible channel after an IndexedDB write.

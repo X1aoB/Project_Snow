@@ -248,3 +248,33 @@ html[data-ui="snow-adv"] .stage-speaker-line strong {
 }
 html[data-ui="snow-adv"] .active-character h1 { color: var(--ink-900); }
 html[data-ui="snow-adv"] .active-character .portrait { border-color: color-mix(in oklab, var(--char) 55%, transparent); }
+
+
+/* ---------------------------------------------------------------- P2 程序化分层雪景
+   仅在开关开启时：隐藏旧的 SVG 背景与 CSS 雪，改用 #scene-stage 内的世界层。
+   每条选择器都限定在 html[data-ui="snow-adv"] 下（测试强制）。 */
+html[data-ui="snow-adv"] #scene-backdrop { display: none; }
+html[data-ui="snow-adv"] .scene-stage .scene-decoration-back { display: none; }
+html[data-ui="snow-adv"] .scene-stage .scene-decoration-front { display: none; }
+html[data-ui="snow-adv"] .scene-stage .snow-atmosphere { display: none; }
+html[data-ui="snow-adv"] .scene-stage::after { opacity: 0.5; }
+
+/* 世界层：far(0) → snow-far(1) → room(2) → [立绘 z-index:3] → snow-near(4) */
+html[data-ui="snow-adv"] .scene-stage .snow-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+html[data-ui="snow-adv"] .scene-stage .snow-layer-far { z-index: 0; }
+html[data-ui="snow-adv"] .scene-stage .snow-canvas-far { z-index: 1; }
+html[data-ui="snow-adv"] .scene-stage .snow-layer-room { z-index: 2; }
+html[data-ui="snow-adv"] .scene-stage .snow-canvas-near { z-index: 4; }
+html[data-ui="snow-adv"] .scene-stage .snow-layer svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+html[data-ui="snow-adv"] .scene-stage .snow-layer-room[hidden] { display: none; }

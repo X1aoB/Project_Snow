@@ -143,6 +143,25 @@ class SnowAdvAssetContractTests(TestCase):
         self.assertIn("ISC License", module)
         self.assertNotIn("innerHTML", module)
 
+    def test_snow_world_module_is_registered_and_csp_safe(self):
+        # P2: the procedural snow-world module ships behind the flag.  It must be
+        # declared in the build manifest (ordered before app.js) and listed as an
+        # app.js dependency so fingerprinting rewrites its import, and its body
+        # must stay CSP-safe: no inline <style>, no external URLs beyond the SVG
+        # namespace, and no dynamic code execution.
+        manifest = json.loads((PUBLIC_ROOT / "assets-manifest.json").read_text(encoding="utf-8"))
+        urls = [item["public_url"] for item in manifest["assets"]]
+        self.assertIn("/modules/snow-world.js", urls)
+        self.assertLess(urls.index("/modules/snow-world.js"), urls.index("/app.js"))
+        app_entry = next(item for item in manifest["assets"] if item["public_url"] == "/app.js")
+        self.assertIn("/modules/snow-world.js", app_entry.get("dependencies", []))
+        source = (PUBLIC_ROOT / "modules" / "snow-world.js").read_text(encoding="utf-8")
+        self.assertIn('from "/modules/snow-world.js"', (PUBLIC_ROOT / "app.js").read_text(encoding="utf-8"))
+        self.assertNotIn("<style", source)
+        self.assertFalse(re.search(r"\beval\b|new\s+Function", source), "no dynamic code execution")
+        external = [url for url in re.findall(r"https?://[^\s\"')]+", source) if url != "http://www.w3.org/2000/svg"]
+        self.assertEqual(external, [], external)
+
     def test_production_fingerprints_cover_the_skin_assets(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -243,3 +262,100 @@ class SnowAdvBrowserTests(TestCase):
         self.assertGreaterEqual(state["smallest"], 12)
         self.assertEqual(self.errors, [])
         self.assertEqual([url for url in self.failed if "snow-adv" in url or "/assets/fonts/" in url], [])
+
+
+    def _reach_in_person(self):
+        # Drive the proven e2e path to the in-person surface so a real scene
+        # (fixture visual_key = "observation") is established.
+        self.page.locator("#accept-experience-notice").click()
+        fixture.PublicFrontendE2ETests._configure_model(self.page)
+        if self.page.locator("#skip-onboarding").is_visible():
+            self.page.locator("#skip-onboarding").click()
+        self.page.locator("#go-in-person").click()
+        self.page.locator("#confirm-presence-transition").click()
+        self.page.locator("#in-person-surface:not([hidden])").wait_for()
+        self.page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+
+    def test_disabled_flag_builds_no_snow_world_and_keeps_the_backdrop(self):
+        self.open(False)
+        self._reach_in_person()
+        state = self.page.evaluate("""() => ({
+          ui: document.documentElement.dataset.ui || null,
+          layers: document.querySelectorAll('#scene-stage [data-snow-world]').length,
+          canvases: document.querySelectorAll('#scene-stage canvas.snow-canvas').length,
+          backdropShown: getComputedStyle(document.getElementById('scene-backdrop')).display !== 'none',
+          backdropSrc: document.getElementById('scene-backdrop').getAttribute('src') || '',
+        })""")
+        self.assertEqual(state["ui"], None)
+        self.assertEqual(state["layers"], 0)
+        self.assertEqual(state["canvases"], 0)
+        self.assertTrue(state["backdropShown"])
+        self.assertIn("observation", state["backdropSrc"])
+        self.assertEqual(self.errors, [])
+        self.assertEqual([url for url in self.failed if "snow-adv" in url or "/modules/snow-world" in url], [])
+
+    def test_enabled_flag_layers_the_world_hides_the_backdrop_and_matches_the_scene(self):
+        self.open(True)
+        self._reach_in_person()
+        self.page.wait_for_function("document.querySelector('#scene-stage canvas.snow-canvas-far')")
+        state = self.page.evaluate("""() => {
+          const stage = document.getElementById('scene-stage');
+          const far = stage.querySelector('.snow-layer-far');
+          const room = stage.querySelector('.snow-layer-room');
+          const art = document.getElementById('stage-character-art');
+          const canvasFar = stage.querySelector('canvas.snow-canvas-far');
+          const canvasNear = stage.querySelector('canvas.snow-canvas-near');
+          const order = [...stage.children].map(node => node.className || node.id);
+          return {
+            ui: document.documentElement.dataset.ui,
+            hasFar: Boolean(far), hasRoom: Boolean(room),
+            hasCanvasFar: Boolean(canvasFar), hasCanvasNear: Boolean(canvasNear),
+            farSvg: far ? far.querySelector('svg[data-layer="far"]') !== null : false,
+            roomSvg: room ? room.querySelector('svg[data-layer="room"]') !== null : false,
+            scene: far ? far.dataset.scene : null,
+            backdropHidden: getComputedStyle(document.getElementById('scene-backdrop')).display === 'none',
+            atmosphereHidden: getComputedStyle(document.querySelector('.snow-atmosphere')).display === 'none',
+            hidden: [...stage.querySelectorAll('[data-snow-world]')].every(node => node.getAttribute('aria-hidden') === 'true'),
+            canvasPx: canvasFar ? canvasFar.width * canvasFar.height : 0,
+            artPresent: Boolean(art),
+            order,
+          };
+        }""")
+        self.assertEqual(state["ui"], "snow-adv")
+        self.assertTrue(state["hasFar"] and state["hasRoom"] and state["hasCanvasFar"] and state["hasCanvasNear"])
+        self.assertTrue(state["farSvg"] and state["roomSvg"])
+        self.assertEqual(state["scene"], "observation")
+        self.assertTrue(state["backdropHidden"])
+        self.assertTrue(state["atmosphereHidden"])
+        self.assertTrue(state["hidden"])
+        self.assertGreater(state["canvasPx"], 0)
+        self.assertTrue(state["artPresent"])
+        self.assertEqual(self.errors, [])
+        self.assertEqual([url for url in self.failed if "snow-adv" in url or "/modules/snow-world" in url], [])
+
+    def test_motion_off_runs_no_persistent_animation_loop(self):
+        # Reduce motion before the config load so syncMotionState starts the
+        # world in the static tier (motionLevel = off).
+        self.page.add_init_script("window.localStorage.setItem('project-snow-public:motion', 'off')")
+        self.open(True)
+        self._reach_in_person()
+        self.page.wait_for_function("document.querySelector('#scene-stage canvas.snow-canvas-far')")
+        self.assertEqual(self.page.evaluate("() => document.documentElement.dataset.motionLevel"), "off")
+        # With motion off there must be no persistent rAF loop repainting the
+        # snow canvases.  A running loop clears + redraws every frame, so the
+        # drawn pixels drift; a stopped loop leaves them byte-identical.  Sample
+        # the far canvas across several animation frames and require no change.
+        drifted = self.page.evaluate("""async () => {
+          const canvas = document.querySelector('#scene-stage canvas.snow-canvas-far');
+          const ctx = canvas.getContext('2d');
+          const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+          const sample = () => ctx.getImageData(0, 0, canvas.width, canvas.height).data.join(',');
+          await frame();
+          const first = sample();
+          for (let i = 0; i < 8; i += 1) await frame();
+          return first !== sample();
+        }""")
+        self.assertFalse(drifted, "motion off must not keep repainting the snow canvas")
+        self.assertEqual(self.errors, [])
+        self.assertEqual([url for url in self.failed if "snow-adv" in url or "/modules/snow-world" in url], [])
+

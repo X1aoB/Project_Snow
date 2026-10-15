@@ -27,6 +27,11 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/modules/snow-world.js",
+      "public_url": "/modules/snow-world.js",
+      "required_html": false
+    },
+    {
       "source": "public_frontend/snow-adv-fonts.css",
       "public_url": "/snow-adv-fonts.css",
       "required_html": false
@@ -38,6 +43,7 @@
         "/modules/runtime.js",
         "/dialogue-context.js",
         "/modules/snow-icons.js",
+        "/modules/snow-world.js",
         "/snow-adv-fonts.css",
         "/assets/avatars/longyan-neutral-96.webp",
         "/assets/avatars/longyan-neutral-200.webp"

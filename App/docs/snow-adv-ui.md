@@ -29,6 +29,36 @@
 
 开关关闭时，每次首屏新增约 6.7 KB（gzip）：`snow-adv.css` 3.4 KB、`snow-icons.js` 2.0 KB、`app.js` 增量 1.3 KB；同时少下载约 960 KB 的品牌原图。开关开启后另加载字体样式表约 31 KB（gzip）和实际用到的字体分片。
 
+## P2 程序化雪景与分层雪花（本阶段）
+
+面对面界面的背景从单张 `#scene-backdrop` SVG 升级为 `#scene-stage` 内的程序化分层世界，所有图形在浏览器内由 DOM / SVG 字符串与 Canvas 生成，不请求任何图片，满足生产 CSP（无内联样式元素、无外链 URL、不动态执行代码；唯一出现的 `http://www.w3.org/2000/svg` 是 SVG 命名空间）。
+
+| 文件 | 内容 |
+|---|---|
+| `public_frontend/modules/snow-world.js` | 新 ES 模块。`mountSnowWorld(stageEl, {visualKey, motionLevel}) → {setScene, setMotion, refresh, destroy, …}`。移植样稿 `snowfx.js` 的 `PALETTES`、`resolveTime`、`rng/mix`、`outdoor()`、九个 `ROOMS` 房间、分层 `mountWorld` 与 `SnowField`（远/近/光尘）。去掉样稿控制台、`localStorage`、白雪转场、相机推进、立绘中轴等后续阶段内容。 |
+| `public_frontend/snow-adv.css` | 追加 P2 分层样式：隐藏旧 `#scene-backdrop`、`.snow-atmosphere`、`.scene-decoration-*`；给世界层定 z-index。每条选择器仍限定在 `html[data-ui="snow-adv"]` 下。 |
+| `public_frontend/app.js` | 静态 `import mountSnowWorld`；`syncSnowWorld()` 在开关开启且处于面对面界面时挂载世界、离开或关闭时销毁；`renderScene()` 调 `setScene(visualKey)`、`syncMotionState()` 调 `setMotion()`、`setChannel()` 调 `syncSnowWorld()`。控制器句柄挂在 `#scene-stage` 节点属性上（非全局），仅供证据截图/测量读取。 |
+| `assets-manifest.json` | 新增 `/modules/snow-world.js` 条目（排在 `app.js` 之前），并加入 `app.js` 的 `dependencies`，使生产指纹化重写其静态导入地址。 |
+
+### 分层
+
+`#scene-stage` 内由后到前：程序化远景（室外天空/远山，或 `generic` 全屏室外）→ 远雪 Canvas → 室内层（带窗洞的墙，使室内雪只透过窗显示）→ 现有 `#stage-character-art` 立绘 → 近景层（室外：大颗近雪；室内：缓慢飘动的光尘）→ 对白。场景键沿用 `app.js` 既有的 `sceneVisualKey`/`SCENE_KEYS`，未知键回退 `generic`，随场景切换更新。只有舞台背景跟随本机时间（`resolveTime`：清晨 5–8、白天 8–17、黄昏 17–19，其余夜晚），最多每 10 分钟刷新；`html[data-snow-time]` 可覆盖（仅测试/截图用）。装饰层全部 `aria-hidden="true"`、`pointer-events: none`。
+
+### 动态档位
+
+读 `document.documentElement.dataset.motionLevel`（`auto`=完整、`light`、`off`；`off` 也覆盖 `prefers-reduced-motion`，由 `syncMotionState()` 维护）：
+
+- `full`：远近雪都动画。
+- `light`：静态画一帧（远雪密度降到 0.45，近雪关闭），不启动 rAF 循环。
+- `off`：静态画一帧，不循环。
+
+`document.hidden` 或 `#in-person-surface` 隐藏时暂停 rAF 循环，可见时恢复。DPR 上限 2。
+
+### 实测
+
+- **每帧绘制耗时**：headless Chromium、390×844、`generic` 夜景（远近雪都动画）下约 **0.08–0.09 ms/帧**（EMA），远低于 2 ms/帧预算。
+- **体积**：`snow-world.js` 约 **11.6 KB（gzip）**，低于 12 KB 预算（原始约 36 KB）。开关关闭时不加载该模块、不改任何 DOM 或请求。
+
 ## 资源来源与重新生成
 
 - 字体：npm `lxgw-wenkai-screen-webfont@1.7.0`（包 MIT，字体 SIL OFL 1.1），使用其中的 `lxgwwenkaigbscreen.css` 分片。字体文件逐字节复制，未修改字形；只从 `unicode-range` 中去掉 emoji 与图形符号区段（U+200D、U+2600–27BF、U+2B00–2BFF、U+FE00–FE0F、U+1F000–1FAFF、U+E0000–E007F），让 emoji 继续使用系统彩色字体，并丢弃只含这些字符的 2 个分片。文件名带内容哈希前 16 位，沿用 Caddy 现有的一年 immutable 缓存规则。
