@@ -1085,6 +1085,10 @@ html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface :is(.message-t
 html[data-ui="snow-adv"] #chat-app[data-snow-world] #timeline .empty-conversation { background: transparent; }
 
 /* ---- 开机层「终端开机」 ---- */
+/* 统计提示挂在 body 上；开场期间隐藏其交互，结束后保留原有同意状态。 */
+html[data-ui="snow-adv"] body:has(#snow-boot, #snow-lock) #snow-statistics-notice {
+  display: none !important;
+}
 html[data-ui="snow-adv"] .snow-boot {
   position: fixed;
   inset: 0;

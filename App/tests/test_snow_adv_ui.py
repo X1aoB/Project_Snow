@@ -1346,7 +1346,7 @@ class SnowAdvOpeningTests(TestCase):
         self.page = page
         return page
 
-    def _open(self, page, enabled, motion=None, init_script=None):
+    def _open(self, page, enabled, motion=None, init_script=None, wait_until="networkidle"):
         if motion is not None:
             page.add_init_script(f"window.localStorage.setItem('project-snow-public:motion', {json.dumps(motion)})")
         if init_script:
@@ -1358,7 +1358,98 @@ class SnowAdvOpeningTests(TestCase):
             route.fulfill(json=payload)
 
         page.route("**/public/v1/config", configure)
-        page.goto(self.base_url, wait_until="networkidle")
+        page.goto(self.base_url, wait_until=wait_until)
+
+    def _enable_statistics(self, page):
+        # Exercise the real consent UI with a synthetic, local collector only.
+        config = {"enabled": True, "app": "project_snow", "endpoint": self.base_url + "/analytics/v1/events", "paths": ["/"]}
+        page.route("**/statistics/config.mjs", lambda route: route.fulfill(
+            content_type="text/javascript", body="export default " + json.dumps(config)))
+        events = []
+
+        def receive(route):
+            events.append(route.request.post_data)
+            route.fulfill(status=202, content_type="application/json", body='{"accepted":1}')
+
+        page.route("**/analytics/v1/events", receive)
+        return events
+
+    def _assert_statistics_waits_for_opening(self, page):
+        notice = page.locator("#snow-statistics-notice")
+        notice.wait_for(state="attached")
+        self.assertFalse(notice.is_visible(), "Consent notice must not cover the opening")
+        self.assertFalse(notice.evaluate("node => node.hidden"), "Opening must not change the consent UI state")
+        self.assertFalse(notice.evaluate("""node => {
+          for (const control of node.querySelectorAll('button, a')) {
+            control.focus();
+            if (document.activeElement === control) return true;
+          }
+          return false;
+        }"""), "Hidden consent controls must not receive focus")
+        self.assertIsNone(page.evaluate("localStorage.getItem('snow.statistics.v1.project_snow.consent')"))
+        return notice.element_handle()
+
+    def _assert_statistics_resumes_unchanged(self, page, original, events):
+        # Fresh visitors still finish the existing modal/onboarding sequence
+        # before interacting with this non-modal consent panel.
+        page.locator("#accept-experience-notice").wait_for(state="visible")
+        page.locator("#accept-experience-notice").click()
+        page.locator("#skip-onboarding").wait_for(state="visible")
+        page.locator("#skip-onboarding").click()
+        notice = page.locator("#snow-statistics-notice")
+        notice.wait_for(state="visible")
+        self.assertTrue(original.evaluate("node => node === document.getElementById('snow-statistics-notice')"))
+        self.assertIsNone(page.evaluate("localStorage.getItem('snow.statistics.v1.project_snow.consent')"))
+        self.assertEqual(events, [])
+        decline = notice.get_by_role("button", name="暂不允许", exact=True)
+        decline.focus()
+        self.assertTrue(decline.evaluate("node => node === document.activeElement"))
+        decline.click()
+        self.assertFalse(notice.is_visible())
+        self.assertLess(page.evaluate("Number(localStorage.getItem('snow.statistics.v1.project_snow.consent'))"), 0)
+        self.assertEqual(events, [])
+        self.assertEqual(self.errors, [])
+
+    def test_statistics_consent_waits_for_desktop_boot_then_resumes(self):
+        page = self._page(1280, 820)
+        events = self._enable_statistics(page)
+        held = []
+        # Keep the actual boot active by holding its synthetic data dependency,
+        # rather than sleeping or replacing any opening lifecycle code.
+        page.route("**/public/v1/characters", lambda route: held.append(route))
+        self._open(page, True, wait_until="domcontentloaded")
+        try:
+            page.locator("#snow-boot").wait_for(state="visible")
+            original = self._assert_statistics_waits_for_opening(page)
+            self.assertEqual(len(held), 1)
+        finally:
+            for route in held:
+                route.continue_()
+        page.locator("#snow-boot").wait_for(state="detached")
+        self._assert_statistics_resumes_unchanged(page, original, events)
+
+    def test_statistics_consent_waits_for_phone_unlock_then_resumes(self):
+        page = self._page(390, 844)
+        events = self._enable_statistics(page)
+        self._open(page, True)
+        lock = page.locator("#snow-lock")
+        lock.wait_for(state="visible")
+        original = self._assert_statistics_waits_for_opening(page)
+        lock.focus()
+        page.keyboard.press("Tab")
+        self.assertTrue(page.evaluate("Boolean(document.activeElement.closest('#snow-lock'))"))
+        lock.focus()
+        page.keyboard.press("Enter")
+        lock.wait_for(state="detached")
+        self._assert_statistics_resumes_unchanged(page, original, events)
+
+    def test_statistics_consent_flag_off_stays_visible_and_usable(self):
+        page = self._page(1280, 820)
+        events = self._enable_statistics(page)
+        self._open(page, False)
+        self.assertEqual(page.locator("#snow-boot, #snow-lock").count(), 0)
+        original = page.locator("#snow-statistics-notice").element_handle()
+        self._assert_statistics_resumes_unchanged(page, original, events)
 
     def _failed_skin_requests(self):
         return [url for url in self.failed if "snow-adv" in url or "/assets/fonts/" in url or "/modules/snow-world" in url]
