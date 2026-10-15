@@ -823,14 +823,19 @@ class SnowAdvPerformanceTests(TestCase):
         # Swap neutral -> happy and sample both art nodes' opacity across the
         # transition. Returns the minimum opacity seen on the OUTGOING (old) art
         # and whether the incoming rose from < 1 to 1, plus the final node count.
+        # The first-entry animation also owns opacity; finish it before measuring
+        # an expression swap. Do not await every animation (breathing is infinite).
+        page.wait_for_function("""() => {
+          const art = document.getElementById('stage-character-art');
+          return art && !art.dataset.stageEnter && !art.dataset.stageArtTransition
+            && !document.querySelector('.stage-character-art-outgoing');
+        }""", timeout=5000)
         return page.evaluate(
             """async character => {
           const art = document.getElementById('stage-character-art');
           const previous = art.getAttribute('src');
           const samples = { outgoingMin: 1, incomingMin: 1, incomingMax: 0, bothSemi: false };
-          let raf = true;
-          const probe = () => {
-            if (!raf) return;
+          const sample = () => {
             const outgoing = document.querySelector('.stage-character-art-outgoing');
             const inOpacity = Number(getComputedStyle(art).opacity);
             samples.incomingMin = Math.min(samples.incomingMin, inOpacity);
@@ -841,13 +846,27 @@ class SnowAdvPerformanceTests(TestCase):
               // The forbidden state: BOTH visible art nodes semi-transparent at once.
               if (outOpacity < 0.95 && inOpacity < 0.95) samples.bothSemi = true;
             }
-            requestAnimationFrame(probe);
           };
-          requestAnimationFrame(probe);
           await window.__projectSnowTest.updateStageCharacterArt(art, character, 'happy');
-          // Sample across the full crossfade duration.
-          await new Promise(resolve => setTimeout(resolve, 360));
-          raf = false;
+          // updateStageCharacterArt resolves when the decoded art is committed,
+          // before WAAPI finishes. A wall-clock delay can expire before rendering
+          // starts on a busy runner, so sample through the actual cleanup instead.
+          await new Promise((resolve, reject) => {
+            let frame = 0;
+            const deadline = setTimeout(() => {
+              cancelAnimationFrame(frame);
+              reject(new Error('stage art swap did not settle: ' + JSON.stringify(samples)));
+            }, 5000);
+            const probe = () => {
+              sample();
+              if (!art.dataset.stageArtTransition && !document.querySelector('.stage-character-art-outgoing')) {
+                // Include a real rendered terminal frame after cleanup removed
+                // fill:both animations, rather than inferring opacity from time.
+                frame = requestAnimationFrame(() => { sample(); clearTimeout(deadline); resolve(); });
+              } else frame = requestAnimationFrame(probe);
+            };
+            probe();
+          });
           samples.changed = art.getAttribute('src') !== previous;
           samples.state = art.dataset.expressionState;
           samples.artNodes = document.querySelectorAll(
@@ -872,10 +891,7 @@ class SnowAdvPerformanceTests(TestCase):
         self.assertLess(samples["incomingMin"], 0.5, samples)
         self.assertGreaterEqual(samples["incomingMax"], 0.99, samples)
         # Exactly one art node remains after the swap settles.
-        page.wait_for_function("!document.querySelector('.stage-character-art-outgoing')", timeout=2000)
-        remaining = page.evaluate(
-            "() => document.querySelectorAll('#scene-stage .stage-character-art, #scene-stage .stage-character-art-outgoing').length")
-        self.assertEqual(remaining, 1)
+        self.assertEqual(samples["artNodes"], 1, samples)
         self.assertEqual(self.errors, [])
         self.assertEqual(self._failed_skin_requests(), [])
 
@@ -888,6 +904,37 @@ class SnowAdvPerformanceTests(TestCase):
         self.assertEqual(samples["state"], "happy")
         # Legacy behaviour: the outgoing art cross-fades out (drops toward 0).
         self.assertLess(samples["outgoingMin"], 0.5, samples)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_expression_swap_samples_until_delayed_animation_finishes(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._reach_in_person(page)
+        # Model a renderer whose animation timeline starts after the old 360 ms
+        # sampling window. Keep the real WAAPI fade and its finished/cleanup path.
+        page.evaluate("""() => {
+          const animate = Element.prototype.animate;
+          window.__delayedSwapAnimations = 0;
+          Element.prototype.animate = function(frames, options) {
+            const animation = animate.call(this, frames, options);
+            if (this.id === 'stage-character-art' && this.dataset.stageArtTransition === 'incoming') {
+              window.__delayedSwapAnimations += 1;
+              animation.pause();
+              setTimeout(() => animation.play(), 500);
+            }
+            return animation;
+          };
+        }""")
+        samples = self._swap_and_sample(page)
+        self.assertEqual(page.evaluate("window.__delayedSwapAnimations"), 1)
+        self.assertEqual(samples["artNodes"], 1, samples)
+        self.assertTrue(samples["changed"])
+        self.assertEqual(samples["state"], "happy")
+        self.assertGreaterEqual(samples["outgoingMin"], 0.95, samples)
+        self.assertFalse(samples["bothSemi"], samples)
+        self.assertLess(samples["incomingMin"], 0.5, samples)
+        self.assertGreaterEqual(samples["incomingMax"], 0.99, samples)
         self.assertEqual(self.errors, [])
         self.assertEqual(self._failed_skin_requests(), [])
 
