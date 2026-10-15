@@ -1029,3 +1029,149 @@ html[data-ui="snow-adv"] :is(
      placeholder 规则在上方已对 #message-input 生效，这里只保证单行高度不被撑高。 */
   html[data-ui="snow-adv"] #message-input { min-height: 44px; }
 }
+
+/* ============================================================= P6a 开场与通讯器世界层
+ * 开机层（桌面「终端开机」）、锁屏层（手机「终端锁屏」）与通讯器背后的世界层。
+ * 节点全部由 app.js 仅在开关开启时建出，关闭态不存在；每条规则仍限定在
+ * html[data-ui="snow-adv"] 下。只用 transform/opacity 动画；减少动态与 off 档无动画。
+ * ============================================================= */
+
+/* 通讯器背后的世界层：桌面开关开启时，app.js 在 body 级建 #snow-backdrop（内含
+ * #snow-backdrop-stage，世界层挂在其中），fixed 铺满视口、aria-hidden、不拦截指针、
+ * z-index 低于 #chat-app，作为文字通讯界面背后的雪境背景。 */
+html[data-ui="snow-adv"] .snow-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--snow-50), color-mix(in oklab, var(--ice-300) 22%, var(--snow-0)));
+}
+html[data-ui="snow-adv"] .snow-backdrop-stage { position: absolute; inset: 0; }
+/* 背后世界的分层/画布铺满容器（舞台世界的 P2 定位是相对 #scene-stage，这里补足绝对定位）。 */
+html[data-ui="snow-adv"] .snow-backdrop-stage > .snow-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
+html[data-ui="snow-adv"] .snow-backdrop-stage > .snow-layer > svg { display: block; width: 100%; height: 100%; }
+html[data-ui="snow-adv"] .snow-backdrop-stage > canvas.snow-layer { display: block; }
+
+/* 桌面开关开启时，#chat-app 浮在背后世界之上；文字通讯的各面做成磨砂设备感，
+ * 让雪景清晰透过来而文字对比度仍 ≥ 4.5:1（ink 文本色不变、底色足够但不盖死雪景）。 */
+html[data-ui="snow-adv"] #chat-app[data-snow-world] { position: relative; z-index: 1; background: transparent; }
+/* 首次入室时让透明舞台透出正在推进的外景；白雪遮罩仍位于舞台最上层。 */
+html[data-ui="snow-adv"] #chat-app[data-snow-pushing="1"] .in-person-surface,
+html[data-ui="snow-adv"] #chat-app[data-snow-pushing="1"] .scene-stage { background: transparent; }
+html[data-ui="snow-adv"] #chat-app[data-snow-pushing="1"] .scene-stage > [data-snow-world],
+html[data-ui="snow-adv"] #chat-app[data-snow-pushing="1"] .stage-character-art,
+html[data-ui="snow-adv"] #chat-app[data-snow-pushing="1"] .stage-dialogue,
+html[data-ui="snow-adv"] #chat-app[data-snow-pushing="1"] .stage-narration { visibility: hidden; }
+html[data-ui="snow-adv"] #chat-app[data-snow-world] .contact-panel,
+html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface .chat-header,
+html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface #current-rendezvous,
+html[data-ui="snow-adv"] #chat-app[data-snow-world] .chat-panel > #composer {
+  background: color-mix(in oklab, var(--snow-0) 72%, transparent);
+  backdrop-filter: saturate(1.1) blur(12px);
+}
+/* 文字通讯主面与消息区更通透，让背后雪世界清晰可见；助手/用户气泡自身仍有不透明底色保证可读。 */
+html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface,
+html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface #timeline,
+html[data-ui="snow-adv"] #chat-app[data-snow-world] .chat-panel { background: transparent; }
+html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface {
+  /* 62% snow + blur keeps the world visible as a frosted pane; timestamps and
+     sender lines sit directly on it, so they need >= 4.5:1 even over night scenes. */
+  background: color-mix(in oklab, var(--snow-0) 62%, transparent);
+  backdrop-filter: saturate(1.05) blur(8px);
+}
+html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface :is(.message-time, .message .meta, .message-usage, .request-status) { color: var(--ink-700); }
+/* 空会话问候卡在磨砂背景上保持足够底色，确保文字可读。 */
+html[data-ui="snow-adv"] #chat-app[data-snow-world] #timeline .empty-conversation { background: transparent; }
+
+/* ---- 开机层「终端开机」 ---- */
+html[data-ui="snow-adv"] .snow-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, var(--snow-0), var(--snow-100) 60%, var(--ice-300));
+  opacity: 1;
+}
+html[data-ui="snow-adv"] .snow-boot[data-phase="out"] { opacity: 0; transition: opacity 300ms var(--ease-snow, ease); }
+html[data-ui="snow-adv"] .snow-boot[data-tier="off"][data-phase="out"] { transition: none; }
+html[data-ui="snow-adv"] .snow-boot-mark {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  width: min(320px, 72vw);
+  text-align: center;
+}
+html[data-ui="snow-adv"] .snow-boot-mark img { width: 72px; height: 72px; border-radius: var(--radius-l, 18px); }
+html[data-ui="snow-adv"] .snow-boot-mark h1 { margin: 0; font-family: var(--font-story); font-size: var(--fs-24, 1.5rem); color: var(--ink-900); letter-spacing: 0.08em; }
+html[data-ui="snow-adv"] .snow-boot-bar { width: 100%; height: 4px; border-radius: 999px; background: color-mix(in oklab, var(--ice-300) 55%, var(--snow-0)); overflow: hidden; }
+html[data-ui="snow-adv"] .snow-boot-bar > i {
+  display: block; height: 100%; width: 40%; border-radius: inherit;
+  background: linear-gradient(90deg, var(--ice-400), var(--ice-600));
+  transform: translateX(-110%);
+}
+html[data-ui="snow-adv"] .snow-boot[data-tier="auto"] .snow-boot-bar > i { animation: snow-boot-sweep 1.1s var(--ease-snow, ease) infinite; }
+html[data-ui="snow-adv"] .snow-boot-status { margin: 0; font-size: var(--fs-13, 0.8125rem); color: var(--ink-600); min-height: 1.2em; }
+
+@keyframes snow-boot-sweep {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(260%); }
+}
+
+/* ---- 锁屏层「终端锁屏」 ---- */
+html[data-ui="snow-adv"] .snow-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  padding: max(22px, env(safe-area-inset-top)) 20px 26px;
+  background: linear-gradient(180deg, var(--ice-700), var(--ink-900) 55%, #0b152e);
+  color: var(--snow-0);
+  opacity: 1;
+  cursor: pointer;
+}
+html[data-ui="snow-adv"] .snow-lock[data-phase="out"] { opacity: 0; transition: opacity 320ms var(--ease-snow, ease); }
+html[data-ui="snow-adv"] .snow-lock[data-tier="off"][data-phase="out"] { transition: none; }
+html[data-ui="snow-adv"] .snow-lock-bar { display: flex; align-items: center; gap: 8px; font-size: var(--fs-13, 0.8125rem); opacity: 0.9; }
+html[data-ui="snow-adv"] .snow-lock-bar img { width: 22px; height: 22px; border-radius: 6px; }
+html[data-ui="snow-adv"] .snow-lock-bar .snow-lock-tod { margin-left: auto; }
+html[data-ui="snow-adv"] .snow-lock-main { display: grid; align-content: start; justify-items: center; gap: 6px; margin-top: 8vh; }
+html[data-ui="snow-adv"] .snow-lock-time { font-family: var(--font-story); font-size: clamp(3.2rem, 18vw, 5rem); font-variant-numeric: tabular-nums; line-height: 1; letter-spacing: 0.04em; }
+html[data-ui="snow-adv"] .snow-lock-date { font-size: var(--fs-16, 1rem); opacity: 0.92; }
+html[data-ui="snow-adv"] .snow-lock-notes { display: grid; gap: 10px; width: min(440px, 100%); margin: 22px auto 0; }
+html[data-ui="snow-adv"] .snow-note-card {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--radius-l, 18px);
+  background: color-mix(in oklab, var(--snow-0) 16%, transparent);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 44px;
+  backdrop-filter: blur(8px);
+}
+html[data-ui="snow-adv"] .snow-note-card.is-primary { background: color-mix(in oklab, var(--char, var(--ice-500)) 34%, transparent); }
+html[data-ui="snow-adv"] .snow-note-card .snow-note-glyph { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: color-mix(in oklab, var(--snow-0) 24%, transparent); }
+html[data-ui="snow-adv"] .snow-note-card .snow-note-glyph img { width: 42px; height: 42px; border-radius: 50%; }
+html[data-ui="snow-adv"] .snow-note-card .snow-note-meta { display: grid; gap: 2px; min-width: 0; }
+html[data-ui="snow-adv"] .snow-note-card .snow-note-meta strong { font-size: var(--fs-14, 0.875rem); }
+html[data-ui="snow-adv"] .snow-note-card .snow-note-meta span { font-size: var(--fs-12, 0.75rem); opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-ui="snow-adv"] .snow-note-card time { font-size: var(--fs-12, 0.75rem); opacity: 0.75; }
+html[data-ui="snow-adv"] .snow-lock-hint { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: var(--fs-13, 0.8125rem); opacity: 0.8; }
+html[data-ui="snow-adv"] .snow-lock[data-tier="auto"] .snow-lock-hint { animation: snow-lock-hint 1.8s var(--ease-snow, ease) infinite; }
+
+@keyframes snow-lock-hint {
+  0%, 100% { transform: translateY(0); opacity: 0.65; }
+  50% { transform: translateY(-4px); opacity: 0.9; }
+}
+
+
+/* 通讯器背后世界已改为独立的 body 级 #snow-backdrop 容器（见上），无需把 #scene-stage
+ * 提为视口背景；#in-person-surface 在文字模式保持原生 hidden 行为。 */

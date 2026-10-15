@@ -76,11 +76,15 @@ class SnowAdvFlagTests(TestCase):
             finally:
                 client.close()
 
-    def test_rollout_pipeline_does_not_accept_the_flag_yet(self):
-        # Production enablement is a later, separately reviewed change to the
-        # deploy allow-list; until then the flag cannot reach a public env file.
-        self.assertNotIn("PUBLIC_UI_SNOW_ADV", (APP_ROOT / "ops" / "deploy.sh").read_text(encoding="utf-8"))
-        self.assertNotIn("PUBLIC_UI_SNOW_ADV", (APP_ROOT / "ops" / "public.env.example").read_text(encoding="utf-8"))
+    def test_rollout_pipeline_accepts_the_flag_and_defaults_it_off(self):
+        # The deploy allow-list and candidate acceptance know the flag; the
+        # shared example env keeps it off so only an exact-SHA candidate file
+        # (or a reviewed env change) can enable it. Behaviour: tests/test_snow_adv_deployment.py.
+        deploy = (APP_ROOT / "ops" / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn("PUBLIC_UI_SNOW_ADV", deploy)
+        self.assertIn("public_ui_snow_adv=false", deploy)
+        self.assertIn('"PUBLIC_UI_SNOW_ADV": "ui_snow_adv"', (APP_ROOT / "ops" / "candidate_acceptance.py").read_text(encoding="utf-8"))
+        self.assertIn("PUBLIC_UI_SNOW_ADV=false", (APP_ROOT / "ops" / "public.env.example").read_text(encoding="utf-8"))
 
 
 class SnowAdvStyleContractTests(TestCase):
@@ -269,6 +273,11 @@ class SnowAdvBrowserTests(TestCase):
     def _reach_in_person(self):
         # Drive the proven e2e path to the in-person surface so a real scene
         # (fixture visual_key = "observation") is established.
+        # P6a：先消隐开场层（桌面开机自动消隐 / 手机锁屏点击解锁），再走既有流程。
+        if self.page.locator("#snow-lock").count() and self.page.locator("#snow-lock").is_visible():
+            self.page.locator("#snow-lock").click(position={"x": 10, "y": 10})
+        self.page.locator("#snow-boot").wait_for(state="detached", timeout=8000)
+        self.page.locator("#snow-lock").wait_for(state="detached", timeout=8000)
         self.page.locator("#accept-experience-notice").click()
         fixture.PublicFrontendE2ETests._configure_model(self.page)
         if self.page.locator("#skip-onboarding").is_visible():
@@ -410,6 +419,11 @@ class SnowAdvStageTests(TestCase):
 
     def _reach_in_person(self, page):
         # Drive the proven e2e path to the in-person surface and arrival reaction.
+        # P6a：先消隐开场层（桌面开机自动消隐 / 手机锁屏点击解锁），再走既有流程。
+        if page.locator("#snow-lock").count() and page.locator("#snow-lock").is_visible():
+            page.locator("#snow-lock").click(position={"x": 10, "y": 10})
+        page.locator("#snow-boot").wait_for(state="detached", timeout=8000)
+        page.locator("#snow-lock").wait_for(state="detached", timeout=8000)
         page.locator("#accept-experience-notice").click()
         # Wait until the scene has loaded (the presence button reads the location)
         # before opening settings, so the control is settled and actionable.
@@ -784,6 +798,11 @@ class SnowAdvPerformanceTests(TestCase):
         page.goto(self.base_url, wait_until="networkidle")
 
     def _reach_in_person(self, page):
+        # P6a：先消隐开场层（桌面开机自动消隐 / 手机锁屏点击解锁），再走既有流程。
+        if page.locator("#snow-lock").count() and page.locator("#snow-lock").is_visible():
+            page.locator("#snow-lock").click(position={"x": 10, "y": 10})
+        page.locator("#snow-boot").wait_for(state="detached", timeout=8000)
+        page.locator("#snow-lock").wait_for(state="detached", timeout=8000)
         page.locator("#accept-experience-notice").click()
         fixture.PublicFrontendE2ETests._configure_model(page)
         if page.locator("#skip-onboarding").is_visible():
@@ -1020,6 +1039,8 @@ class SnowAdvCommunicatorTests(TestCase):
         return [url for url in self.failed if "snow-adv" in url or "/assets/fonts/" in url or "/modules/snow-world" in url]
 
     def _reach_in_person(self, page):
+        # P6a：先消隐开场层（手机锁屏/桌面开机），再走既有须知/面对面流程。
+        self._dismiss_snow_opening(page)
         # Mirror the proven P3 path to the in-person surface and arrival reaction.
         page.locator("#accept-experience-notice").click()
         page.locator("#go-in-person-label", has_text="观景区").wait_for(state="visible")
@@ -1041,7 +1062,15 @@ class SnowAdvCommunicatorTests(TestCase):
         page.locator("#in-person-surface:not([hidden])").wait_for()
         page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
 
+    def _dismiss_snow_opening(self, page):
+        # P6a：消隐开场层——手机锁屏点击解锁、桌面开机等待自动消隐；关闭开关时二者都不存在。
+        if page.locator("#snow-lock").count() and page.locator("#snow-lock").is_visible():
+            page.locator("#snow-lock").click(position={"x": 10, "y": 10})
+        page.locator("#snow-boot").wait_for(state="detached", timeout=8000)
+        page.locator("#snow-lock").wait_for(state="detached", timeout=8000)
+
     def _dismiss_notice(self, page):
+        self._dismiss_snow_opening(page)
         if page.locator("#accept-experience-notice").is_visible():
             page.locator("#accept-experience-notice").click()
         if page.locator("#skip-onboarding").is_visible():
@@ -1231,3 +1260,404 @@ class SnowAdvCommunicatorTests(TestCase):
         self.assertEqual(self.errors, [])
         self.assertEqual(self._failed_skin_requests(), [])
 
+
+
+@skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
+class SnowAdvOpeningTests(TestCase):
+    """P6a 开场与通讯器世界层：桌面开机 + 首次入室镜头推进、手机锁屏、首帧防闪、flag-off。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), fixture.PublicFrontendHandler)
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+        cls.base_url = f"http://127.0.0.1:{cls.server.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.server_thread.join(timeout=5)
+
+    def setUp(self):
+        fixture.PublicFrontendE2ETests.setUp(self)
+        self.playwright = fixture.sync_playwright().start()
+        self.browser = fixture._launch_browser(self.playwright)
+        self.errors = []
+        self.failed = []
+        self.page = None
+
+    def tearDown(self):
+        self.browser.close()
+        self.playwright.stop()
+
+    def _page(self, width=1280, height=820, reduced_motion=None):
+        page = self.browser.new_page(viewport={"width": width, "height": height}, reduced_motion=reduced_motion)
+        page.on("pageerror", lambda error: self.errors.append(str(error)))
+        page.on("response", lambda response: self.failed.append(response.url) if response.status >= 400 else None)
+        page.set_default_timeout(8000)
+        self.page = page
+        return page
+
+    def _open(self, page, enabled, motion=None, init_script=None):
+        if motion is not None:
+            page.add_init_script(f"window.localStorage.setItem('project-snow-public:motion', {json.dumps(motion)})")
+        if init_script:
+            page.add_init_script(init_script)
+
+        def configure(route):
+            payload = route.fetch().json()
+            payload["features"] = {**payload.get("features", {}), "ui_snow_adv": enabled}
+            route.fulfill(json=payload)
+
+        page.route("**/public/v1/config", configure)
+        page.goto(self.base_url, wait_until="networkidle")
+
+    def _failed_skin_requests(self):
+        return [url for url in self.failed if "snow-adv" in url or "/assets/fonts/" in url or "/modules/snow-world" in url]
+
+    # 适配 P1–P5 flag-on 流程：先消隐 P6a 开机/锁屏层，再进入既有须知/引导/面对面流程。
+    def _dismiss_opening(self, page):
+        # 手机锁屏：点击任意处解锁；桌面开机：等待自动消隐。
+        if page.locator("#snow-lock").count() and page.locator("#snow-lock").is_visible():
+            page.locator("#snow-lock").click(position={"x": 10, "y": 10})
+        page.locator("#snow-boot").wait_for(state="detached", timeout=8000)
+        page.locator("#snow-lock").wait_for(state="detached", timeout=8000)
+
+    def _dismiss_notice(self, page):
+        if page.locator("#accept-experience-notice").is_visible():
+            page.locator("#accept-experience-notice").click()
+        if page.locator("#skip-onboarding").is_visible():
+            page.locator("#skip-onboarding").click()
+
+    def _reach_in_person(self, page):
+        self._dismiss_opening(page)
+        self._dismiss_notice(page)
+        fixture.PublicFrontendE2ETests._configure_model(page)
+        if page.locator("#skip-onboarding").is_visible():
+            page.locator("#skip-onboarding").click()
+        page.locator("#go-in-person").click()
+        page.locator("#confirm-presence-transition").click()
+        page.locator("#in-person-surface:not([hidden])").wait_for()
+        page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+
+    # ---- 桌面开机 + 通讯器浮于可见外景世界 ----
+    def test_desktop_shows_boot_then_communicator_over_exterior_world(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        # 开机层出现并自动消隐（夹具加载极快，可能在断言前已消隐；用探针确认开机确曾运行）。
+        page.wait_for_function("window.__projectSnowTest && window.__projectSnowTest.snowProbe().bootDone === true", timeout=8000)
+        page.locator("#snow-boot").wait_for(state="detached", timeout=8000)
+        self._dismiss_notice(page)
+        # 通讯器背后世界：body 级 #snow-backdrop 可见（非零矩形、不在 hidden/display:none 祖先里），
+        # 显示 generic 外景，canvas 有像素；#chat-app data-snow-world=exterior；只有一个世界在动。
+        page.wait_for_function(
+            "window.__projectSnowTest.snowProbe().backdropScene === 'generic'"
+            " && document.querySelector('#snow-backdrop canvas.snow-canvas-far')", timeout=8000)
+        state = page.evaluate("""() => {
+          const n = document.getElementById('snow-backdrop');
+          const rect = n ? n.getBoundingClientRect() : null;
+          const canvasFar = n ? n.querySelector('canvas.snow-canvas-far') : null;
+          const farSvg = n ? n.querySelector('.snow-layer-far svg[data-layer="far"]') : null;
+          const probe = window.__projectSnowTest.snowProbe();
+          return {
+            present: Boolean(n),
+            visibleRect: Boolean(rect && rect.width > 0 && rect.height > 0),
+            inHidden: Boolean(n && n.closest('[hidden]')),
+            display: n ? getComputedStyle(n).display : null,
+            canvasPx: canvasFar ? canvasFar.width * canvasFar.height : 0,
+            hasFarSvg: Boolean(farSvg),
+            world: document.getElementById('chat-app').dataset.snowWorld,
+            backdropScene: probe.backdropScene,
+            beenInPerson: probe.beenInPerson,
+            activeLoops: probe.activeLoops,
+          };
+        }""")
+        self.assertTrue(state["present"] and state["visibleRect"])
+        self.assertFalse(state["inHidden"])
+        self.assertNotEqual(state["display"], "none")
+        self.assertGreater(state["canvasPx"], 0)
+        self.assertTrue(state["hasFarSvg"])
+        self.assertEqual(state["world"], "exterior")
+        self.assertEqual(state["backdropScene"], "generic")
+        self.assertFalse(state["beenInPerson"])
+        self.assertEqual(state["activeLoops"], 1)  # 只有背后世界在动
+        # 像素证据：从 timeline 空白区域截图采样若干点，颜色不应全相同（证明背后雪景透出，
+        # 而非 P5 的纯色平背景）——用 variance / 极差 > 阈值判定。
+        shot = page.locator("#timeline").screenshot()
+        from PIL import Image
+        import io as _io
+        img = Image.open(_io.BytesIO(shot)).convert("RGB")
+        w, h = img.size
+        samples = [img.getpixel((int(w * fx), int(h * fy))) for fx in (0.2, 0.5, 0.8) for fy in (0.3, 0.6, 0.85)]
+        reds = [p[0] for p in samples]
+        self.assertGreater(max(reds) - min(reds), 6, f"timeline 背后应有雪景渐变/雪花，采样却近乎纯色: {samples}")
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_same_day_revisit_skips_boot_visuals(self):
+        page = self._page(1280, 820)
+        # 预置「今天见过开机」标记：用页面本地时间构造同样的键值。
+        page.add_init_script(
+            "const n=new Date();window.localStorage.setItem("
+            "'project-snow-public:snow-adv:boot-seen', n.getFullYear()+'-'+(n.getMonth()+1)+'-'+n.getDate());")
+        self._open(page, True)
+        # 同日重访不建开机层。
+        self.assertEqual(page.locator("#snow-boot").count(), 0)
+        # 世界背景仍挂载。
+        page.wait_for_function("document.getElementById('chat-app').dataset.snowWorld === 'exterior'", timeout=8000)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    # ---- 首次入室镜头推进 → P4 veil（显示目的地） ----
+    def test_first_indoor_move_plays_push_then_veil_second_move_no_push(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._dismiss_opening(page)
+        self._dismiss_notice(page)
+        # 人仍在外面：背后世界为 generic。
+        page.wait_for_function("window.__projectSnowTest && window.__projectSnowTest.snowProbe().backdropScene === 'generic'", timeout=8000)
+        # 建好舞台 veil 节点（真实到场会建）；并模拟亲身入室（arrival 会先置 beenInPerson）。
+        page.evaluate("""() => {
+          document.getElementById('text-surface').hidden = true;
+          document.getElementById('in-person-surface').hidden = false;
+          document.documentElement.dataset.motionLevel = 'auto';
+          window.__projectSnowTest.snowSetBeenInPerson(true);
+        }""")
+        # 布防（排除首帧/历史恢复的同步突发）：先触发一次同地点 render，并等待布防完成。
+        page.evaluate("() => window.__projectSnowTest.snowRenderSceneWith({ visual_key: 'generic', character_location: '基地外' })")
+        page.wait_for_function("window.__projectSnowTest.snowProbe().veilArmed === true", timeout=4000)
+        # 首次由外→室内：背后世界 (#snow-backdrop) 的层应标记 data-pushing 并真的在动（WAAPI）。
+        page.evaluate("() => window.__projectSnowTest.snowRenderSceneWith({ visual_key: 'observation', character_location: '观景区', character_activity: '和分析员一起看风景' })")
+        page.wait_for_function("document.querySelector('#snow-backdrop .snow-layer-far[data-pushing]')", timeout=4000)
+        pushing = page.evaluate("""() => {
+          const room = document.querySelector('#snow-backdrop .snow-layer-room');
+          const far = document.querySelector('#snow-backdrop .snow-layer-far');
+          const roomAnims = room && room.getAnimations ? room.getAnimations().length : 0;
+          const farAnims = far && far.getAnimations ? far.getAnimations().length : 0;
+          return { pushPlayed: window.__projectSnowTest.snowProbe().pushPlayed, roomAnims, farAnims };
+        }""")
+        self.assertTrue(pushing["pushPlayed"], "首次入室应播放镜头推进")
+        self.assertGreaterEqual(pushing["roomAnims"] + pushing["farAnims"], 1, "推进期间背后世界层应有运行中的 Web Animations（非恒等变换）")
+        # 推进在白光峰值拉起 veil，标题必须是目的地「观景区」，副标题是活动，绝不是外景「基地外」。
+        # （相位 up 是瞬态；标题一旦被 veil 写入即稳定，直接等标题变为目的地。）
+        page.wait_for_function(
+            "document.querySelector('#snow-scene-veil .snow-scene-veil-title')"
+            " && document.querySelector('#snow-scene-veil .snow-scene-veil-title').textContent === '观景区'", timeout=6000)
+        veil = page.evaluate("""() => ({
+          title: document.querySelector('#snow-scene-veil .snow-scene-veil-title').textContent,
+          sub: document.querySelector('#snow-scene-veil .snow-scene-veil-sub').textContent,
+        })""")
+        self.assertEqual(veil["title"], "观景区")
+        self.assertNotEqual(veil["title"], "基地外")
+        self.assertEqual(veil["sub"], "和分析员一起看风景")
+        # 推进结束。第二次移动：不再推进（只走 veil）。
+        page.wait_for_function("!document.querySelector('#snow-backdrop .snow-layer-far[data-pushing]')", timeout=6000)
+        page.evaluate("() => window.__projectSnowTest.snowRenderSceneWith({ visual_key: 'archive', character_location: '资料室' })")
+        page.wait_for_timeout(150)
+        self.assertFalse(page.evaluate("() => document.querySelector('#snow-backdrop .snow-layer-far[data-pushing]') !== null"), "第二次移动不应再推进")
+        # 同一时刻只有一个 SnowField rAF 循环在跑（面对面可见时背后世界暂停）。
+        self.assertLessEqual(page.evaluate("() => window.__projectSnowTest.snowProbe().activeLoops"), 1)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_light_and_off_motion_do_not_play_push(self):
+        for motion in ("light", "off"):
+            page = self._page(1280, 820)
+            self._open(page, True, motion=motion)
+            self._dismiss_opening(page)
+            self._dismiss_notice(page)
+            page.evaluate("""() => {
+              document.getElementById('text-surface').hidden = true;
+              document.getElementById('in-person-surface').hidden = false;
+              window.__projectSnowTest.snowSetBeenInPerson(true);
+            }""")
+            page.evaluate("() => window.__projectSnowTest.snowRenderSceneWith({ visual_key: 'generic', character_location: '基地外' })")
+            page.wait_for_function("window.__projectSnowTest.snowProbe().veilArmed === true", timeout=4000)
+            page.evaluate("() => window.__projectSnowTest.snowRenderSceneWith({ visual_key: 'observation', character_location: '观景区' })")
+            page.wait_for_timeout(200)
+            probe = page.evaluate("() => window.__projectSnowTest.snowProbe()")
+            self.assertFalse(probe["pushPlayed"], f"{motion} 档位不应推进")
+            self.assertFalse(page.evaluate("() => document.querySelector('#snow-backdrop .snow-layer-far[data-pushing]') !== null"))
+            errors = list(self.errors)
+            page.close()
+            self.assertEqual(errors, [])
+
+    # ---- 手机锁屏 ----
+    def test_phone_shows_lock_with_clock_and_date(self):
+        page = self._page(390, 844)
+        self._open(page, True)
+        page.locator("#snow-lock").wait_for(state="visible", timeout=8000)
+        state = page.evaluate("""() => ({
+          lock: Boolean(document.getElementById('snow-lock')),
+          time: document.getElementById('snow-lock-time').textContent,
+          date: document.getElementById('snow-lock-date').textContent,
+          tod: document.querySelector('.snow-lock-tod').textContent,
+          boot: document.getElementById('snow-boot') ? 1 : 0,
+          worldAttr: document.getElementById('chat-app').dataset.snowWorld || null,
+        })""")
+        self.assertTrue(state["lock"])
+        self.assertRegex(state["time"], r"^\d{2}:\d{2}$")
+        self.assertIn("日", state["date"])
+        self.assertIn(state["tod"], ("清晨", "白天", "黄昏", "夜晚"))
+        self.assertEqual(state["boot"], 0)        # 手机走锁屏，不显示开机层
+        self.assertIsNone(state["worldAttr"])      # 手机竖屏不做通讯器背后世界
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_phone_unlock_by_click_and_by_keyboard(self):
+        # 点击解锁。
+        page = self._page(390, 844)
+        self._open(page, True)
+        page.locator("#snow-lock").wait_for(state="visible", timeout=8000)
+        page.locator("#snow-lock").click(position={"x": 10, "y": 10})
+        page.locator("#snow-lock").wait_for(state="detached", timeout=8000)
+        # 解锁后体验须知可达。
+        page.locator("#accept-experience-notice").wait_for(state="visible", timeout=8000)
+        self.assertEqual(self.errors, [])
+        page.close()
+        # 键盘解锁（Enter）。
+        page2 = self._page(390, 844)
+        self._open(page2, True)
+        page2.locator("#snow-lock").wait_for(state="visible", timeout=8000)
+        page2.locator("#snow-lock").focus()
+        page2.keyboard.press("Enter")
+        page2.locator("#snow-lock").wait_for(state="detached", timeout=8000)
+        page2.locator("#accept-experience-notice").wait_for(state="visible", timeout=8000)
+        self.assertEqual(self.errors, [])
+
+    def test_phone_lock_notification_card_opens_its_target(self):
+        # 用夹具公告 feed 造一条未读公告：锁屏加载公告后出现「公告」通知卡；点开经既有
+        # openAnnouncements 处理打开公告弹窗（解锁 → 先过体验须知 → 再弹公告）。
+        page = self._page(390, 844)
+
+        def announcements(route):
+            route.fulfill(json=fixture._announcement_test_feed())
+
+        page.route("**/announcements.json", announcements)
+        self._open(page, True)
+        page.locator("#snow-lock").wait_for(state="visible", timeout=8000)
+        # 公告异步就绪后，锁屏补上未读公告通知卡。
+        page.locator('#snow-lock .snow-note-card[data-snow-note="notice"]').wait_for(state="visible", timeout=8000)
+        page.locator('#snow-lock .snow-note-card[data-snow-note="notice"]').click()
+        page.locator("#snow-lock").wait_for(state="detached", timeout=8000)
+        # 解锁后先过须知，再打开公告弹窗（既有 openAnnouncements 处理）。
+        page.locator("#accept-experience-notice").wait_for(state="visible", timeout=8000)
+        page.locator("#accept-experience-notice").click()
+        page.locator("#announcements-dialog[open]").wait_for(timeout=8000)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_phone_lock_keyboard_notification_and_focus_stay_in_lock(self):
+        page = self._page(390, 844)
+        page.route("**/announcements.json", lambda route: route.fulfill(json=fixture._announcement_test_feed()))
+        self._open(page, True)
+        card = page.locator('#snow-lock .snow-note-card[data-snow-note="notice"]')
+        card.wait_for(state="visible")
+        page.locator("#snow-lock").focus()
+        for _ in range(4):
+            page.keyboard.press("Tab")
+            self.assertTrue(page.evaluate("Boolean(document.activeElement.closest('#snow-lock'))"))
+        card.focus()
+        page.keyboard.press("Enter")
+        page.locator("#snow-lock").wait_for(state="detached")
+        self.assertFalse(page.evaluate("document.getElementById('chat-app').inert"))
+        page.locator("#accept-experience-notice").click()
+        page.locator("#announcements-dialog[open]").wait_for()
+        self.assertEqual(self.errors, [])
+
+    def test_phone_lock_skipped_on_same_session_revisit(self):
+        page = self._page(390, 844)
+        page.add_init_script("window.sessionStorage.setItem('project-snow-public:snow-adv:lock-seen', '1')")
+        self._open(page, True)
+        # 同一会话重访不建锁屏；须知直接可达。
+        page.locator("#accept-experience-notice").wait_for(state="visible", timeout=8000)
+        self.assertEqual(page.locator("#snow-lock").count(), 0)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    # ---- 体验须知在开场后仍可达 ----
+    def test_experience_notice_reachable_after_desktop_boot(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        page.locator("#snow-boot").wait_for(state="detached", timeout=8000)
+        page.locator("#accept-experience-notice").wait_for(state="visible", timeout=8000)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    # ---- 开场层占屏时，新手引导与体验须知都不得盖在其上 ----
+    def test_onboarding_and_notice_do_not_overlay_lock_until_unlock(self):
+        page = self._page(390, 844)
+        self._open(page, True)
+        page.locator("#snow-lock").wait_for(state="visible", timeout=8000)
+        # 锁屏期间：新手引导不可见、体验须知不可命中（<dialog> 走顶层亦不得先于解锁出现）。
+        locked = page.evaluate("""() => {
+          const guide = document.getElementById('onboarding-guide');
+          const notice = document.getElementById('experience-notice-dialog');
+          const guideVisible = guide && !guide.hidden && getComputedStyle(guide).display !== 'none'
+            && getComputedStyle(guide).visibility !== 'hidden';
+          // 命中测试：锁屏覆盖全屏，屏幕中点上层元素应属于锁屏，而非引导/须知。
+          const mid = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+          const topInLock = Boolean(mid && mid.closest('#snow-lock'));
+          return { guideVisible, noticeOpen: Boolean(notice && notice.open), topInLock };
+        }""")
+        self.assertFalse(locked["guideVisible"], "锁屏期间不得显示新手引导")
+        self.assertFalse(locked["noticeOpen"], "锁屏期间不得弹出体验须知")
+        self.assertTrue(locked["topInLock"], "屏幕中点应被锁屏覆盖，不被引导/须知占据")
+        # 解锁 → 先过体验须知 → 新手引导（onboarding 待完成）出现。
+        page.locator("#snow-lock").click(position={"x": 10, "y": 10})
+        page.locator("#snow-lock").wait_for(state="detached", timeout=8000)
+        page.locator("#accept-experience-notice").wait_for(state="visible", timeout=8000)
+        page.locator("#accept-experience-notice").click()
+        page.locator("#onboarding-guide:not([hidden])").wait_for(state="visible", timeout=8000)
+        step = page.evaluate("() => document.getElementById('onboarding-step-label').textContent")
+        self.assertIn("第 1 步", step)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    # ---- 首帧中性保持：config 取回失败也立即解除 ----
+    def test_first_flash_hold_cleared_on_config_failure(self):
+        page = self._page(1280, 820)
+        # 预置「上次见过雪境」标记，使首帧守卫把根节点暂设不可见。
+        page.add_init_script("window.localStorage.setItem('project-snow-public:snow-adv:last-seen', '1')")
+
+        def fail_config(route):
+            route.fulfill(status=500, content_type="application/json", body='{"error":"boom"}')
+
+        page.route("**/public/v1/config", fail_config)
+        page.goto(self.base_url, wait_until="domcontentloaded")
+        # 远早于 1000ms 兜底：失败路径（boot().catch）应已清除内联 visibility 保持。
+        page.wait_for_function(
+            "document.documentElement.style.visibility !== 'hidden'"
+            " && !document.documentElement.dataset.snowBooting", timeout=900)
+        self.assertNotEqual(page.evaluate("() => document.documentElement.style.visibility"), "hidden")
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    # ---- flag-off：开场层与世界层都不存在 ----
+    def test_flag_off_has_no_opening_or_world_layer_desktop(self):
+        page = self._page(1280, 820)
+        self._open(page, False)
+        self._dismiss_notice(page)
+        state = page.evaluate("""() => ({
+          ui: document.documentElement.dataset.ui || null,
+          boot: document.getElementById('snow-boot') ? 1 : 0,
+          lock: document.getElementById('snow-lock') ? 1 : 0,
+          backdrop: document.getElementById('snow-backdrop') ? 1 : 0,
+          worldAttr: document.getElementById('chat-app').dataset.snowWorld || null,
+          worldLayers: document.querySelectorAll('#scene-stage [data-snow-world]').length,
+        })""")
+        self.assertEqual(state, {"ui": None, "boot": 0, "lock": 0, "backdrop": 0, "worldAttr": None, "worldLayers": 0})
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_flag_off_has_no_lock_on_phone(self):
+        page = self._page(390, 844)
+        self._open(page, False)
+        self._dismiss_notice(page)
+        state = page.evaluate("""() => ({
+          ui: document.documentElement.dataset.ui || null,
+          lock: document.getElementById('snow-lock') ? 1 : 0,
+        })""")
+        self.assertEqual(state, {"ui": None, "lock": 0})
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])

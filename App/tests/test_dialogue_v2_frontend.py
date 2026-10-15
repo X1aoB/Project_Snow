@@ -902,9 +902,102 @@ class SnowAdvVeilProductionTests(TestCase):
         self.assertLess(self._veil()["opacity"], 0.05)
         self.assertFalse(self.errors)
 
+    def test_real_arrival_push_exposes_exterior_before_destination(self):
+        self._open()
+        self._reach_in_person()
+        self.page.locator('#chat-app[data-snow-pushing="1"]').wait_for()
+        self.page.wait_for_timeout(250)
+        push = self.page.evaluate("""() => {
+          const stage = document.getElementById('scene-stage');
+          const backdrop = document.getElementById('snow-backdrop-stage').snowWorld;
+          const target = backdrop.room.querySelector('.push-target').getBoundingClientRect();
+          return {
+            scene: backdrop.scene, roomHidden: backdrop.room.hidden,
+            targetWidth: target.width, targetHeight: target.height,
+            transform: getComputedStyle(backdrop.room).transform,
+            stageBackground: getComputedStyle(stage).backgroundColor,
+            surfaceBackground: getComputedStyle(document.getElementById('in-person-surface')).backgroundColor,
+            stageWorldVisibility: getComputedStyle(stage.querySelector('[data-snow-world]')).visibility,
+            activeLoops: window.__projectSnowTest.snowProbe().activeLoops,
+            stageRunning: stage.snowWorld.isRunning(), backdropRunning: backdrop.isRunning(),
+          };
+        }""")
+        self.assertEqual(push["scene"], "generic")
+        self.assertFalse(push["roomHidden"])
+        self.assertGreater(push["targetWidth"], 0)
+        self.assertGreater(push["targetHeight"], 0)
+        self.assertNotIn(push["transform"], ("none", "matrix(1, 0, 0, 1, 0, 0)"))
+        self.assertEqual(push["stageBackground"], "rgba(0, 0, 0, 0)")
+        self.assertEqual(push["surfaceBackground"], "rgba(0, 0, 0, 0)")
+        self.assertEqual(push["stageWorldVisibility"], "hidden")
+        self.assertEqual(push["activeLoops"], 1)
+        self.assertFalse(push["stageRunning"])
+        self.assertTrue(push["backdropRunning"])
+        self.page.wait_for_function("document.querySelector('#snow-scene-veil .snow-scene-veil-title').textContent === '观景区'")
+        self.page.wait_for_function("!document.getElementById('chat-app').dataset.snowPushing")
+        self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().worldScene"), "observation")
+        self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().activeLoops"), 1)
+        self.assertFalse(self.errors)
+
+    def test_reduced_motion_during_push_cancels_camera_and_pending_title(self):
+        self._open()
+        self._reach_in_person()
+        self.page.locator('#chat-app[data-snow-pushing="1"]').wait_for()
+        self.page.emulate_media(reduced_motion="reduce")
+        self.page.wait_for_function("!document.getElementById('chat-app').dataset.snowPushing && window.__projectSnowTest.snowProbe().activeLoops === 0")
+        self.page.wait_for_timeout(1900)
+        self.assertEqual(self._veil()["phase"], "idle")
+        self.assertEqual(self._veil()["titleText"], "")
+        self.assertFalse(self.page.evaluate("window.__projectSnowTest.snowProbe().pushing"))
+        self.assertFalse(self.errors)
+
+    def test_opening_communicator_during_push_cancels_pending_title(self):
+        self._open()
+        self._reach_in_person()
+        self.page.locator('#chat-app[data-snow-pushing="1"]').wait_for()
+        self.page.locator("#open-communicator").click()
+        self.page.locator("#text-surface:not([hidden])").wait_for()
+        self.page.wait_for_timeout(1900)
+        self.assertEqual(self._veil()["phase"], "idle")
+        self.assertEqual(self._veil()["titleText"], "")
+        self.assertFalse(self.page.evaluate("window.__projectSnowTest.snowProbe().pushing"))
+        self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().activeLoops"), 1)
+        self.assertFalse(self.errors)
+
+    def test_communicator_snow_reacts_to_live_motion_preferences(self):
+        self._open()
+        self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().activeLoops"), 1)
+        self.page.locator("#open-settings").click()
+        self.page.locator("#settings-tab-about").click()
+        for motion, loops in (("light", 0), ("off", 0), ("auto", 1)):
+            self.page.locator("#motion-preference").select_option(motion)
+            self.page.wait_for_function(f"window.__projectSnowTest.snowProbe().activeLoops === {loops}")
+        self.page.emulate_media(reduced_motion="reduce")
+        self.page.wait_for_function("window.__projectSnowTest.snowProbe().activeLoops === 0")
+        self.page.emulate_media(reduced_motion="no-preference")
+        self.page.wait_for_function("window.__projectSnowTest.snowProbe().activeLoops === 1")
+        self.assertFalse(self.errors)
+
+    def test_light_first_arrival_does_not_replay_camera_when_auto_returns(self):
+        self._open(motion_pref="light")
+        self._reach_in_person()
+        self.page.wait_for_function("document.getElementById('snow-scene-veil').dataset.phase === 'idle'")
+        self.page.locator("#open-communicator").click()
+        self.page.locator("#text-surface:not([hidden])").wait_for()
+        self.page.locator("#open-settings").click()
+        self.page.locator("#settings-tab-about").click()
+        self.page.locator("#motion-preference").select_option("auto")
+        self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().backdropScene"), "observation")
+        self.assertFalse(self.page.evaluate("window.__projectSnowTest.snowProbe().pushPlayed"))
+        self.assertFalse(self.errors)
+
     def test_veil_does_not_replay_when_reopening_communicator_to_same_location(self):
         self._open()
         self._reach_in_person()
+        # 首次入室在桌面 auto 档会先播镜头推进，veil 比直接进入晚约 1.3s 升起；先等它真正
+        # 升起（phase=up）再回到 idle，确保首播已完成，避免把首播误计为「重播」。
+        self.page.wait_for_function(
+            "document.getElementById('snow-scene-veil').dataset.phase === 'up'", timeout=6000)
         self.page.wait_for_function(
             "document.getElementById('snow-scene-veil').dataset.phase === 'idle'", timeout=5000)
         self.page.evaluate("() => { window.__veilReplayed = false; const v = document.getElementById('snow-scene-veil');"

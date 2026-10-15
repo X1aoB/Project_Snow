@@ -1,10 +1,28 @@
 import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope, anonymousServerTimings } from "/modules/runtime.js";
 import { DIALOGUE_PROTOCOL, SCENE_PROTOCOL, dialogueRecordKey, decodeSidecar, mergeDialogueReceipts, relevantDialogueReceipts, fitDialogueContext, isPureRendezvousJoin, sceneVisualKey } from "/dialogue-context.js";
 import { createSnowIcon } from "/modules/snow-icons.js";
-import { mountSnowWorld } from "/modules/snow-world.js";
+import { mountSnowWorld, activeSnowLoops } from "/modules/snow-world.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
+// 雪境 ADV P6a：开关随 /public/v1/config 下发，皮肤只能在 config 解析后才切换。为避免
+// 旧界面先闪一帧，仅当本机存在「上次见过雪境皮肤」标记时，才在 config 解析前把界面保持中性
+// （data-snow-booting，由 loadConfig 解析后删除）。首访用户没有该标记，不做保持，直接接受切换。
+const SNOW_LAST_SEEN_KEY = "project-snow-public:snow-adv:last-seen";
+// 仅当存在标记时，用内联属性（非 <style> 元素，CSP 安全）把根节点暂设为不可见，直到
+// config 解析后恢复，避免返回用户看到旧界面闪一帧。首访无标记则不保持，直接接受切换。
+// 兜底：即使 config 迟迟不来，也在 1s 后恢复可见，绝不长时间卡白。
+try {
+  if (localPreferences.getItem(SNOW_LAST_SEEN_KEY) === "1") {
+    document.documentElement.dataset.snowBooting = "1";
+    document.documentElement.style.visibility = "hidden";
+    window.setTimeout(() => { document.documentElement.style.visibility = ""; }, 1000);
+  }
+} catch { /* 存储不可用则不保持 */ }
+function snowClearFirstFlashHold() {
+  document.documentElement.style.visibility = "";
+  delete document.documentElement.dataset.snowBooting;
+}
 const apiRoot = "/public/v1";
 const publicHttp = createHttpClient(apiRoot);
 const dialogueHttp = createHttpClient("/public/v2");
@@ -99,6 +117,12 @@ const state = {
   snowVeilSeen: false,
   snowVeilTimers: [],
   snowVeilAnimation: null,
+  // 雪境 ADV P6a 开场与通讯器世界层。
+  snowOpening: null,        // { phone, kind: 'boot'|'lock'|'none' } 页面加载时判定一次
+  snowBeenInPerson: false,  // 本页会话内是否已亲身进过室内（决定首次入室镜头推进）
+  snowPushPlayed: false,    // 首次入室镜头推进是否已经播放过
+  snowEntryConsumed: false, // 首次入室已展示；light/off 后切回 auto 不补播推进
+  snowBootDone: false,      // 开机层是否已消隐
   playedStageMotionKeys: new Set(),
   replyTimingByRequest: new Map(),
   streamingPresentationByCharacter: new Map(),
@@ -275,6 +299,8 @@ function openAnnouncements({ automatic = false } = {}) {
 }
 function maybeShowAnnouncements() {
   if (!announcements.ready || !announcements.feed || document.hidden || document.querySelector("dialog[open]") || globalRequestBusy()) return;
+  // P6a：开机/锁屏层占屏时不自动弹公告（<dialog> 走顶层会盖在开场层之上）。
+  if (snowOpeningActive()) return;
   if (document.activeElement?.matches("input, textarea") && document.activeElement.value) return;
   if (announcementView().unread.some((key) => !announcements.attempted.has(key))) openAnnouncements({ automatic: true });
 }
@@ -298,6 +324,8 @@ async function refreshAnnouncements() {
       if (announcementRenderSignature() !== announcements.renderSignature) renderAnnouncements();
       else { renderAnnouncementStatus(); renderAnnouncementBadges(); }
       maybeShowAnnouncements();
+      // P6a：锁屏仍在时，公告就绪后补上「未读公告」通知卡。
+      snowRefreshLockNotes();
     }
   })();
   renderAnnouncementStatus();
@@ -572,7 +600,16 @@ function fitPublicRequestPayload(payload, { arrays = [], texts = [], targetBytes
 }
 if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
   Object.defineProperty(window, "__projectSnowTest", {
-    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, normalizeExpressionState, normalizeStageMotion, expressionManifestUrlForCharacter, normalizeExpressionManifest, stagePresentationRenderer, preloadStagePresentation, clearStagePresentationCache, warmCharacterStage, updateStageCharacterArt, playStageMotion, cancelStageMotion, renderStage }),
+    value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, normalizeExpressionState, normalizeStageMotion, expressionManifestUrlForCharacter, normalizeExpressionManifest, stagePresentationRenderer, preloadStagePresentation, clearStagePresentationCache, warmCharacterStage, updateStageCharacterArt, playStageMotion, cancelStageMotion, renderStage,
+      // P6a 探针：读取开场/世界层状态，并可强制切换世界场景以单测镜头推进/veil。
+      snowProbe: () => ({ opening: state.snowOpening, beenInPerson: state.snowBeenInPerson, pushPlayed: state.snowPushPlayed, bootDone: state.snowBootDone,
+        worldScene: snowWorld ? snowWorld.scene : null,
+        backdropScene: snowBackdrop ? snowBackdrop.scene : null,
+        pushing: snowBackdrop ? snowBackdrop.isPushing() : false,
+        veilArmed: state.snowVeilArmed,
+        activeLoops: activeSnowLoops() }),
+      snowRenderSceneWith: (sceneState) => { state.scene = sceneState; renderScene(); },
+      snowSetBeenInPerson: (value) => { state.snowBeenInPerson = Boolean(value); } }),
     configurable: false,
     writable: false,
   });
@@ -653,8 +690,12 @@ function syncMotionState() {
   document.documentElement.dataset.motion = featureEnabled("motion_v2") ? "v2" : "legacy";
   document.documentElement.dataset.pageHidden = String(document.hidden);
   const preference = localPreferences.getItem("project-snow-public:motion") || "auto";
+  const previousLevel = document.documentElement.dataset.motionLevel;
   document.documentElement.dataset.motionLevel = reducedMotion() ? "off" : preference;
+  if (previousLevel !== document.documentElement.dataset.motionLevel || document.hidden) cancelSnowScenePresentation();
+  if (snowBackdrop) snowBackdrop.setMotion(document.documentElement.dataset.motionLevel);
   if (snowWorld) snowWorld.setMotion(document.documentElement.dataset.motionLevel);
+  for (const opening of document.querySelectorAll("#snow-boot, #snow-lock")) opening.dataset.tier = stageMotionTier();
   if ($("motion-preference")) $("motion-preference").value = preference;
   if ($("motion-preference-setting")) $("motion-preference-setting").hidden = !featureEnabled("motion_v2");
 }
@@ -719,6 +760,13 @@ function syncInterfaceSkin() {
 // 雪境 ADV 世界层 (P2)：开关开启且处于面对面界面时，在 #scene-stage 内挂载程序化
 // 分层雪景与 Canvas 远近雪；关闭或离开面对面时销毁。立绘仍留在原 DOM 位置。
 let snowWorld = null;
+// P6a：通讯器背后的世界——一个 body 级 fixed 的「舞台」容器，仅桌面开关开启时存在，
+// aria-hidden、pointer-events:none、z-index 低于 #chat-app；文字界面可见时作为雪境背景，
+// 面对面可见时暂停（只让一个世界在动）。手机与关闭开关时都不建。
+let snowBackdrop = null;
+let snowBackdropStage = null;
+let snowPushContext = null;
+let snowPresentationSequence = 0;
 function snowWorldScene() {
   const scene = state.scene || {};
   return SCENE_KEYS.has(scene.visual_key) ? scene.visual_key : "generic";
@@ -726,18 +774,58 @@ function snowWorldScene() {
 function currentMotionLevel() {
   return document.documentElement.dataset.motionLevel || "auto";
 }
+// 背后世界应显示的场景：首次入室镜头推进播放前恒为 generic 外景（推进从外景推入）；
+// 推进播放后（snowPushPlayed）跟随当前室内地点。关闭推进（light/off）时入室即跟随室内。
+function snowBackdropScene() {
+  if (!state.snowBeenInPerson) return "generic";
+  if (state.snowEntryConsumed || state.snowPushPlayed || stageMotionTier() !== "auto") return snowWorldScene();
+  return "generic";
+}
 function syncSnowWorld() {
+  syncSnowBackdrop();
+  // P2 舞台世界：仅面对面可见时挂载在 #scene-stage（保持原状，不受通讯器背后世界影响）。
   const stage = $("scene-stage");
   const wanted = featureEnabled("ui_snow_adv") && stage && !$("in-person-surface").hidden;
   if (wanted && !snowWorld) {
     snowWorld = mountSnowWorld(stage, { visualKey: snowWorldScene(), motionLevel: currentMotionLevel() });
-    // 控制器句柄仅挂在 stage 节点上（非全局），供证据截图与帧耗时测量读取；
-    // 关闭开关或离开面对面时随世界一起清除。不新增 DOM、请求或可见行为。
     stage.snowWorld = snowWorld;
   } else if (!wanted && snowWorld) {
     snowWorld.destroy();
     snowWorld = null;
     if (stage) delete stage.snowWorld;
+  }
+}
+// 通讯器背后世界的建/拆与可见性。
+function syncSnowBackdrop() {
+  const want = featureEnabled("ui_snow_adv") && !snowOpeningState().phone;
+  const app = $("chat-app");
+  if (want && !snowBackdrop) {
+    const host = document.createElement("div");
+    host.className = "snow-backdrop";
+    host.id = "snow-backdrop";
+    host.setAttribute("aria-hidden", "true");
+    const stageEl = document.createElement("div");
+    stageEl.className = "snow-backdrop-stage";
+    stageEl.id = "snow-backdrop-stage";
+    host.append(stageEl);
+    document.body.prepend(host);  // body 级，位于 #chat-app 之前
+    snowBackdropStage = stageEl;
+    snowBackdrop = mountSnowWorld(stageEl, { visualKey: snowBackdropScene(), motionLevel: currentMotionLevel(), role: "backdrop" });
+    stageEl.snowWorld = snowBackdrop;  // 证据/测试读取句柄
+  } else if (!want && snowBackdrop) {
+    snowBackdrop.destroy();
+    snowBackdrop = null;
+    snowBackdropStage = null;
+    document.getElementById("snow-backdrop")?.remove();
+  }
+  if (snowBackdrop) {
+    // 背后世界场景跟随「是否已入室」；推进进行中不要打断（pushInto 自行切场景）。
+    if (!snowBackdrop.isPushing()) snowBackdrop.setScene(snowBackdropScene());
+    snowBackdrop.setMotion(currentMotionLevel());  // 内部按 role 在面对面可见时暂停
+  }
+  if (app) {
+    if (snowBackdrop) app.dataset.snowWorld = state.snowBeenInPerson ? "interior" : "exterior";
+    else delete app.dataset.snowWorld;
   }
 }
 
@@ -904,8 +992,32 @@ function buildSnowVeil() {
   stage.append(veil);
 }
 function removeSnowVeil() {
-  for (const timer of state.snowVeilTimers.splice(0)) window.clearTimeout(timer);
+  cancelSnowScenePresentation();
   $("scene-stage")?.querySelector(".snow-scene-veil")?.remove();
+}
+function clearSnowVeil() {
+  for (const timer of state.snowVeilTimers.splice(0)) window.clearTimeout(timer);
+  state.snowVeilAnimation?.cancel();
+  state.snowVeilAnimation = null;
+  const veil = $("snow-scene-veil");
+  for (const animation of veil?.getAnimations?.({ subtree: true }) || []) animation.cancel();
+  if (veil) veil.dataset.phase = "idle";
+}
+function finishSnowCamera() {
+  snowPushContext = null;
+  delete $("chat-app").dataset.snowPushing;
+  if (snowBackdrop) {
+    snowBackdrop.setScene(snowBackdropScene());
+    snowBackdrop.setMotion(currentMotionLevel());
+  }
+  if (snowWorld) snowWorld.setMotion(currentMotionLevel());
+}
+function cancelSnowScenePresentation() {
+  snowPresentationSequence += 1;
+  snowBackdrop?.cancelPush();
+  clearSnowVeil();
+  finishSnowCamera();
+  if (snowWorld) snowWorld.setScene(snowWorldScene());
 }
 function syncSnowVeilMount() {
   if (featureEnabled("ui_snow_adv")) buildSnowVeil();
@@ -918,17 +1030,25 @@ function maybePlaySnowVeil(scene, visualKey) {
   const location = plain(scene?.character_location || "");
   const visible = snowAdvActive() && !$("in-person-surface").hidden;
   const tier = stageMotionTier();
-  // 遮罩不适用时，世界场景照旧立即切换（与改动前行为一致）。
+  if (snowPushContext && (!visible || document.hidden || tier !== "auto"
+      || snowPushContext.characterId !== state.selected || snowPushContext.location !== location
+      || snowPushContext.visualKey !== visualKey)) cancelSnowScenePresentation();
+  // 遮罩不适用时，P2 舞台世界场景照旧立即切换（舞台世界仅面对面可见时存在）。
   const commitScene = () => { if (snowWorld) snowWorld.setScene(visualKey); };
   if (!visible || !location || tier === "off") {
+    if (state.snowVeilTimers.length || state.snowVeilAnimation) cancelSnowScenePresentation();
     commitScene();
     if (visible && location) state.snowVeilLocation = location;
+    if (visible && state.snowBeenInPerson && visualKey !== "generic") state.snowEntryConsumed = true;
     armSnowVeilSoon();
     return;
   }
   const changed = state.snowVeilArmed && location !== state.snowVeilLocation;
   state.snowVeilLocation = location;
   if (!changed) { commitScene(); armSnowVeilSoon(); return; }
+  // P6a：首次由「外面」进入室内，先镜头推进再 P4 veil；推进接管后不再立即切场景。
+  if (snowMaybePushIntoScene(scene, visualKey, commitScene)) return;
+  if (state.snowBeenInPerson && visualKey !== "generic") state.snowEntryConsumed = true;
   playSnowVeil(scene, location, tier, commitScene);
 }
 // 首帧/历史恢复发生在同一帧的同步突发里；用一次 rAF 把布防推到下一帧，排除这段突发。
@@ -940,8 +1060,8 @@ function armSnowVeilSoon() {
 function playSnowVeil(scene, location, tier, commitScene) {
   const veil = $("snow-scene-veil");
   if (!veil || typeof veil.animate !== "function" || document.hidden) { commitScene(); return; }
-  for (const timer of state.snowVeilTimers.splice(0)) window.clearTimeout(timer);
-  state.snowVeilAnimation?.cancel();
+  clearSnowVeil();
+  const sequence = snowPresentationSequence;
   const card = veil.querySelector(".snow-scene-veil-card");
   const kicker = veil.querySelector(".snow-scene-veil-kicker");
   const title = veil.querySelector(".snow-scene-veil-title");
@@ -962,8 +1082,9 @@ function playSnowVeil(scene, location, tier, commitScene) {
       { duration: fadeIn + 160, easing: "cubic-bezier(0.34, 1.32, 0.5, 1)", fill: "both" });
   }
   // 掩护下切换世界场景（纯视觉延迟）。
-  state.snowVeilTimers.push(window.setTimeout(() => { commitScene(); }, fadeIn));
+  state.snowVeilTimers.push(window.setTimeout(() => { if (sequence === snowPresentationSequence) commitScene(); }, fadeIn));
   state.snowVeilTimers.push(window.setTimeout(() => {
+    if (sequence !== snowPresentationSequence) return;
     veil.dataset.phase = "down";
     const outAnim = veil.animate([{ opacity: 1 }, { opacity: 0 }], { duration: fadeOut, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)", fill: "both" });
     state.snowVeilAnimation = outAnim;
@@ -975,6 +1096,295 @@ function playSnowVeil(scene, location, tier, commitScene) {
     });
   }, fadeIn + hold));
 }
+
+// ================================================================ P6a 开场与通讯器世界层
+// 全部仅在 ui_snow_adv 开启时生效，节点由 JS 在开关开启时建出、关闭态不存在，所以
+// flag-off 的 DOM 与行为逐字节不变。开机/锁屏二选一在页面加载时按屏幕判定一次
+// （与手机布局同一 860px 分界），中途改窗口大小不切换。减少动态/off 档无动画。
+const SNOW_BOOT_SEEN_KEY = "project-snow-public:snow-adv:boot-seen";   // 同一日历日跳过开机视觉
+const SNOW_LOCK_SEEN_KEY = "project-snow-public:snow-adv:lock-seen";  // 同一浏览器会话跳过锁屏
+const SNOW_TOD_LABELS = { dawn: "清晨", day: "白天", dusk: "黄昏", night: "夜晚" };
+
+function snowOpeningState() {
+  if (!state.snowOpening) {
+    const phone = window.matchMedia("(max-width: 860px)").matches;
+    state.snowOpening = { phone, kind: phone ? "lock" : "boot" };
+  }
+  return state.snowOpening;
+}
+// 开机层或锁屏层是否正占据屏幕——其间不得弹出体验须知、新手引导或任何对话框
+// （<dialog>.showModal() 走顶层，会盖在开机/锁屏之上），须在消隐/解锁后按正常顺序出现。
+function snowOpeningActive() {
+  return Boolean(document.getElementById("snow-boot") || document.getElementById("snow-lock"));
+}
+// 开场层消隐/解锁后调用：先按既有顺序弹一次性体验须知，再渲染尚未完成的新手引导。
+async function snowRunDeferredOpenings() {
+  await showExperienceNoticeIfNeeded();
+  renderOnboarding();
+}
+function snowLocalDay(now = new Date()) {
+  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+}
+function snowTimeOfDayLabel() {
+  // 复用世界模块的 resolveTime 口径（含 html[data-snow-time] 覆盖，仅测试/截图）。
+  const override = document.documentElement.dataset.snowTime;
+  const h = new Date().getHours();
+  const key = override && SNOW_TOD_LABELS[override] ? override
+    : h >= 5 && h < 8 ? "dawn" : h >= 8 && h < 17 ? "day" : h >= 17 && h < 19 ? "dusk" : "night";
+  return SNOW_TOD_LABELS[key];
+}
+
+// ---- 开机层「终端开机」（桌面） ----
+function buildSnowBoot() {
+  if ($("snow-boot") || document.body.querySelector(".snow-boot")) return;
+  const boot = document.createElement("div");
+  boot.className = "snow-boot";
+  boot.id = "snow-boot";
+  boot.setAttribute("role", "status");
+  boot.setAttribute("aria-label", "小吉终端正在启动");
+  boot.dataset.phase = "in";
+  boot.dataset.tier = stageMotionTier();
+  const mark = document.createElement("div");
+  mark.className = "snow-boot-mark";
+  const img = document.createElement("img");
+  img.src = "/shared/brand/xiaoji-icon-192.png";
+  img.alt = "";
+  const h1 = document.createElement("h1");
+  h1.textContent = "小吉终端";
+  const bar = document.createElement("div");
+  bar.className = "snow-boot-bar";
+  bar.setAttribute("aria-hidden", "true");
+  bar.append(document.createElement("i"));
+  const status = document.createElement("p");
+  status.className = "snow-boot-status";
+  status.id = "snow-boot-status";
+  mark.append(img, h1, bar, status);
+  boot.append(mark);
+  document.body.append(boot);
+}
+function snowBootStep(label) {
+  const status = $("snow-boot-status");
+  if (status) status.textContent = label;
+}
+function dismissSnowBoot(onRemoved) {
+  const boot = $("snow-boot");
+  state.snowBootDone = true;
+  if (!boot) { if (onRemoved) onRemoved(); return; }
+  snowBootStep("就绪");
+  // 同一日历日重访直接跳过视觉：记录「上次见过开机」的日期。
+  try { localPreferences.setItem(SNOW_BOOT_SEEN_KEY, snowLocalDay()); } catch { /* 存储不可用则下次照常显示 */ }
+  const tier = stageMotionTier();
+  boot.dataset.tier = tier;
+  // 节点真正移除后才允许体验须知/新手引导出现（它们绝不能盖在开机层之上）。
+  const finish = () => { boot.remove(); if (onRemoved) onRemoved(); };
+  if (tier === "off" || typeof boot.animate !== "function") { finish(); return; }
+  boot.dataset.phase = "out";
+  // ≤300ms 淡出；不额外拖延。
+  window.setTimeout(finish, 320);
+}
+// 开机层只在：桌面开场、开关开启、且今天还没见过时显示；否则不建（不加任何延迟）。
+function maybeStartSnowBoot() {
+  if (!featureEnabled("ui_snow_adv")) return false;
+  const opening = snowOpeningState();
+  if (opening.kind !== "boot") return false;
+  let seen = "";
+  try { seen = localPreferences.getItem(SNOW_BOOT_SEEN_KEY) || ""; } catch { seen = ""; }
+  if (seen === snowLocalDay()) return false;
+  buildSnowBoot();
+  snowBootStep("读取本地记录");
+  return true;
+}
+
+// ---- 锁屏层「终端锁屏」（手机） ----
+function snowLockNotes() {
+  // 通知卡仅由既有状态构造：当前待赴约定、未读公告。各源独立容错——某子系统
+  // 尚未就绪时该卡缺省，绝不阻断开场。
+  const notes = [];
+  try {
+    // 当前待赴约定：复用既有签名约定判定；点开走「去见她/赴约」确认流程，绝不自动赴约。
+    const pending = sceneActionsV2Enabled() ? signedPendingRendezvous().value : null;
+    if (pending) {
+      const location = pending.location_name || "约定地点";
+      notes.push({ kind: "rendezvous", characterId: pending.character_id || state.selected,
+        title: `约定 · ${location}`, detail: "点开确认是否赴约" });
+    }
+  } catch { /* 约定子系统未就绪则无此卡 */ }
+  try {
+    if (announcementView().unread.length) {
+      notes.push({ kind: "notice", title: "公告与生日", detail: `${announcementView().unread.length} 条新消息` });
+    }
+  } catch { /* 公告未加载则无此卡 */ }
+  return notes;
+}
+function buildSnowLock() {
+  if ($("snow-lock")) return;
+  const lock = document.createElement("div");
+  lock.className = "snow-lock";
+  lock.id = "snow-lock";
+  lock.setAttribute("role", "dialog");
+  lock.setAttribute("aria-modal", "true");
+  lock.tabIndex = 0;
+  lock.setAttribute("aria-label", "小吉终端锁屏，点击或按回车解锁");
+  lock.dataset.phase = "in";
+  lock.dataset.tier = stageMotionTier();
+  const bar = document.createElement("div");
+  bar.className = "snow-lock-bar";
+  const barImg = document.createElement("img");
+  barImg.src = "/shared/brand/xiaoji-icon-192.png"; barImg.alt = "";
+  const barName = document.createElement("strong"); barName.textContent = "小吉终端";
+  const tod = document.createElement("span"); tod.className = "snow-lock-tod"; tod.textContent = snowTimeOfDayLabel();
+  bar.append(barImg, barName, tod);
+  const main = document.createElement("div");
+  main.className = "snow-lock-main";
+  const time = document.createElement("div");
+  time.className = "snow-lock-time"; time.id = "snow-lock-time";
+  const date = document.createElement("div");
+  date.className = "snow-lock-date"; date.id = "snow-lock-date";
+  const notes = document.createElement("div");
+  notes.className = "snow-lock-notes"; notes.id = "snow-lock-notes";
+  main.append(time, date, notes);
+  const hint = document.createElement("div");
+  hint.className = "snow-lock-hint";
+  hint.append(createSnowIcon("snowflake"));
+  hint.append(document.createTextNode("点击任意处解锁"));
+  lock.append(bar, main, hint);
+  // 时钟与日期。
+  const now = new Date();
+  time.textContent = now.toTimeString().slice(0, 5);
+  date.textContent = `${now.getMonth() + 1} 月 ${now.getDate()} 日 · 星期${"日一二三四五六"[now.getDay()]}`;
+  // 通知卡（公告等异步源就绪后由 snowRefreshLockNotes 重渲染）。
+  snowRenderLockNotes(notes);
+  document.body.append(lock);
+  lock.snowPreviousInert = $("chat-app").inert;
+  $("chat-app").inert = true;
+  lock.addEventListener("click", () => snowUnlock(null));
+  lock.addEventListener("keydown", (event) => {
+    // 子通知按钮保留原生 Enter/Space 激活，不能被外层解锁处理吞掉。
+    if (["Escape", "Esc"].includes(event.key)
+        || event.target === lock && ["Enter", " ", "Spacebar"].includes(event.key)) {
+      event.preventDefault(); snowUnlock(null);
+    }
+    if (event.key === "Tab") {
+      const targets = [lock, ...lock.querySelectorAll("button")];
+      const index = targets.indexOf(document.activeElement);
+      if (event.shiftKey && index <= 0 || !event.shiftKey && index === targets.length - 1) {
+        event.preventDefault(); targets[event.shiftKey ? targets.length - 1 : 0].focus();
+      }
+    }
+  });
+  window.setTimeout(() => lock.focus({ preventScroll: true }), 0);
+}
+// 渲染锁屏通知卡（可重入，公告等异步源就绪后重渲染）。
+function snowRenderLockNotes(notesEl) {
+  if (!notesEl) return;
+  const now = new Date();
+  const focused = notesEl.contains(document.activeElement) ? document.activeElement : null;
+  const focusedKind = focused?.dataset.snowNote;
+  const focusedCharacter = focused?.dataset.characterId;
+  let restoreFocus = null;
+  notesEl.replaceChildren();
+  for (const note of snowLockNotes()) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "snow-note-card";
+    card.dataset.snowNote = note.kind;
+    if (note.characterId) card.dataset.characterId = note.characterId;
+    const glyph = document.createElement("span");
+    glyph.className = "snow-note-glyph";
+    glyph.append(createSnowIcon(note.kind === "rendezvous" ? "footprints" : "bell"));
+    const meta = document.createElement("span");
+    meta.className = "snow-note-meta";
+    const strong = document.createElement("strong"); strong.textContent = note.title;
+    const span = document.createElement("span"); span.textContent = note.detail;
+    meta.append(strong, span);
+    const t = document.createElement("time"); t.textContent = now.toTimeString().slice(0, 5);
+    card.append(glyph, meta, t);
+    card.addEventListener("click", (event) => { event.stopPropagation(); snowUnlock(note); });
+    notesEl.append(card);
+    if (note.kind === focusedKind && card.dataset.characterId === focusedCharacter) restoreFocus = card;
+  }
+  if (focused) (restoreFocus || $("snow-lock"))?.focus({ preventScroll: true });
+}
+// 公告等异步源就绪时，若锁屏仍在，重渲染其通知卡（新出现的未读公告据此补上卡片）。
+function snowRefreshLockNotes() {
+  const notesEl = document.getElementById("snow-lock-notes");
+  if (notesEl) snowRenderLockNotes(notesEl);
+}
+let snowLockUnlocking = false;
+function snowUnlock(note) {
+  const lock = $("snow-lock");
+  if (!lock || snowLockUnlocking) return;
+  snowLockUnlocking = true;
+  try { tabPreferences.setItem(SNOW_LOCK_SEEN_KEY, "1"); } catch { /* 会话存储不可用则本会话内可能重复，无副作用 */ }
+  const tier = stageMotionTier();
+  const finish = () => {
+    $("chat-app").inert = Boolean(lock.snowPreviousInert);
+    lock.remove();
+    $("open-settings")?.focus({ preventScroll: true });
+    // 解锁后再按既有顺序弹出一次性体验须知等（锁屏期间被推迟）。
+    void snowAfterUnlock(note);
+  };
+  if (tier === "off" || typeof lock.animate !== "function") { finish(); return; }
+  lock.dataset.phase = "out";
+  window.setTimeout(finish, 340);
+}
+async function snowAfterUnlock(note) {
+  // 体验须知与新手引导在解锁后按正常顺序出现（锁屏期间被推迟，且绝不盖在锁屏之上）。
+  await snowRunDeferredOpenings();
+  if (!note) return;
+  // 通知卡复用既有处理，绝不自动赴约 / 自动发消息。
+  if (note.kind === "rendezvous") { if (note.characterId && note.characterId !== state.selected) await selectCharacter(note.characterId); await openPresenceDialog(); }
+  else if (note.kind === "notice") { openAnnouncements(); }
+}
+function maybeStartSnowLock() {
+  if (!featureEnabled("ui_snow_adv")) return false;
+  const opening = snowOpeningState();
+  if (opening.kind !== "lock") return false;
+  let seen = "";
+  try { seen = tabPreferences.getItem(SNOW_LOCK_SEEN_KEY) || ""; } catch { seen = ""; }
+  if (seen === "1") return false;
+  buildSnowLock();
+  return true;
+}
+
+// ---- 通讯器背后的世界层（桌面） ----
+// 首次由「外面」进入某室内地点时的镜头推进 → 随后交给 P4 veil（显示目的地）。供 renderScene 调用。
+// 返回 true 表示本次已用推进接管场景切换（调用方不再播放自己的 veil / 立即 setScene）。
+// 推进作用于 body 级的「通讯器背后世界」(snowBackdrop)——它在人入室前显示 generic 外景，
+// 其 .push-target 是基地外亮灯入口；推进把外景推近入口 → 白光掩护里切到室内 → veil 显示目的地。
+function snowMaybePushIntoScene(scene, visualKey, commitScene) {
+  const tier = stageMotionTier();
+  const destination = plain(scene?.character_location || "") || visualKey;
+  const activity = plain(scene?.character_activity || "");
+  // 首次入室 = backdrop 当前仍是 generic 外景、目标是具体室内、尚未推进过、auto 档。
+  const canPush = featureEnabled("ui_snow_adv") && !snowOpeningState().phone
+    && !state.snowPushPlayed && !state.snowEntryConsumed && tier === "auto"
+    && snowBackdrop && typeof snowBackdrop.pushInto === "function" && snowBackdrop.scene === "generic"
+    && visualKey && visualKey !== "generic" && !document.hidden;
+  if (!canPush) return false;
+  state.snowPushPlayed = true;
+  state.snowEntryConsumed = true;
+  const sequence = ++snowPresentationSequence;
+  snowPushContext = { characterId: state.selected, location: destination, visualKey };
+  $("chat-app").dataset.snowPushing = "1";
+  // 仅把舞台的视觉层暂时让开，逻辑/回复照常推进。外景与入口真实可见，且只运行外景雪花。
+  if (snowWorld) snowWorld.setMotion(currentMotionLevel());
+  snowBackdrop.setMotion(currentMotionLevel());
+  void snowBackdrop.pushInto(visualKey, {
+    onWhiteout: () => {
+      if (sequence !== snowPresentationSequence || !snowPushContext) return true;
+      // veil 真正盖住外景后才显示目的地，避免先出现室内再播放被遮住的推进。
+      playSnowVeil({ character_location: destination, character_activity: activity }, destination, tier, () => {
+        commitScene();
+        finishSnowCamera();
+      });
+      return true; // 世界切换已由 veil 接管。
+    },
+  });
+  return true;
+}
+// ================================================================ /P6a
+
 function bodyIsVisible(node) {
   if (!node?.isConnected || node.closest("[hidden], [inert]") || document.hidden) return false;
   const bounds = node.getBoundingClientRect();
@@ -2561,6 +2971,14 @@ async function loadConfig() {
   state.config = await api("/config", { headers: {} });
   syncMotionState();
   syncInterfaceSkin();
+  // P6a 首帧处理：config 解析后解除中性保持（见模块顶部的 data-snow-booting 守卫）。
+  // 并记录「上次见过雪境皮肤」的标记——仅当存在该标记时，下次才在 config 解析前保持中性，
+  // 避免首访用户为了防闪而被挡一帧；关闭时清除标记。
+  try {
+    if (featureEnabled("ui_snow_adv")) localPreferences.setItem(SNOW_LAST_SEEN_KEY, "1");
+    else localPreferences.removeItem(SNOW_LAST_SEEN_KEY);
+  } catch { /* 存储不可用则下次按首访处理 */ }
+  snowClearFirstFlashHold();
   $("version-badge").textContent = state.config.app_version || "0.9.6";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
@@ -3385,6 +3803,9 @@ function finishOnboarding() {
 }
 function renderOnboarding() {
   if (localPreferences.getItem("project-snow-public:onboarding") === "complete") return;
+  // P6a：开机/锁屏层占屏时不显示新手引导，避免盖在开场层之上；消隐/解锁后由
+  // snowRunDeferredOpenings() 再次调用本函数按正常顺序显示。
+  if (snowOpeningActive()) { $("onboarding-guide").hidden = true; return; }
   const step = Math.min(state.onboardingStep, ONBOARDING_STEPS.length - 1);
   const item = ONBOARDING_STEPS[step];
   $("onboarding-guide").hidden = false;
@@ -4530,6 +4951,7 @@ function cancelModeTransition() {
 }
 async function selectCharacter(characterId, { closeContacts = true } = {}) {
   if (!characterId || characterId === state.selected && !state.selectionController) return;
+  cancelSnowScenePresentation();
   cancelBackgroundSummaries();
   if (state.selected) await saveDraftNow();
   const sequence = ++state.selectionSequence;
@@ -5338,6 +5760,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   // A character switch may happen while the persistence write is pending.
   // Only the selected thread owns the visible surface and composer controls.
   if (thread && thread.characterId !== state.selected) return;
+  if (channel !== "in_person") cancelSnowScenePresentation();
   const composerChanged = state.composerDraftKey !== draftKey(state.selected, channel);
   if (channel === "in_person" && !$("text-surface").hidden) rememberTimelineViewport();
   const snapshot = prepareSurfaceMotion(channel);
@@ -6356,6 +6779,8 @@ async function performSceneAction(action, characterId = state.selected, signal =
   }
 }
 async function arriveSceneAction(userText = "") {
+  // P6a：用户亲身进入室内，世界背景从此为当前室内地点，不再跳回外景。
+  state.snowBeenInPerson = true;
   const characterId = state.selected;
   const thread = currentThread();
   const previousChannel = thread?.channel || "text";
@@ -6427,6 +6852,7 @@ function arrivalReactionUnavailableMessage(code = "") {
 async function arriveInPerson() {
   cancelBackgroundSummaries();
   if (!state.selected || globalRequestBusy()) return;
+  state.snowBeenInPerson = true;
   if (sceneActionsV2Enabled()) return arriveSceneAction();
   state.arrivalPending = true;
   const started = performance.now();
@@ -7259,8 +7685,19 @@ async function boot() {
   await migrateBrowserState();
   await pruneExpiredMessages();
   await loadConfig();
-  await showExperienceNoticeIfNeeded();
+  // P6a：开关只在 config 解析后才已知，故开机/锁屏层只能此时才出现。
+  // 桌面 → 终端开机（真实加载步驱动，就绪即消隐，不加延迟）；手机 → 终端锁屏。
+  // 开场层永不阻断启动：任何构造异常都降级为「无开场层」。
+  let snowBoot = false;
+  let snowLock = false;
+  try { snowBoot = maybeStartSnowBoot(); } catch { snowBoot = false; }
+  try { snowLock = maybeStartSnowLock(); } catch { snowLock = false; }
+  if (snowBoot) snowBootStep("读取本地记录");
+  // 体验须知与新手引导：桌面开机消隐后、手机解锁后按正常顺序出现（绝不盖在开场层之上）；
+  // 其余情况（flag 关 / 跳过开机锁屏）保持原有顺序——config 之后立即弹须知。
+  if (!snowBoot && !snowLock) await showExperienceNoticeIfNeeded();
   await loadCharacters();
+  if (snowBoot) { snowBootStep("就绪"); dismissSnowBoot(() => { void snowRunDeferredOpenings(); }); }
   void loadStageRelease(state.config?.stage_release, state.characters.map(item => item.character_id)).then(release => {
     state.stageRelease = release;
     if (release && currentThread()?.channel === "in_person") renderStage();
@@ -7275,6 +7712,8 @@ async function boot() {
   $("auto-summary-enabled").checked = state.autoSummaryEnabled;
   updateComposerAvailability();
   restoreDraft();
+  // P6a：桌面开关开启时，通讯器背后挂载世界背景（人在外→generic 外景）。
+  syncSnowWorld();
   renderOnboarding();
   if (!state.storageAvailable) showBanner("浏览器未开放本地存储，本次聊天不会保存；仍可继续使用。 ");
   startAnnouncements();
@@ -7282,6 +7721,11 @@ async function boot() {
   window.setInterval(() => { void checkBuildUpdate(); }, 300000);
 }
 boot().catch((error) => {
+  // 启动失败（含 /public/v1/config 取回失败）也必须立刻解除首帧中性保持，绝不卡白。
+  snowClearFirstFlashHold();
+  $("snow-boot")?.remove();
+  const lock = $("snow-lock");
+  if (lock) { $("chat-app").inert = Boolean(lock.snowPreviousInert); lock.remove(); }
   $("connection-status").textContent = "连接失败";
   showBanner(displayError(error));
 });

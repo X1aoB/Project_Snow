@@ -6,6 +6,11 @@
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+// 活动中的 SnowField rAF 循环计数（供测试断言「同一时刻只有一个世界在动画」）。
+// 每个世界实例的 loop 开始/停止时增减。读取见下方导出的 activeSnowLoops()。
+let activeSnowLoopCount = 0;
+export function activeSnowLoops() { return activeSnowLoopCount; }
+
 // ---------------------------------------------------------------- 配色
 const PALETTES = {
   dawn: { sky: ["#b5c4e2", "#ead3dc", "#fbe7d9"], sun: "#ffdcc2", sunPos: [0.76, 0.52], glow: 170, disc: 46, far: ["#fbf2f1", "#b6c1d9"], mid: ["#f1f1f5", "#8f9fbe"], near: "#6c7c9c", snow: "#fff6f2", ground: ["#fbf3f1", "#dde0ea"], wall: ["#eff0f5", "#d8dce7"], frame: "#c7cddb", floor: ["#e3e6ef", "#c6cbda"], light: "#ffe2cc", lightOpacity: 0.36, lamp: "#ffd6a6", lampOpacity: 0.28, stars: 0, aurora: 0, flake: "#ffffff" },
@@ -309,7 +314,7 @@ const ROOMS = {
       + `<linearGradient id="${id}-doorin" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${mix(warm, "#ffffff", 0.45)}"/><stop offset="1" stop-color="${warm}"/></linearGradient></defs>`;
     s += `<circle cx="${dx + dw / 2}" cy="${dy + dh * 0.55}" r="170" fill="url(#${id}-door)" opacity="${glowK.toFixed(2)}"/>`;
     s += `<rect x="${dx - 14}" y="${dy - 12}" width="${dw + 28}" height="${dh + 12}" rx="6" fill="${frame}"/>`;
-    s += `<rect x="${dx}" y="${dy}" width="${dw}" height="${dh}" rx="4" fill="url(#${id}-doorin)" opacity="${(0.82 + p.lampOpacity * 0.18).toFixed(2)}"/>`;
+    s += `<rect class="push-target" data-push-target="" x="${dx}" y="${dy}" width="${dw}" height="${dh}" rx="4" fill="url(#${id}-doorin)" opacity="${(0.82 + p.lampOpacity * 0.18).toFixed(2)}"/>`;
     s += `<rect x="${dx + dw / 2 - 1.5}" y="${dy}" width="3" height="${dh}" fill="${frame}" opacity=".55"/>`;
     s += `<rect x="${dx - 30}" y="${dy - 34}" width="${dw + 60}" height="16" rx="6" fill="${mix(bld, "#1f2d3a", 0.38)}"/><rect x="${dx - 36}" y="${dy - 46}" width="${dw + 72}" height="16" rx="8" fill="${p.snow}"/>`;
     s += `<ellipse cx="${dx + dw / 2}" cy="${dy + dh + 4}" rx="130" ry="16" fill="${warm}" opacity="${(0.25 + p.lampOpacity * 0.3).toFixed(2)}"/>`;
@@ -450,7 +455,7 @@ function resolveMotion(level) {
  *   → layer-room（室内墙+窗洞） → [保留的 #stage-character-art] → snow-near（室外大雪/室内光尘）
  * 立绘保持在原 DOM 位置；世界层插在它前后，所以不接管立绘。
  */
-export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel } = {}) {
+export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, role = "stage" } = {}) {
   const far = el("div", "snow-layer snow-layer-far");
   const snowFar = el("canvas", "snow-layer snow-canvas snow-canvas-far");
   const room = el("div", "snow-layer snow-layer-room");
@@ -474,10 +479,20 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel } =
 
   function anySnow() { return fields.some((fld) => fld.particles.length); }
   function surfaceHidden() {
+    if (document.hidden) return true;
     const surface = document.getElementById("in-person-surface");
-    return document.hidden || !surface || surface.hidden;
+    const cameraVisible = document.getElementById("chat-app")?.dataset.snowPushing === "1";
+    if (role === "backdrop") {
+      // 通讯器背后的世界：面对面可见时暂停（只让一个世界在动），文字界面可见时运行；
+      // 其容器自身被隐藏（flag 关 / 手机）时也暂停。
+      const inPersonVisible = surface && !surface.hidden;
+      if (inPersonVisible && !cameraVisible) return true;
+      return !stageEl || stageEl.hidden || stageEl.offsetParent === null;
+    }
+    return !surface || surface.hidden || cameraVisible;
   }
   function loop(now) {
+    if (world.loopCounted) { activeSnowLoopCount -= 1; world.loopCounted = false; }
     world.raf = 0;
     if (world.destroyed || surfaceHidden() || world.motion !== "full") return;
     const dt = Math.min(0.05, (now - (world.last || now)) / 1000);
@@ -486,14 +501,19 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel } =
     for (const fld of fields) { fld.step(dt, now / 1000); fld.draw(); }
     world.perfMs = world.perfMs * 0.92 + (performance.now() - t0) * 0.08;
     world.raf = requestAnimationFrame(loop);
+    activeSnowLoopCount += 1; world.loopCounted = true;
   }
   function startLoop() {
     if (world.raf || world.destroyed || surfaceHidden()) return;
     if (world.motion !== "full" || !anySnow()) { for (const fld of fields) fld.draw(); return; }
     world.last = 0;
     world.raf = requestAnimationFrame(loop);
+    activeSnowLoopCount += 1; world.loopCounted = true;
   }
-  function stopLoop() { if (world.raf) { cancelAnimationFrame(world.raf); world.raf = 0; } }
+  function stopLoop() {
+    if (world.raf) { cancelAnimationFrame(world.raf); world.raf = 0; }
+    if (world.loopCounted) { activeSnowLoopCount -= 1; world.loopCounted = false; }
+  }
 
   function render() {
     if (world.destroyed) return;
@@ -508,7 +528,8 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel } =
     far.dataset.scene = key;
     far.innerHTML = built.far;
     room.innerHTML = built.room;
-    room.hidden = built.outdoor; // generic 全室外，无需室内墙层
+    // generic 的这一层也包含基地建筑和亮灯入口，必须保留可见。
+    room.hidden = false;
     const tier = world.motion;
     farField.color = built.flake;
     farField.density = tier === "light" ? 0.45 : 1;
@@ -528,9 +549,100 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel } =
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("resize", onResize);
 
+  // 相机推进（P6a）：从 generic 室外景朝亮灯入口 .push-target 推近，雪片迎面掠过，
+  // 在白光掩护里把世界切到室内场景。只动 transform/opacity（Web Animations，满足 CSP），
+  // 不改任何逻辑/请求/回复计时。调用方传 onWhiteout（白光峰值时执行场景切换与 veil），
+  // 本函数负责图层推近动画，并在推进到接近白光时调用 onWhiteout，再把图层恢复静止。
+  // off/light 档位与减少动态下，调用方不应调用本函数（直接走 veil）。
+  let cancelCamera = null;
+  function pushCamera({ onWhiteout } = {}) {
+    cancelCamera?.();
+    const target = room.querySelector(".push-target");
+    const layers = [far, snowFar, room, snowNear];
+    if (typeof far.animate !== "function" || !target) {
+      // 不支持 Web Animations（或无入口）时退化为立即执行白光回调。
+      if (!world.destroyed) onWhiteout?.();
+      return Promise.resolve();
+    }
+    world.pushing = true;
+    for (const el of layers) el.style.transform = "";
+    const t = target.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const onScreen = t.right > 0 && t.left < vw && t.bottom > 0 && t.top < vh && t.width > 0;
+    // 入口不在屏内（移动端竖屏裁掉建筑）时朝画面中心推进。
+    const px = onScreen ? t.left + t.width / 2 : vw / 2;
+    const py = onScreen ? t.top + t.height / 2 : vh * 0.62;
+    const span = (el, s) => {
+      const b = el.getBoundingClientRect();
+      const clamp = (want, lo, hi) => Math.min(hi, Math.max(lo, want));
+      return {
+        origin: `${(px - b.left).toFixed(1)}px ${(py - b.top).toFixed(1)}px`,
+        tx: clamp(vw / 2 - px, vw - px - (b.right - px) * s, (px - b.left) * s - px),
+        ty: clamp(vh / 2 - py, vh - py - (b.bottom - py) * s, (py - b.top) * s - py),
+      };
+    };
+    const ROOM_S = 6, FAR_S = 1.3;
+    const rm = span(room, ROOM_S);
+    room.style.transformOrigin = rm.origin;
+    for (const el of [far, snowFar, snowNear]) el.style.transformOrigin = "50% 50%";
+    const farMax = { x: (vw / 2) * (FAR_S - 1), y: (vh / 2) * (FAR_S - 1) };
+    const fx = Math.max(-farMax.x, Math.min(farMax.x, rm.tx * 0.25));
+    const fy = Math.max(-farMax.y, Math.min(farMax.y, rm.ty * 0.25));
+    const opts = { duration: 1800, easing: "cubic-bezier(.45,0,.75,.3)", fill: "forwards" };
+    const anims = [
+      far.animate([{ transform: "translate(0,0) scale(1)" }, { transform: `translate(${fx.toFixed(1)}px,${fy.toFixed(1)}px) scale(${FAR_S})` }], opts),
+      snowFar.animate([{ transform: "translate(0,0) scale(1)" }, { transform: `translate(${fx.toFixed(1)}px,${fy.toFixed(1)}px) scale(${FAR_S})` }], opts),
+      room.animate([{ transform: "translate(0,0) scale(1)" }, { transform: `translate(${rm.tx.toFixed(1)}px,${rm.ty.toFixed(1)}px) scale(${ROOM_S})` }], opts),
+      snowNear.animate([{ transform: "scale(1)", opacity: 1 }, { transform: "scale(2.6)", opacity: 0.35 }], opts),
+    ];
+    world.pushAnimations = anims;
+    // 用数据属性标记正在推进，供证据截图/测试断言读取（Web Animations 是否在跑）。
+    far.dataset.pushing = "1";
+    // 硬性兜底：无论动画是否正常 finish，推进总时长 + 余量后强制清除 pushing 状态，
+    // 避免被中途 setScene/暂停打断时 pushing 卡死（否则后续入室会误判为仍在推进）。
+    let whiteoutTimer, finishTimer, settle;
+    const finish = new Promise(resolve => { settle = resolve; });
+    const clearPushing = () => {
+      window.clearTimeout(whiteoutTimer);
+      window.clearTimeout(finishTimer);
+      anims.forEach((a) => { try { a.cancel(); } catch {} });
+      for (const el of layers) { el.style.transformOrigin = ""; el.style.transform = ""; }
+      delete far.dataset.pushing;
+      world.pushing = false;
+      world.pushAnimations = null;
+      cancelCamera = null;
+      settle();
+    };
+    cancelCamera = clearPushing;
+    whiteoutTimer = window.setTimeout(() => {
+      if (!world.destroyed && world.pushing) onWhiteout?.();
+    }, opts.duration - 480);
+    finishTimer = window.setTimeout(clearPushing, opts.duration + 400);
+    Promise.all(anims.map((a) => a.finished.catch(() => {}))).then(() => {
+      if (cancelCamera === clearPushing) clearPushing();
+    });
+    return finish;
+  }
+
   render();
 
   return {
+    get root() { return stageEl; },
+    get far() { return far; },
+    get room() { return room; },
+    get snowFar() { return snowFar; },
+    get snowNear() { return snowNear; },
+    get scene() { return world.scene; },
+    isPushing() { return Boolean(world.pushing); },
+    cancelPush() { cancelCamera?.(); },
+    pushInto(key, options) {
+      // 推进完成后由 onWhiteout 回调切场景；若调用方未接管切换，这里兜底切到目标场景。
+      const commit = () => { if (key && key !== world.scene) { world.scene = key; render(); } };
+      const onWhiteout = options?.onWhiteout
+        ? () => { const r = options.onWhiteout(); if (r === undefined) commit(); return r; }
+        : commit;
+      return pushCamera({ onWhiteout });
+    },
     setScene(key) { if (key !== world.scene) { world.scene = key; render(); } },
     setMotion(level) {
       const next = resolveMotion(level);
@@ -543,7 +655,9 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel } =
     isRunning() { return Boolean(world.raf); },
     destroy() {
       world.destroyed = true;
+      cancelCamera?.();
       stopLoop();
+      if (world.pushAnimations) { for (const a of world.pushAnimations) { try { a.cancel(); } catch {} } world.pushAnimations = null; }
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("resize", onResize);
       for (const node of [far, snowFar, room, snowNear]) node.remove();
