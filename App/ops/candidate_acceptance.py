@@ -34,6 +34,11 @@ DIALOGUE_FLAGS = {
     "PUBLIC_SCENE_ACTIONS_V2": "scene_actions_v2",
     "PUBLIC_SESSION_MEMORY_V2": "session_memory_v2",
 }
+# Presentation-only switches. Recorded (and required in the evidence) only when
+# the candidate environment carries them, so older environments stay valid.
+INTERFACE_FLAGS = {
+    "PUBLIC_UI_SNOW_ADV": "ui_snow_adv",
+}
 HASH = re.compile(r"^[0-9a-f]{64}$")
 FRONTEND_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -151,6 +156,11 @@ def public_environment_identity(paths: Paths, compose_environment: Path) -> dict
         if any(values.get(key) not in {"true", "false"} for key in DIALOGUE_FLAGS):
             raise MaintenanceError("Acceptance requires all dialogue rollout flags as strict booleans")
         identity["rollout_features"] = {name: values[key] == "true" for key, name in DIALOGUE_FLAGS.items()}
+    present = {key: name for key, name in INTERFACE_FLAGS.items() if key in values}
+    if present:
+        if any(values[key] not in {"true", "false"} for key in present):
+            raise MaintenanceError("Acceptance requires interface flags as strict booleans")
+        identity["interface_features"] = {name: values[key] == "true" for key, name in present.items()}
     return identity
 
 
@@ -293,6 +303,10 @@ def prepare(
     if rollout is not None and (evidence.get("rollout_features") != rollout
                                 or any(type(value) is not bool for value in (evidence.get("rollout_features") or {}).values())):
         raise MaintenanceError("Candidate evidence must name the exact observed dialogue rollout flags")
+    interface = observed["public_environments"]["candidate"].get("interface_features")
+    if interface is not None and (evidence.get("interface_features") != interface
+                                  or any(type(value) is not bool for value in (evidence.get("interface_features") or {}).values())):
+        raise MaintenanceError("Candidate evidence must name the exact observed interface flags")
     document = {
         "schema_version": RECEIPT_SCHEMA,
         "colour": colour,
