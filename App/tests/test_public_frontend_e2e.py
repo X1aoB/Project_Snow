@@ -310,7 +310,17 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             manifest = self._expression_manifest(character_id)
             self._json(manifest)
             return
-        assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
+        assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/snow-adv.css": "snow-adv.css", "/snow-adv-fonts.css": "snow-adv-fonts.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
+        if path.startswith("/assets/fonts/") and path.endswith(".woff2"):
+            candidate = (PUBLIC_ROOT / path.lstrip("/")).resolve()
+            if candidate.is_relative_to((PUBLIC_ROOT / "assets" / "fonts").resolve()) and candidate.is_file():
+                body = candidate.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "font/woff2")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
         if path == "/dialogue-context.js" or (path.startswith("/modules/") and path.endswith(".js")) or (path.startswith("/statistics/") and path.endswith((".mjs", ".css"))):
             candidate = (PUBLIC_ROOT / path.lstrip("/")).resolve()
             if candidate.is_relative_to(PUBLIC_ROOT.resolve()) and candidate.is_file():

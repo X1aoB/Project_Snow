@@ -94,6 +94,7 @@ from .public_subscription import (
 # WebP. StaticFiles inherits Python's process-wide mapping, so register the
 # public format before any FileResponse is constructed.
 mimetypes.add_type("image/webp", ".webp")
+mimetypes.add_type("font/woff2", ".woff2")
 
 ANONYMOUS_COOKIE = "__Host-snow_anon"
 DEVELOPMENT_ANONYMOUS_COOKIE = "snow_anon_dev"
@@ -1041,6 +1042,7 @@ def create_app(
                 "dialogue_domains_v2": public_settings.dialogue_domains_v2,
                 "scene_actions_v2": public_settings.scene_actions_v2,
                 "session_memory_v2": public_settings.session_memory_v2,
+                "ui_snow_adv": public_settings.ui_snow_adv,
             },
             "capabilities": {
                 "dialogue_protocol": "public-dialogue-v2",

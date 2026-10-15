@@ -201,12 +201,12 @@ class DialogueV2FrontendTests(TestCase):
         DialogueHandler.join_release.set()
         self.browser.close(); self.playwright.stop()
 
-    def open(self, v2=True, motion=True, memory=True):
+    def open(self, v2=True, motion=True, memory=True, snow=False):
         DialogueHandler.memory_enabled = memory
         def config(route):
             payload = route.fetch().json()
             payload["features"] = {"chat_latency_v2": True, "motion_v2": motion, "verified_block_replay": True,
-                "dialogue_domains_v2": v2, "scene_actions_v2": v2, "session_memory_v2": v2 and memory}
+                "dialogue_domains_v2": v2, "scene_actions_v2": v2, "session_memory_v2": v2 and memory, "ui_snow_adv": snow}
             payload["capabilities"] = {"dialogue_protocol": "public-dialogue-v2", "scene_action_protocol": "public-scene-action-v2", "recovery_only": True}
             route.fulfill(json=payload)
         self.page.route("**/public/v1/config", config)
@@ -715,6 +715,31 @@ class DialogueV2FrontendTests(TestCase):
         self.page.wait_for_function("document.activeElement.id==='message-input'")
         self.assertFalse(self.errors)
 
+    def _arrival_notices(self, snow):
+        self.open(snow=snow)
+        self.page.locator("#go-in-person").click(); self.page.locator("#confirm-presence-transition").click()
+        self.page.wait_for_function("document.querySelector('#chat-app').dataset.channel==='in_person'")
+        self.page.wait_for_timeout(400)
+        return self.page.evaluate("""() => {
+          const shown = id => { const node = document.getElementById(id); return node && !node.hidden && !node.closest('[hidden]') ? node.textContent.trim() : ''; };
+          return { banner: shown('system-banner'), status: shown('request-status'), narration: shown('stage-narration') + shown('stage-speech') };
+        }""")
+
+    def test_snow_adv_scene_arrival_keeps_a_single_notice(self):
+        legacy = self._arrival_notices(snow=False)
+        self.assertFalse(self.errors)
+        self.page.close()
+        self.page = self.browser.new_page(viewport={"width": 1200, "height": 850}, reduced_motion="reduce")
+        self.page.on("pageerror", lambda error: self.errors.append(str(error)))
+        snow = self._arrival_notices(snow=True)
+        # Flag off keeps whatever the legacy path shows; flag on drops the duplicate banner/status only.
+        self.assertTrue("已来到" in legacy["banner"] or "已来到" in legacy["status"], legacy)
+        self.assertNotIn("已来到", snow["banner"])
+        self.assertNotIn("已来到", snow["status"])
+        self.assertNotIn("正在确认会合地点", snow["status"])
+        self.assertEqual(bool(legacy["narration"]), bool(snow["narration"]))
+        self.assertFalse(self.errors)
+
     def test_first_join_pending_without_history_recovers_original_uuid_before_orphan_cleanup(self):
         self.open()
         self.assertEqual(self.local()["messages"], [])
@@ -770,3 +795,296 @@ class DialogueV2FrontendTests(TestCase):
         self.assertEqual(recovery[0]["payload"], old_context["sceneActionSnapshot"]["envelope"])
         self.assertEqual(len(self.rows()), 2)
         self.assertFalse(self.errors)
+
+
+@skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
+class SnowAdvVeilProductionTests(TestCase):
+    """P4 后续：生产态（motion_v2=true, scene_actions_v2=true）下的独立白雪转场遮罩。
+
+    复用本模块的 DialogueHandler 夹具与 open() 的配置形状（snow=True 开启皮肤且保持
+    motion_v2/scene_actions_v2 为真），每个用例自建页面（按需设置 reduced-motion）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), DialogueHandler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base_url = f"http://127.0.0.1:{cls.server.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown(); cls.server.server_close(); cls.thread.join(timeout=5)
+
+    def setUp(self):
+        fixture.PublicFrontendE2ETests.setUp(self)
+        DialogueHandler.requests = []; DialogueHandler.results = {}; DialogueHandler.counter = 0
+        DialogueHandler.scope_rejected = False
+        DialogueHandler.memory_enabled = True
+        DialogueHandler.join_started = threading.Event()
+        DialogueHandler.join_release = threading.Event()
+        DialogueHandler.scenario = "success"
+        self.playwright = fixture.sync_playwright().start()
+        self.browser = fixture._launch_browser(self.playwright)
+        self.errors = []
+        self.page = None
+
+    def tearDown(self):
+        DialogueHandler.join_release.set()
+        self.browser.close(); self.playwright.stop()
+
+    def _open(self, width=1200, height=850, reduced_motion="no-preference", motion_pref=None, snow=True):
+        page = self.browser.new_page(viewport={"width": width, "height": height}, reduced_motion=reduced_motion)
+        page.set_default_timeout(10000)
+        self.errors = []
+        page.on("pageerror", lambda error: self.errors.append(str(error)))
+        if motion_pref is not None:
+            page.add_init_script(f"window.localStorage.setItem('project-snow-public:motion', {json.dumps(motion_pref)})")
+        self.page = page
+
+        def config(route):
+            payload = route.fetch().json()
+            payload["features"] = {"chat_latency_v2": True, "motion_v2": True, "verified_block_replay": True,
+                "dialogue_domains_v2": True, "scene_actions_v2": True, "session_memory_v2": True, "ui_snow_adv": snow}
+            payload["capabilities"] = {"dialogue_protocol": "public-dialogue-v2", "scene_action_protocol": "public-scene-action-v2", "recovery_only": True}
+            route.fulfill(json=payload)
+
+        page.route("**/public/v1/config", config)
+        page.goto(self.base_url, wait_until="networkidle")
+        page.locator("#accept-experience-notice").click()
+        fixture.PublicFrontendE2ETests._configure_model(page)
+        if page.locator("#skip-onboarding").is_visible():
+            page.locator("#skip-onboarding").click()
+
+    def _reach_in_person(self):
+        self.page.locator("#go-in-person").click()
+        self.page.locator("#confirm-presence-transition").click()
+        self.page.locator("#in-person-surface:not([hidden])").wait_for()
+
+    def _veil(self):
+        return self.page.evaluate("""() => {
+          const veil = document.getElementById('snow-scene-veil');
+          if (!veil) return { present: false };
+          const title = veil.querySelector('.snow-scene-veil-title');
+          const sub = veil.querySelector('.snow-scene-veil-sub');
+          return {
+            present: true,
+            phase: veil.dataset.phase,
+            opacity: Number(getComputedStyle(veil).opacity),
+            ariaHidden: veil.getAttribute('aria-hidden'),
+            pointerEvents: getComputedStyle(veil).pointerEvents,
+            titleText: title ? title.textContent : '',
+            titleFont: title ? getComputedStyle(title).fontFamily : '',
+            titleSize: title ? parseFloat(getComputedStyle(title).fontSize) : 0,
+            subText: sub ? sub.textContent : '',
+          };
+        }""")
+
+    def test_veil_plays_with_location_title_on_entering_in_person(self):
+        self._open()
+        # 进入面对面（从文字进入已知地点 观景区）应播放遮罩。
+        self._reach_in_person()
+        self.page.wait_for_function(
+            "document.getElementById('snow-scene-veil') && document.getElementById('snow-scene-veil').dataset.phase !== 'idle'",
+            timeout=4000)
+        # 等遮罩真正升到可见（淡入+保持 600ms），再读属性，避免采在淡入起点。
+        self.page.wait_for_function(
+            "Number(getComputedStyle(document.getElementById('snow-scene-veil')).opacity) > 0.6", timeout=4000)
+        veil = self._veil()
+        self.assertTrue(veil["present"])
+        self.assertEqual(veil["titleText"], "观景区")
+        self.assertIn("LXGW WenKai Screen", veil["titleFont"])
+        self.assertGreaterEqual(veil["titleSize"], 28)
+        self.assertEqual(veil["ariaHidden"], "true")
+        self.assertEqual(veil["pointerEvents"], "none")
+        self.assertGreater(veil["opacity"], 0.5)
+        self.page.wait_for_function(
+            "document.getElementById('snow-scene-veil').dataset.phase === 'idle'", timeout=4000)
+        self.assertLess(self._veil()["opacity"], 0.05)
+        self.assertFalse(self.errors)
+
+    def test_real_arrival_push_exposes_exterior_before_destination(self):
+        self._open()
+        self._reach_in_person()
+        self.page.locator('#chat-app[data-snow-pushing="1"]').wait_for()
+        self.page.wait_for_timeout(250)
+        push = self.page.evaluate("""() => {
+          const stage = document.getElementById('scene-stage');
+          const backdrop = document.getElementById('snow-backdrop-stage').snowWorld;
+          const target = backdrop.room.querySelector('.push-target').getBoundingClientRect();
+          return {
+            scene: backdrop.scene, roomHidden: backdrop.room.hidden,
+            targetWidth: target.width, targetHeight: target.height,
+            transform: getComputedStyle(backdrop.room).transform,
+            stageBackground: getComputedStyle(stage).backgroundColor,
+            surfaceBackground: getComputedStyle(document.getElementById('in-person-surface')).backgroundColor,
+            stageWorldVisibility: getComputedStyle(stage.querySelector('[data-snow-world]')).visibility,
+            activeLoops: window.__projectSnowTest.snowProbe().activeLoops,
+            stageRunning: stage.snowWorld.isRunning(), backdropRunning: backdrop.isRunning(),
+          };
+        }""")
+        self.assertEqual(push["scene"], "generic")
+        self.assertFalse(push["roomHidden"])
+        self.assertGreater(push["targetWidth"], 0)
+        self.assertGreater(push["targetHeight"], 0)
+        self.assertNotIn(push["transform"], ("none", "matrix(1, 0, 0, 1, 0, 0)"))
+        self.assertEqual(push["stageBackground"], "rgba(0, 0, 0, 0)")
+        self.assertEqual(push["surfaceBackground"], "rgba(0, 0, 0, 0)")
+        self.assertEqual(push["stageWorldVisibility"], "hidden")
+        self.assertEqual(push["activeLoops"], 1)
+        self.assertFalse(push["stageRunning"])
+        self.assertTrue(push["backdropRunning"])
+        self.page.wait_for_function("document.querySelector('#snow-scene-veil .snow-scene-veil-title').textContent === '观景区'")
+        self.page.wait_for_function("!document.getElementById('chat-app').dataset.snowPushing")
+        self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().worldScene"), "observation")
+        self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().activeLoops"), 1)
+        self.assertFalse(self.errors)
+
+    def test_fast_reply_cancels_camera_and_scene_veil_before_visible_measurement(self):
+        # The second reply changes the scene in renderScene before renderStage;
+        # both that veil and the original arrival camera must yield to the reply.
+        for message, expected_scene in (("合成日常聊天", "observation"), ("合成邀请", "canteen")):
+            with self.subTest(message=message):
+                self._open()
+                self._reach_in_person()
+                self.page.locator('#chat-app[data-snow-pushing="1"]').wait_for()
+                self.page.evaluate("""() => {
+                  window.__firstReplyPaintVisibility = null;
+                  const sample = () => {
+                    const metric = window.__projectSnowPerformance.getSamples()[0];
+                    if (metric?.ready_to_paint_ms !== null && metric?.ready_to_paint_ms !== undefined) {
+                      window.__firstReplyPaintVisibility = {
+                        visibility: getComputedStyle(document.getElementById('stage-speech')).visibility,
+                        pushing: Boolean(document.getElementById('chat-app').dataset.snowPushing),
+                        veilPhase: document.getElementById('snow-scene-veil').dataset.phase,
+                      };
+                    } else requestAnimationFrame(sample);
+                  };
+                  requestAnimationFrame(sample);
+                }""")
+                self.page.locator("#message-input").fill(message)
+                self.page.locator("#send-message").click()
+                self.page.wait_for_function("window.__firstReplyPaintVisibility !== null")
+                self.assertEqual(self.page.evaluate("window.__firstReplyPaintVisibility"),
+                                 {"visibility": "visible", "pushing": False, "veilPhase": "idle"})
+                self.page.wait_for_function("window.__projectSnowPerformance.getSamples()[0].send_to_first_effective_ms > 0")
+                self.assertIn("合成的有效回复。", self.page.locator("#stage-speech").inner_text())
+                self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().worldScene"), expected_scene)
+                self.page.wait_for_timeout(1700)
+                self.assertEqual(self._veil()["phase"], "idle", "cancelled camera must not bring back its delayed title")
+                self.assertFalse(self.errors)
+                self.page.close()
+
+    def test_css_hidden_reply_is_not_counted_until_visible(self):
+        self._open()
+        self._reach_in_person()
+        self.page.wait_for_function("document.getElementById('snow-scene-veil').dataset.phase === 'up'")
+        self.page.wait_for_function("document.getElementById('snow-scene-veil').dataset.phase === 'idle'")
+        # Inherited CSS visibility keeps a nonzero layout rectangle. It must
+        # not count as a visible first glyph or effective reply.
+        self.page.locator("#stage-dialogue").evaluate("node => { node.style.visibility = 'hidden'; }")
+        self.page.locator("#message-input").fill("合成日常聊天")
+        self.page.locator("#send-message").click()
+        self.page.wait_for_function("document.getElementById('stage-speech').textContent.includes('合成的有效回复。')")
+        hidden_sample = self.page.evaluate("window.__projectSnowPerformance.getSamples()[0]")
+        self.assertIsNone(hidden_sample["ready_to_paint_ms"])
+        self.assertIsNone(hidden_sample["send_to_first_effective_ms"])
+        self.page.locator("#stage-dialogue").evaluate("node => { node.style.removeProperty('visibility'); }")
+        self.page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        self.page.wait_for_function("window.__projectSnowPerformance.getSamples()[0].send_to_first_effective_ms > 0")
+        self.assertFalse(self.errors)
+
+    def test_reduced_motion_during_push_cancels_camera_and_pending_title(self):
+        self._open()
+        self._reach_in_person()
+        self.page.locator('#chat-app[data-snow-pushing="1"]').wait_for()
+        self.page.emulate_media(reduced_motion="reduce")
+        self.page.wait_for_function("!document.getElementById('chat-app').dataset.snowPushing && window.__projectSnowTest.snowProbe().activeLoops === 0")
+        self.page.wait_for_timeout(1900)
+        self.assertEqual(self._veil()["phase"], "idle")
+        self.assertEqual(self._veil()["titleText"], "")
+        self.assertFalse(self.page.evaluate("window.__projectSnowTest.snowProbe().pushing"))
+        self.assertFalse(self.errors)
+
+    def test_opening_communicator_during_push_cancels_pending_title(self):
+        self._open()
+        self._reach_in_person()
+        self.page.locator('#chat-app[data-snow-pushing="1"]').wait_for()
+        self.page.locator("#open-communicator").click()
+        self.page.locator("#text-surface:not([hidden])").wait_for()
+        self.page.wait_for_timeout(1900)
+        self.assertEqual(self._veil()["phase"], "idle")
+        self.assertEqual(self._veil()["titleText"], "")
+        self.assertFalse(self.page.evaluate("window.__projectSnowTest.snowProbe().pushing"))
+        self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().activeLoops"), 1)
+        self.assertFalse(self.errors)
+
+    def test_communicator_snow_reacts_to_live_motion_preferences(self):
+        self._open()
+        self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().activeLoops"), 1)
+        self.page.locator("#open-settings").click()
+        self.page.locator("#settings-tab-about").click()
+        for motion, loops in (("light", 0), ("off", 0), ("auto", 1)):
+            self.page.locator("#motion-preference").select_option(motion)
+            self.page.wait_for_function(f"window.__projectSnowTest.snowProbe().activeLoops === {loops}")
+        self.page.emulate_media(reduced_motion="reduce")
+        self.page.wait_for_function("window.__projectSnowTest.snowProbe().activeLoops === 0")
+        self.page.emulate_media(reduced_motion="no-preference")
+        self.page.wait_for_function("window.__projectSnowTest.snowProbe().activeLoops === 1")
+        self.assertFalse(self.errors)
+
+    def test_light_first_arrival_does_not_replay_camera_when_auto_returns(self):
+        self._open(motion_pref="light")
+        self._reach_in_person()
+        self.page.wait_for_function("document.getElementById('snow-scene-veil').dataset.phase === 'idle'")
+        self.page.locator("#open-communicator").click()
+        self.page.locator("#text-surface:not([hidden])").wait_for()
+        self.page.locator("#open-settings").click()
+        self.page.locator("#settings-tab-about").click()
+        self.page.locator("#motion-preference").select_option("auto")
+        self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().backdropScene"), "observation")
+        self.assertFalse(self.page.evaluate("window.__projectSnowTest.snowProbe().pushPlayed"))
+        self.assertFalse(self.errors)
+
+    def test_veil_does_not_replay_when_reopening_communicator_to_same_location(self):
+        self._open()
+        self._reach_in_person()
+        # 首次入室在桌面 auto 档会先播镜头推进，veil 比直接进入晚约 1.3s 升起；先等它真正
+        # 升起（phase=up）再回到 idle，确保首播已完成，避免把首播误计为「重播」。
+        self.page.wait_for_function(
+            "document.getElementById('snow-scene-veil').dataset.phase === 'up'", timeout=6000)
+        self.page.wait_for_function(
+            "document.getElementById('snow-scene-veil').dataset.phase === 'idle'", timeout=5000)
+        self.page.evaluate("() => { window.__veilReplayed = false; const v = document.getElementById('snow-scene-veil');"
+                           " new MutationObserver(() => { if (v.dataset.phase === 'up') window.__veilReplayed = true; })"
+                           " .observe(v, { attributes: true, attributeFilter: ['data-phase'] }); }")
+        # 回到通讯器（文字），再返回同一地点：不应重播遮罩。
+        self.page.locator("#open-communicator").click()
+        self.page.locator("#text-surface:not([hidden])").wait_for()
+        self.page.locator("#go-in-person").click()
+        self.page.locator("#confirm-presence-transition").click()
+        self.page.locator("#in-person-surface:not([hidden])").wait_for()
+        self.page.wait_for_timeout(900)
+        self.assertFalse(self.page.evaluate("() => window.__veilReplayed"),
+                         "returning to the same location must not replay the veil")
+        self.assertFalse(self.errors)
+
+    def test_veil_never_plays_at_motion_off(self):
+        self._open(reduced_motion="reduce")
+        self.page.wait_for_function("document.getElementById('snow-scene-veil')", timeout=4000)
+        self.page.evaluate("() => { window.__veilEverUp = false; const v = document.getElementById('snow-scene-veil');"
+                           " new MutationObserver(() => { if (v.dataset.phase !== 'idle') window.__veilEverUp = true; })"
+                           " .observe(v, { attributes: true, attributeFilter: ['data-phase'] }); }")
+        self._reach_in_person()
+        self.page.wait_for_timeout(900)
+        self.assertFalse(self.page.evaluate("() => window.__veilEverUp"),
+                         "no veil at motion off / reduced motion")
+        self.assertEqual(self._veil()["phase"], "idle")
+        self.assertFalse(self.errors)
+
+    def test_no_veil_element_when_flag_off(self):
+        self._open(snow=False)
+        self._reach_in_person()
+        self.page.wait_for_timeout(400)
+        self.assertFalse(self._veil()["present"], "no veil element exists when the flag is off")
+        self.assertFalse(self.errors)
+

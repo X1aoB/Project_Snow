@@ -841,6 +841,8 @@ build_candidate_public_env() {
   public_dialogue_domains_v2=false
   public_scene_actions_v2=false
   public_session_memory_v2=false
+  # 雪境 ADV interface skin: presentation only, off unless explicitly enabled.
+  public_ui_snow_adv=false
   carriage_return="$(printf '\r')"
   while IFS= read -r public_line || [ -n "$public_line" ]; do
     case "$public_line" in
@@ -864,6 +866,7 @@ build_candidate_public_env() {
       PUBLIC_SUBSCRIPTION_ENABLED|PUBLIC_STATISTICS_ENABLED|WEB_CONCURRENCY|\
       PUBLIC_CHAT_LATENCY_V2|PUBLIC_VERIFIED_BLOCK_STREAM|PUBLIC_MOTION_V2|\
       PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2|\
+      PUBLIC_UI_SNOW_ADV|\
       PUBLIC_APP_VERSION|PUBLIC_DATA_VERSION|PUBLIC_MEDIA_VERSION|PUBLIC_MEDIA_ROOT|\
       PUBLIC_EXPERIENCE_NOTICE_VERSION|PUBLIC_ARRIVAL_PROBABILITY|\
       PUBLIC_STICKER_VERSION|PUBLIC_STICKER_ROOT|TURNSTILE_SITE_KEY|\
@@ -918,6 +921,12 @@ build_candidate_public_env() {
           PUBLIC_SESSION_MEMORY_V2) public_session_memory_v2="$public_value" ;;
         esac
         ;;
+      PUBLIC_UI_SNOW_ADV)
+        case "$public_value" in
+          true|false) public_ui_snow_adv="$public_value" ;;
+          *) echo 'Public interface flags must be true or false.' >&2; return 1 ;;
+        esac
+        ;;
     esac
   done < "$source_file"
 
@@ -966,7 +975,7 @@ build_candidate_public_env() {
             *) echo 'Candidate dialogue flags contain a malformed line.' >&2; return 1 ;;
           esac
           case "$public_override_key" in
-            PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2) ;;
+            PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2|PUBLIC_UI_SNOW_ADV) ;;
             *) echo 'Candidate dialogue flags contain a disallowed key.' >&2; return 1 ;;
           esac
           case "$public_override_seen" in
@@ -982,6 +991,7 @@ build_candidate_public_env() {
             PUBLIC_DIALOGUE_DOMAINS_V2) public_dialogue_domains_v2="$public_override_value" ;;
             PUBLIC_SCENE_ACTIONS_V2) public_scene_actions_v2="$public_override_value" ;;
             PUBLIC_SESSION_MEMORY_V2) public_session_memory_v2="$public_override_value" ;;
+            PUBLIC_UI_SNOW_ADV) public_ui_snow_adv="$public_override_value" ;;
           esac
         done < "$public_override_path"
         [ "$public_override_count" -gt 0 ] || {
@@ -1056,6 +1066,7 @@ build_candidate_public_env() {
       "$public_chat_latency_v2" "$public_verified_block_stream" "$public_motion_v2" || return 1
     printf 'PUBLIC_DIALOGUE_DOMAINS_V2=%s\nPUBLIC_SCENE_ACTIONS_V2=%s\nPUBLIC_SESSION_MEMORY_V2=%s\n' \
       "$public_dialogue_domains_v2" "$public_scene_actions_v2" "$public_session_memory_v2" || return 1
+    printf 'PUBLIC_UI_SNOW_ADV=%s\n' "$public_ui_snow_adv" || return 1
     printf 'PUBLIC_APP_VERSION=%s\nPUBLIC_DATA_VERSION=%s\n' \
       "$candidate_app_version" "$candidate_data_version" || return 1
     printf 'PUBLIC_MEDIA_VERSION=%s\nPUBLIC_MEDIA_ROOT=%s\n' \

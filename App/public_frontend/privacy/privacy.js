@@ -12,6 +12,13 @@ async function load() {
   ]);
   if (!configResponse.ok || !attributionResponse.ok) throw new Error("load_failed");
   const config = await configResponse.json();
+  // 雪境 ADV (P5)：隐私页也按开关皮肤化。features.ui_snow_adv 为真时挂
+  // html[data-ui="snow-adv"]（与主页一致），snow-adv.css 的规则随之生效；关闭则不变。
+  // 字体与图标署名行默认带 hidden（[hidden]{display:none !important}），仅开关开启时显示。
+  const snowAdvOn = config?.features?.ui_snow_adv === true;
+  if (snowAdvOn) document.documentElement.dataset.ui = "snow-adv";
+  else delete document.documentElement.dataset.ui;
+  document.querySelectorAll(".snow-adv-attribution").forEach((node) => { node.hidden = !snowAdvOn; });
   const attributions = await attributionResponse.json();
   document.getElementById("privacy-project-link").href = config.source_links.project_snow;
   document.getElementById("privacy-website-link").href = config.source_links.mywebsite;

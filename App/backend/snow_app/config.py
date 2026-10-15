@@ -195,7 +195,8 @@ class PublicSettings:
     dialogue_domains_v2: bool = False
     scene_actions_v2: bool = False
     session_memory_v2: bool = False
-
+    # 雪境 ADV interface skin; presentation only, default off.
+    ui_snow_adv: bool = False
     @classmethod
     def from_environment(cls) -> "PublicSettings":
         if load_dotenv is not None:
@@ -307,6 +308,7 @@ class PublicSettings:
             dialogue_domains_v2=os.getenv("PUBLIC_DIALOGUE_DOMAINS_V2", "false").casefold() == "true",
             scene_actions_v2=os.getenv("PUBLIC_SCENE_ACTIONS_V2", "false").casefold() == "true",
             session_memory_v2=os.getenv("PUBLIC_SESSION_MEMORY_V2", "false").casefold() == "true",
+            ui_snow_adv=os.getenv("PUBLIC_UI_SNOW_ADV", "false").casefold() == "true",
         )
 
     @property
