@@ -655,3 +655,377 @@ html[data-ui="snow-adv"][data-motion-level="off"] .snow-scene-veil-card { transi
   html[data-ui="snow-adv"] .snow-scene-veil-title::after { width: 40px; }
 }
 
+
+/* ================================================================ P5 通讯器与其余界面
+   仅在 html[data-ui="snow-adv"] 下：把面对面舞台以外的所有界面重做成雪境皮肤——文字
+   通讯（联系人卡片、磨砂设备感、角色色气泡、空会话问候卡）、顶栏、输入区、各弹窗与
+   抽屉、新手引导、提示与系统横幅，以及隐私页。沿用 P1 令牌与色板，仅改表现：动画只动
+   transform / opacity，档位由 [data-motion-level] 驱动。每条选择器都限定在
+   html[data-ui="snow-adv"] 下（测试强制）。开关关闭时本段全部匹配不到，旧界面逐字节不变。
+   per-row 的角色色由 renderCharacters() 写的 data-snow-character 提供（见 P1 的
+   [data-snow-character] 规则派生 --char/--char-deep/--char-soft）。 */
+
+/* ---- 1) 文字通讯：联系人卡片 ---------------------------------------------- */
+/* 设备感：聊天面板磨砂雪白，联系人栏半透明。 */
+html[data-ui="snow-adv"] .chat-panel { background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(244, 249, 252, 0.72)); }
+html[data-ui="snow-adv"] .contact-service { color: var(--ink-600); }
+html[data-ui="snow-adv"] .connection-status { color: var(--ink-600); }
+
+/* 联系人行做成卡片：圆形头像带角色色描边环、名字、预览、置顶星。 */
+html[data-ui="snow-adv"] .character-row { gap: 4px; }
+html[data-ui="snow-adv"] .character {
+  gap: 12px;
+  border-radius: var(--radius-m);
+  background: transparent;
+  transition: background-color 150ms var(--ease-snow), box-shadow 150ms var(--ease-snow), transform 150ms var(--ease-snow);
+}
+html[data-ui="snow-adv"] .character:hover {
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.9);
+}
+html[data-ui="snow-adv"] .character[aria-current="true"],
+html[data-ui="snow-adv"] .character[aria-selected="true"] {
+  border-color: transparent;
+  background: var(--snow-0);
+  box-shadow: 0 6px 18px rgba(32, 62, 92, 0.08), inset 3px 0 0 var(--char);
+}
+/* 圆形头像 + 角色色描边环（用 box-shadow 环，不改尺寸）。 */
+html[data-ui="snow-adv"] .character .portrait {
+  border-radius: 50%;
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--snow-0), 0 0 0 4px color-mix(in oklab, var(--char) 60%, var(--snow-0));
+}
+html[data-ui="snow-adv"] .character strong { color: var(--ink-900); font-size: var(--fs-16); }
+html[data-ui="snow-adv"] .character small { color: var(--ink-600); font-size: var(--fs-13); }
+/* 置顶星：角色色高亮。 */
+html[data-ui="snow-adv"] .pin-character { color: var(--ink-400); background: transparent; }
+html[data-ui="snow-adv"] .pin-character:hover { color: var(--ice-700); background: var(--snow-100); }
+html[data-ui="snow-adv"] .pin-character[aria-pressed="true"] { color: var(--warm-500); background: color-mix(in oklab, var(--warm-500) 14%, var(--snow-0)); }
+
+/* ---- 2) 文字通讯：消息气泡 ------------------------------------------------ */
+/* 助手气泡：白色磨砂、角色色细描边；用户气泡：冰蓝。 */
+html[data-ui="snow-adv"] .message-avatar .portrait { border-radius: 50%; }
+html[data-ui="snow-adv"] :is(.content-message, .content-speech) {
+  border-color: color-mix(in srgb, var(--char) 34%, var(--snow-200));
+  border-left: 3px solid color-mix(in srgb, var(--char) 62%, var(--snow-0));
+  border-radius: var(--radius-m) var(--radius-m) var(--radius-m) 6px;
+  color: var(--ink-900);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 6px 18px rgba(32, 62, 92, 0.07);
+}
+html[data-ui="snow-adv"] .message.user :is(.content-message, .content-speech) {
+  border-color: var(--ice-600);
+  border-left-width: 1px;
+  border-radius: var(--radius-m) var(--radius-m) 6px var(--radius-m);
+  color: var(--snow-0);
+  background: var(--ice-600);
+}
+/* 动作、表情、用量 chip 协调。 */
+html[data-ui="snow-adv"] .content-action {
+  border-color: color-mix(in srgb, var(--char) 30%, var(--ice-300));
+  border-radius: var(--radius-m);
+  color: color-mix(in srgb, var(--char-deep) 55%, var(--ink-700));
+  background: var(--char-soft);
+}
+html[data-ui="snow-adv"] .content-sticker {
+  border-color: var(--snow-200);
+  border-radius: var(--radius-m);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 6px 18px rgba(32, 62, 92, 0.07);
+}
+html[data-ui="snow-adv"] .message.user .content-sticker { border-color: color-mix(in srgb, var(--ice-400) 72%, transparent); background: var(--snow-100); }
+html[data-ui="snow-adv"] .content-sticker span { border-color: var(--snow-100); background: rgba(248, 252, 254, 0.8); }
+html[data-ui="snow-adv"] .message-usage { color: var(--ink-400); }
+html[data-ui="snow-adv"] .message-recovery-note { color: var(--ink-600); }
+html[data-ui="snow-adv"] .message.failed .message-body { border-color: var(--warm-300); background: color-mix(in oklab, var(--warm-500) 8%, var(--snow-0)); }
+html[data-ui="snow-adv"] .message .meta { color: var(--ink-600); }
+html[data-ui="snow-adv"] .message .meta span + span::before { color: var(--ink-400); }
+/* 文字通讯打字指示气泡随新色板。 */
+html[data-ui="snow-adv"] .typing-indicator-bubble {
+  border-color: color-mix(in srgb, var(--char) 30%, var(--snow-200));
+  border-radius: var(--radius-m) var(--radius-m) var(--radius-m) 6px;
+  background: var(--snow-0);
+  box-shadow: 0 6px 18px rgba(32, 62, 92, 0.07);
+}
+html[data-ui="snow-adv"] .typing-dot { background: var(--char); }
+
+/* 气泡 pop-in：auto 轻微上浮 + 淡入（~220ms），light 仅淡入，off 无。
+   作用在新消息行上（JS 在 .message 节点加 is-snow-pop，见 app.js）。 */
+html[data-ui="snow-adv"][data-motion-level="auto"] .message.is-snow-pop {
+  animation: snow-bubble-pop 220ms var(--ease-settle) both;
+}
+html[data-ui="snow-adv"][data-motion-level="light"] .message.is-snow-pop {
+  animation: snow-bubble-fade 220ms var(--ease-snow) both;
+}
+html[data-ui="snow-adv"][data-motion-level="off"] .message.is-snow-pop { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-ui="snow-adv"] .message.is-snow-pop { animation: none; }
+}
+
+/* ---- 3) 文字通讯：空会话问候卡 ------------------------------------------- */
+/* 友好的角色色问候卡，取代纯灰文字（文案不变，由 app.js 包进 .snow-empty-greeting）。 */
+html[data-ui="snow-adv"] .empty-conversation { color: var(--ink-600); }
+html[data-ui="snow-adv"] .empty-conversation .snow-empty-greeting {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 26px 28px;
+  border: 1px solid color-mix(in srgb, var(--char) 26%, var(--snow-200));
+  border-radius: var(--radius-l);
+  background: linear-gradient(180deg, var(--snow-0), color-mix(in oklab, var(--char) 7%, var(--snow-0)));
+  box-shadow: 0 10px 30px rgba(32, 62, 92, 0.08);
+}
+html[data-ui="snow-adv"] .empty-conversation .snow-empty-greeting .snow-empty-avatar {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  color: var(--char-deep);
+  background: var(--char-soft);
+  box-shadow: 0 0 0 3px var(--snow-0), 0 0 0 5px color-mix(in srgb, var(--char) 46%, var(--snow-0));
+  font-family: var(--font-story);
+  font-size: var(--fs-28);
+  line-height: 1;
+}
+html[data-ui="snow-adv"] .empty-conversation .snow-empty-greeting p { max-width: none; margin: 0; color: var(--ink-700); font-size: var(--fs-14); line-height: 1.7; }
+html[data-ui="snow-adv"][data-motion-level="auto"] .empty-conversation .snow-empty-greeting { animation: snow-bubble-pop 320ms var(--ease-snow) both; }
+html[data-ui="snow-adv"][data-motion-level="off"] .empty-conversation .snow-empty-greeting { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-ui="snow-adv"] .empty-conversation .snow-empty-greeting { animation: none; }
+}
+/* 开场建议胶囊随新色板。 */
+html[data-ui="snow-adv"] .starter-prompts button {
+  border-color: var(--snow-200);
+  border-radius: 999px;
+  color: var(--ice-700);
+  background: rgba(255, 255, 255, 0.86);
+}
+html[data-ui="snow-adv"] .starter-prompts button:hover { border-color: var(--ice-300); background: var(--snow-100); }
+
+/* ---- 4) 顶栏：文字通讯头部 ------------------------------------------------ */
+html[data-ui="snow-adv"] .active-character h1 { color: var(--ink-900); }
+html[data-ui="snow-adv"] .active-character p { color: var(--ink-600); }
+html[data-ui="snow-adv"] .active-character .portrait { border-radius: 50%; border-color: color-mix(in srgb, var(--char) 50%, transparent); }
+html[data-ui="snow-adv"] .current-rendezvous { border-bottom-color: var(--snow-200); background: var(--char-soft); }
+html[data-ui="snow-adv"] .current-rendezvous strong { color: var(--char-deep); }
+html[data-ui="snow-adv"] .new-replies {
+  border-color: var(--snow-200);
+  border-radius: 999px;
+  color: var(--ice-700);
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: var(--shadow-lift);
+}
+html[data-ui="snow-adv"] .rendezvous-card {
+  border-color: color-mix(in srgb, var(--char) 30%, var(--snow-200));
+  border-radius: var(--radius-m);
+  background: linear-gradient(145deg, var(--snow-0), var(--char-soft));
+  box-shadow: var(--shadow-lift);
+}
+html[data-ui="snow-adv"] .rendezvous-card strong { color: var(--char-deep); }
+html[data-ui="snow-adv"] .rendezvous-card small { color: var(--ink-600); }
+
+/* ---- 4b) 顶栏：面对面 HUD ------------------------------------------------- */
+/* HUD 工具按钮、地点随新色板；≥44px 触控目标由既有规则保证，这里不缩小。 */
+html[data-ui="snow-adv"] .scene-hud {
+  border-bottom-color: var(--snow-200);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 24px rgba(32, 62, 92, 0.08);
+}
+html[data-ui="snow-adv"] .scene-location strong { color: var(--ink-900); font-size: var(--fs-13); }
+html[data-ui="snow-adv"] .scene-location small { color: var(--ink-600); font-size: var(--fs-12); }
+html[data-ui="snow-adv"] .scene-character-button strong { color: var(--ink-900); font-size: var(--fs-14); }
+html[data-ui="snow-adv"] .scene-character-button small { color: var(--ink-600); font-size: var(--fs-12); }
+html[data-ui="snow-adv"] .sidebar-toggle-icon { color: var(--ink-600); }
+
+/* ---- 5) 输入区（文字通讯）------------------------------------------------- */
+html[data-ui="snow-adv"] .composer-row textarea {
+  border-color: var(--snow-200);
+  border-radius: 999px;
+  color: var(--ink-900);
+  background: var(--snow-0);
+}
+html[data-ui="snow-adv"] .composer-row textarea:focus {
+  border-color: var(--ice-400);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ice-400) 28%, transparent);
+}
+html[data-ui="snow-adv"] .shortcut-button {
+  border-color: var(--snow-200);
+  border-radius: 999px;
+  color: var(--ice-700);
+  background: var(--snow-100);
+}
+html[data-ui="snow-adv"] .shortcut-button:hover { border-color: var(--ice-300); background: var(--snow-0); }
+html[data-ui="snow-adv"] .composer-foot { color: var(--ink-400); }
+html[data-ui="snow-adv"] .selected-sticker {
+  border-color: color-mix(in srgb, var(--ice-400) 60%, transparent);
+  border-radius: var(--radius-m);
+  color: var(--ice-700);
+  background: var(--snow-100);
+}
+html[data-ui="snow-adv"] .request-status { color: var(--ink-600); }
+html[data-ui="snow-adv"] .request-recovery { border-color: var(--ice-300); color: var(--ice-700); background: var(--snow-100); }
+html[data-ui="snow-adv"] .stop-waiting { color: var(--warm-600); background: color-mix(in oklab, var(--warm-500) 14%, var(--snow-0)); }
+
+/* 修复移动端 placeholder 换行被截断：文字通讯输入框 placeholder 单行省略。
+   不改文案、不改行为；仅限 ::placeholder 展示。 */
+html[data-ui="snow-adv"] #message-input::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-ui="snow-adv"] #message-input::-webkit-input-placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- 6) 弹窗、抽屉、引导、提示、系统横幅 ---------------------------------- */
+/* 弹窗标题/说明/表单文案与分段标题。 */
+html[data-ui="snow-adv"] .modal h2 { color: var(--ink-900); }
+html[data-ui="snow-adv"] .modal p,
+html[data-ui="snow-adv"] .modal li,
+html[data-ui="snow-adv"] .modal label { color: var(--ink-700); }
+html[data-ui="snow-adv"] .modal-context { color: var(--ink-600); }
+html[data-ui="snow-adv"] .modal :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]) {
+  border-color: var(--snow-200);
+  border-radius: var(--radius-s);
+  color: var(--ink-900);
+  background: var(--snow-0);
+}
+html[data-ui="snow-adv"] .modal :is(input, select, textarea):focus {
+  border-color: var(--ice-400);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ice-400) 24%, transparent);
+}
+html[data-ui="snow-adv"] .modal pre,
+html[data-ui="snow-adv"] .modal code { border-radius: var(--radius-s); background: var(--snow-100); color: var(--ink-900); }
+html[data-ui="snow-adv"] .form-hint,
+html[data-ui="snow-adv"] .form-error { color: var(--ink-600); }
+html[data-ui="snow-adv"] .form-error { color: var(--warm-600); }
+html[data-ui="snow-adv"] .provider-doc-links a { color: var(--ice-700); }
+
+/* 设置分页标签。 */
+html[data-ui="snow-adv"] .settings-tabs button { border-radius: 999px; color: var(--ink-600); }
+html[data-ui="snow-adv"] .settings-tabs button:hover:not(.active) { background: var(--snow-100); }
+
+/* 公告 / 生日弹窗。 */
+html[data-ui="snow-adv"] .announcement-tabs button { color: var(--ink-600); }
+html[data-ui="snow-adv"] .announcement-tabs button[aria-selected="true"] { color: var(--ice-700); }
+html[data-ui="snow-adv"] .announcement-tab-badge { border-radius: 999px; color: var(--snow-0); background: var(--warm-500); }
+html[data-ui="snow-adv"] .announcement-update-meta,
+html[data-ui="snow-adv"] .announcements-footer > span { color: var(--ink-600); }
+html[data-ui="snow-adv"] .announcement-section-title { color: var(--ink-900); }
+html[data-ui="snow-adv"] .birthday-highlight {
+  border-radius: var(--radius-m);
+  background: linear-gradient(145deg, var(--snow-0), var(--char-soft));
+}
+html[data-ui="snow-adv"] .birthday-highlight strong { color: var(--char-deep); }
+html[data-ui="snow-adv"] :is(.birthday-highlight small, .birthday-row-copy > span, .birthday-source, .birthday-countdown, .birthday-attribution) { color: var(--ink-600); }
+
+/* 一起去（共同移动）弹窗的地点选项。 */
+html[data-ui="snow-adv"] .movement-options [role="radio"] {
+  border: 1px solid var(--snow-200);
+  border-radius: var(--radius-m);
+  color: var(--ink-900);
+  background: var(--snow-0);
+}
+html[data-ui="snow-adv"] .movement-options [role="radio"][aria-checked="true"] {
+  border-color: var(--ice-400);
+  background: var(--snow-100);
+  box-shadow: inset 0 0 0 1px var(--ice-400);
+}
+html[data-ui="snow-adv"] .movement-options [role="radio"] small { color: var(--ink-600); }
+
+/* 场景切换弹窗（去见她）。 */
+html[data-ui="snow-adv"] .presence-dialog-scene {
+  border-radius: var(--radius-m);
+  background: var(--char-soft);
+}
+html[data-ui="snow-adv"] .presence-dialog-scene strong { color: var(--char-deep); }
+html[data-ui="snow-adv"] .presence-dialog-scene p { color: var(--ink-700); }
+
+/* 反馈弹窗。 */
+html[data-ui="snow-adv"] .feedback-context-choice,
+html[data-ui="snow-adv"] .feedback-context-preview { border-radius: var(--radius-m); background: var(--snow-100); }
+html[data-ui="snow-adv"] .feedback-context-choice small { color: var(--ink-600); }
+
+/* 信息 / 回看抽屉。 */
+html[data-ui="snow-adv"] :is(.info-panel, .transcript-panel) header h2 { color: var(--ink-900); }
+html[data-ui="snow-adv"] .info-card { border-radius: var(--radius-m); background: var(--snow-50); }
+html[data-ui="snow-adv"] .info-card strong { color: var(--char-deep); }
+html[data-ui="snow-adv"] .transcript-entry { border-radius: var(--radius-m); background: var(--snow-50); }
+html[data-ui="snow-adv"] .transcript-entry strong { color: var(--ink-700); }
+html[data-ui="snow-adv"] .evidence-sources { color: var(--ink-600); }
+
+/* 新手引导 / coach marks。 */
+html[data-ui="snow-adv"] .onboarding-guide {
+  border: 1px solid var(--snow-200);
+  border-radius: var(--radius-l);
+  background: var(--frost-bg);
+  box-shadow: var(--shadow-frost);
+}
+html[data-ui="snow-adv"] .onboarding-guide strong { font-family: var(--font-story); font-weight: 400; color: var(--ink-900); }
+html[data-ui="snow-adv"] .onboarding-guide p { color: var(--ink-700); }
+html[data-ui="snow-adv"] .onboarding-skip { color: var(--ink-600); }
+
+/* 系统横幅（维护 / 新版本 / 标签页接管）。 */
+html[data-ui="snow-adv"] .system-banner {
+  border-radius: var(--radius-m);
+  color: var(--ink-900);
+  background: color-mix(in oklab, var(--warm-500) 12%, var(--snow-0));
+}
+html[data-ui="snow-adv"] .system-banner .secondary-button { background: var(--snow-0); }
+
+/* ---- 7) 隐私页（flag 开启时才皮肤化）------------------------------------- */
+/* 隐私页也挂 html[data-ui="snow-adv"]（由 privacy.js 读 /config 设置），复用 P1 令牌。 */
+html[data-ui="snow-adv"] .privacy-page {
+  color: var(--ink-900);
+  background: linear-gradient(180deg, var(--snow-0) 0%, var(--snow-50) 46%, var(--snow-100) 100%);
+}
+html[data-ui="snow-adv"] .privacy-header .brand-mark { border-radius: 50%; }
+html[data-ui="snow-adv"] .privacy-hero h1 { font-family: var(--font-story); font-weight: 400; color: var(--ink-900); }
+html[data-ui="snow-adv"] .privacy-hero p,
+html[data-ui="snow-adv"] .privacy-page .privacy-main p { color: var(--ink-700); }
+html[data-ui="snow-adv"] .privacy-page :is(h2, h3) { color: var(--ink-900); }
+html[data-ui="snow-adv"] .privacy-grid > article,
+html[data-ui="snow-adv"] .privacy-section {
+  border: 1px solid var(--snow-200);
+  border-radius: var(--radius-l);
+  background: var(--snow-0);
+  box-shadow: 0 10px 28px rgba(32, 62, 92, 0.06);
+}
+html[data-ui="snow-adv"] .privacy-page a { color: var(--ice-700); }
+html[data-ui="snow-adv"] .privacy-page .panel-kicker { color: var(--ink-600); }
+html[data-ui="snow-adv"] .attribution-list article { border-radius: var(--radius-m); background: var(--snow-50); }
+html[data-ui="snow-adv"] .attribution-list article span { color: var(--ink-600); font-size: var(--fs-12); }
+/* 字体与图标署名行：仅在 flag 开启时显示（privacy.js 开启时移除 hidden）。 */
+html[data-ui="snow-adv"] .snow-adv-attribution { color: var(--ink-600); font-size: var(--fs-12); }
+html[data-ui="snow-adv"] .snow-adv-attribution a { color: var(--ice-700); }
+
+/* ---- 8) ≥12px 兜底：P5 新增的可见小字节点 -------------------------------- */
+html[data-ui="snow-adv"] :is(
+  .snow-empty-greeting p, .snow-adv-attribution, .movement-options [role="radio"] small
+) { font-size: var(--fs-12); }
+
+/* ---- 关键帧（只被上面开关开启的规则引用）--------------------------------- */
+@keyframes snow-bubble-pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes snow-bubble-fade { from { opacity: 0; } to { opacity: 1; } }
+
+
+/* ---- 9) 移动端（≤560px）：修复 HUD 名字截断与输入占位 ---------------------- */
+@media (max-width: 560px) {
+  /* HUD 角色名原本被 .scene-character-button max-width:150px + strong 省略号挤成
+     「凯…」。开关开启时让按钮用可用宽度、名字正常显示（真正放不下才省略）。 */
+  html[data-ui="snow-adv"] .scene-character-button { max-width: none; min-width: 0; }
+  html[data-ui="snow-adv"] .scene-character-button > span:nth-child(2) { min-width: 0; }
+  html[data-ui="snow-adv"] .scene-character-button strong {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+  /* 面对面输入占位同样单行省略，避免「说些什么，也可只填写动作……」换行被裁切。
+     placeholder 规则在上方已对 #message-input 生效，这里只保证单行高度不被撑高。 */
+  html[data-ui="snow-adv"] #message-input { min-height: 44px; }
+}

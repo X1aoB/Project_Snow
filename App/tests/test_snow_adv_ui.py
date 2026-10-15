@@ -960,3 +960,274 @@ class SnowAdvPerformanceTests(TestCase):
         self.assertEqual(self.errors, [])
         self.assertEqual(self._failed_skin_requests(), [])
 
+
+
+# --------------------------------------------------------------------------- P5
+# 通讯器与其余界面：联系人卡片 per-row 角色色、气泡 pop-in 按档位、移动端 placeholder
+# 单行与 HUD 名字不截断、文字通讯/设置/公告弹窗全部 ≥12px、隐私页仅在 flag 开启时皮肤化。
+
+
+@skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
+class SnowAdvCommunicatorTests(TestCase):
+    """P5 通讯器与其余界面：联系人卡片、气泡 pop-in、移动端修复、最小字号、隐私页。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), fixture.PublicFrontendHandler)
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+        cls.base_url = f"http://127.0.0.1:{cls.server.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.server_thread.join(timeout=5)
+
+    def setUp(self):
+        fixture.PublicFrontendE2ETests.setUp(self)
+        self.playwright = fixture.sync_playwright().start()
+        self.browser = fixture._launch_browser(self.playwright)
+        self.errors = []
+        self.failed = []
+        self.page = None
+
+    def tearDown(self):
+        self.browser.close()
+        self.playwright.stop()
+
+    def _page(self, width=1280, height=820):
+        page = self.browser.new_page(viewport={"width": width, "height": height})
+        page.on("pageerror", lambda error: self.errors.append(str(error)))
+        page.on("response", lambda response: self.failed.append(response.url) if response.status >= 400 else None)
+        page.set_default_timeout(8000)
+        self.page = page
+        return page
+
+    def _open(self, page, enabled, motion=None):
+        if motion is not None:
+            page.add_init_script(f"window.localStorage.setItem('project-snow-public:motion', {json.dumps(motion)})")
+
+        def configure(route):
+            payload = route.fetch().json()
+            payload["features"] = {**payload.get("features", {}), "ui_snow_adv": enabled}
+            route.fulfill(json=payload)
+
+        page.route("**/public/v1/config", configure)
+        page.goto(self.base_url, wait_until="networkidle")
+
+    def _failed_skin_requests(self):
+        return [url for url in self.failed if "snow-adv" in url or "/assets/fonts/" in url or "/modules/snow-world" in url]
+
+    def _reach_in_person(self, page):
+        # Mirror the proven P3 path to the in-person surface and arrival reaction.
+        page.locator("#accept-experience-notice").click()
+        page.locator("#go-in-person-label", has_text="观景区").wait_for(state="visible")
+        if page.locator("#onboarding-guide:not([hidden])").count() and page.locator("#skip-onboarding").is_visible():
+            page.locator("#skip-onboarding").click()
+        narrow = page.viewport_size["width"] <= 820
+        if narrow and page.locator("#contact-panel").get_attribute("aria-hidden") == "true":
+            page.locator("#open-contacts").click()
+            page.locator("#contact-panel.open").wait_for()
+        fixture.PublicFrontendE2ETests._configure_model(page)
+        if narrow and page.locator("#contact-panel.open").count():
+            if page.locator("#close-contacts").is_visible():
+                page.locator("#close-contacts").click()
+            page.locator("#contact-panel:not(.open)").wait_for()
+        if page.locator("#skip-onboarding").is_visible():
+            page.locator("#skip-onboarding").click()
+        page.locator("#go-in-person").click()
+        page.locator("#confirm-presence-transition").click()
+        page.locator("#in-person-surface:not([hidden])").wait_for()
+        page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+
+    def _dismiss_notice(self, page):
+        if page.locator("#accept-experience-notice").is_visible():
+            page.locator("#accept-experience-notice").click()
+        if page.locator("#skip-onboarding").is_visible():
+            page.locator("#skip-onboarding").click()
+
+    def test_contact_cards_carry_per_row_character_colour(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._dismiss_notice(page)
+        page.locator(".character-row[data-snow-character]").first.wait_for()
+        rows = page.evaluate(
+            """() => {
+          const paint = document.createElement('canvas').getContext('2d');
+          const toRgb = color => { paint.fillStyle = '#000'; paint.fillStyle = color; paint.fillRect(0, 0, 1, 1);
+            const [r, g, b] = paint.getImageData(0, 0, 1, 1).data; return `${r},${g},${b}`; };
+          return [...document.querySelectorAll('.character-row[data-snow-character]')].slice(0, 4).map(row => {
+            const probe = document.createElement('span');
+            probe.style.color = 'var(--char)';
+            row.appendChild(probe);
+            const colour = toRgb(getComputedStyle(probe).color);
+            probe.remove();
+            return { id: row.dataset.snowCharacter, colour };
+          });
+        }""")
+        self.assertGreaterEqual(len(rows), 2)
+        # Every row carries a resolved --char, and at least two differ (per-row colour).
+        self.assertTrue(all(row["id"] and row["colour"] for row in rows))
+        self.assertGreater(len({row["colour"] for row in rows}), 1)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_contact_rows_have_no_colour_attribute_when_flag_off(self):
+        page = self._page(1280, 820)
+        self._open(page, False)
+        self._dismiss_notice(page)
+        page.locator(".character-row").first.wait_for()
+        count = page.evaluate("() => document.querySelectorAll('.character-row[data-snow-character]').length")
+        self.assertEqual(count, 0)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_bubble_pop_in_present_at_auto_and_absent_at_off(self):
+        # The pop-in is a CSS keyframe animation gated by motion level; probe it
+        # on a representative .message node under the skinned chat shell.
+        def animation_name(motion):
+            page = self._page(1280, 820)
+            self._open(page, True, motion=motion)
+            self._dismiss_notice(page)
+            name = page.evaluate(
+                """() => {
+              const timeline = document.getElementById('timeline');
+              const node = document.createElement('article');
+              node.className = 'message assistant sent is-snow-pop';
+              node.innerHTML = '<div class="message-avatar"></div><div class="message-body">'
+                + '<div class="message-content-stack"><div class="content-message">你好</div></div></div>';
+              timeline.appendChild(node);
+              const value = getComputedStyle(node).animationName;
+              node.remove();
+              return value;
+            }""")
+            errors = list(self.errors)
+            failed = self._failed_skin_requests()
+            page.close()
+            return name, errors, failed
+
+        auto_name, auto_errors, auto_failed = animation_name("auto")
+        self.assertIn("snow-bubble-pop", auto_name)
+        self.assertEqual(auto_errors, [])
+        self.assertEqual(auto_failed, [])
+
+        off_name, off_errors, off_failed = animation_name("off")
+        self.assertEqual(off_name.strip(), "none")
+        self.assertEqual(off_errors, [])
+        self.assertEqual(off_failed, [])
+
+    def test_mobile_placeholder_single_line_and_hud_name_not_truncated(self):
+        page = self._page(390, 844)
+        self._open(page, True)
+        self._reach_in_person(page)
+        # The in-person composer placeholder is the long "说些什么，也可只填写动作……".
+        page.wait_for_function(
+            "document.getElementById('message-input').placeholder.includes('说些什么')", timeout=8000)
+        state = page.evaluate(
+            """() => {
+          const input = document.getElementById('message-input');
+          const style = getComputedStyle(input, '::placeholder');
+          const name = document.getElementById('stage-character-name');
+          return {
+            placeholder: input.placeholder,
+            // Single-line textarea: content box does not overflow its own height.
+            fitsOneLine: input.scrollHeight <= input.clientHeight + 2,
+            placeholderNowrap: style.whiteSpace,
+            nameText: name.textContent,
+            // The HUD name is fully shown (not clipped): scrollWidth <= clientWidth (+1 rounding).
+            nameNotTruncated: name.scrollWidth <= name.clientWidth + 1,
+          };
+        }""")
+        self.assertIn("说些什么", state["placeholder"])
+        self.assertTrue(state["fitsOneLine"], state)
+        self.assertGreaterEqual(len(state["nameText"]), 3)
+        self.assertTrue(state["nameNotTruncated"], state)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_all_visible_text_is_at_least_twelve_pixels(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._dismiss_notice(page)
+        page.locator(".character-row").first.wait_for()
+
+        def smallest(selector_scope):
+            return page.evaluate(
+                """scope => {
+              const root = scope ? document.querySelector(scope) : document.body;
+              if (!root) return 999;
+              const nodes = [...root.querySelectorAll('*')].filter(node => {
+                if (node.closest('[hidden]') || node.hidden) return false;
+                const style = getComputedStyle(node);
+                if (style.display === 'none' || style.visibility === 'hidden') return false;
+                const text = [...node.childNodes].some(child => child.nodeType === 3 && child.textContent.trim());
+                return text;
+              });
+              return nodes.length ? Math.min(...nodes.map(node => parseFloat(getComputedStyle(node).fontSize))) : 999;
+            }""",
+                selector_scope,
+            )
+
+        # Text channel (contact list + chat shell visible text).
+        self.assertGreaterEqual(smallest("#text-surface"), 12)
+        self.assertGreaterEqual(smallest("#contact-panel"), 12)
+        # Settings dialog.
+        page.locator("#open-settings").click()
+        page.locator("#settings-dialog[open]").wait_for()
+        self.assertGreaterEqual(smallest("#settings-dialog"), 12)
+        page.locator('#settings-dialog [data-close-dialog="settings-dialog"]').click()
+        # Announcements dialog.
+        page.locator("#open-announcements").click()
+        page.locator("#announcements-dialog[open]").wait_for()
+        self.assertGreaterEqual(smallest("#announcements-dialog"), 12)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def _open_privacy(self, enabled):
+        page = self._page(1280, 820)
+
+        def configure(route):
+            payload = route.fetch().json()
+            payload["features"] = {**payload.get("features", {}), "ui_snow_adv": enabled}
+            route.fulfill(json=payload)
+
+        def attributions(route):
+            route.fulfill(json={"avatars": [], "stickers": [], "knowledge_data": {}})
+
+        page.route("**/public/v1/config", configure)
+        page.route("**/public/v1/attributions", attributions)
+        page.goto(f"{self.base_url}/privacy/", wait_until="networkidle")
+        return page
+
+    def test_privacy_page_skinned_and_attribution_only_when_flag_on(self):
+        page = self._open_privacy(True)
+        page.wait_for_function("document.documentElement.dataset.ui === 'snow-adv'")
+        state = page.evaluate(
+            """() => ({
+          ui: document.documentElement.dataset.ui,
+          attributionVisible: (() => { const node = document.querySelector('.snow-adv-attribution');
+            return node ? getComputedStyle(node).display !== 'none' : false; })(),
+          heroFont: getComputedStyle(document.querySelector('.privacy-hero h1')).fontFamily,
+        })""")
+        self.assertEqual(state["ui"], "snow-adv")
+        self.assertTrue(state["attributionVisible"])
+        self.assertIn("LXGW WenKai Screen", state["heroFont"])
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_privacy_page_unskinned_and_attribution_hidden_when_flag_off(self):
+        page = self._open_privacy(False)
+        # Give privacy.js a chance to run its config fetch before asserting.
+        page.wait_for_function("document.querySelector('.snow-adv-attribution') !== null")
+        state = page.evaluate(
+            """() => ({
+          ui: document.documentElement.dataset.ui || null,
+          attributionVisible: (() => { const node = document.querySelector('.snow-adv-attribution');
+            return node ? getComputedStyle(node).display !== 'none' : false; })(),
+        })""")
+        self.assertIsNone(state["ui"])
+        self.assertFalse(state["attributionVisible"])
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+

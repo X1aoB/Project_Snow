@@ -110,6 +110,34 @@
 - **CSP**：无内联 `<style>` 元素、无外链 URL；仅用 `transform`/`opacity` 动画。
 - 不改 public v1 / `public-state-2` / IndexedDB v4 / 请求负载 / 快照 / 回复计时，不新增模型调用。证据（录像 .webm/.gif 与定格 .png，桌面 1280×820 + 移动 390×844）见 `.tmp/snow-adv-p4/`。
 
+## P5 通讯器与其余界面（本阶段）
+
+把面对面舞台以外的所有界面重做成雪境皮肤：文字通讯（联系人卡片、磨砂设备感、角色色气泡、空会话问候卡）、顶栏（文字通讯头部与面对面 HUD）、输入区、各弹窗与抽屉、新手引导、提示与系统横幅，以及隐私页。仅在 `html[data-ui="snow-adv"]` 下生效；开关关闭时行为与 DOM 逐字节不变——本阶段只改既有节点的表现，JS 新增的属性/类都以 `snowAdvActive()`（读 `<html data-ui>`）为前提，关闭态不写出。动画只动 `transform`/`opacity`，档位由 `app.js` 维护的 `[data-motion-level]` 驱动。
+
+| 文件 | 内容 |
+|---|---|
+| `public_frontend/snow-adv.css` | 追加 P5 段：① 联系人卡片——`.character` 做成卡片，圆形头像带角色色描边环（`box-shadow` 双环），选中态左侧 `inset` 角色色条；置顶星用暖色高亮；每行的角色色由 `renderCharacters()` 写的 `data-snow-character` 经 P1 的 `[data-snow-character]` 规则派生 `--char`。② 消息气泡——助手气泡白色磨砂 + 角色色细左描边与圆角尾巴，用户气泡冰蓝；动作/表情/用量 chip 协调；文字通讯打字气泡随新色板。③ 气泡 pop-in——`.message.is-snow-pop` 由关键帧 `snow-bubble-pop`（`auto`：上浮 6px + 淡入 ~220ms）/ `snow-bubble-fade`（`light`：仅淡入）驱动，`off`/减少动态无动画。④ 空会话问候卡 `.snow-empty-greeting`——角色色头像首字 + 原文案，取代纯灰文字。⑤ 顶栏——文字通讯头部、当前约定条、新回复气泡、约定卡随新色板；面对面 HUD 工具/地点随新色板，`≥44px` 触控目标不缩小。⑥ 输入区——胶囊输入框、工具/发送按钮与 P1 一致；`#message-input::placeholder` 单行省略，修复移动端占位文案换行被裁切。⑦ 弹窗/抽屉/引导/提示/横幅——设置、公告与生日、去见她、一起去、反馈、信息与回看抽屉、新手引导、系统横幅统一半径、磨砂、字体与角色色。⑧ 隐私页——`.privacy-page` 在开关开启时皮肤化（标题用霞鹜文楷、卡片磨砂圆角），字体与图标署名行 `.snow-adv-attribution` 仅开关开启时显示。⑨ 移动端（≤560px）——放开 HUD 角色名的 `max-width:150px` 与省略号，让 3–4 字名字正常显示（修复「凯…」截断）；输入占位保持单行。⑩ `≥12px` 兜底覆盖 P5 新增的小字节点。每条选择器都限定在 `html[data-ui="snow-adv"]` 下（测试强制）；关键帧 `snow-bubble-pop`/`snow-bubble-fade` 只被开关开启的规则引用。 |
+| `public_frontend/app.js` | `renderCharacters()`：开关开启时给每个 `.character-row` 写 `data-snow-character`（关闭态不写，DOM 逐字节不变）。`renderTimeline()`：空会话在开关开启且已选角色时用 `.snow-empty-greeting`（角色色头像首字 + 原文案）渲染，否则沿用原 `<p>`；新消息行在开关开启时加 `is-snow-pop` 类交给 CSS 按档位做 pop-in（关闭态沿用既有 `transientMotion` WAAPI 行为）。既有 `#chat-app` 上的 `data-snow-character`（P1，选中角色时写）为整个聊天面板派生 `--char`，助手气泡/问候卡/约定卡/头像均据此取色。 |
+| `public_frontend/privacy/index.html` | 链接 `/snow-adv.css?v=1.0.0`；在「许可边界」区加一条默认 `hidden` 的字体与图标署名 `<p class="snow-adv-attribution">`（霞鹜文楷 SIL OFL 1.1；Lucide 图标 ISC）。 |
+| `public_frontend/privacy/privacy.js` | 读 `/public/v1/config` 后，`features.ui_snow_adv` 为真时给 `<html>` 加 `data-ui="snow-adv"` 并移除署名行的 `hidden`；为假时清除（因 `app.css` 的 `[hidden]{display:none !important}`，可见性由 `hidden` 属性而非 CSS `display` 控制）。 |
+
+### 动态档位（P5）
+
+- `auto`：气泡 pop-in 上浮 + 淡入、空会话问候卡轻微入场。
+- `light`：气泡仅淡入（无位移），问候卡无入场动画。
+- `off`（含减少动态）：无任何气泡/问候卡动画。
+
+### 实测
+
+- **联系人卡片 per-row 角色色**：headless Chromium、开关开启，`.character-row[data-snow-character]` 各自解析出不同的 `--char`（≥2 行颜色不同）；关闭态无该属性。
+- **气泡 pop-in**：`auto` 下 `.message.is-snow-pop` 的 `animation-name` 含 `snow-bubble-pop`，`off` 下为 `none`。
+- **移动端（390×844）**：面对面占位「说些什么，也可只填写动作……」在单行输入框内不溢出（`scrollHeight ≤ clientHeight + 2`）；HUD 角色名（3–4 字，夹具角色「凯茜娅」）完整显示不截断（`scrollWidth ≤ clientWidth + 1`）。
+- **最小字号**：文字通讯界面、联系人栏、设置弹窗、公告弹窗中所有可见文字 `≥ 12px`。
+- **隐私页**：开关开启时挂 `data-ui="snow-adv"`、标题用霞鹜文楷、署名行可见；关闭时不挂皮肤、署名行隐藏。
+- **体积（eager，开关关闭也随包下发）**：相对 P4，`snow-adv.css` 约 **+3.6 KB（gzip）**、`app.js` 约 **+0.5 KB（gzip）**，合计约 **+4.2 KB（gzip）**（起始工作树 107,007 B → 111,255 B）。开关开启不新增网络请求（复用 P1 的字体/图标/令牌，无新模块）。隐私页新增一处 `/snow-adv.css` 引用（该资源已在清单与指纹化中）。
+- **CSP**：无内联 `<style>` 元素、无外链 URL（隐私页署名行的 `<a>` 为可点击链接，非被动获取资源）；仅用 `transform`/`opacity` 动画。
+- 不改 public v1 / `public-state-2` / IndexedDB v4 / 请求负载 / 快照 / 回复计时，不新增模型调用。证据（桌面 1280×820 + 移动 390×844 定格 .png）见 `.tmp/snow-adv-p5/`。
+
 ## 资源来源与重新生成
 
 - 字体：npm `lxgw-wenkai-screen-webfont@1.7.0`（包 MIT，字体 SIL OFL 1.1），使用其中的 `lxgwwenkaigbscreen.css` 分片。字体文件逐字节复制，未修改字形；只从 `unicode-range` 中去掉 emoji 与图形符号区段（U+200D、U+2600–27BF、U+2B00–2BFF、U+FE00–FE0F、U+1F000–1FAFF、U+E0000–E007F），让 emoji 继续使用系统彩色字体，并丢弃只含这些字符的 2 个分片。文件名带内容哈希前 16 位，沿用 Caddy 现有的一年 immutable 缓存规则。
@@ -126,7 +154,7 @@
   node App/scripts/build_snow_adv_icons.mjs --check  # 测试使用
   ```
 
-- 放量时（P5/P6），隐私与素材页应补充霞鹜文楷（OFL 1.1）与 lucide（ISC）的署名。
+- 放量时（P5/P6），隐私与素材页应补充霞鹜文楷（OFL 1.1）与 lucide（ISC）的署名。P5 已在隐私页加入该署名行（`.snow-adv-attribution`），仅在 `ui_snow_adv` 开启时显示。
 
 ## 验证
 

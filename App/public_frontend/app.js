@@ -3355,7 +3355,10 @@ function renderCharacters() {
           ? `发送了表情：${last.contentBlocks.find((block) => block.type === "sticker")?.caption || "表情"}`
           : "尚未开始对话";
       const pinned = state.pinnedCharacters.has(character.character_id);
-      return `<div class="character-row" role="listitem"><button class="character" aria-current="${character.character_id === state.selected}" data-character="${escapeHtml(character.character_id)}">${avatarMarkup(character, { thumbnail: true, priority: character.character_id === state.selected })}<span><strong>${escapeHtml(character.display_name)}</strong><small>${escapeHtml(summary)}</small></span></button><button class="pin-character" type="button" data-pin-character="${escapeHtml(character.character_id)}" aria-pressed="${pinned}" aria-label="${pinned ? "取消置顶" : "置顶"}${escapeHtml(character.display_name)}">${pinned ? "★" : "☆"}</button></div>`;
+      // 雪境 ADV (P5)：每行带 data-snow-character，让联系人卡片用各自的角色色（--char）。
+      // 仅皮肤开启时写出，关闭态 DOM 与旧界面逐字节一致。
+      const rowCharacter = snowAdvActive() ? ` data-snow-character="${escapeHtml(character.character_id)}"` : "";
+      return `<div class="character-row" role="listitem"${rowCharacter}><button class="character" aria-current="${character.character_id === state.selected}" data-character="${escapeHtml(character.character_id)}">${avatarMarkup(character, { thumbnail: true, priority: character.character_id === state.selected })}<span><strong>${escapeHtml(character.display_name)}</strong><small>${escapeHtml(summary)}</small></span></button><button class="pin-character" type="button" data-pin-character="${escapeHtml(character.character_id)}" aria-pressed="${pinned}" aria-label="${pinned ? "取消置顶" : "置顶"}${escapeHtml(character.display_name)}">${pinned ? "★" : "☆"}</button></div>`;
     }).join("");
   bindAvatarImages($("character-list"));
   document.querySelectorAll("[data-character]").forEach((button) => { button.onclick = () => selectCharacter(button.dataset.character); });
@@ -4876,7 +4879,12 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   const older = thread?.hasOlderMessages || window.start > 0 ? '<button id="load-older-messages" class="secondary-button load-older-messages" type="button">加载更早的 40 条</button>' : "";
   const newer = window.hasNewer ? '<button id="load-newer-messages" class="secondary-button load-older-messages" type="button">查看较新的 40 条</button>' : "";
   if (!messages.length) {
-    reconcileMarkup(timeline, `${older}${timelineTypingMarkup()}<div class="empty-conversation"><p>从一句问候开始吧。历史只保存在此浏览器。</p>${starterPromptsMarkup()}</div>`);
+    const emptyCopy = "从一句问候开始吧。历史只保存在此浏览器。";
+    // 雪境 ADV (P5)：空会话用角色色问候卡取代纯灰文字；文案不变。关闭态保持原样。
+    const emptyBody = snowAdvActive() && currentCharacter()
+      ? `<div class="snow-empty-greeting"><span class="snow-empty-avatar" aria-hidden="true">${escapeHtml((currentCharacter().display_name || "").slice(0, 1))}</span><p>${escapeHtml(emptyCopy)}</p></div>`
+      : `<p>${escapeHtml(emptyCopy)}</p>`;
+    reconcileMarkup(timeline, `${older}${timelineTypingMarkup()}<div class="empty-conversation">${emptyBody}${starterPromptsMarkup()}</div>`);
     timeline.dataset.messageCount = "0";
     bindTimelineActions();
     observeTimelineViewport();
@@ -4909,7 +4917,14 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     // Historical rows and background arrivals must not animate on re-render.
     if (!featureEnabled("motion_v2") || quietPresentation() || message.createdAtEstimated || Date.now() - message.createdAt > 3000 || !wasNearBottom) continue;
     const node = [...timeline.querySelectorAll("[data-message-id]")].find(item => item.dataset.messageId === message.id);
-    if (node) void transientMotion.play(node, [{ opacity: .25, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 180, easing: "cubic-bezier(.22,.72,.24,1)" });
+    if (!node) continue;
+    if (snowAdvActive()) {
+      // 雪境 ADV (P5)：气泡 pop-in 由 CSS 关键帧按动态档位驱动（auto 上浮+淡入、
+      // light 仅淡入、off 无），只动 transform/opacity。加类即可，不再用 WAAPI。
+      node.classList.add("is-snow-pop");
+    } else {
+      void transientMotion.play(node, [{ opacity: .25, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 180, easing: "cubic-bezier(.22,.72,.24,1)" });
+    }
   }
   const newMessages = allMessages.length > previousCount;
   timeline.dataset.messageCount = String(allMessages.length);
