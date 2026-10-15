@@ -1,5 +1,6 @@
 import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope, anonymousServerTimings } from "/modules/runtime.js";
 import { DIALOGUE_PROTOCOL, SCENE_PROTOCOL, dialogueRecordKey, decodeSidecar, mergeDialogueReceipts, relevantDialogueReceipts, fitDialogueContext, isPureRendezvousJoin, sceneVisualKey } from "/dialogue-context.js";
+import { createSnowIcon } from "/modules/snow-icons.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
@@ -641,6 +642,61 @@ function syncMotionState() {
   if ($("motion-preference-setting")) $("motion-preference-setting").hidden = !featureEnabled("motion_v2");
 }
 function replyTiming(requestId) { return state.replyTimingByRequest.get(requestId); }
+// 雪境 ADV skin (P1).  Off unless the server reports features.ui_snow_adv.
+// Turning it on only adds html[data-ui="snow-adv"], links the story font and
+// swaps the static Unicode control glyphs for SVG icons; turning it off
+// restores the original glyphs, so the legacy interface is untouched.
+const SNOW_ADV_FONT_STYLESHEET = "/snow-adv-fonts.css";
+const SNOW_ADV_STATIC_ICONS = Object.freeze([
+  [".contact-search > span[aria-hidden]", "search"],
+  ["#open-settings", "settings"],
+  ["#open-contacts", "menu"],
+  ["#stage-menu > summary", "menu"],
+  ["#open-info", "info"],
+  [".announcement-entry > span[aria-hidden]:first-child", "bell"],
+  ["#toggle-stage-ui", "eye-off"],
+  ["#toggle-sticker .composer-tool-icon", "smile"],
+  ["#toggle-action .composer-tool-icon", "sparkles"],
+  ["#open-movement-shortcuts .composer-tool-icon", "footprints"],
+  ["#send-message .composer-tool-icon", "send-horizontal"],
+]);
+function snowAdvIconTargets() {
+  const targets = [];
+  for (const [selector, icon] of SNOW_ADV_STATIC_ICONS) document.querySelectorAll(selector).forEach(node => targets.push([node, icon]));
+  document.querySelectorAll("button.icon-button").forEach(node => {
+    if (node.dataset.snowGlyph === "×" || (!node.dataset.snowGlyph && node.textContent.trim() === "×")) targets.push([node, "x"]);
+  });
+  return targets;
+}
+function applySnowAdvIcons(enabled) {
+  for (const [node, icon] of snowAdvIconTargets()) {
+    if (enabled && !node.dataset.snowGlyph) {
+      const glyph = node.textContent.trim();
+      // Only a node holding a single glyph is replaced; labelled text stays.
+      if (!glyph || glyph.length > 2 || node.children.length) continue;
+      node.dataset.snowGlyph = glyph;
+      node.replaceChildren(createSnowIcon(icon));
+    } else if (!enabled && node.dataset.snowGlyph) {
+      node.textContent = node.dataset.snowGlyph;
+      delete node.dataset.snowGlyph;
+    }
+  }
+}
+function loadSnowAdvFonts() {
+  if (document.querySelector("link[data-snow-adv-fonts]")) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = SNOW_ADV_FONT_STYLESHEET;
+  link.dataset.snowAdvFonts = "";
+  document.head.append(link);
+}
+function syncInterfaceSkin() {
+  const enabled = featureEnabled("ui_snow_adv");
+  if (enabled) document.documentElement.dataset.ui = "snow-adv";
+  else delete document.documentElement.dataset.ui;
+  if (enabled) loadSnowAdvFonts();
+  applySnowAdvIcons(enabled);
+}
 function bodyIsVisible(node) {
   if (!node?.isConnected || node.closest("[hidden], [inert]") || document.hidden) return false;
   const bounds = node.getBoundingClientRect();
@@ -2225,6 +2281,7 @@ function renderMobileProviderOptions() {
 async function loadConfig() {
   state.config = await api("/config", { headers: {} });
   syncMotionState();
+  syncInterfaceSkin();
   $("version-badge").textContent = state.config.app_version || "0.9.6";
   $("github-link").href = state.config.source_links.project_snow;
   $("website-github-link").href = state.config.source_links.mywebsite;
@@ -4186,6 +4243,8 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     if (preparedScene) state.sceneByCharacter.set(characterId, preparedScene);
     state.scene = preparedScene;
     const character = characterById(characterId);
+    // Data only; snow-adv.css reads it for the character colour when enabled.
+    $("chat-app").dataset.snowCharacter = characterId;
     renderCharacters();
     $("active-character").innerHTML = `${avatarMarkup(character, { thumbnail: true, priority: true, className: "large" })}<div><h1>${escapeHtml(character.display_name)}</h1><p>文字通讯</p></div>`;
     fillAvatar($("stage-header-avatar"), character, { thumbnail: true, priority: true });

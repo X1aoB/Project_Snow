@@ -1,0 +1,250 @@
+/*
+ * 雪境 ADV design system (P1).
+ *
+ * Every rule is scoped to html[data-ui="snow-adv"], which app.js sets only when
+ * the server reports features.ui_snow_adv === true.  With the flag off this
+ * file matches nothing, so the existing interface renders exactly as before.
+ * Fonts live in /snow-adv-fonts.css and are linked lazily by app.js.
+ * Motion is unchanged in P1; animation work belongs to later phases.
+ */
+
+html[data-ui="snow-adv"] {
+  /* Snow and ice */
+  --snow-0: #ffffff;
+  --snow-50: #f7fafc;
+  --snow-100: #eef4f8;
+  --snow-200: #dde8ef;
+  --ice-300: #bcd5e5;
+  --ice-400: #8fbfdb;
+  --ice-500: #5d9bc2;
+  --ice-600: #3a7ca5; /* 4.56:1 on white */
+  --ice-700: #2b5f80;
+  /* Ink */
+  --ink-900: #1f2d3a;
+  --ink-700: #34485a;
+  --ink-600: #4a5d6e; /* 6.8:1 on white */
+  --ink-400: #7b8c9a; /* decoration and large text only */
+  /* Warm accents for mood and reminders */
+  --warm-300: #f6cdbb;
+  --warm-500: #e58a6a;
+  --warm-600: #c96a4c;
+
+  /* Current character colour; [data-snow-character] below overrides it. */
+  --char: var(--ice-500);
+  --char-deep: color-mix(in oklab, var(--char) 76%, var(--ink-900));
+  --char-soft: color-mix(in oklab, var(--char) 14%, var(--snow-0));
+
+  --font-ui: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", system-ui, sans-serif;
+  --font-story: "LXGW WenKai Screen", "KaiTi", "STKaiti", "PingFang SC", "Microsoft YaHei", serif;
+
+  /* Type scale; nothing in the interface goes below 12px. */
+  --fs-12: 0.75rem;
+  --fs-13: 0.8125rem;
+  --fs-14: 0.875rem;
+  --fs-16: 1rem;
+  --fs-18: 1.125rem;
+  --fs-20: 1.25rem;
+  --fs-24: 1.5rem;
+
+  --radius-s: 10px;
+  --radius-m: 16px;
+  --radius-l: 24px;
+  --shadow-frost: 0 18px 48px rgba(32, 62, 92, 0.16), 0 2px 6px rgba(32, 62, 92, 0.06);
+  --shadow-lift: 0 10px 28px rgba(32, 62, 92, 0.14);
+  --frost-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 249, 252, 0.95));
+
+  /* Easing tokens for later phases (P1 does not change motion). */
+  --ease-snow: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-settle: cubic-bezier(0.34, 1.32, 0.5, 1);
+
+  /* Re-map the shared design variables so every var()-based rule follows. */
+  --snow-bg: var(--snow-50);
+  --snow-panel: var(--snow-0);
+  --snow-panel-strong: var(--snow-0);
+  --snow-line: var(--snow-200);
+  --snow-line-soft: var(--snow-100);
+  --snow-ink: var(--ink-900);
+  --snow-muted: var(--ink-600);
+  --snow-blue: var(--ice-600);
+  --snow-blue-strong: var(--ice-700);
+  --snow-blue-soft: var(--snow-100);
+  --snow-focus: var(--ice-600);
+  --snow-shadow: var(--shadow-frost);
+  --snow-radius: var(--radius-m);
+  --control-icon-size: 20px;
+
+  font-family: var(--font-ui);
+}
+
+/* 22 character theme colours (draft palette from the P0 mockups). */
+html[data-ui="snow-adv"] [data-snow-character="702f4375675b"] { --char: #e2738a; --char-deep: #b84f67; --char-soft: #fbe3e8; } /* 米娅 */
+html[data-ui="snow-adv"] [data-snow-character="447ed3c401c9"] { --char: #7c78c8; --char-deep: #5a55a3; --char-soft: #e9e8f8; } /* 胧嫣 */
+html[data-ui="snow-adv"] [data-snow-character="ca0144ccd81b"] { --char: #5d9bc2; } /* 里芙 */
+html[data-ui="snow-adv"] [data-snow-character="1b0a6b35719a"] { --char: #d0645a; } /* 芬妮 */
+html[data-ui="snow-adv"] [data-snow-character="98322bd505f4"] { --char: #4f8fd6; } /* 辰星 */
+html[data-ui="snow-adv"] [data-snow-character="cf0569ac6de9"] { --char: #b4544e; } /* 肴 */
+html[data-ui="snow-adv"] [data-snow-character="9f5804761c56"] { --char: #9a7bc9; } /* 安卡希雅 */
+html[data-ui="snow-adv"] [data-snow-character="43f05917bfa1"] { --char: #6aa7b8; } /* 恩雅 */
+html[data-ui="snow-adv"] [data-snow-character="4370a74d6fda"] { --char: #e08a4c; } /* 妮塔 */
+html[data-ui="snow-adv"] [data-snow-character="6862c43d2ac9"] { --char: #8c9bb0; } /* 猫汐尔 */
+html[data-ui="snow-adv"] [data-snow-character="921f9ef0cc4e"] { --char: #e0a83c; } /* 晴 */
+html[data-ui="snow-adv"] [data-snow-character="8d5b5c3912bb"] { --char: #5aa58a; } /* 琴诺 */
+html[data-ui="snow-adv"] [data-snow-character="85b205f6f623"] { --char: #6d7fc0; } /* 瑟瑞斯 */
+html[data-ui="snow-adv"] [data-snow-character="a2ffc5b44d7f"] { --char: #d27aa6; } /* 芙提雅 */
+html[data-ui="snow-adv"] [data-snow-character="673ba6851b05"] { --char: #a08a6a; } /* 苔丝 */
+html[data-ui="snow-adv"] [data-snow-character="daab0f4cceb4"] { --char: #7aa06a; } /* 茉莉安 */
+html[data-ui="snow-adv"] [data-snow-character="5157b8972632"] { --char: #c46f8e; } /* 薇蒂雅 */
+html[data-ui="snow-adv"] [data-snow-character="78aa7ab99154"] { --char: #4fa3a3; } /* 伊切尔 */
+html[data-ui="snow-adv"] [data-snow-character="d5ecfceba959"] { --char: #8e6fb3; } /* 克罗瑞娜 */
+html[data-ui="snow-adv"] [data-snow-character="25b23cb64398"] { --char: #c9875a; } /* 凯茜娅 */
+html[data-ui="snow-adv"] [data-snow-character="6455a5dcff6a"] { --char: #e39a72; } /* 卜卜 */
+html[data-ui="snow-adv"] [data-snow-character="41b7444e39cc"] { --char: #5f8fb0; } /* 奈莉德 */
+
+/* Base surface */
+html[data-ui="snow-adv"] body {
+  color: var(--ink-900);
+  background: linear-gradient(180deg, var(--snow-0) 0%, var(--snow-50) 46%, var(--snow-100) 100%);
+  -webkit-font-smoothing: antialiased;
+}
+html[data-ui="snow-adv"] :focus-visible {
+  outline: 2px solid var(--ice-600);
+  outline-offset: 2px;
+}
+
+/* Minimum 12px: every rule that app.css sets below .75rem. */
+html[data-ui="snow-adv"] :is(
+  .content-action, .content-sticker small, .message-usage, .rendezvous-card small, .stop-waiting,
+  .action-composer label, .composer-foot, .selected-sticker-copy strong, .selected-sticker-copy small,
+  .selected-sticker-copy > span, .scene-character-button small, .scene-location small,
+  .scene-menu-popover button, .scene-menu-popover a, .stage-presence-status, .stage-speaker-line span,
+  .system-banner, .announcement-tab-badge, .announcement-update-meta, .birthday-highlight small,
+  .birthday-row-copy > span, .birthday-source, .birthday-countdown, .birthday-attribution,
+  .announcements-footer > span, .form-error, .form-hint, .provider-doc-links a, .settings-tabs button,
+  .advanced-model-settings > button, .sticker-choice, .presence-dialog-scene p,
+  .birthday-calendar .birthday-countdown
+) {
+  font-size: var(--fs-12);
+}
+
+/* Story typography: dialogue, nameplate and scene titles use LXGW WenKai. */
+html[data-ui="snow-adv"] :is(.stage-speech, .stage-narration, .stage-speaker-line strong, .transition-card strong, #stage-location) {
+  font-family: var(--font-story);
+}
+html[data-ui="snow-adv"] .stage-speech {
+  color: var(--ink-900);
+  font-size: var(--fs-18);
+  line-height: 1.8;
+  letter-spacing: 0.01em;
+}
+
+/* Icons */
+html[data-ui="snow-adv"] .snow-icon {
+  display: block;
+  width: var(--control-icon-size);
+  height: var(--control-icon-size);
+  flex: none;
+  stroke-width: 1.9;
+}
+html[data-ui="snow-adv"] .contact-search .snow-icon { width: 18px; height: 18px; }
+html[data-ui="snow-adv"] .composer-tool-icon .snow-icon { width: 18px; height: 18px; }
+
+/* Brand: keep the original 小吉终端 icon, drop the legacy gradient tile. */
+html[data-ui="snow-adv"] .brand-mark {
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  box-shadow: 0 6px 16px rgba(58, 124, 165, 0.22);
+}
+
+/* Buttons */
+html[data-ui="snow-adv"] :is(.presence-switch, .primary-button, .secondary-button, .danger-button, .send-button) {
+  border-radius: 999px;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  transition: background-color 160ms var(--ease-snow), border-color 160ms var(--ease-snow), box-shadow 160ms var(--ease-snow);
+}
+html[data-ui="snow-adv"] :is(.presence-switch, .primary-button, .send-button) {
+  border-color: transparent;
+  color: var(--snow-0);
+  background: var(--ice-600);
+  box-shadow: 0 8px 18px rgba(58, 124, 165, 0.24);
+}
+html[data-ui="snow-adv"] :is(.presence-switch, .primary-button, .send-button):hover:not(:disabled) {
+  background: var(--ice-700);
+}
+html[data-ui="snow-adv"] .secondary-button {
+  border-color: var(--snow-200);
+  color: var(--ice-700);
+  background: var(--snow-0);
+}
+html[data-ui="snow-adv"] .secondary-button:hover:not(:disabled) {
+  border-color: var(--ice-300);
+  background: var(--snow-100);
+}
+html[data-ui="snow-adv"] :is(.footer-command, .icon-button) {
+  border-radius: 999px;
+  color: var(--ink-600);
+}
+html[data-ui="snow-adv"] :is(.footer-command, .icon-button):hover:not(:disabled) {
+  border-color: var(--snow-200);
+  color: var(--ice-700);
+  background: var(--snow-100);
+}
+html[data-ui="snow-adv"] :is(.scene-character-button, .scene-tool-button) {
+  border-color: rgba(188, 213, 229, 0.9);
+  border-radius: 999px;
+  color: var(--ink-900);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: var(--shadow-lift);
+}
+html[data-ui="snow-adv"] .scene-tool-button.primary {
+  border-color: transparent;
+  color: var(--snow-0);
+  background: var(--ice-600);
+}
+
+/* Inputs */
+html[data-ui="snow-adv"] :is(.contact-search input, .composer-row textarea, .action-composer textarea) {
+  border-color: var(--snow-200);
+  border-radius: var(--radius-m);
+  color: var(--ink-900);
+  background: var(--snow-0);
+}
+html[data-ui="snow-adv"] :is(.contact-search input, .composer-row textarea, .action-composer textarea):focus {
+  border-color: var(--ice-400);
+  box-shadow: 0 0 0 3px rgba(93, 155, 194, 0.18);
+}
+html[data-ui="snow-adv"] .contact-search span { color: var(--ink-400); }
+
+/* Panels, bars and dialogs */
+html[data-ui="snow-adv"] .contact-panel { background: rgba(255, 255, 255, 0.95); }
+html[data-ui="snow-adv"] .contact-footer { background: var(--snow-50); }
+html[data-ui="snow-adv"] .chat-header { background: rgba(255, 255, 255, 0.92); }
+html[data-ui="snow-adv"] .composer { background: rgba(255, 255, 255, 0.94); }
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .composer { background: var(--snow-100); }
+html[data-ui="snow-adv"] :is(.info-panel, .transcript-panel) { background: var(--snow-0); }
+html[data-ui="snow-adv"] :is(.info-panel, .transcript-panel).open { box-shadow: -12px 0 40px rgba(32, 62, 92, 0.1); }
+html[data-ui="snow-adv"] .modal {
+  border-color: var(--snow-200);
+  border-radius: var(--radius-l);
+  background: var(--snow-0);
+  box-shadow: var(--shadow-frost);
+}
+html[data-ui="snow-adv"] .modal::backdrop { background: rgba(31, 45, 58, 0.24); }
+html[data-ui="snow-adv"] .settings-tabs button.active { color: var(--ice-700); background: var(--snow-100); }
+html[data-ui="snow-adv"] .panel-kicker { color: var(--ink-600); }
+html[data-ui="snow-adv"] .toast {
+  border-color: var(--snow-200);
+  border-radius: 999px;
+  color: var(--ink-700);
+  background: rgba(255, 255, 255, 0.97);
+}
+
+/* Character colour, applied where a nameplate already exists. */
+html[data-ui="snow-adv"] .stage-speaker-line strong {
+  color: var(--snow-0);
+  background: var(--char-deep);
+  letter-spacing: 0.04em;
+}
+html[data-ui="snow-adv"] .active-character h1 { color: var(--ink-900); }
+html[data-ui="snow-adv"] .active-character .portrait { border-color: color-mix(in oklab, var(--char) 55%, transparent); }

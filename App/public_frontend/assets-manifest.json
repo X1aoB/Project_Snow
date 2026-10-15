@@ -22,11 +22,23 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/modules/snow-icons.js",
+      "public_url": "/modules/snow-icons.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/snow-adv-fonts.css",
+      "public_url": "/snow-adv-fonts.css",
+      "required_html": false
+    },
+    {
       "source": "public_frontend/app.js",
       "public_url": "/app.js",
       "dependencies": [
         "/modules/runtime.js",
         "/dialogue-context.js",
+        "/modules/snow-icons.js",
+        "/snow-adv-fonts.css",
         "/assets/avatars/longyan-neutral-96.webp",
         "/assets/avatars/longyan-neutral-200.webp"
       ]
@@ -34,6 +46,10 @@
     {
       "source": "public_frontend/app.css",
       "public_url": "/app.css"
+    },
+    {
+      "source": "public_frontend/snow-adv.css",
+      "public_url": "/snow-adv.css"
     },
     {
       "source": "public_frontend/privacy/privacy.js",
@@ -46,7 +62,7 @@
     {
       "source": "frontend/shared/brand/xiaoji-icon.png",
       "public_url": "/shared/brand/xiaoji-icon.png",
-      "required_html": true
+      "required_html": false
     },
     {
       "source": "frontend/shared/brand/xiaoji-icon-192.png",

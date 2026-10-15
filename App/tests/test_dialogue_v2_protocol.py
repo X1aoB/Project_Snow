@@ -515,7 +515,7 @@ class DialogueV2RouteTests(TestCase):
         client = TestClient(disabled)
         try:
             config = client.get("/public/v1/config").json()
-            for name in ("dialogue_domains_v2", "scene_actions_v2", "session_memory_v2"):
+            for name in ("dialogue_domains_v2", "scene_actions_v2", "session_memory_v2", "ui_snow_adv"):
                 self.assertFalse(config["features"][name])
             self.assertEqual(client.get("/public/v1/build-info").json()["api_schema"], "public-v1")
             denied = client.post("/public/v2/chat/stream", headers=self.headers, json=self.envelope())
