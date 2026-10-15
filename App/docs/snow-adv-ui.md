@@ -80,6 +80,36 @@
 - **CSP**：无内联 `<style>` 元素、无外链 URL；▼ 与快捷菜单图标用 DOM API 生成（CSP 安全）。
 - 不改 public v1 / `public-state-2` / IndexedDB v4 / 请求负载 / 快照 / 回复计时，不新增模型调用。
 
+## P4 演出与转场（本阶段）
+
+把面对面舞台做成有「演出感」的 galgame 画面，仅在 `html[data-ui="snow-adv"]` 下生效。开关关闭时行为、DOM 与时序逐字节不变（本阶段只改既有节点的表现与 `transform`/`opacity` 动画，不新增任何可见元素，脚本只在开关开启时读 `data-ui`）。所有动画只动 `transform` 与 `opacity`，档位由 `app.js` 维护的 `data-motion-level` 驱动。
+
+| 文件 | 内容 |
+|---|---|
+| `public_frontend/app.js` | ① 换表情无透明空档：`crossfadeStageCharacterArt()` 在开关开启时让外层旧图全程 `opacity:1`，仅内层新图（`data-stage-art-transition="incoming"`，z-index 更高）从 0 淡入到 1，淡入完成后再移除旧图——任意时刻可见画面都不透明，绝不会两层同时半透明；关闭开关沿用旧的交叉淡出。② 入场：立绘首次为某场景/到场出现（上一帧无图/隐藏且非换表情）时，`playStageEnter()` 以 `--ease-settle` 做 ~420ms 的上浮(≈12px→0)+淡入；`light` 仅淡入；`off`/减少动态/页面隐藏不做。纯视觉，调用方不 `await`，不阻塞到场/回复逻辑。③ 动作：`stageMotionFrames()` 在开关开启时返回带缓冲、小振幅、会 settle 的 `lean_in`/`tremble`/`recoil`/`startle`（曲线取自样稿 `--ease-snow`/`--ease-settle`），替代旧的 ±10px 生硬抖动；动作名、触发、去重键完全不变；`light` 档位不做任何位移/缩放（标记 `data-stage-motion="suppressed"`），`off`/减少动态同既有抑制。新增 `snowAdvActive()`（以 `<html data-ui>` 为唯一真源）与 `stageMotionTier()`（auto/light/off）两个辅助。④ 独立白雪转场遮罩：生产环境 `motion_v2`/`scene_actions_v2` 开启时旧的三个转场层根本不显示，故在 `renderScene()` 中新增 `maybePlaySnowVeil(scene, visualKey)`——仅在开关开启、面对面可见、已布防（`armSnowVeilSoon()` 用一次 `requestAnimationFrame` 把布防推到下一帧，排除首帧/历史恢复的同步突发）、且 `scene.character_location` 相对上次确实变化时，在独立覆盖层 `#snow-scene-veil`（`syncSnowVeilMount()` 仅在开关开启时建、`aria-hidden`、`pointer-events:none`）上播放：快速磨砂白雪淡入 → 在掩护下才调用 `snowWorld.setScene(visualKey)`（仅延迟 P2 世界的视觉切换，不延迟任何逻辑/请求/回复计时）→ 显示地点标题卡（标题=`character_location`、副标题=`character_activity`）→ 保持 ~600ms → 淡出。初始加载/历史恢复、重开通讯器回到同一地点、地点未变均不触发；`auto`=淡入+标题轻微上浮，`light`=纯短淡入，`off`/减少动态=完全不播放。调用方从不 `await`，地点仍仅由既有 `aria-live` 播报一次（本层不参与无障碍播报）。 |
+| `public_frontend/snow-adv.css` | 追加 P4 段：① 呼吸——`auto` 且页面可见时，`.stage-character-art[data-actor-anchor]` 以 `@keyframes snow-actor-breath` 做 1→1.008 的极轻缩放，`transform-origin` 落在身体中轴底部 `calc(100% * var(--actor-anchor-x))`（用 `transform`，不与 P3 的 `translate` 中轴定位冲突）；`light`/`off`/减少动态/`data-page-hidden="true"` 时 `animation:none`。② 白雪转场遮罩——把既有的脚印加载卡（`#scene-transition-layer .transition-card`、`#presence-arrival-loading`、`#mode-transition-layer`）重做成磨砂白雪淡入 + 居中标题卡：标题（地点名）用霞鹜文楷故事字体加细线描边，副标题为既有 detail 文案；隐藏脚印 `.transition-footsteps` 与加载圆点 `.transition-dots`。复用同一批 DOM、`data-phase`、`aria-live` 文案与时序钩子，纯表现改动，不延迟/重排任何逻辑、请求或回复计时。`off`/减少动态时这些层无任何 `transition`/`animation` 时长（瞬时显隐）。③ 独立白雪转场覆盖层 `.snow-scene-veil`（`idle` 态 `opacity:0`、`pointer-events:none`）与地点标题卡 `.snow-scene-veil-title`——霞鹜文楷、桌面 `--fs-32`(32px)/移动 `--fs-24`(24px)、带字距与两侧冰蓝细线（`::before`/`::after`），`.snow-scene-veil-kicker`/`.snow-scene-veil-sub` ≥ 12px；`off`/减少动态时无任何 `transition`/`animation`。新增字号令牌 `--fs-28`/`--fs-32`（旧的脚印层标题也改用故事字体放大）。每条选择器都限定在 `html[data-ui="snow-adv"]` 下；关键帧 `snow-actor-breath` 只被开关开启的呼吸规则引用。 |
+
+### 动态档位（P4）
+
+读 `document.documentElement.dataset.motionLevel`（由 `syncMotionState()` 维护，`off` 覆盖 `prefers-reduced-motion`）：
+
+- `auto`：换表情叠加淡入、入场上浮+淡入、呼吸、带缓冲的小振幅动作、白雪遮罩淡入+标题轻微上浮全部开启。
+- `light`：仅淡入淡出——换表情仍只淡入内层（不出现透明空档）、入场仅淡入、无呼吸、无位移/缩放动作、遮罩为纯短淡入。
+- `off`（含减少动态）：无动画——瞬时换帧、无呼吸、无动作、完全不播放白雪遮罩。
+
+### 生产态白雪遮罩（本阶段修订）
+
+评审发现：生产环境 `motion_v2=true`、`scene_actions_v2=true`，旧的三个转场层（`#scene-transition-layer`/`#presence-arrival-loading`/`#mode-transition-layer`）在该配置下根本不显示，用户看不到白雪转场。修订用一个**独立的、仅装饰的**覆盖层 `#snow-scene-veil` 承载地点转场，在面对面地点真正变化时播放（见上 app.js ④）。旧三层的雪境重做样式保留（兼容 `motion_v2` 关闭的旧路径），不冲突。触发矩阵：从文字进入已知地点 / 面对面可见时地点变化 → 播放；初始加载·历史恢复 / 重开通讯器回到同一地点 / 地点未变 / `off`·减少动态 → 不播放。
+
+### 实测
+
+- **换表情无透明空档**：headless Chromium、1280×820、开关开启，`updateStageCharacterArt(neutral→happy)` 过程中逐帧采样：外层旧图 `opacity` 全程 ≥ 0.95，两层从不同时半透明；内层从 < 0.5 升到 ≥ 0.99；settle 后舞台仅剩 1 个立绘节点。开关关闭时旧图照常淡出到 < 0.5（旧行为不变）。
+- **呼吸**：`auto` 下 `#stage-character-art` 的 `animation-name` 含 `snow-actor-breath`；`light`/`off` 下为 `none`。
+- **生产态白雪遮罩**（`motion_v2`/`scene_actions_v2` 开启，复用 `test_dialogue_v2_frontend.py` 夹具）：进入面对面（观景区）后 `#snow-scene-veil` 升起、`opacity > 0.5`、标题「观景区」以霞鹜文楷 ≥ 28px 显示、`aria-hidden="true"`、`pointer-events:none`，随后淡回 `idle`（`opacity ≈ 0`）；重开通讯器回到同一地点不重播；`off`/减少动态下从不升起；开关关闭时无 `#snow-scene-veil` 元素。
+- **体积（eager，开关关闭也随包下发）**：相对 P3，`snow-adv.css` 约 **+1.8 KB（gzip）**、`app.js` 约 **+3.6 KB（gzip）**，合计约 **+5.5 KB（gzip）**。开关开启不新增网络请求（白雪遮罩复用既有 DOM 与现有令牌/字体，无新图标/字体/模块）。
+- **CSP**：无内联 `<style>` 元素、无外链 URL；仅用 `transform`/`opacity` 动画。
+- 不改 public v1 / `public-state-2` / IndexedDB v4 / 请求负载 / 快照 / 回复计时，不新增模型调用。证据（录像 .webm/.gif 与定格 .png，桌面 1280×820 + 移动 390×844）见 `.tmp/snow-adv-p4/`。
+
 ## 资源来源与重新生成
 
 - 字体：npm `lxgw-wenkai-screen-webfont@1.7.0`（包 MIT，字体 SIL OFL 1.1），使用其中的 `lxgwwenkaigbscreen.css` 分片。字体文件逐字节复制，未修改字形；只从 `unicode-range` 中去掉 emoji 与图形符号区段（U+200D、U+2600–27BF、U+2B00–2BFF、U+FE00–FE0F、U+1F000–1FAFF、U+E0000–E007F），让 emoji 继续使用系统彩色字体，并丢弃只含这些字符的 2 个分片。文件名带内容哈希前 16 位，沿用 Caddy 现有的一年 immutable 缓存规则。

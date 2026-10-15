@@ -93,6 +93,12 @@ const state = {
   stageMotionRequestSequence: 0,
   stageMotionAnimation: null,
   stageMotionCharacterId: "",
+  stageEnterAnimation: null,
+  snowVeilLocation: null,
+  snowVeilArmed: false,
+  snowVeilSeen: false,
+  snowVeilTimers: [],
+  snowVeilAnimation: null,
   playedStageMotionKeys: new Set(),
   replyTimingByRequest: new Map(),
   streamingPresentationByCharacter: new Map(),
@@ -612,6 +618,15 @@ function abortableDelay(milliseconds, signal) {
 function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches || localPreferences.getItem("project-snow-public:motion") === "off"; }
 function featureEnabled(name) { return state.config?.features?.[name] === true; }
 function quietPresentation() { return reducedMotion() || document.hidden; }
+// 雪境 ADV 演出 (P4)：是否处于雪境皮肤。以 <html data-ui> 为唯一真源（syncInterfaceSkin
+// 设置、CSS 与动态档位都读它），这样测试只需切 data-ui 即可驱动，无需等 config。
+function snowAdvActive() { return document.documentElement.dataset.ui === "snow-adv"; }
+// P4 立绘/动作档位：auto=完整（位移+缩放+呼吸）、light=仅淡入淡出、off=无动画（含减少动态）。
+function stageMotionTier() {
+  if (reducedMotion()) return "off";
+  return document.documentElement.dataset.motionLevel === "light" ? "light"
+    : document.documentElement.dataset.motionLevel === "off" ? "off" : "auto";
+}
 const surfaceMotion = new MotionScope();
 const transientMotion = new MotionScope();
 const completedReplyTimings = [];
@@ -863,6 +878,102 @@ function syncStageQuickMenu() {
 function syncStageQuickMenuMount() {
   if (featureEnabled("ui_snow_adv")) buildStageQuickMenu();
   else removeStageQuickMenu();
+  syncSnowVeilMount();
+}
+// 雪境 ADV (P4 后续)：白雪转场遮罩。生产环境 motion_v2/scene_actions_v2 开启时，旧的三个
+// 转场层根本不显示，所以用这个独立的、仅装饰的覆盖层来呈现地点转场。节点仅在开关开启时建、
+// aria-hidden、pointer-events:none；地点播报仍只走既有 aria-live（本层不参与无障碍播报）。
+function buildSnowVeil() {
+  const stage = $("scene-stage");
+  if (!stage || stage.querySelector(".snow-scene-veil")) return;
+  const veil = document.createElement("div");
+  veil.className = "snow-scene-veil";
+  veil.id = "snow-scene-veil";
+  veil.setAttribute("aria-hidden", "true");
+  veil.dataset.phase = "idle";
+  const card = document.createElement("div");
+  card.className = "snow-scene-veil-card";
+  const kicker = document.createElement("span");
+  kicker.className = "snow-scene-veil-kicker";
+  const title = document.createElement("strong");
+  title.className = "snow-scene-veil-title";
+  const sub = document.createElement("span");
+  sub.className = "snow-scene-veil-sub";
+  card.append(kicker, title, sub);
+  veil.append(card);
+  stage.append(veil);
+}
+function removeSnowVeil() {
+  for (const timer of state.snowVeilTimers.splice(0)) window.clearTimeout(timer);
+  $("scene-stage")?.querySelector(".snow-scene-veil")?.remove();
+}
+function syncSnowVeilMount() {
+  if (featureEnabled("ui_snow_adv")) buildSnowVeil();
+  else removeSnowVeil();
+}
+// 决定是否在本次 renderScene 播放遮罩，并在遮罩掩护下切换 P2 世界场景（仅视觉延迟，不延迟逻辑）。
+// 触发：开关开启、面对面可见、已布防（排除首帧/历史恢复）、地点确实变化。
+// 不触发：初始加载/历史恢复、重开通讯器回到同一地点、地点未变、off/减少动态。
+function maybePlaySnowVeil(scene, visualKey) {
+  const location = plain(scene?.character_location || "");
+  const visible = snowAdvActive() && !$("in-person-surface").hidden;
+  const tier = stageMotionTier();
+  // 遮罩不适用时，世界场景照旧立即切换（与改动前行为一致）。
+  const commitScene = () => { if (snowWorld) snowWorld.setScene(visualKey); };
+  if (!visible || !location || tier === "off") {
+    commitScene();
+    if (visible && location) state.snowVeilLocation = location;
+    armSnowVeilSoon();
+    return;
+  }
+  const changed = state.snowVeilArmed && location !== state.snowVeilLocation;
+  state.snowVeilLocation = location;
+  if (!changed) { commitScene(); armSnowVeilSoon(); return; }
+  playSnowVeil(scene, location, tier, commitScene);
+}
+// 首帧/历史恢复发生在同一帧的同步突发里；用一次 rAF 把布防推到下一帧，排除这段突发。
+function armSnowVeilSoon() {
+  if (state.snowVeilArmed || state.snowVeilSeen) return;
+  state.snowVeilSeen = true;
+  requestAnimationFrame(() => { state.snowVeilArmed = true; });
+}
+function playSnowVeil(scene, location, tier, commitScene) {
+  const veil = $("snow-scene-veil");
+  if (!veil || typeof veil.animate !== "function" || document.hidden) { commitScene(); return; }
+  for (const timer of state.snowVeilTimers.splice(0)) window.clearTimeout(timer);
+  state.snowVeilAnimation?.cancel();
+  const card = veil.querySelector(".snow-scene-veil-card");
+  const kicker = veil.querySelector(".snow-scene-veil-kicker");
+  const title = veil.querySelector(".snow-scene-veil-title");
+  const sub = veil.querySelector(".snow-scene-veil-sub");
+  // 标题卡文案：标题=地点名，副标题=角色活动（本层 aria-hidden，不额外播报）。
+  if (kicker) kicker.textContent = "场景";
+  if (title) title.textContent = location;
+  if (sub) sub.textContent = plain(scene?.character_activity || "");
+  const fadeIn = tier === "light" ? 180 : 300;
+  const hold = 600;
+  const fadeOut = tier === "light" ? 180 : 420;
+  veil.dataset.phase = "up";
+  veil.dataset.tier = tier;
+  const inAnim = veil.animate([{ opacity: 0 }, { opacity: 1 }], { duration: fadeIn, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)", fill: "both" });
+  state.snowVeilAnimation = inAnim;
+  if (tier !== "light" && card) {
+    card.animate([{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "translateY(0)" }],
+      { duration: fadeIn + 160, easing: "cubic-bezier(0.34, 1.32, 0.5, 1)", fill: "both" });
+  }
+  // 掩护下切换世界场景（纯视觉延迟）。
+  state.snowVeilTimers.push(window.setTimeout(() => { commitScene(); }, fadeIn));
+  state.snowVeilTimers.push(window.setTimeout(() => {
+    veil.dataset.phase = "down";
+    const outAnim = veil.animate([{ opacity: 1 }, { opacity: 0 }], { duration: fadeOut, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)", fill: "both" });
+    state.snowVeilAnimation = outAnim;
+    outAnim.finished.catch(() => {}).finally(() => {
+      if (state.snowVeilAnimation !== outAnim) return;
+      state.snowVeilAnimation = null;
+      veil.dataset.phase = "idle";
+      try { outAnim.cancel(); } catch {}
+    });
+  }, fadeIn + hold));
 }
 function bodyIsVisible(node) {
   if (!node?.isConnected || node.closest("[hidden], [inert]") || document.hidden) return false;
@@ -3877,16 +3988,22 @@ function crossfadeStageCharacterArt(node, duration = 280) {
   node.parentNode.insertBefore(outgoing, node);
   node.style.opacity = "1";
   node.dataset.stageArtTransition = "incoming";
+  // 雪境 ADV (P4)：换表情不出现透明空档。外层（旧图）全程保持 opacity 1，
+  // 内层（新图，z-index 更高、叠在上面）从 0 淡入到 1，淡入完成后再移除旧图。
+  // 这样任意时刻可见画面都是不透明的，绝不会两层同时半透明。关闭开关时沿用旧的交叉淡出。
+  const snowAdv = snowAdvActive();
   const options = {
     duration,
-    easing: "cubic-bezier(.22,.72,.24,1)",
+    easing: snowAdv ? "cubic-bezier(0.22, 0.61, 0.36, 1)" : "cubic-bezier(.22,.72,.24,1)",
     fill: "both",
   };
+  if (snowAdv) outgoing.style.opacity = "1";
   const transition = {
     outgoing,
     dispose: state.stageArtSurface?.dispose,
     animations: [
-      outgoing.animate([{ opacity: 1 }, { opacity: 0 }], options),
+      snowAdv ? outgoing.animate([{ opacity: 1 }, { opacity: 1 }], options)
+              : outgoing.animate([{ opacity: 1 }, { opacity: 0 }], options),
       node.animate([{ opacity: 0 }, { opacity: 1 }], options),
     ],
   };
@@ -3903,8 +4020,33 @@ function crossfadeStageCharacterArt(node, duration = 280) {
   });
   return transition;
 }
-function cancelStageArt({ hide = false } = {}) {
-  state.stageArtRequestSequence += 1;
+// 雪境 ADV (P4)：立绘入场。只在开关开启时生效，只动 transform/opacity，绝不阻塞逻辑
+// （纯视觉，调用方不 await）。auto=上浮+淡入(--ease-settle, ~420ms)；light=仅淡入；
+// off/减少动态/页面隐藏/无 WAAPI=不动画。transform 不与 P3 的 translate 中轴定位冲突。
+function playStageEnter(node) {
+  if (!snowAdvActive() || !node || node.hidden || typeof node.animate !== "function") return false;
+  const tier = stageMotionTier();
+  if (tier === "off" || document.hidden) return false;
+  state.stageEnterAnimation?.cancel();
+  const frames = tier === "light"
+    ? [{ opacity: 0 }, { opacity: 1 }]
+    : [{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "translateY(0)" }];
+  const animation = node.animate(frames, {
+    duration: 420,
+    easing: "cubic-bezier(0.34, 1.32, 0.5, 1)", // --ease-settle
+    fill: "both",
+  });
+  state.stageEnterAnimation = animation;
+  node.dataset.stageEnter = tier;
+  animation.finished.catch(() => {}).finally(() => {
+    if (state.stageEnterAnimation === animation) state.stageEnterAnimation = null;
+    delete node.dataset.stageEnter;
+    // fill:both leaves the final frame latched; clear it so breathing/motion own transform again.
+    try { animation.cancel(); } catch {}
+  });
+  return true;
+}
+function cancelStageArt({ hide = false } = {}) {  state.stageArtRequestSequence += 1;
   state.stageArtController?.abort();
   state.stageArtController = null;
   state.stageArtPending = null;
@@ -4009,6 +4151,9 @@ async function updateStageCharacterArt(node, character, expressionState, perform
       && Boolean(node.getAttribute("src"));
     const outgoingTransition = shouldCrossfade
       ? crossfadeStageCharacterArt(node, previousCharacterId === characterId ? 160 : 280) : null;
+    // 雪境 ADV (P4)：立绘首次为某场景/到场出现时（上一帧无图或已隐藏，且不是换表情交叉淡入），
+    // 以 --ease-settle 做 ~420ms 的柔和上浮(≈12px→0)+淡入(0→1)。light 仅淡入，off 不做。
+    const firstAppearance = !outgoingTransition && (node.hidden || !node.getAttribute("src"));
     const previousSurface = state.stageArtSurface;
     loadedRenderer.commit(node, loadedPresentation, loadedSurface);
     state.stageArtSurface = loadedSurface;
@@ -4026,6 +4171,7 @@ async function updateStageCharacterArt(node, character, expressionState, perform
     delete node.dataset.stageArtFailedAt;
     node.hidden = false;
     if (!outgoingTransition) cancelStageArtTransition(node);
+    if (firstAppearance) playStageEnter(node);
     return true;
   })();
   pending.promise = operation;
@@ -4056,6 +4202,52 @@ function cancelStageMotion(characterId = "") {
   return Boolean(animation);
 }
 function stageMotionFrames(stageMotion) {
+  // 雪境 ADV (P4)：带缓冲、小振幅、会 settle 的曲线，替代旧的 ±10px 生硬抖动。
+  // 动作名与触发完全不变；只在开关开启时走这一支。只动 transform。
+  if (snowAdvActive()) {
+    if (stageMotion === "lean_in") return {
+      duration: 1700, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
+      frames: [
+        { transform: "translateY(0) scale(1)", offset: 0 },
+        { transform: "translateY(-1.1%) scale(1.035)", offset: 0.32 },
+        { transform: "translateY(-1.1%) scale(1.035)", offset: 0.68 },
+        { transform: "translateY(0) scale(1)", offset: 1 },
+      ],
+    };
+    if (stageMotion === "tremble") return {
+      duration: 760, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
+      frames: [
+        { transform: "translateX(0)", offset: 0 },
+        { transform: "translateX(-5px)", offset: 0.1 },
+        { transform: "translateX(4.4px)", offset: 0.22 },
+        { transform: "translateX(-3.4px)", offset: 0.34 },
+        { transform: "translateX(2.5px)", offset: 0.46 },
+        { transform: "translateX(-1.6px)", offset: 0.58 },
+        { transform: "translateX(0.9px)", offset: 0.72 },
+        { transform: "translateX(-0.4px)", offset: 0.86 },
+        { transform: "translateX(0)", offset: 1 },
+      ],
+    };
+    if (stageMotion === "recoil") return {
+      duration: 1000, easing: "cubic-bezier(0.34, 1.32, 0.5, 1)",
+      frames: [
+        { transform: "translate(0, 0) scale(1)", offset: 0 },
+        { transform: "translate(-0.8%, 1.2%) scale(0.982)", offset: 0.26 },
+        { transform: "translate(0, 0) scale(1)", offset: 1 },
+      ],
+    };
+    if (stageMotion === "startle") return {
+      duration: 760, easing: "cubic-bezier(0.34, 1.32, 0.5, 1)",
+      frames: [
+        { transform: "translateY(0)", offset: 0 },
+        { transform: "translateY(-2.2%)", offset: 0.16 },
+        { transform: "translateY(0.35%)", offset: 0.38 },
+        { transform: "translateY(-0.5%)", offset: 0.6 },
+        { transform: "translateY(0)", offset: 1 },
+      ],
+    };
+    return null;
+  }
   if (stageMotion === "lean_in") return {
     duration: 560,
     frames: [
@@ -4110,12 +4302,14 @@ function playStageMotion(node, message, presentation, requestSequence = state.st
   node.dataset.stageMotionKey = playKey;
   node.dataset.stageMotion = reducedMotion() ? "suppressed" : stageMotion;
   if (document.hidden || reducedMotion() || typeof node.animate !== "function") return false;
+  // 雪境 ADV (P4)：light 档位只保留淡入淡出，不做任何位移/缩放动作；标记为 suppressed。
+  if (snowAdvActive() && stageMotionTier() === "light") { node.dataset.stageMotion = "suppressed"; return false; }
   const definition = stageMotionFrames(stageMotion);
   if (!definition) return false;
   state.stageMotionAnimation?.cancel();
   const animation = node.animate(definition.frames, {
     duration: definition.duration,
-    easing: "cubic-bezier(.22,.78,.24,1)",
+    easing: definition.easing || "cubic-bezier(.22,.78,.24,1)",
     iterations: 1,
   });
   state.stageMotionAnimation = animation;
@@ -5011,7 +5205,7 @@ function renderScene() {
   const backdrop = SCENE_ASSET_URLS[visualKey] || `/assets/immersive/scenes/${visualKey}.svg`;
   if ($("scene-backdrop").getAttribute("src") !== backdrop) $("scene-backdrop").src = backdrop;
   syncSnowWorld();
-  if (snowWorld) snowWorld.setScene(visualKey);
+  maybePlaySnowVeil(scene, visualKey);
   $("stage-location").textContent = scene.character_location || "场景尚未建立";
   $("stage-activity").textContent = scene.character_activity || "选择角色后读取当前位置";
   const presenceLabel = scene.character_location ? `去见她 · ${scene.character_location}` : "去见她";

@@ -684,3 +684,279 @@ def _min_background_alpha(background_color, background_image):
         return min(image_alphas)
     color_alphas = _alphas(background_color)
     return min(color_alphas) if color_alphas else 1.0
+
+
+# --------------------------------------------------------------------------- P4
+# 演出与转场：换表情不出现透明空档、立绘呼吸按档位、白雪转场遮罩、无页面错误。
+# 立绘换帧用与 test_stage_presentation_timing.py 相同的做法：给角色装一份带不同表情
+# 图的清单，再直接调用 __projectSnowTest.updateStageCharacterArt 触发换帧。
+from hashlib import sha256 as _sha256  # noqa: E402
+from io import BytesIO as _BytesIO  # noqa: E402
+from urllib.parse import urlparse as _urlparse  # noqa: E402
+
+_P4_CHARACTER = "25b23cb64398"
+
+
+@skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
+class SnowAdvPerformanceTests(TestCase):
+    """P4 面对面演出：换表情无透明空档、呼吸、动作、白雪转场遮罩。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), fixture.PublicFrontendHandler)
+        cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.server_thread.start()
+        cls.base_url = f"http://127.0.0.1:{cls.server.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.server_thread.join(timeout=5)
+
+    def setUp(self):
+        fixture.PublicFrontendE2ETests.setUp(self)
+        from PIL import Image
+
+        self.images = {}
+        for index, name in enumerate(("neutral", "happy", "thinking")):
+            image = Image.new("RGBA", (8, 10), (30 + index * 60, 160 - index * 30, 80 + index * 40, 255))
+            buffer = _BytesIO()
+            image.save(buffer, format="PNG")
+            self.images[name] = buffer.getvalue()
+        manifest = fixture.PublicFrontendHandler._expression_manifest(_P4_CHARACTER)
+        manifest.pop("presentations", None)
+        manifest.pop("performances", None)
+        for state_name, item in manifest["expressions"].items():
+            name = state_name if state_name in ("happy", "thinking") else "neutral"
+            item.pop("presentation_id", None)
+            item.update(stage_asset_path=f"/p4art/{name}.png", stage_asset_sha256=_sha256(self.images[name]).hexdigest())
+        self.manifest_bytes = json.dumps(manifest).encode()
+        self.character = {
+            "character_id": _P4_CHARACTER,
+            "expression_manifest_url": f"/p4art/{_P4_CHARACTER}/manifest.json",
+            "expression_manifest_sha256": _sha256(self.manifest_bytes).hexdigest(),
+        }
+        self.playwright = fixture.sync_playwright().start()
+        self.browser = fixture._launch_browser(self.playwright)
+        self.errors = []
+        self.failed = []
+        self.page = None
+
+    def tearDown(self):
+        self.browser.close()
+        self.playwright.stop()
+
+    def _page(self, width=1280, height=820, reduced_motion=None):
+        page = self.browser.new_page(viewport={"width": width, "height": height}, reduced_motion=reduced_motion)
+        page.on("pageerror", lambda error: self.errors.append(str(error)))
+        page.on("response", lambda response: self.failed.append(response.url) if response.status >= 400 else None)
+        page.set_default_timeout(8000)
+        self.page = page
+        return page
+
+    def _open(self, page, enabled, motion=None):
+        if motion is not None:
+            page.add_init_script(f"window.localStorage.setItem('project-snow-public:motion', {json.dumps(motion)})")
+
+        def route_fixture(route):
+            path = _urlparse(route.request.url).path
+            if path == "/public/v1/config":
+                payload = route.fetch().json()
+                payload["features"] = {**payload.get("features", {}), "ui_snow_adv": enabled}
+                route.fulfill(json=payload)
+            elif path == "/public/v1/characters":
+                payload = route.fetch().json()
+                for character in payload["characters"]:
+                    if character["character_id"] == _P4_CHARACTER:
+                        character.update(self.character)
+                route.fulfill(json=payload)
+            elif path.startswith("/p4art/"):
+                name = path.rsplit("/", 1)[-1]
+                if name == "manifest.json":
+                    route.fulfill(content_type="application/json", body=self.manifest_bytes)
+                else:
+                    route.fulfill(content_type="image/png", body=self.images[name.removesuffix(".png")])
+            else:
+                route.continue_()
+
+        page.route("**/*", route_fixture)
+        page.goto(self.base_url, wait_until="networkidle")
+
+    def _reach_in_person(self, page):
+        page.locator("#accept-experience-notice").click()
+        fixture.PublicFrontendE2ETests._configure_model(page)
+        if page.locator("#skip-onboarding").is_visible():
+            page.locator("#skip-onboarding").click()
+        page.locator("#go-in-person").click()
+        page.locator("#confirm-presence-transition").click()
+        page.locator("#in-person-surface:not([hidden])").wait_for()
+        page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+        page.wait_for_function(
+            "document.getElementById('stage-character-art') && !document.getElementById('stage-character-art').hidden"
+            " && document.getElementById('stage-character-art').getAttribute('src')", timeout=8000)
+
+    def _failed_skin_requests(self):
+        return [url for url in self.failed if "snow-adv" in url or "/assets/fonts/" in url
+                or "/modules/snow-world" in url or "/p4art/" in url]
+
+    def _swap_and_sample(self, page):
+        # Swap neutral -> happy and sample both art nodes' opacity across the
+        # transition. Returns the minimum opacity seen on the OUTGOING (old) art
+        # and whether the incoming rose from < 1 to 1, plus the final node count.
+        return page.evaluate(
+            """async character => {
+          const art = document.getElementById('stage-character-art');
+          const previous = art.getAttribute('src');
+          const samples = { outgoingMin: 1, incomingMin: 1, incomingMax: 0, bothSemi: false };
+          let raf = true;
+          const probe = () => {
+            if (!raf) return;
+            const outgoing = document.querySelector('.stage-character-art-outgoing');
+            const inOpacity = Number(getComputedStyle(art).opacity);
+            samples.incomingMin = Math.min(samples.incomingMin, inOpacity);
+            samples.incomingMax = Math.max(samples.incomingMax, inOpacity);
+            if (outgoing) {
+              const outOpacity = Number(getComputedStyle(outgoing).opacity);
+              samples.outgoingMin = Math.min(samples.outgoingMin, outOpacity);
+              // The forbidden state: BOTH visible art nodes semi-transparent at once.
+              if (outOpacity < 0.95 && inOpacity < 0.95) samples.bothSemi = true;
+            }
+            requestAnimationFrame(probe);
+          };
+          requestAnimationFrame(probe);
+          await window.__projectSnowTest.updateStageCharacterArt(art, character, 'happy');
+          // Sample across the full crossfade duration.
+          await new Promise(resolve => setTimeout(resolve, 360));
+          raf = false;
+          samples.changed = art.getAttribute('src') !== previous;
+          samples.state = art.dataset.expressionState;
+          samples.artNodes = document.querySelectorAll(
+            '#scene-stage .stage-character-art, #scene-stage .stage-character-art-outgoing').length;
+          return samples;
+        }""",
+            self.character,
+        )
+
+    def test_expression_swap_under_flag_never_dips_transparent(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._reach_in_person(page)
+        samples = self._swap_and_sample(page)
+        self.assertTrue(samples["changed"])
+        self.assertEqual(samples["state"], "happy")
+        # Outgoing (old) art stays fully opaque the whole time; the two art nodes
+        # are never both semi-transparent, so no mid-swap transparency dip.
+        self.assertGreaterEqual(samples["outgoingMin"], 0.95, samples)
+        self.assertFalse(samples["bothSemi"], samples)
+        # Incoming genuinely rose from below 1 up to 1 (a real fade-in on top).
+        self.assertLess(samples["incomingMin"], 0.5, samples)
+        self.assertGreaterEqual(samples["incomingMax"], 0.99, samples)
+        # Exactly one art node remains after the swap settles.
+        page.wait_for_function("!document.querySelector('.stage-character-art-outgoing')", timeout=2000)
+        remaining = page.evaluate(
+            "() => document.querySelectorAll('#scene-stage .stage-character-art, #scene-stage .stage-character-art-outgoing').length")
+        self.assertEqual(remaining, 1)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_expression_swap_flag_off_keeps_legacy_crossfade(self):
+        page = self._page(1280, 820)
+        self._open(page, False)
+        self._reach_in_person(page)
+        samples = self._swap_and_sample(page)
+        self.assertTrue(samples["changed"])
+        self.assertEqual(samples["state"], "happy")
+        # Legacy behaviour: the outgoing art cross-fades out (drops toward 0).
+        self.assertLess(samples["outgoingMin"], 0.5, samples)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def _breathing(self, page):
+        return page.evaluate(
+            """() => {
+          const art = document.getElementById('stage-character-art');
+          const names = art.getAnimations().map(a => a.animationName || (a.effect && a.effect.getKeyframes && 'js'));
+          const cssBreath = art.getAnimations().some(a => a.animationName === 'snow-actor-breath');
+          return { cssBreath, animationName: getComputedStyle(art).animationName, names };
+        }""")
+
+    def test_breathing_present_at_auto_absent_at_light_and_off(self):
+        # auto: breathing animation is running on the stage art.
+        page = self._page(1280, 820, reduced_motion="no-preference")
+        self._open(page, True, motion="auto")
+        self._reach_in_person(page)
+        page.wait_for_function(
+            "document.getElementById('stage-character-art').dataset.actorAnchor", timeout=8000)
+        auto = self._breathing(page)
+        self.assertIn("snow-actor-breath", auto["animationName"], auto)
+        page.close()
+        # light: no breathing.
+        page = self._page(1280, 820, reduced_motion="no-preference")
+        self._open(page, True, motion="light")
+        self._reach_in_person(page)
+        page.wait_for_function(
+            "document.getElementById('stage-character-art').dataset.actorAnchor", timeout=8000)
+        light = self._breathing(page)
+        self.assertEqual(light["animationName"].strip(), "none", light)
+        page.close()
+        # off: no breathing.
+        page = self._page(1280, 820, reduced_motion="no-preference")
+        self._open(page, True, motion="off")
+        self._reach_in_person(page)
+        page.wait_for_function(
+            "document.getElementById('stage-character-art').dataset.actorAnchor", timeout=8000)
+        off = self._breathing(page)
+        self.assertEqual(off["animationName"].strip(), "none", off)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def _veil_state(self, page):
+        # Drive the existing scene-transition overlay to a running phase (a
+        # presentation-only probe; it changes no logic) and read how the veil
+        # renders: story-font title, footprints hidden, and transition durations.
+        return page.evaluate(
+            """() => {
+          const layer = document.getElementById('scene-transition-layer');
+          document.getElementById('transition-title').textContent = '观景区';
+          document.getElementById('transition-detail').textContent = '正在建立新的场景';
+          layer.hidden = false;
+          layer.dataset.phase = 'arriving';
+          const title = document.getElementById('transition-title');
+          const footsteps = layer.querySelector('.transition-footsteps');
+          const dots = layer.querySelector('.transition-dots');
+          const dur = node => (getComputedStyle(node).transitionDuration + ' ' + getComputedStyle(node).animationDuration)
+            .split(/[ ,]+/).map(parseFloat).filter(v => !Number.isNaN(v));
+          return {
+            titleFont: getComputedStyle(title).fontFamily,
+            titleText: title.textContent,
+            footstepsHidden: getComputedStyle(footsteps).display === 'none',
+            dotsHidden: getComputedStyle(dots).display === 'none',
+            layerDurations: dur(layer),
+            cardDurations: dur(layer.querySelector('.transition-card')),
+          };
+        }""")
+
+    def test_scene_transition_veil_shows_story_title_and_hides_footprints(self):
+        page = self._page(1280, 820)
+        self._open(page, True, motion="auto")
+        self._reach_in_person(page)
+        veil = self._veil_state(page)
+        self.assertIn("LXGW WenKai Screen", veil["titleFont"], veil)
+        self.assertEqual(veil["titleText"], "观景区")
+        self.assertTrue(veil["footstepsHidden"], veil)
+        self.assertTrue(veil["dotsHidden"], veil)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_scene_transition_veil_off_has_no_animated_durations(self):
+        page = self._page(1280, 820)
+        self._open(page, True, motion="off")
+        self._reach_in_person(page)
+        veil = self._veil_state(page)
+        # At motion off there must be no CSS transition/animation durations > 0 on the veil layers.
+        self.assertTrue(all(value == 0 for value in veil["layerDurations"]), veil)
+        self.assertTrue(all(value == 0 for value in veil["cardDurations"]), veil)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+

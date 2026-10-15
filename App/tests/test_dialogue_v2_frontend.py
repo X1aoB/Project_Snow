@@ -795,3 +795,149 @@ class DialogueV2FrontendTests(TestCase):
         self.assertEqual(recovery[0]["payload"], old_context["sceneActionSnapshot"]["envelope"])
         self.assertEqual(len(self.rows()), 2)
         self.assertFalse(self.errors)
+
+
+@skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
+class SnowAdvVeilProductionTests(TestCase):
+    """P4 后续：生产态（motion_v2=true, scene_actions_v2=true）下的独立白雪转场遮罩。
+
+    复用本模块的 DialogueHandler 夹具与 open() 的配置形状（snow=True 开启皮肤且保持
+    motion_v2/scene_actions_v2 为真），每个用例自建页面（按需设置 reduced-motion）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), DialogueHandler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base_url = f"http://127.0.0.1:{cls.server.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown(); cls.server.server_close(); cls.thread.join(timeout=5)
+
+    def setUp(self):
+        fixture.PublicFrontendE2ETests.setUp(self)
+        DialogueHandler.requests = []; DialogueHandler.results = {}; DialogueHandler.counter = 0
+        DialogueHandler.scope_rejected = False
+        DialogueHandler.memory_enabled = True
+        DialogueHandler.join_started = threading.Event()
+        DialogueHandler.join_release = threading.Event()
+        DialogueHandler.scenario = "success"
+        self.playwright = fixture.sync_playwright().start()
+        self.browser = fixture._launch_browser(self.playwright)
+        self.errors = []
+        self.page = None
+
+    def tearDown(self):
+        DialogueHandler.join_release.set()
+        self.browser.close(); self.playwright.stop()
+
+    def _open(self, width=1200, height=850, reduced_motion="no-preference", motion_pref=None, snow=True):
+        page = self.browser.new_page(viewport={"width": width, "height": height}, reduced_motion=reduced_motion)
+        page.set_default_timeout(10000)
+        self.errors = []
+        page.on("pageerror", lambda error: self.errors.append(str(error)))
+        if motion_pref is not None:
+            page.add_init_script(f"window.localStorage.setItem('project-snow-public:motion', {json.dumps(motion_pref)})")
+        self.page = page
+
+        def config(route):
+            payload = route.fetch().json()
+            payload["features"] = {"chat_latency_v2": True, "motion_v2": True, "verified_block_replay": True,
+                "dialogue_domains_v2": True, "scene_actions_v2": True, "session_memory_v2": True, "ui_snow_adv": snow}
+            payload["capabilities"] = {"dialogue_protocol": "public-dialogue-v2", "scene_action_protocol": "public-scene-action-v2", "recovery_only": True}
+            route.fulfill(json=payload)
+
+        page.route("**/public/v1/config", config)
+        page.goto(self.base_url, wait_until="networkidle")
+        page.locator("#accept-experience-notice").click()
+        fixture.PublicFrontendE2ETests._configure_model(page)
+        if page.locator("#skip-onboarding").is_visible():
+            page.locator("#skip-onboarding").click()
+
+    def _reach_in_person(self):
+        self.page.locator("#go-in-person").click()
+        self.page.locator("#confirm-presence-transition").click()
+        self.page.locator("#in-person-surface:not([hidden])").wait_for()
+
+    def _veil(self):
+        return self.page.evaluate("""() => {
+          const veil = document.getElementById('snow-scene-veil');
+          if (!veil) return { present: false };
+          const title = veil.querySelector('.snow-scene-veil-title');
+          const sub = veil.querySelector('.snow-scene-veil-sub');
+          return {
+            present: true,
+            phase: veil.dataset.phase,
+            opacity: Number(getComputedStyle(veil).opacity),
+            ariaHidden: veil.getAttribute('aria-hidden'),
+            pointerEvents: getComputedStyle(veil).pointerEvents,
+            titleText: title ? title.textContent : '',
+            titleFont: title ? getComputedStyle(title).fontFamily : '',
+            titleSize: title ? parseFloat(getComputedStyle(title).fontSize) : 0,
+            subText: sub ? sub.textContent : '',
+          };
+        }""")
+
+    def test_veil_plays_with_location_title_on_entering_in_person(self):
+        self._open()
+        # 进入面对面（从文字进入已知地点 观景区）应播放遮罩。
+        self._reach_in_person()
+        self.page.wait_for_function(
+            "document.getElementById('snow-scene-veil') && document.getElementById('snow-scene-veil').dataset.phase !== 'idle'",
+            timeout=4000)
+        # 等遮罩真正升到可见（淡入+保持 600ms），再读属性，避免采在淡入起点。
+        self.page.wait_for_function(
+            "Number(getComputedStyle(document.getElementById('snow-scene-veil')).opacity) > 0.6", timeout=4000)
+        veil = self._veil()
+        self.assertTrue(veil["present"])
+        self.assertEqual(veil["titleText"], "观景区")
+        self.assertIn("LXGW WenKai Screen", veil["titleFont"])
+        self.assertGreaterEqual(veil["titleSize"], 28)
+        self.assertEqual(veil["ariaHidden"], "true")
+        self.assertEqual(veil["pointerEvents"], "none")
+        self.assertGreater(veil["opacity"], 0.5)
+        self.page.wait_for_function(
+            "document.getElementById('snow-scene-veil').dataset.phase === 'idle'", timeout=4000)
+        self.assertLess(self._veil()["opacity"], 0.05)
+        self.assertFalse(self.errors)
+
+    def test_veil_does_not_replay_when_reopening_communicator_to_same_location(self):
+        self._open()
+        self._reach_in_person()
+        self.page.wait_for_function(
+            "document.getElementById('snow-scene-veil').dataset.phase === 'idle'", timeout=5000)
+        self.page.evaluate("() => { window.__veilReplayed = false; const v = document.getElementById('snow-scene-veil');"
+                           " new MutationObserver(() => { if (v.dataset.phase === 'up') window.__veilReplayed = true; })"
+                           " .observe(v, { attributes: true, attributeFilter: ['data-phase'] }); }")
+        # 回到通讯器（文字），再返回同一地点：不应重播遮罩。
+        self.page.locator("#open-communicator").click()
+        self.page.locator("#text-surface:not([hidden])").wait_for()
+        self.page.locator("#go-in-person").click()
+        self.page.locator("#confirm-presence-transition").click()
+        self.page.locator("#in-person-surface:not([hidden])").wait_for()
+        self.page.wait_for_timeout(900)
+        self.assertFalse(self.page.evaluate("() => window.__veilReplayed"),
+                         "returning to the same location must not replay the veil")
+        self.assertFalse(self.errors)
+
+    def test_veil_never_plays_at_motion_off(self):
+        self._open(reduced_motion="reduce")
+        self.page.wait_for_function("document.getElementById('snow-scene-veil')", timeout=4000)
+        self.page.evaluate("() => { window.__veilEverUp = false; const v = document.getElementById('snow-scene-veil');"
+                           " new MutationObserver(() => { if (v.dataset.phase !== 'idle') window.__veilEverUp = true; })"
+                           " .observe(v, { attributes: true, attributeFilter: ['data-phase'] }); }")
+        self._reach_in_person()
+        self.page.wait_for_timeout(900)
+        self.assertFalse(self.page.evaluate("() => window.__veilEverUp"),
+                         "no veil at motion off / reduced motion")
+        self.assertEqual(self._veil()["phase"], "idle")
+        self.assertFalse(self.errors)
+
+    def test_no_veil_element_when_flag_off(self):
+        self._open(snow=False)
+        self._reach_in_person()
+        self.page.wait_for_timeout(400)
+        self.assertFalse(self._veil()["present"], "no veil element exists when the flag is off")
+        self.assertFalse(self.errors)
+
