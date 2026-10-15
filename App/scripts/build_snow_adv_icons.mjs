@@ -94,7 +94,8 @@ export function createSnowIcon(name, doc = document) {
 
 const output = build();
 if (process.argv.includes("--check")) {
-  const current = readFileSync(outputPath, "utf8");
+  // Compare with normalised line endings so a Windows core.autocrlf checkout passes.
+  const current = readFileSync(outputPath, "utf8").replace(/\r\n/g, "\n");
   if (current !== output) {
     console.error("public_frontend/modules/snow-icons.js is out of date; run node App/scripts/build_snow_adv_icons.mjs");
     process.exit(1);

@@ -147,11 +147,18 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="verify the checked-in output instead of writing it")
     args = parser.parse_args()
     files, stylesheet, source = build(args.package)
+    def same(path: Path, payload: bytes) -> bool:
+        # Text outputs may be checked out with CRLF under core.autocrlf.
+        current = path.read_bytes()
+        return current == payload or (
+            not path.name.endswith(".woff2") and current.replace(b"\r\n", b"\n") == payload.replace(b"\r\n", b"\n")
+        )
+
     if args.check:
         existing = {path.name for path in FONT_DIR.iterdir()} if FONT_DIR.is_dir() else set()
         stale = existing ^ set(files)
-        changed = [name for name, payload in files.items() if (FONT_DIR / name).is_file() and (FONT_DIR / name).read_bytes() != payload]
-        if stale or changed or not STYLESHEET.is_file() or STYLESHEET.read_text(encoding="utf-8") != stylesheet:
+        changed = [name for name, payload in files.items() if (FONT_DIR / name).is_file() and not same(FONT_DIR / name, payload)]
+        if stale or changed or not STYLESHEET.is_file() or not same(STYLESHEET, stylesheet.encode("utf-8")):
             print("snow-adv fonts are out of date", sorted(stale), changed, file=sys.stderr)
             return 1
         return 0
