@@ -7595,7 +7595,10 @@ $("character-search").oninput = renderCharacters;
 $("composer").onsubmit = sendMessage;
 $("message-input").oninput = () => { updateInputCount(); scheduleDraftSave(); };
 $("action-input").oninput = () => { updateInputCount(); scheduleDraftSave(); };
-$("message-input").onkeydown = (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("composer").requestSubmit(); } };
+$("message-input").onkeydown = (event) => {
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("composer").requestSubmit(); }
+};
 $("toggle-action").onclick = () => {
   if (!state.selected || !state.writerOwned || currentThread()?.channel !== "in_person") return;
   const open = !state.actionComposerOpen;
@@ -7812,6 +7815,7 @@ $("settings-dialog").addEventListener("cancel", () => { modelSetupController?.ab
 document.addEventListener("visibilitychange", () => { if (document.hidden) stopSubscriptionPolling(); else startSubscriptionPolling(); });
 $("sticker-picker").addEventListener("close", () => $("toggle-sticker").setAttribute("aria-expanded", "false"));
 window.addEventListener("keydown", (event) => {
+  if (event.isComposing || event.keyCode === 229) return;
   if (document.querySelector("dialog[open]")) return;
   if (trapDrawerFocus(event)) return;
   if (event.key === "Escape" && (state.actionComposerOpen || state.invitationPopoverKey)) {
