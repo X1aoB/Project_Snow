@@ -217,9 +217,34 @@ class DialogueV2FrontendTests(TestCase):
 
     def send(self, message="合成日常聊天"):
         self.page.locator("#message-input").fill(message)
-        self.page.locator("#send-message").click()
-        self.page.wait_for_function("!document.querySelector('#send-message').disabled")
-        self.page.wait_for_timeout(80)
+        # Submission awaits IndexedDB before marking the composer busy. Observe
+        # this real handler's completion instead of its initially enabled button.
+        # The same contract covers v1, zero-model scene actions, and failed or
+        # memory-only persistence; none requires a particular HTTP response.
+        self.page.evaluate("""() => {
+          const form = document.querySelector('#composer'), original = form.onsubmit;
+          if (typeof original !== 'function') throw new Error('composer submit handler missing');
+          const observation = { completed: false, error: null };
+          const wrapper = async function(event) {
+            form.onsubmit = original;
+            try { return await original.call(this, event); }
+            catch (error) { observation.error = String(error?.stack || error); throw error; }
+            finally { observation.completed = true; }
+          };
+          observation.restore = () => { if (form.onsubmit === wrapper) form.onsubmit = original; };
+          window.__dialogueSubmitObservation = observation;
+          form.onsubmit = wrapper;
+        }""")
+        try:
+            self.page.locator("#send-message").click()
+            self.page.wait_for_function("window.__dialogueSubmitObservation?.completed === true")
+            self.assertIsNone(self.page.evaluate("window.__dialogueSubmitObservation.error"))
+            self.page.wait_for_function("!document.querySelector('#send-message').disabled")
+        finally:
+            self.page.evaluate("""() => {
+              window.__dialogueSubmitObservation?.restore();
+              delete window.__dialogueSubmitObservation;
+            }""")
 
     def recover_chat(self, request_id):
         with self.page.expect_response(lambda response: response.url.endswith("/public/v2/chat/stream")
