@@ -77,11 +77,20 @@ export class MotionScope {
     for (const cleanup of this.cleanups) cleanup();
     this.cleanups.clear();
   }
-  play(node: Element, frames: Keyframe[], options: KeyframeAnimationOptions): Promise<void> {
-    if (typeof node.animate !== "function") return Promise.resolve();
-    const animation = node.animate(frames, options);
-    this.animations.add(animation);
-    return animation.finished.catch(() => {}).then(() => { this.animations.delete(animation); animation.cancel(); });
+  async play(node: Element, frames: Keyframe[], options: KeyframeAnimationOptions): Promise<void> {
+    let animation: Animation | undefined;
+    try {
+      if (typeof node.animate !== "function") return;
+      animation = node.animate(frames, options);
+      this.animations.add(animation);
+      await animation.finished;
+    } catch { /* Decorative motion cannot change a saved reply or reject a render. */ }
+    finally {
+      if (animation) {
+        this.animations.delete(animation);
+        try { animation.cancel(); } catch { /* The element may already be gone. */ }
+      }
+    }
   }
   cleanup(callback: () => void): void { this.cleanups.add(callback); }
 }

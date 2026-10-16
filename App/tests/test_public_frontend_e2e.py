@@ -2162,6 +2162,7 @@ class PublicFrontendE2ETests(TestCase):
                 "() => document.querySelectorAll('.stage-character-art-outgoing').length === 0"
             )
             page.evaluate("() => document.querySelector('#presence-dialog')?.close()")
+            page.locator("#open-stage-contacts").click()
             page.locator('[data-character="702f4375675b"]').click()
             page.locator("#stage-character-name", has_text="米娅").wait_for(state="visible")
             page.evaluate("() => document.querySelector('#presence-dialog')?.close()")
