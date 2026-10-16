@@ -377,15 +377,17 @@ class DialogueV2FrontendTests(TestCase):
         self.assertFalse(fixture.PublicFrontendHandler.chat_payloads)
         self.assertFalse(self.errors)
 
-    def test_switch_contact_does_not_join_or_show_remote_face(self):
+    def test_face_switch_contact_joins_the_new_character(self):
         self.open(); self.page.locator("#go-in-person").click(); self.page.locator("#confirm-presence-transition").click()
         self.page.wait_for_function("document.querySelector('#chat-app').dataset.channel==='in_person'")
         count = len(self.rows("/public/v2/scene/action"))
         self.page.locator(f'[data-character="{OTHER}"]').click()
         self.page.wait_for_function("document.querySelector('#active-character').textContent.includes('安卡希雅')")
-        self.assertEqual(self.page.locator("#chat-app").get_attribute("data-channel"), "text")
+        self.page.wait_for_function("document.querySelector('#chat-app').dataset.channel==='in_person' && !document.querySelector('#send-message').disabled")
         new = self.rows("/public/v2/scene/action")[count:]
-        self.assertTrue(new); self.assertTrue(all(row["payload"]["action"] == "resolve" for row in new))
+        self.assertTrue(new)
+        self.assertEqual(sum(row["payload"]["action"] == "join_character" for row in new), 1)
+        self.assertTrue(all(row["payload"]["character_id"] == OTHER for row in new))
         self.assertFalse(self.page.locator("#presence-dialog").is_visible())
 
     def test_old_v1_capability_off_keeps_old_chat_and_database(self):
@@ -701,9 +703,11 @@ class DialogueV2FrontendTests(TestCase):
         self.send("合成未来邀请 accepted 明天去餐厅")
         card = self.page.locator("#current-rendezvous")
         self.assertTrue(card.is_visible())
-        self.assertEqual(card.evaluate("node=>node.parentElement.id"), "composer")
+        self.assertEqual(card.evaluate("node=>node.parentElement.id"), "scene-invitation-anchor")
         self.assertEqual(card.locator('[data-current-rendezvous="go"]').count(), 0)
-        self.page.locator('[data-current-rendezvous="stay"]').focus()
+        self.page.locator('[data-current-rendezvous="open"]').click()
+        self.assertEqual(card.locator('#scene-invitation-details [data-current-rendezvous="stay"]').inner_text(), "收起")
+        card.locator('#scene-invitation-details [data-current-rendezvous="stay"]').focus()
         self.page.keyboard.press("Enter")
         self.assertEqual(self.page.evaluate("document.activeElement.dataset.currentRendezvous"), "open")
         self.page.keyboard.press("Enter")

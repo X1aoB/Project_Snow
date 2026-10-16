@@ -233,10 +233,11 @@ class PublicFrontendLatencyMotionTests(TestCase):
                 page = browser.new_page()
                 self.open(page)
                 self.send(page)
-                page.locator("#timeline").get_by_text("第一段已经确认。", exact=True).wait_for(timeout=2500)
+                page.locator("#timeline").get_by_text("第一段已经确认。", exact=True).wait_for(timeout=3500)
                 elapsed = page.evaluate("performance.now() - window.__sentAt")
-                self.assertGreaterEqual(elapsed, 550)
-                self.assertLess(elapsed, 2000)
+                # Eight graphemes now take 1.7–2.3s; transport/paint adds a small margin.
+                self.assertGreaterEqual(elapsed, 1600)
+                self.assertLess(elapsed, 3000)
                 feedback_at = page.evaluate("window.__feedbackAt")
                 if feedback_at:
                     feedback = feedback_at - page.evaluate("window.__sentAt")
@@ -552,6 +553,9 @@ class PublicFrontendLatencyMotionTests(TestCase):
                 self.assertTrue(page.locator("#in-person-surface").is_visible())
                 self.assertTrue(page.locator("#message-input").is_editable())
                 page.locator("#message-input").fill("等待期间更新的面对面草稿")
+                # The outside click closes the action popover. Reopen it to
+                # keep editing the still-active owner while its save is held.
+                page.locator("#toggle-action").click()
                 page.locator("#action-input").fill("等待期间更新的面对面动作")
                 page.evaluate("window.__draftCompletionGate.release()")
                 page.wait_for_function("!document.querySelector('#text-surface').hidden && !document.querySelector('#text-surface').inert && !document.querySelector('#send-message').disabled")

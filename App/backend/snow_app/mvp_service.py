@@ -6757,7 +6757,8 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 "character": character.display_name,
                 "character_id": character.character_id,
                 "user_role": "分析员",
-                "user_message": context.get("user_message") or message,
+                "user_message": "" if context.get("arrival_event") else context.get("user_message") or message,
+                **({"arrival_event": context["arrival_event"]} if context.get("arrival_event") else {}),
                 "analyst_content_blocks": context.get("analyst_content_blocks") or [],
                 "mode": context.get("mode", "immersive"),
                 "style_context": context.get("style_context") or {},
@@ -9456,6 +9457,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         persist_exchange: bool = True,
         remember_session: bool = True,
         presence_arrival: bool = False,
+        system_arrival: bool = False,
         max_tokens_override: int | None = None,
         public_sticker_candidates: list[dict[str, Any]] | None = None,
         public_state_update_catalog: list[dict[str, Any]] | None = None,
@@ -9471,9 +9473,12 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         observer = current_generation_observer()
         if observer is not None:
             observer.phase("context")
-        if not message.strip() and not attachment_context:
+        if system_arrival and (not presence_arrival or message.strip() or attachment_context
+                               or analyst_content_blocks or persist_exchange or remember_session):
+            raise ValueError("System arrival must be an unpersisted event, not a user turn")
+        if not message.strip() and not attachment_context and not system_arrival:
             raise ValueError("消息不能为空。")
-        message = message.strip() or "请查看并说明附件内容。"
+        message = message.strip() if system_arrival else message.strip() or "请查看并说明附件内容。"
         frame = coerce_turn_frame(turn_frame, message) if turn_frame is not None else None
         mode = self._normalize_mode(mode)
         character = self.character(character_value)
@@ -9547,7 +9552,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             next_channel = str(dialogue_transition["to"])
             channel_transition = dialogue_transition
 
-        normalized_analyst_blocks = self._normalize_analyst_content_blocks(
+        normalized_analyst_blocks = [] if system_arrival else self._normalize_analyst_content_blocks(
             message.strip(),
             analyst_content_blocks,
             active_channel,
@@ -9648,6 +9653,8 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         self._record_generation_duration("retrieval_ms", retrieval_started)
         prompt_started = time.perf_counter()
         if presence_arrival:
+            if system_arrival:
+                context["arrival_event"] = {"type": "in_person_arrival", "source": "verified_scene_join"}
             context["question_focus"] = "casual_check_in"
             context["conversation_mode"] = "natural_chat"
             context["response_contract"] = (
@@ -9885,7 +9892,7 @@ interaction_decision、memory_candidates 等元数据必须先于 content_blocks
         # Only a definite successful-but-empty provider response reaches this
         # branch. Network errors have already raised and are never replayed.
         # One compact recovery consumes at most the second provider HTTP call.
-        if not answer_text.strip() and not has_sticker_output:
+        if not answer_text.strip() and not has_sticker_output and not system_arrival:
             recovery_kwargs = dict(initial_kwargs)
             recovery_kwargs.pop("user_content", None)
             recovery_started = time.perf_counter()
@@ -10029,6 +10036,10 @@ interaction_decision、memory_candidates 等元数据必须先于 content_blocks
             fallback_answer = answer_text
             fallback_generated = copy.deepcopy(generated)
             try:
+                if system_arrival:
+                    # A proactive event has one paid attempt. Preserve the
+                    # existing rejection/fallback validation without a repair call.
+                    raise MVPProviderError("arrival_provider_call_budget_exhausted")
                 retry_kwargs: dict[str, Any] = {"mode": mode}
                 if model_settings is not None:
                     retry_kwargs["model_settings"] = model_settings

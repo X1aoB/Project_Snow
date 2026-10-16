@@ -6,6 +6,36 @@ export function remainingNaturalWait(startedAt: number, now: number, reduced = f
 export function segmentWait(textLength: number, spent: number, reduced = false): number {
   return reduced ? 0 : Math.max(0, Math.min(PRESENTATION_TIMING.segmentBudget - spent, Math.max(PRESENTATION_TIMING.segmentMin, Math.min(PRESENTATION_TIMING.segmentMax, 200 + textLength * 3))));
 }
+export const COMMUNICATOR_TIMING = Object.freeze({ perGrapheme: 250, jitter: .15, bubbleMin: 1500, bubbleMax: 20000, gapMin: 600, gapMax: 1200, artificialBudget: 60000 });
+function timingFraction(key: string): number {
+  let hash = 2166136261;
+  for (const character of key) hash = Math.imul(hash ^ character.codePointAt(0)!, 16777619);
+  return (hash >>> 0) / 0xffffffff;
+}
+export function graphemeCount(text: string): number {
+  return Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)).length;
+}
+export function communicatorBubbleTiming(text: string, requestId: string, index: number): { typing: number; gap: number } {
+  const factor = 1 + (timingFraction(`${requestId}:typing:${index}`) * 2 - 1) * COMMUNICATOR_TIMING.jitter;
+  return {
+    typing: Math.max(COMMUNICATOR_TIMING.bubbleMin, Math.min(COMMUNICATOR_TIMING.bubbleMax, graphemeCount(text) * COMMUNICATOR_TIMING.perGrapheme * factor)),
+    gap: index === 0 ? 0 : COMMUNICATOR_TIMING.gapMin + timingFraction(`${requestId}:gap:${index}`) * (COMMUNICATOR_TIMING.gapMax - COMMUNICATOR_TIMING.gapMin),
+  };
+}
+/** Only presentation time: immutable confirmed blocks and their order remain untouched.
+ * While the terminal packet is absent, reserve half the remaining budget for later
+ * blocks. Once complete, proportionally distribute the full remaining budget. */
+export function communicatorDelayPlan(texts: readonly string[], requestId: string, firstIndex = 0,
+  elapsedBeforeFirst = 0, spent = 0, terminal = true): number[] {
+  const waits = texts.map((text, offset) => {
+    const timing = communicatorBubbleTiming(text, requestId, firstIndex + offset);
+    return Math.max(0, timing.typing + timing.gap - (offset === 0 ? Math.max(0, elapsedBeforeFirst) : 0));
+  });
+  const budget = Math.max(0, COMMUNICATOR_TIMING.artificialBudget - spent) * (terminal ? 1 : .5);
+  const total = waits.reduce((sum, value) => sum + value, 0);
+  const scale = total > budget ? budget / total : 1;
+  return waits.map(value => value * scale);
+}
 export interface ConfirmedBlock { type: "message" | "speech"; text: string }
 export interface CommittedBlockEvent { request_id: string; character_id: string; sequence: number; block_id: string; block: ConfirmedBlock }
 /** Only server-committed text may enter the visible reply. Replays are immutable. */

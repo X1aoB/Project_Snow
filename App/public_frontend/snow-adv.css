@@ -809,6 +809,28 @@ html[data-ui="snow-adv"] .starter-prompts button:hover { border-color: var(--ice
 html[data-ui="snow-adv"] .active-character h1 { color: var(--ink-900); }
 html[data-ui="snow-adv"] .active-character p { color: var(--ink-600); }
 html[data-ui="snow-adv"] .active-character .portrait { border-radius: 50%; border-color: color-mix(in srgb, var(--char) 50%, transparent); }
+html[data-ui="snow-adv"] #stage-header-avatar { border-radius: 50%; overflow: hidden; }
+html[data-ui="snow-adv"] .scene-invitation-chip,
+html[data-ui="snow-adv"] .joint-movement-notice { color: var(--char-deep); border-color: color-mix(in srgb, var(--char) 30%, var(--snow-200)); background: rgba(255, 255, 255, .86); }
+html[data-ui="snow-adv"] .scene-invitation-anchor .scene-invitation-details { color: var(--ink-700); border-color: var(--snow-200); background: rgba(255, 255, 255, .86); }
+html[data-ui="snow-adv"] .scene-invitation-details small { font-size: var(--fs-12); }
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .action-composer {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 8px);
+  left: max(16px, calc((100% - var(--dialogue-max-width)) / 2 + 10px));
+  width: min(420px, calc(100% - 32px));
+  max-height: min(280px, 45dvh);
+  margin: 0;
+  padding: 10px 14px 14px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--char) 26%, var(--snow-200));
+  border-radius: var(--radius-l);
+  background: rgba(255, 255, 255, .84);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 12px 36px rgba(32, 62, 92, .16);
+}
+html[data-ui="snow-adv"] .action-composer textarea { min-height: 78px; background: rgba(255, 255, 255, .72); }
 html[data-ui="snow-adv"] .current-rendezvous { border-bottom-color: var(--snow-200); background: var(--char-soft); }
 html[data-ui="snow-adv"] .current-rendezvous strong { color: var(--char-deep); }
 html[data-ui="snow-adv"] .new-replies {

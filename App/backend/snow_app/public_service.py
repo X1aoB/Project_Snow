@@ -35,6 +35,7 @@ from .public_contracts import (
     HistoryTurn,
     PendingRendezvous,
     PresenceArrivalRequest,
+    PresenceArrivalV2Request,
     PresenceResolveRequest,
     PresenceTransitionRequest,
     StateEvent,
@@ -1819,6 +1820,7 @@ class PublicChatService:
         *,
         model_called: bool,
         diagnostics: dict[str, Any] | None = None,
+        usage: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             key: value
@@ -1833,6 +1835,7 @@ class PublicChatService:
                     str((diagnostics or {}).get("error_stage") or "unknown"),
                 ),
                 "diagnostics": diagnostics or {},
+                **({"usage": usage} if usage is not None else {}),
             }.items()
             if key != "state"
         }
@@ -1868,7 +1871,8 @@ class PublicChatService:
         total_started = time.perf_counter()
         self.repository.reset_request_health()
         self.mvp.reset_generation_diagnostics()
-        synthetic = ChatRequest(
+        typed_arrival = isinstance(request, PresenceArrivalV2Request)
+        synthetic = request if typed_arrival else ChatRequest(
             request_id=request.arrival_id,
             provider=request.provider,
             credential=request.credential,
@@ -1886,33 +1890,42 @@ class PublicChatService:
             state_override=dict(prepared["state"]),
         ) as (session_id, world_id, _state):
             try:
-                result = self.mvp.chat(
-                    request.character_id,
-                    synthetic.message,
-                    session_id=session_id,
-                    world_session_id=world_id,
-                    communication_channel="in_person",
-                    analyst_content_blocks=[],
-                    model_settings=(provider.base_url, api_key, request.model),
-                    model_info={
-                        "provider_id": provider.provider_id,
-                        "model_name": request.model,
-                        "reason": "public_presence_arrival",
-                    },
-                    thinking_decision=_public_immersive_thinking_decision(
-                        provider, self.public_settings.max_provider_calls_per_action, request.reasoning_effort,
-                        model=request.model, latency_v2=self.public_settings.chat_latency_v2,
-                    ),
-                    max_tokens_override=1600,
-                    persist_exchange=False,
-                    remember_session=False,
-                    presence_arrival=True,
-                    allow_dialogue_channel_transition=False,
-                )
+                def generate(_dialogue, budget):
+                    return self.mvp.chat(
+                        request.character_id,
+                        "" if typed_arrival else synthetic.message,
+                        session_id=session_id,
+                        world_session_id=world_id,
+                        communication_channel="in_person",
+                        analyst_content_blocks=[],
+                        model_settings=(provider.base_url, api_key, request.model),
+                        model_info={
+                            "provider_id": provider.provider_id,
+                            "model_name": request.model,
+                            "reason": "public_presence_arrival",
+                        },
+                        thinking_decision=_public_immersive_thinking_decision(
+                            provider, budget.max_provider_calls, request.reasoning_effort,
+                            model=request.model, latency_v2=self.public_settings.chat_latency_v2,
+                        ),
+                        max_tokens_override=1600,
+                        persist_exchange=False,
+                        remember_session=False,
+                        presence_arrival=True,
+                        **({"system_arrival": True} if typed_arrival else {}),
+                        allow_dialogue_channel_transition=False,
+                    )
+                budget = GenerationBudget(1 if typed_arrival else self.public_settings.max_provider_calls_per_action)
+                result = self.engine.generate(
+                    DialogueContext(request.character_id, "", "in_person", WorldState(prepared["state"])),
+                    budget, generate).payload
+                if typed_arrival:
+                    result["usage"] = {**(result.get("usage") or {}), "provider_calls": budget.provider_calls}
             except SubscriptionError as exc:
                 return self.failed_presence_arrival(
                     prepared, exc.code, model_called=exc.submitted,
                     diagnostics=self._diagnostics(total_started, generation_class="rejected", error_stage="provider"),
+                    usage={"provider_calls": budget.provider_calls} if typed_arrival else None,
                 )
             except Exception as exc:
                 from .mvp_service import MVPProviderError
@@ -1923,6 +1936,7 @@ class PublicChatService:
                     prepared,
                     "provider_request_failed",
                     model_called=True,
+                    usage={"provider_calls": budget.provider_calls} if typed_arrival else None,
                     diagnostics=self._diagnostics(
                         total_started,
                         generation_class="rejected",
@@ -1944,6 +1958,7 @@ class PublicChatService:
                 "role_guard_rejected",
                 model_called=True,
                 diagnostics=diagnostics,
+                usage=result.get("usage") if typed_arrival else None,
             )
         # A proactive arrival is not a user-authored chat turn. Do not invent
         # one from a local empty-output fallback; keep the already-applied
@@ -1953,6 +1968,7 @@ class PublicChatService:
                 prepared,
                 "upstream_invalid_response",
                 model_called=True,
+                usage=result.get("usage") if typed_arrival else None,
                 diagnostics=self._diagnostics(
                     total_started,
                     result,
@@ -1983,6 +1999,7 @@ class PublicChatService:
                 code,
                 model_called=True,
                 diagnostics=diagnostics,
+                usage=result.get("usage") if typed_arrival else None,
             )
         blocks, answer, truncated, safety_category = self._public_generation_content(
             result,
@@ -1994,6 +2011,7 @@ class PublicChatService:
                 prepared,
                 "role_guard_rejected",
                 model_called=True,
+                usage=result.get("usage") if typed_arrival else None,
                 diagnostics=self._diagnostics(
                     total_started,
                     result,
@@ -2031,6 +2049,7 @@ class PublicChatService:
                 "reaction": reaction,
                 "model_called": True,
                 "terminal_error": "",
+                **({"usage": result.get("usage") or {}} if typed_arrival else {}),
                 "diagnostics": self._diagnostics(
                     total_started,
                     result,
@@ -2049,22 +2068,23 @@ class PublicChatService:
     @contextmanager
     def _request_state(
         self,
-        request: ChatRequest,
+        request: ChatRequest | PresenceArrivalRequest,
         subject_hash: str,
         *,
         state_override: dict[str, Any] | None = None,
     ) -> Iterator[tuple[str, str, dict[str, Any]]]:
         state = state_override or self._normalized_state(request.state_package, subject_hash)
+        request_id = request.arrival_id if isinstance(request, PresenceArrivalRequest) else request.request_id
         session_id = "public_session_" + sha256(
-            f"{subject_hash}\x1f{request.request_id}\x1f{request.character_id}".encode()
+            f"{subject_hash}\x1f{request_id}\x1f{request.character_id}".encode()
         ).hexdigest()[:20]
-        world_id = "public_world_" + sha256(f"{subject_hash}\x1f{request.request_id}".encode()).hexdigest()[:20]
+        world_id = "public_world_" + sha256(f"{subject_hash}\x1f{request_id}".encode()).hexdigest()[:20]
         # A new local day is an explicit product choice.  “start_today” keeps
         # stable relationship/world state but does not leak yesterday's
         # transcript or summary into the prompt.  “continue_previous” keeps
         # the bounded history supplied by the browser and is phrased as an
         # optional topic, never as an obligation.
-        continuity_decision = str(request.continuity_decision or "").strip()
+        continuity_decision = str(getattr(request, "continuity_decision", "") or "").strip()
         turns = [] if continuity_decision == "start_today" else _history_turns(request.recent_history)
         history_summary = "" if continuity_decision == "start_today" else request.history_summary
         session_state = {
@@ -2078,7 +2098,7 @@ class PublicChatService:
                 else []
             ),
             "continuity_decision": continuity_decision,
-            "local_day_key": request.local_day_key,
+            "local_day_key": getattr(request, "local_day_key", ""),
             "continuity_rule": (
                 "可选承接上次话题，不责备分析员未完成过去计划。"
                 if continuity_decision == "continue_previous"
@@ -2087,7 +2107,7 @@ class PublicChatService:
                 else "仅使用本次请求提供的连续性内容，不把旧话题写成义务。"
             ),
             "style_context": None,
-            "communication_channel": request.communication_channel,
+            "communication_channel": getattr(request, "communication_channel", "in_person"),
             "recent_story_titles": [],
         }
         world_state = {

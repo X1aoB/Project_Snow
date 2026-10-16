@@ -37,7 +37,7 @@
             <img class="brand-mark" src="/shared/brand/xiaoji-icon-192.png" alt="" aria-hidden="true" />
             <span><strong>小吉终端</strong><small id="version-badge">1.0.0</small></span>
           </a>
-          <button id="close-contacts" class="icon-button mobile-only" type="button" aria-label="关闭角色列表">×</button>
+          <button id="close-contacts" class="icon-button contact-close" type="button" aria-label="收起角色列表">×</button>
         </header>
         <div class="contact-service"><span id="connection-status" class="connection-status">正在连接</span><span>记录保存在当前浏览器</span></div>
         <label class="contact-search"><span aria-hidden="true">⌕</span><input id="character-search" type="search" placeholder="搜索角色" autocomplete="off" /></label>
@@ -99,6 +99,9 @@
               </details>
               <button id="stage-open-announcements" class="scene-tool-button icon-only announcement-entry" type="button" aria-label="公告与生日" aria-haspopup="dialog" aria-controls="announcements-dialog" title="公告与生日"><span aria-hidden="true">!</span><span class="announcement-unread-dot" hidden aria-hidden="true"></span></button>
             </div>
+            <div id="scene-invitation-anchor" class="scene-invitation-anchor">
+              <div id="joint-movement-notice" class="joint-movement-notice" role="status" aria-live="polite" hidden></div>
+            </div>
           </header>
           <div id="scene-stage" class="scene-stage">
             <img id="scene-backdrop" class="scene-backdrop" src="/assets/immersive/scenes/generic.svg" alt="" aria-hidden="true" />
@@ -132,8 +135,8 @@
             <button id="stop-waiting" class="stop-waiting" type="button" hidden>停止等待</button>
             <button id="fast-forward-reply" class="stop-waiting" type="button" hidden>立即显示</button>
           </div>
-          <div id="analyst-action-field" class="action-composer" hidden>
-            <label for="action-input">你的动作或神态 <span>可选，也可单独发送</span></label>
+          <div id="analyst-action-field" class="action-composer" role="region" aria-label="动作或神态草稿" hidden>
+            <div class="action-composer-heading"><label for="action-input">你的动作或神态 <span>可选，也可单独发送</span></label><button id="close-action" class="icon-button" type="button" aria-label="收起动作草稿">×</button></div>
             <textarea id="action-input" rows="1" maxlength="1200" placeholder="描述动作或神态……"></textarea>
           </div>
           <div id="selected-sticker" class="selected-sticker" role="status" aria-live="polite" hidden>
@@ -144,7 +147,7 @@
           <div class="composer-row">
             <div class="composer-tools" aria-label="输入工具">
               <button id="toggle-sticker" class="primary-button text-only composer-tool-button" type="button" aria-label="选择表情包" aria-expanded="false" aria-controls="sticker-picker" title="发送表情包"><span class="composer-tool-icon" aria-hidden="true">☺</span><span class="composer-tool-label">表情包</span></button>
-              <button id="toggle-action" class="primary-button face-only composer-tool-button" type="button" aria-label="添加动作或神态" aria-expanded="false" aria-controls="analyst-action-field" title="添加动作或神态"><span class="composer-tool-icon" aria-hidden="true">✦</span><span class="composer-tool-label">动作</span></button>
+              <button id="toggle-action" class="primary-button face-only composer-tool-button" type="button" aria-label="添加动作或神态" aria-expanded="false" aria-controls="analyst-action-field" title="添加动作或神态"><span class="composer-tool-icon" aria-hidden="true">✦</span><span class="composer-tool-label">动作</span><span class="action-draft-dot" aria-hidden="true" hidden></span></button>
               <button id="open-movement-shortcuts" class="shortcut-button composer-tool-button" type="button" aria-label="邀请角色一起去其他地点" aria-haspopup="dialog"><span class="composer-tool-icon" aria-hidden="true">↗</span><span class="composer-tool-label">一起去</span></button>
             </div>
             <textarea id="message-input" rows="1" maxlength="2000" aria-label="输入对白或消息" placeholder="选择角色后输入消息……" disabled></textarea>
