@@ -17,6 +17,16 @@ def capture(page, name):
         page.screenshot(path=str(output / name))
 
 
+def composition_key(locator, key, *, composing, key_code):
+    """Synthetic IME event delivery in real Chromium, not a native IME claim."""
+    return locator.evaluate("""(node, options) => {
+      const event = new KeyboardEvent('keydown', {key:options.key, code:options.key,
+        isComposing:options.composing, keyCode:options.keyCode, bubbles:true, cancelable:true});
+      node.dispatchEvent(event);
+      return {isComposing:event.isComposing, keyCode:event.keyCode, prevented:event.defaultPrevented};
+    }""", {"key": key, "composing": composing, "keyCode": key_code})
+
+
 @skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
 class ImmersiveControlsTests(TestCase):
     setUpClass = classmethod(skin.SnowAdvStageTests.setUpClass.__func__)
@@ -108,6 +118,110 @@ class ImmersiveControlsTests(TestCase):
         page.locator("#toggle-action").click()
         self.assertEqual(page.locator("#action-input").input_value(), "合成保留动作\n")
         self.assertEqual(len(skin.fixture.PublicFrontendHandler.chat_payloads), before)
+        self.assertFalse(self.errors)
+
+    def test_ime_confirmation_never_sends_but_plain_enter_and_shift_enter_work(self):
+        for composing, key_code in ((True, 13), (False, 229)):
+            with self.subTest(is_composing=composing, key_code=key_code):
+                page = self.face(390)
+                page.locator("#open-communicator").click()
+                page.locator("#text-surface").wait_for(state="visible")
+                page.wait_for_function("!document.getElementById('send-message').disabled")
+                before = len(skin.fixture.PublicFrontendHandler.chat_payloads)
+                page.evaluate("""() => {window.__compositionSubmits=0;
+                  document.getElementById('composer').addEventListener('submit',()=>window.__compositionSubmits++);}""")
+                message = page.locator("#message-input")
+                message.fill("中文候选")
+                message.dispatch_event("compositionstart", {"data": ""})
+                message.dispatch_event("compositionupdate", {"data": "中文候选"})
+                event = composition_key(message, "Enter", composing=composing, key_code=key_code)
+                self.assertEqual(page.evaluate("window.__compositionSubmits"), 0)
+                self.assertEqual(event, {"isComposing": composing, "keyCode": key_code, "prevented": False})
+                self.assertEqual(message.input_value(), "中文候选")
+                message.dispatch_event("compositionend", {"data": "中文候选"})
+                page.keyboard.press("Shift+Enter")
+                self.assertEqual(message.input_value(), "中文候选\n")
+                self.assertEqual(page.evaluate("window.__compositionSubmits"), 0)
+                self.assertEqual(len(skin.fixture.PublicFrontendHandler.chat_payloads), before)
+                page.keyboard.insert_text("继续")
+                with page.expect_response(lambda response: response.url.endswith("/public/v1/chat/stream")):
+                    page.keyboard.press("Enter")
+                self.assertEqual(page.evaluate("window.__compositionSubmits"), 1)
+                self.assertEqual(len(skin.fixture.PublicFrontendHandler.chat_payloads), before + 1)
+                self.assertEqual(skin.fixture.PublicFrontendHandler.chat_payloads[-1]["message"], "中文候选\n继续")
+                page.close()
+        self.assertFalse(self.errors)
+
+    def test_action_ime_escape_preserves_popover_focus_and_draft(self):
+        for composing, key_code in ((True, 27), (False, 229)):
+            with self.subTest(is_composing=composing, key_code=key_code):
+                page = self.face(390)
+                before = len(skin.fixture.PublicFrontendHandler.chat_payloads)
+                page.locator("#toggle-action").click()
+                action = page.locator("#action-input")
+                action.fill("合成输入法动作")
+                action.dispatch_event("compositionstart", {"data": ""})
+                action.dispatch_event("compositionupdate", {"data": "合成输入法动作"})
+                enter = composition_key(action, "Enter", composing=composing, key_code=13 if composing else 229)
+                self.assertFalse(enter["prevented"])
+                escape = composition_key(action, "Escape", composing=composing, key_code=key_code)
+                self.assertTrue(page.locator("#analyst-action-field").is_visible())
+                self.assertEqual(escape, {"isComposing": composing, "keyCode": key_code, "prevented": False})
+                self.assertEqual(page.evaluate("document.activeElement.id"), "action-input")
+                self.assertEqual(action.input_value(), "合成输入法动作")
+                action.dispatch_event("compositionend", {"data": "合成输入法动作"})
+                page.keyboard.press("Enter")
+                self.assertEqual(action.input_value(), "合成输入法动作\n")
+                page.keyboard.press("Escape")
+                self.assertTrue(page.locator("#analyst-action-field").is_hidden())
+                self.assertEqual(page.evaluate("document.activeElement.id"), "toggle-action")
+                page.locator("#toggle-action").click()
+                self.assertEqual(action.input_value(), "合成输入法动作\n")
+                self.assertEqual(len(skin.fixture.PublicFrontendHandler.chat_payloads), before)
+                page.close()
+        self.assertFalse(self.errors)
+
+    def test_action_popover_stays_visible_in_simulated_soft_keyboard_viewport(self):
+        # A viewport resize exercises layout; this is not a physical-device or
+        # native soft-keyboard/visualViewport validation.
+        page = self.face(390)
+        before_calls = len(skin.fixture.PublicFrontendHandler.chat_payloads)
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.locator("#toggle-action").click()
+        page.locator("#action-input").fill("合成软键盘缩小草稿")
+        page.keyboard.press("Escape")
+        # Compare the same draft/count footer with the popover closed and open.
+        closed = {}
+        for height in (844, 420):
+            page.set_viewport_size({"width": 390, "height": height})
+            closed[height] = page.locator("#scene-stage").bounding_box()
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.locator("#toggle-action").click()
+        for height in (844, 420, 844):
+            with self.subTest(viewport_height=height):
+                page.set_viewport_size({"width": 390, "height": height})
+                field = page.locator("#analyst-action-field")
+                self.assertTrue(field.is_visible())
+                box = field.bounding_box()
+                self.assertGreaterEqual(box["x"], 0)
+                self.assertGreaterEqual(box["y"], 0)
+                self.assertLessEqual(box["x"] + box["width"], 390)
+                self.assertLessEqual(box["y"] + box["height"], height)
+                self.assertLessEqual(box["y"] + box["height"], page.locator("#toggle-action").bounding_box()["y"] + 1)
+                stage = page.locator("#scene-stage").bounding_box()
+                for key in ("x", "y", "width", "height"):
+                    self.assertAlmostEqual(stage[key], closed[height][key], delta=1)
+                self.assertEqual(page.evaluate("document.activeElement.id"), "action-input")
+                self.assertTrue(page.locator("#action-input").evaluate("""node => {
+                  const r=node.getBoundingClientRect();
+                  return document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===node;
+                }"""))
+                self.assertEqual(page.locator("#action-input").input_value(), "合成软键盘缩小草稿")
+                capture(page, f"action-simulated-keyboard-390x{height}.png")
+        page.keyboard.press("Escape")
+        page.locator("#toggle-action").click()
+        self.assertEqual(page.locator("#action-input").input_value(), "合成软键盘缩小草稿")
+        self.assertEqual(len(skin.fixture.PublicFrontendHandler.chat_payloads), before_calls)
         self.assertFalse(self.errors)
 
     def test_empty_avatar_uses_image_and_round_stage_avatar_keeps_fallback(self):
