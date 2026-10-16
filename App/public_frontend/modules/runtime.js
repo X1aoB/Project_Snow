@@ -385,15 +385,23 @@ var MotionScope = class {
     for (const cleanup of this.cleanups) cleanup();
     this.cleanups.clear();
   }
-  play(node, frames, options) {
-    if (typeof node.animate !== "function") return Promise.resolve();
-    const animation = node.animate(frames, options);
-    this.animations.add(animation);
-    return animation.finished.catch(() => {
-    }).then(() => {
-      this.animations.delete(animation);
-      animation.cancel();
-    });
+  async play(node, frames, options) {
+    let animation;
+    try {
+      if (typeof node.animate !== "function") return;
+      animation = node.animate(frames, options);
+      this.animations.add(animation);
+      await animation.finished;
+    } catch {
+    } finally {
+      if (animation) {
+        this.animations.delete(animation);
+        try {
+          animation.cancel();
+        } catch {
+        }
+      }
+    }
   }
   cleanup(callback) {
     this.cleanups.add(callback);

@@ -80,3 +80,14 @@ test("motion cancellation settles and cleans resources without a network control
   scope.cancel(); await pending; scope.cancel();
   assert.equal(cleaned,1); assert.ok(cancel >= 1);
 });
+
+test("unavailable animation creation and cleanup never reject presentation", async () => {
+  const scope = new MotionScope();
+  await assert.doesNotReject(scope.play({animate(){throw new Error("unavailable");}},[],{}));
+  await assert.doesNotReject(scope.play({animate:()=>({
+    finished:Promise.reject(new Error("interrupted")),
+    cancel(){throw new Error("detached");},
+  })},[],{}));
+  // Failed animations must no longer be owned by the scope.
+  assert.doesNotThrow(() => scope.cancel());
+});

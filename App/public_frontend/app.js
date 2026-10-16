@@ -2125,6 +2125,7 @@ function surfaceHistory(surface = "timeline") {
 async function loadOlderMessages(surface = "timeline") {
   const thread = currentThread();
   if (!thread?.messages.length || state.historyPageLoading) return;
+  if (thread.channel === "text") flushCommunicatorPresentation(thread.characterId, { render: false });
   const root = $(surface === "timeline" ? "timeline" : "transcript-content");
   const limitKey = `${surface}VisibleLimit`;
   const endKey = `${surface}EndId`;
@@ -2163,6 +2164,7 @@ async function loadOlderMessages(surface = "timeline") {
   if (sameAnchor && anchorTop !== undefined) root.scrollTop += sameAnchor.getBoundingClientRect().top - anchorTop;
 }
 function loadNewerMessages(surface = "timeline", latest = false) {
+  if (currentThread()?.channel === "text") flushCommunicatorPresentation(state.selected, { render: false });
   const messages = surfaceHistory(surface);
   const windowBefore = historyWindow(messages, state[`${surface}EndId`], state[`${surface}VisibleLimit`]);
   const nextEnd = latest ? messages.length : Math.min(messages.length, windowBefore.end + 40);
@@ -5216,7 +5218,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     }
     renderAll();
     updateComposerAvailability();
-    if (closeContacts) {
+    if (closeContacts && (currentThread()?.channel === "in_person" || window.matchMedia("(max-width: 820px)").matches)) {
       closeContactsPanel({ restoreFocus: true });
     }
     if (!switchingFromStage && sceneActionsV2Enabled() && state.selected === characterId) {
@@ -6737,6 +6739,14 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     if (!committedReply?.blocks.length && !dialogueV2 && !shouldReuseChatRequest(error)) {
       state.retrySnapshots.delete(userMessage.id);
       userMessage.requestSnapshot = null;
+    }
+    // Expose confirmed content before cancellation renders with the streaming
+    // cursor, so a previously visible prefix keeps its original DOM nodes.
+    if (communicatorPaced && committedReply?.blocks.length) {
+      const streaming = state.streamingPresentationByCharacter.get(characterId);
+      if (streaming?.requestId === requestId) {
+        streaming.visibleCount = committedReply.blocks.length;
+      }
     }
     cancelPresentationQueue(characterId, requestId);
     if (committedReply?.blocks.length) {

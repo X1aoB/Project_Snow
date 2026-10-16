@@ -60,7 +60,7 @@ class FollowupHandler(fixture.PublicFrontendHandler):
         if cls.scenario != "action_fallback":
             terminal["content_blocks"] = blocks
         packets.append("event: done\ndata: " + json.dumps(terminal, ensure_ascii=False) + "\n\n")
-        if cls.scenario == "partial_once":
+        if cls.scenario in {"partial_once", "partial_after_visible"}:
             packets = packets[:2] + ["event: error\ndata: " + json.dumps({"code": "provider_network_error", "partial": True, "retryable": False}) + "\n\n"]
         body = "".join(packets).encode()
         self.send_response(200)
@@ -70,7 +70,13 @@ class FollowupHandler(fixture.PublicFrontendHandler):
             self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         try:
-            if cls.scenario == "slow":
+            if cls.scenario == "partial_after_visible":
+                prefix = "".join(packets[:2]).encode()
+                self.wfile.write(prefix)
+                self.wfile.flush()
+                cls.release.wait(timeout=15)
+                self.wfile.write(body[len(prefix):])
+            elif cls.scenario == "slow":
                 progress = packets[0].encode()
                 self.wfile.write(progress)
                 self.wfile.flush()
@@ -175,13 +181,16 @@ class FeedbackFollowupUITests(TestCase):
         self.completed()
         # Network completion must release controls before the natural floor.
         self.assertLess(self.page.evaluate("performance.now()-window.__sentAt"), 550)
-        self.page.wait_for_function("window.__blockTimes.length===4")
+        # Six-character bubbles now take at least 1.5 s each, plus a
+        # 0.6–1.2 s gap. This one pacing test observes the whole real delivery.
+        self.page.wait_for_function("window.__blockTimes.length===4", timeout=12000)
         times = self.page.evaluate("window.__blockTimes")
-        self.assertGreaterEqual(times[0] - self.page.evaluate("window.__sentAt"), 550)
+        self.assertGreaterEqual(times[0] - self.page.evaluate("window.__sentAt"), 1450)
+        self.assertLess(times[0] - self.page.evaluate("window.__sentAt"), 2300)
         for gap in (right - left for left, right in zip(times, times[1:])):
-            self.assertGreaterEqual(gap, 175)
-            self.assertLess(gap, 550)
-        self.assertLessEqual(times[-1] - times[0], 1300)
+            self.assertGreaterEqual(gap, 2050)
+            self.assertLess(gap, 3400)
+        self.assertLessEqual(times[-1] - times[0], 10200)
         self.assertEqual(self.page.locator("#timeline .message.assistant").count(), 1)
         self.assertEqual(self.errors, [])
 
@@ -196,10 +205,12 @@ class FeedbackFollowupUITests(TestCase):
         feedback = self.page.evaluate("window.__feedbackAt-window.__sentAt")
         self.assertGreaterEqual(feedback, 450)
         self.assertLess(feedback, 850)
-        self.page.wait_for_function("window.__blockTimes.length===4")
+        self.page.wait_for_function("window.__blockTimes.length>=1")
         first = self.page.evaluate("window.__blockTimes[0]-window.__sentAt")
-        self.assertGreaterEqual(first, 1100)
-        self.assertLess(first, 1500)
+        # The 1.15 s upstream wait counts toward the 1.5–1.725 s first
+        # bubble, rather than adding another full typing delay afterward.
+        self.assertGreaterEqual(first, 1450)
+        self.assertLess(first, 2300)
         self.assertEqual(self.errors, [])
 
     def test_reduced_motion_skips_bubble_delays(self):
@@ -222,6 +233,7 @@ class FeedbackFollowupUITests(TestCase):
         FollowupHandler.scenario = "replay"
         self.send("合成第二个请求")
         self.completed()
+        self.page.locator("#fast-forward-reply").click()
         self.page.wait_for_function("document.querySelectorAll('#timeline .message.assistant .content-message').length===8")
         self.assertEqual(self.page.locator("#timeline .message.user.failed").count(), 0)
         self.assertEqual(len(FollowupHandler.requests), 2)
@@ -242,6 +254,7 @@ class FeedbackFollowupUITests(TestCase):
         }""")
         self.send("合成本地持久化故障")
         self.completed()
+        self.page.locator("#fast-forward-reply").click()
         self.page.wait_for_function("window.__blockTimes.length===4")
         self.assertEqual(self.page.evaluate("window.__worldQuotaFaults"), 1)
         self.assertIn("合成地点", self.page.locator("#go-in-person-label").text_content())
@@ -256,8 +269,12 @@ class FeedbackFollowupUITests(TestCase):
         self.send("合成部分结果恢复")
         self.completed()
         self.page.wait_for_function("document.querySelector('#timeline .message.assistant.partial') || document.querySelector('#timeline .message.assistant.failed')")
+        prefix = self.page.locator("#timeline .message.assistant .content-message").first
+        prefix.wait_for(state="visible")
+        self.assertEqual(prefix.inner_text(), "合成第一段。")
         self.page.evaluate("""() => {
           window.__keptPrefix=document.querySelector('#timeline .message.assistant .content-message');
+          if(!window.__keptPrefix?.isConnected)throw new Error('confirmed prefix is missing');
           window.__prefixWasRemoved=false;
           new MutationObserver(()=>{if(!window.__keptPrefix.isConnected)window.__prefixWasRemoved=true;})
             .observe(document.querySelector('#timeline'),{subtree:true,childList:true});
@@ -268,6 +285,42 @@ class FeedbackFollowupUITests(TestCase):
         self.completed()
         self.assertFalse(self.page.evaluate("window.__prefixWasRemoved"))
         self.assertTrue(self.page.evaluate("window.__keptPrefix===document.querySelector('#timeline .message.assistant .content-message')"))
+        self.assertEqual(self.page.locator("#timeline .message.assistant").count(), 1)
+        self.assertEqual(len(FollowupHandler.requests), 2)
+        self.assertEqual(FollowupHandler.requests[0]["request_id"], FollowupHandler.requests[1]["request_id"])
+        self.assertEqual(self.errors, [])
+
+    def test_delayed_partial_error_preserves_visible_prefix_through_failure_and_recovery(self):
+        FollowupHandler.scenario = "partial_after_visible"
+        self.open()
+        self.send("合成已显示前缀后失败")
+        prefix = self.page.locator("#timeline .message.assistant .content-message").first
+        prefix.wait_for(state="visible")
+        self.assertEqual(prefix.inner_text(), "合成第一段。")
+        self.assertTrue(self.page.locator("#send-message").is_disabled())
+        self.assertFalse(FollowupHandler.release.is_set())
+        self.page.evaluate("""() => {
+          window.__keptPrefix=document.querySelector('#timeline .message.assistant .content-message');
+          if(!window.__keptPrefix?.isConnected)throw new Error('confirmed prefix is missing');
+          window.__prefixWasRemoved=false;
+          new MutationObserver(records=>{
+            if(!window.__keptPrefix.isConnected || records.some(record=>
+              [...record.removedNodes].some(node=>node===window.__keptPrefix || node.contains?.(window.__keptPrefix))))
+              window.__prefixWasRemoved=true;
+          }).observe(document.querySelector('#timeline'),{subtree:true,childList:true});
+        }""")
+        FollowupHandler.release.set()
+        self.completed()
+        self.page.locator("#timeline .message.assistant.partial, #timeline .message.assistant.failed").wait_for(state="visible")
+        self.assertTrue(prefix.is_visible())
+        self.assertTrue(self.page.evaluate("window.__keptPrefix===document.querySelector('#timeline .message.assistant .content-message')"))
+        self.assertFalse(self.page.evaluate("window.__prefixWasRemoved"))
+        FollowupHandler.scenario = "replay"
+        self.page.locator("#timeline .message.user.failed [data-retry-message]").click()
+        self.page.wait_for_function("document.querySelectorAll('#timeline .message.assistant .content-message').length===4")
+        self.completed()
+        self.assertTrue(self.page.evaluate("window.__keptPrefix===document.querySelector('#timeline .message.assistant .content-message')"))
+        self.assertFalse(self.page.evaluate("window.__prefixWasRemoved"))
         self.assertEqual(self.page.locator("#timeline .message.assistant").count(), 1)
         self.assertEqual(len(FollowupHandler.requests), 2)
         self.assertEqual(FollowupHandler.requests[0]["request_id"], FollowupHandler.requests[1]["request_id"])
@@ -286,6 +339,7 @@ class FeedbackFollowupUITests(TestCase):
         }""")
         self.send("合成显示故障")
         self.completed()
+        self.page.locator("#fast-forward-reply").click()
         self.page.wait_for_function("window.__blockTimes.length===4")
         self.assertEqual(self.page.evaluate("window.__presentationFaults"), 1)
         self.assertEqual(self.page.locator("#timeline .message.user.failed").count(), 0)
@@ -296,6 +350,8 @@ class FeedbackFollowupUITests(TestCase):
     def test_failed_text_status_stays_in_text_and_feedback_binds_its_request(self):
         self.open()
         self.send("合成成功的旧轮")
+        self.completed()
+        self.page.locator("#fast-forward-reply").click()
         self.page.wait_for_function("window.__blockTimes.length===4")
         first_request = FollowupHandler.requests[-1]["request_id"]
         FollowupHandler.scenario = "failure"
@@ -385,7 +441,8 @@ class FeedbackFollowupUITests(TestCase):
           const anchor=[...t.querySelectorAll('[data-message-id]')].find(n=>n.getBoundingClientRect().bottom>top);
           window.__historyAnchor={id:anchor.dataset.messageId,offset:anchor.getBoundingClientRect().top-top};}""")
         self.send()
-        self.page.wait_for_function("window.__blockTimes.length===4")
+        # Keep natural bubble delivery active while checking the reader anchor.
+        self.page.wait_for_function("window.__blockTimes.length===4", timeout=12000)
         self.assertLess(self.page.evaluate("""() => {const t=document.querySelector('#timeline'),a=window.__historyAnchor;
           const n=[...t.querySelectorAll('[data-message-id]')].find(n=>n.dataset.messageId===a.id);
           return Math.abs(n.getBoundingClientRect().top-t.getBoundingClientRect().top-a.offset);}"""), 3)
@@ -399,7 +456,7 @@ class FeedbackFollowupUITests(TestCase):
         self.page.wait_for_timeout(100)
         self.send("合成贴底检查")
         self.page.wait_for_function("""() => {const rows=[...document.querySelectorAll('#timeline .message.assistant')];
-          return rows.length===24 && rows.at(-1).querySelectorAll('.content-message').length===4;}""")
+          return rows.length===24 && rows.at(-1).querySelectorAll('.content-message').length===4;}""", timeout=12000)
         self.page.set_viewport_size({"width": 1200, "height": 800})
         self.page.wait_for_timeout(150)
         self.assertLess(self.page.locator("#timeline").evaluate("n=>n.scrollHeight-n.scrollTop-n.clientHeight"), 3)

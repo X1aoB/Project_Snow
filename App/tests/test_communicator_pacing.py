@@ -8,6 +8,7 @@ from http.server import ThreadingHTTPServer
 from unittest import TestCase, skipUnless
 
 from tests import test_public_frontend_e2e as fixture
+from tests import test_public_frontend_reliability as reliability_fixture
 
 
 FIRST = "雪" * 39 + "。"
@@ -218,6 +219,70 @@ class CommunicatorPacingTests(TestCase):
                 PacingHandler.terminal.set()
                 self.wait_stored(page, 2, "sent")
                 page.wait_for_function("!document.querySelector('#send-message').disabled")
+                self.assertEqual(len(PacingHandler.requests), 1)
+                self.assertEqual(self.errors, [])
+            finally:
+                PacingHandler.second.set(); PacingHandler.terminal.set(); browser.close()
+
+    def test_older_history_ends_delivery_before_returning_to_latest(self):
+        with fixture.sync_playwright() as playwright:
+            browser = fixture._launch_browser(playwright)
+            try:
+                page = browser.new_page()
+                self.open(page)
+                reliability_fixture.PublicFrontendReliabilityTests.seed(page, count=100)
+                page.reload(wait_until="networkidle")
+                self.send(page)
+                self.wait_stored(page, 1, "pending")
+                self.assertNotIn(FIRST, page.locator("#timeline").inner_text())
+                page.locator("#fast-forward-reply").wait_for(state="visible")
+                page.locator("#load-older-messages").click()
+                page.locator("#load-newer-messages").wait_for(state="visible")
+                self.assertTrue(page.locator("#send-message").is_disabled())
+                self.assertNotIn(SECOND, page.locator("#timeline").inner_text())
+                PacingHandler.second.set(); PacingHandler.terminal.set()
+                self.wait_stored(page, 2, "sent")
+                # Check the older-page action itself ended delivery, before the
+                # newer-page entry point has any opportunity to flush it.
+                page.locator("#fast-forward-reply").wait_for(state="hidden", timeout=1000)
+                page.locator("#new-replies").click()
+                for text in (FIRST, SECOND):
+                    page.locator("#timeline").get_by_text(text, exact=True).wait_for(timeout=1000)
+                    self.assertEqual(page.locator("#timeline").get_by_text(text, exact=True).count(), 1)
+                self.assertEqual(page.locator("#timeline .typing-indicator").count(), 0)
+                self.assertEqual(len(PacingHandler.requests), 1)
+                self.assertEqual(self.errors, [])
+            finally:
+                PacingHandler.second.set(); PacingHandler.terminal.set(); browser.close()
+
+    def test_newer_history_immediately_releases_verified_prefix_without_another_request(self):
+        with fixture.sync_playwright() as playwright:
+            browser = fixture._launch_browser(playwright)
+            try:
+                page = browser.new_page()
+                self.open(page)
+                reliability_fixture.PublicFrontendReliabilityTests.seed(page, count=201)
+                page.reload(wait_until="networkidle")
+                for _ in range(4):
+                    page.locator("#load-older-messages").click()
+                page.locator("#load-newer-messages").wait_for(state="visible")
+                self.send(page)
+                self.wait_stored(page, 1, "pending")
+                self.assertNotIn(FIRST, page.locator("#timeline").inner_text())
+                # A new request starts while the user is already on an older
+                # page, so only the newer-page action can flush this delivery.
+                page.locator("#load-newer-messages").click()
+                page.locator("#timeline").get_by_text(FIRST, exact=True).wait_for(timeout=1000)
+                self.assertTrue(page.locator("#send-message").is_disabled())
+                self.assertNotIn(SECOND, page.locator("#timeline").inner_text())
+                self.assertNotIn("未经确认", page.locator("#timeline").inner_text())
+                PacingHandler.second.set()
+                self.wait_stored(page, 2, "pending")
+                page.locator("#timeline").get_by_text(SECOND, exact=True).wait_for(timeout=1000)
+                self.assertTrue(page.locator("#send-message").is_disabled())
+                PacingHandler.terminal.set()
+                self.wait_stored(page, 2, "sent")
+                page.locator("#fast-forward-reply").wait_for(state="hidden", timeout=1000)
                 self.assertEqual(len(PacingHandler.requests), 1)
                 self.assertEqual(self.errors, [])
             finally:

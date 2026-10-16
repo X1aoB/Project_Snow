@@ -276,11 +276,35 @@ class DialogueV2FrontendTests(TestCase):
 
     def test_expired_recovery_cannot_generate_or_downgrade(self):
         self.open(); DialogueHandler.scenario = "unavailable"
-        self.send()
-        self.assertEqual(len(self.rows()), 2)
+        with self.page.expect_response(lambda response: response.url.endswith("/public/v2/chat/stream")
+                and response.status == 410 and response.request.headers.get("x-snow-recovery-only") == "1") as recovery:
+            self.send()
+        request_id = recovery.value.request.post_data_json["chat"]["request_id"]
+        # The composer's initial enabled state can precede async submission.
+        # A real recovery response and its durable terminal row identify the
+        # finished request, independently of UI timing or the retry backoff.
+        self.page.wait_for_function("""requestId => new Promise((resolve, reject) => {
+          const r = indexedDB.open('project-snow-public', 4);
+          r.onerror = () => reject(r.error);
+          r.onsuccess = () => {
+            const db = r.result, tx = db.transaction('messages', 'readonly');
+            const user = tx.objectStore('messages').get(`user:${requestId}`);
+            tx.oncomplete = () => { resolve(user.result?.status === 'failed'
+              && user.result.errorCode === 'request_result_unavailable'); db.close(); };
+          };
+        })""", arg=request_id)
+        self.page.wait_for_function("""() => !document.querySelector('#send-message').disabled
+          && document.querySelector('#request-status').getAttribute('aria-busy') === 'false'
+          && document.querySelector('#request-status').textContent.includes('恢复窗口已结束')""")
+        rows = self.rows()
+        self.assertEqual(len(rows), 2)
+        self.assertFalse(rows[0]["recovery"]); self.assertTrue(rows[1]["recovery"])
+        self.assertEqual(rows[0]["payload"], rows[1]["payload"])
+        self.assertEqual(rows[0]["payload"]["chat"]["request_id"], request_id)
         self.assertIn("恢复窗口已结束", self.page.locator("#request-status").inner_text())
         self.assertEqual(self.page.locator("[data-retry-message]").count(), 0)
         self.assertFalse(any(path == "/public/v1/chat/stream" for path in fixture.PublicFrontendHandler.request_paths))
+        self.assertFalse(self.errors)
 
     def test_invitation_survives_long_chat_reopen_and_stay_then_zero_model_join(self):
         self.open(); self.send("合成邀请去餐厅")
