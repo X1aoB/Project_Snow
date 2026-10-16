@@ -237,6 +237,18 @@ class PresenceArrivalRequest(StrictModel):
         return value
 
 
+class PresenceArrivalV2Request(PresenceArrivalRequest):
+    """A paid reaction to one signed, already completed model-free join."""
+
+    protocol: Literal["public-presence-arrival-v2"] = "public-presence-arrival-v2"
+    # Recovery does not need a live BYOK envelope. New generation still opens
+    # and validates it before admission; credentials are never business hashes.
+    credential: str = Field(default="", max_length=8192)
+    arrival_ticket: str = Field(min_length=1, max_length=2048)
+    segment_id: UUID
+    session_context_package: str = Field(min_length=1, max_length=8192)
+
+
 class PresenceState(StrictModel):
     character_id: str = Field(min_length=12, max_length=32)
     character_name: str = Field(min_length=1, max_length=80)

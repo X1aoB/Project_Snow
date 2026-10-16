@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime, UTC
 from typing import Any
 
+from .arrival_ticket import sign_arrival_ticket, verify_arrival_ticket
 from .dialogue_turn import parse_turn_frame
 from .mvp_policy import scene_visual_key
 from .public_contracts import (DialogueV2ChatRequest, SceneActionRequest, SessionContext,
@@ -127,6 +128,19 @@ class DialogueV2Service:
             world["analyst_location"] = defaults.get("analyst_location")
             world["pending_rendezvous"].pop(chat.character_id, None)
             world["revision"] += 1
+        # Older clients retained the accepted invitation after a completed
+        # joint move. Consume only that exact signed scene event, never a
+        # future promise, unresolved invitation or remote waiting rendezvous.
+        active = context.active_invitation
+        if (active and active.status == "accepted" and active.time_scope == "now"
+                and overlay and active.invitation_id == f"invite:{overlay.source_event_id}"
+                and active.location_id == overlay.location_id
+                and active.activity_id == overlay.activity_id
+                and not world.get("pending_rendezvous", {}).get(chat.character_id)):
+            target = self._definition(active.location_id, chat.character_id)["location"]
+            scene = world["presence"][chat.character_id]
+            if world.get("analyst_location") == scene["location"] == target:
+                context.active_invitation = None
         return world
 
     def _memory(self, context, request_id, kind, value, location_id="", *, source_message_ids=None):
@@ -252,6 +266,8 @@ class DialogueV2Service:
             }.get(disposition, disposition)
             if disposition == "accept_now" and intent.time_scope == "now":
                 world, action = self._move(world, chat, intent, waiting=chat.communication_channel == "text")
+                if chat.communication_channel == "in_person":
+                    context.active_invitation = None
                 memories.append(self._memory(context, chat.request_id,
                     "assistant_commitment" if chat.communication_channel == "text" else "shared_scene_event",
                     f"约定在{intent.definition['location']}会合" if chat.communication_channel == "text" else f"一起到达{intent.definition['location']}", intent.location_id))
@@ -418,4 +434,39 @@ class DialogueV2Service:
         result = {"request_id": str(envelope.request_id), "character_id": envelope.character_id,
                   "communication_channel": channel, "movement_status": action, "model_called": False,
                   "usage": {"provider_calls": 0}, "terminal_error": "", "state_event": world["recent_events"][-1] if world["recent_events"] else None}
-        return self._finish(result, context, world, envelope, subject, memories, action)
+        result = self._finish(result, context, world, envelope, subject, memories, action)
+        if action.get("status") == "joined":
+            result["arrival_ticket"] = sign_arrival_ticket(self.settings,
+                subject_hash=subject, character_id=envelope.character_id,
+                segment_id=envelope.segment_id, arrival_id=envelope.request_id,
+                state_package=result["state_package"],
+                session_context_package=result["session_context_package"])
+        return result
+
+    def prepare_arrival(self, envelope, subject, joined):
+        """Verify an existing join without reapplying movement or probability."""
+        verify_arrival_ticket(self.settings, envelope, subject)
+        if (not isinstance(joined, dict) or joined.get("request_id") != str(envelope.arrival_id)
+                or joined.get("character_id") != envelope.character_id
+                or joined.get("communication_channel") != "in_person"
+                or joined.get("scene_action", {}).get("status") != "joined"
+                or joined.get("scene_action", {}).get("action") not in {"join_character", "join_rendezvous"}
+                or joined.get("state_package") != envelope.state_package
+                or joined.get("session_context_package") != envelope.session_context_package
+                or joined.get("arrival_ticket") != envelope.arrival_ticket):
+            raise PublicSecurityError("Arrival ticket does not match a completed join")
+        context = verify_session_context(self.settings, envelope.session_context_package,
+            subject_hash=subject, character_id=envelope.character_id,
+            segment_id=envelope.segment_id, catalog_version=self.catalog_version)
+        world = StatePayload.model_validate(verify_state(self.settings, envelope.state_package)).model_dump()
+        if (not context or not context.scene_overlay
+                or context.scene_overlay.source_event_id != str(envelope.arrival_id)
+                or context.scene_overlay.communication_channel != "in_person"
+                or world["subject_binding"] != subject
+                or not self.legacy._scene_state(world, envelope.character_id)["co_located"]):
+            raise PublicSecurityError("Arrival ticket does not confirm a meeting")
+        self.legacy.ensure_character_available(envelope.character_id)
+        return {"arrival_id": str(envelope.arrival_id), "character_id": envelope.character_id,
+                "communication_channel": "in_person", "decision": "noticed",
+                "reaction": None, "model_called": False, "state": world,
+                "state_package": envelope.state_package}

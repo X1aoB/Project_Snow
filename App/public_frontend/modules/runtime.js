@@ -316,6 +316,32 @@ function remainingNaturalWait(startedAt, now, reduced = false) {
 function segmentWait(textLength, spent, reduced = false) {
   return reduced ? 0 : Math.max(0, Math.min(PRESENTATION_TIMING.segmentBudget - spent, Math.max(PRESENTATION_TIMING.segmentMin, Math.min(PRESENTATION_TIMING.segmentMax, 200 + textLength * 3))));
 }
+var COMMUNICATOR_TIMING = Object.freeze({ perGrapheme: 250, jitter: 0.15, bubbleMin: 1500, bubbleMax: 2e4, gapMin: 600, gapMax: 1200, artificialBudget: 6e4 });
+function timingFraction(key) {
+  let hash2 = 2166136261;
+  for (const character of key) hash2 = Math.imul(hash2 ^ character.codePointAt(0), 16777619);
+  return (hash2 >>> 0) / 4294967295;
+}
+function graphemeCount(text2) {
+  return Array.from(new Intl.Segmenter(void 0, { granularity: "grapheme" }).segment(text2)).length;
+}
+function communicatorBubbleTiming(text2, requestId, index) {
+  const factor = 1 + (timingFraction(`${requestId}:typing:${index}`) * 2 - 1) * COMMUNICATOR_TIMING.jitter;
+  return {
+    typing: Math.max(COMMUNICATOR_TIMING.bubbleMin, Math.min(COMMUNICATOR_TIMING.bubbleMax, graphemeCount(text2) * COMMUNICATOR_TIMING.perGrapheme * factor)),
+    gap: index === 0 ? 0 : COMMUNICATOR_TIMING.gapMin + timingFraction(`${requestId}:gap:${index}`) * (COMMUNICATOR_TIMING.gapMax - COMMUNICATOR_TIMING.gapMin)
+  };
+}
+function communicatorDelayPlan(texts, requestId, firstIndex = 0, elapsedBeforeFirst = 0, spent = 0, terminal = true) {
+  const waits = texts.map((text2, offset) => {
+    const timing = communicatorBubbleTiming(text2, requestId, firstIndex + offset);
+    return Math.max(0, timing.typing + timing.gap - (offset === 0 ? Math.max(0, elapsedBeforeFirst) : 0));
+  });
+  const budget = Math.max(0, COMMUNICATOR_TIMING.artificialBudget - spent) * (terminal ? 1 : 0.5);
+  const total = waits.reduce((sum, value) => sum + value, 0);
+  const scale = total > budget ? budget / total : 1;
+  return waits.map((value) => value * scale);
+}
 var CommittedReply = class {
   constructor(requestId, characterId) {
     this.requestId = requestId;
@@ -477,6 +503,7 @@ function validateHistoryBackup(value) {
   return portableCopy(data);
 }
 export {
+  COMMUNICATOR_TIMING,
   CommittedReply,
   HISTORY_DATABASE_VERSION,
   MAX_VISIBLE_MESSAGES,
@@ -489,10 +516,13 @@ export {
   beforeMessageCursor,
   buildIdentity,
   clearHistoryDatabase,
+  communicatorBubbleTiming,
+  communicatorDelayPlan,
   compareMessageCursor,
   createHttpClient,
   createSafeStorage,
   focusWithin,
+  graphemeCount,
   historyWindow,
   loadStageRelease,
   mergeHistoryDatabase,

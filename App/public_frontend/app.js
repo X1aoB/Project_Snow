@@ -1,4 +1,4 @@
-import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, CommittedReply, MotionScope, anonymousServerTimings } from "/modules/runtime.js";
+import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, COMMUNICATOR_TIMING, communicatorDelayPlan, CommittedReply, MotionScope, anonymousServerTimings } from "/modules/runtime.js";
 import { DIALOGUE_PROTOCOL, SCENE_PROTOCOL, dialogueRecordKey, decodeSidecar, mergeDialogueReceipts, relevantDialogueReceipts, fitDialogueContext, isPureRendezvousJoin, sceneVisualKey } from "/dialogue-context.js";
 import { createSnowIcon } from "/modules/snow-icons.js";
 import { mountSnowWorld, activeSnowLoops } from "/modules/snow-world.js";
@@ -69,6 +69,9 @@ const state = {
   rendezvousDismissals: new Set(),
   selectedSticker: null,
   actionComposerOpen: false,
+  invitationPopoverKey: "",
+  jointMovementNoticeIds: new Set(),
+  jointMovementNoticeTimer: 0,
   selected: "",
   threads: new Map(),
   worldPackage: "",
@@ -76,6 +79,7 @@ const state = {
   sceneByCharacter: new Map(),
   dialogueByCharacter: new Map(),
   sceneActionByCharacter: new Map(),
+  arrivalRequestByCharacter: new Map(),
   latest: new Map(),
   typingByCharacter: new Map(),
   presentationByCharacter: new Map(),
@@ -83,6 +87,7 @@ const state = {
   retrySnapshots: new Map(),
   presenceResolvePending: 0,
   deferredPresenceCharacter: "",
+  deferredFaceEntryCharacter: "",
   deferredPresenceRunning: false,
   modeTransitionSequence: 0,
   modeTransitionPending: false,
@@ -1466,6 +1471,7 @@ function syncFastForward() {
   syncStageQuickMenu();
 }
 function finishReceivedPresentation() {
+  flushCommunicatorPresentation();
   const currentTiming = replyTiming(typingStateFor()?.requestId);
   if (currentTiming) currentTiming.skip = true;
   const queue = presentationFor();
@@ -1480,6 +1486,14 @@ function finishReceivedPresentation() {
   syncFastForward();
 }
 async function deliverCompletedReply(characterId, requestId, message, visibleCount = 0) {
+  if (featureEnabled("chat_latency_v2") && message.communicationChannel === "text") {
+    state.readyReplyIds.delete(message.id);
+    if (state.streamingPresentationByCharacter.get(characterId)?.requestId === requestId) {
+      state.streamingPresentationByCharacter.delete(characterId);
+    }
+    const queue = enqueueCommunicatorReply(characterId, requestId, message, { terminal: true });
+    return queue.done;
+  }
   const ready = { requestId, messageId: message.id, visibleCount, controller: new AbortController() };
   state.completedPresentationByCharacter.set(characterId, ready);
   syncFastForward();
@@ -2425,15 +2439,22 @@ async function pruneExpiredMessages() {
 function draftKey(characterId = state.selected, channel = currentThread()?.channel || "text", field = "message") {
   return `${plain(characterId)}:${channel === "in_person" ? "in_person" : "text"}:${field}`;
 }
+let draftWriteQueue = Promise.resolve();
 async function persistDrafts() {
   if (state.writerReady && !state.writerOwned) return;
   const values = Object.fromEntries(state.drafts);
   const revision = id();
   for (const key of ["drafts", "drafts_recovery_v1"]) state.memoryStores.app_state.set(key, { key, values: structuredClone(values), revision });
-  const db = await openDB();
-  if (!db) return;
-  try { await writeDraftsDatabase(db, values, revision); }
-  catch { useMemoryStorage(); }
+  // Capture each revision now, then write in that same order. A slower earlier
+  // openDB must never commit an empty snapshot over a newer action draft.
+  const write = async () => {
+    const db = await openDB();
+    if (!db) return;
+    try { await writeDraftsDatabase(db, values, revision); }
+    catch { useMemoryStorage(); }
+  };
+  draftWriteQueue = draftWriteQueue.then(write, write);
+  await draftWriteQueue;
 }
 function captureComposerDraft() {
   if (!state.selected) return false;
@@ -3298,6 +3319,7 @@ function cancelPresentationQueue(characterId = state.selected, requestId = "", {
   if (requestId && queue.requestId !== requestId) return false;
   queue.cancelled = true;
   queue.controller?.abort();
+  queue.resolveDone?.(false);
   if (queue.timer) window.clearTimeout(queue.timer);
   cancelStageMotion(characterId);
   state.presentationByCharacter.delete(characterId);
@@ -3456,7 +3478,126 @@ async function preloadStickerBlock(block, timeoutMs = 900, signal = undefined) {
   });
   await Promise.race([loading, abortableDelay(timeoutMs, signal)]);
 }
+// A communicator queue owns only a visibility cursor. All confirmed content is
+// saved independently; neither ending a network request nor a visual cancellation
+// can discard received text or create another generation request.
+function flushCommunicatorPresentation(characterId = state.selected, { render = true } = {}) {
+  const pending = typingStateFor(characterId);
+  const timing = pending?.channel === "text" ? replyTiming(pending.requestId) : null;
+  if (timing) timing.skip = true;
+  const queue = presentationFor(characterId);
+  if (queue?.kind !== "communicator") return false;
+  queue.skip = true;
+  queue.visibleCount = queue.blocks.length;
+  const streaming = state.streamingPresentationByCharacter.get(characterId);
+  if (streaming?.requestId === queue.requestId) streaming.visibleCount = streaming.receivedCount;
+  if (render && characterId === state.selected) renderTimeline();
+  void driveCommunicatorReply(queue);
+  return true;
+}
+function enqueueCommunicatorReply(characterId, requestId, message, { terminal = false, start = true } = {}) {
+  let queue = presentationFor(characterId);
+  if (queue?.kind !== "communicator" || queue.requestId !== requestId) {
+    cancelPresentationQueue(characterId, "", { render: false });
+    let resolveDone;
+    const done = new Promise(resolve => { resolveDone = resolve; });
+    queue = { kind: "communicator", characterId, requestId, messageId: message.id,
+      blocks: [], visibleCount: 0, terminal: false, running: false, cancelled: false, version: 0,
+      controller: new AbortController(), skip: false, artificialSpent: 0, lastDeliveredAt: 0,
+      done, resolveDone };
+    state.presentationByCharacter.set(characterId, queue);
+  }
+  const timing = replyTiming(requestId);
+  queue.blocks = presentationBlocks(message);
+  queue.version += 1;
+  queue.messageId = message.id;
+  queue.terminal ||= terminal;
+  queue.skip ||= Boolean(timing?.skip || timing?.recovery || quietPresentation()
+    || characterId !== state.selected || currentThread()?.channel !== "text");
+  if (queue.skip) {
+    if (timing) timing.skip = true;
+    queue.visibleCount = queue.blocks.length;
+  }
+  // Let the terminal handler finish its scene/status bookkeeping before a
+  // reduced-motion or already-flushed queue clears the request's typing owner.
+  if (start) void Promise.resolve().then(() => driveCommunicatorReply(queue));
+  syncFastForward();
+  return queue;
+}
+async function driveCommunicatorReply(queue) {
+  if (queue.running || queue.cancelled || presentationFor(queue.characterId) !== queue) return;
+  queue.running = true;
+  const owns = () => !queue.cancelled && presentationFor(queue.characterId) === queue
+    && ownsTypingState(queue.characterId, queue.requestId);
+  try {
+    while (owns() && queue.visibleCount < queue.blocks.length) {
+      const timing = replyTiming(queue.requestId);
+      queue.skip ||= Boolean(timing?.skip || timing?.recovery || quietPresentation()
+        || queue.characterId !== state.selected || currentThread()?.channel !== "text");
+      if (queue.skip) {
+        if (timing) timing.skip = true;
+        queue.visibleCount = queue.blocks.length;
+        break;
+      }
+      const index = queue.visibleCount;
+      const began = performance.now();
+      const prior = index === 0 ? timing?.sentAt ?? began : queue.lastDeliveredAt || began;
+      const elapsedBefore = Math.max(0, began - prior);
+      const spentBefore = queue.artificialSpent;
+      let plannedVersion = -1;
+      let plannedWait = 0;
+      if (index > 0 || timing?.feedbackAllowed) updateTypingPhase(queue.characterId, queue.requestId, "segment");
+      while (owns() && !queue.skip && !timing?.skip && !quietPresentation()) {
+        // Replan remaining whole bubbles when more confirmed blocks arrive. No
+        // final-block shortcut: compression applies proportionally to every wait.
+        if (plannedVersion !== queue.version) {
+          plannedWait = communicatorDelayPlan(queue.blocks.slice(index).map(block => plain(block.text)),
+            queue.requestId, index, elapsedBefore, spentBefore, queue.terminal)[0] || 0;
+          plannedVersion = queue.version;
+        }
+        const remaining = plannedWait - (performance.now() - began);
+        if (remaining <= 0) break;
+        await abortableDelay(Math.min(32, remaining), queue.controller.signal);
+      }
+      const added = Math.min(COMMUNICATOR_TIMING.artificialBudget - queue.artificialSpent,
+        Math.max(0, performance.now() - began));
+      queue.artificialSpent += added;
+      if (timing) { timing.naturalWaitMs += added; timing.segmentSpent = queue.artificialSpent; }
+      if (!owns()) return;
+      queue.skip ||= Boolean(timing?.skip || quietPresentation()
+        || queue.characterId !== state.selected || currentThread()?.channel !== "text");
+      if (queue.skip && timing) timing.skip = true;
+      queue.visibleCount = queue.skip ? queue.blocks.length : index + 1;
+      queue.lastDeliveredAt = performance.now();
+      if (timing) { timing.presented = true; timing.lastBodyPaintAt = queue.lastDeliveredAt; }
+      updateTypingPhase(queue.characterId, queue.requestId, queue.visibleCount < queue.blocks.length || !queue.terminal ? "segment" : "presenting");
+    }
+    if (owns() && queue.terminal && queue.visibleCount === queue.blocks.length) {
+      state.presentationByCharacter.delete(queue.characterId);
+      clearTypingState(queue.characterId, queue.requestId);
+      queue.resolveDone(true);
+    }
+  } catch (error) {
+    if (error?.name !== "AbortError" && presentationFor(queue.characterId) === queue) {
+      queue.visibleCount = queue.blocks.length;
+      queue.skip = true;
+      if (replyTiming(queue.requestId)) replyTiming(queue.requestId).skip = true;
+      if (queue.terminal) {
+        state.presentationByCharacter.delete(queue.characterId);
+        clearTypingState(queue.characterId, queue.requestId);
+        queue.resolveDone(false);
+      }
+    }
+  } finally {
+    queue.running = false;
+    syncFastForward();
+    if (queue.characterId === state.selected) renderTimeline();
+  }
+}
 async function presentAssistantTurn(characterId, requestId, message, { visibleCount = 0 } = {}) {
+  if (featureEnabled("chat_latency_v2") && message.communicationChannel === "text") {
+    return enqueueCommunicatorReply(characterId, requestId, message, { terminal: true }).done;
+  }
   if (!ownsTypingState(characterId, requestId)) return false;
   const blocks = presentationBlocks(message);
   const inPerson = message.communicationChannel === "in_person";
@@ -3617,6 +3758,15 @@ function renderRequestStatus() {
       retry.onclick = () => retryMessage(failedMessage.id);
       target.append(" ", retry);
     }
+  }
+  if (!pending && belongsToSegment && state.requestRecoveryByCharacter.get(statusKey) === "recover_arrival") {
+    const recovery = document.createElement("button");
+    recovery.type = "button";
+    recovery.className = "request-recovery";
+    recovery.textContent = "恢复到场回应";
+    recovery.disabled = globalRequestBusy();
+    recovery.onclick = () => recoverPresenceArrival(state.selected);
+    target.append(" ", recovery);
   }
   const stop = $("stop-waiting");
   if (stop) stop.hidden = !pending || ["waiting", "arrival", "presenting"].includes(pending.phase);
@@ -4819,7 +4969,10 @@ async function flushDeferredPresenceRefresh() {
   setRequestStatus(characterId, "正在重新读取当前角色的场景……");
   try {
     await resolvePresence(characterId, state.selectionController?.signal);
-    if (characterId === state.selected) setRequestStatus(characterId, "场景已重新读取");
+    if (characterId === state.selected && state.deferredFaceEntryCharacter === characterId) {
+      state.deferredFaceEntryCharacter = "";
+      await arriveSceneAction();
+    } else if (characterId === state.selected) setRequestStatus(characterId, "场景已重新读取");
   } catch (error) {
     if (error?.name !== "AbortError" && characterId === state.selected) {
       setRequestStatus(characterId, `重新读取失败：${displayError(error)}`, "", "refresh_scene");
@@ -4952,6 +5105,8 @@ function cancelModeTransition() {
 }
 async function selectCharacter(characterId, { closeContacts = true } = {}) {
   if (!characterId || characterId === state.selected && !state.selectionController) return;
+  flushCommunicatorPresentation(state.selected, { render: false });
+  closeImmersivePopovers({ restoreFocus: false });
   cancelSnowScenePresentation();
   cancelBackgroundSummaries();
   if (state.selected) await saveDraftNow();
@@ -4967,7 +5122,9 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   void warmCharacterStage(characterById(characterId), "neutral", "", controller.signal);
   const previousId = state.selected;
   const previousThread = currentThread();
-  const switchingFromStage = Boolean(previousId && previousId !== characterId && previousThread?.channel === "in_person");
+  const switchingFromStage = Boolean(previousId && previousId !== characterId
+    && (previousThread?.channel === "in_person" || state.deferredFaceEntryCharacter === previousId));
+  state.deferredFaceEntryCharacter = "";
   cancelPresentationQueue(previousId);
   if (previousId && previousId !== characterId) cancelStageArt();
   try {
@@ -4990,6 +5147,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
       preparedScene = cachedSceneForCharacter(characterId);
     } else if (globalRequestBusy()) {
       state.deferredPresenceCharacter = characterId;
+      if (switchingFromStage && sceneActionsV2Enabled()) state.deferredFaceEntryCharacter = characterId;
     } else {
       state.presenceResolvePending += 1;
       updateComposerAvailability();
@@ -5045,6 +5203,11 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
       setRequestStatus(characterId, "上一位角色仍在回复，完成后会重新读取当前场景。");
     } else if (dialogueV2Enabled()) {
       await setChannel(thread.channel === "in_person" && preparedScene?.co_located ? "in_person" : "text", false, thread);
+      if (switchingFromStage && sceneActionsV2Enabled()) {
+        if (closeContacts) closeContactsPanel({ restoreFocus: false });
+        await arriveSceneAction();
+        if (sequence !== state.selectionSequence || controller.signal.aborted) return;
+      }
     } else if (switchingFromStage && !preparedScene?.co_located) {
       await setChannel("in_person", false);
       window.setTimeout(() => { if (sequence === state.selectionSequence) openPresenceDialog(); }, 0);
@@ -5054,12 +5217,10 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     renderAll();
     updateComposerAvailability();
     if (closeContacts) {
-      $("contact-panel").classList.remove("open");
-      if (window.matchMedia("(max-width: 820px)").matches) {
-        $("contact-panel").setAttribute("aria-hidden", "true");
-        $("contact-panel").inert = true;
-      }
-      syncContactToggleState();
+      closeContactsPanel({ restoreFocus: true });
+    }
+    if (!switchingFromStage && sceneActionsV2Enabled() && state.selected === characterId) {
+      await recoverPresenceArrival(characterId);
     }
   } catch (error) {
     if (error?.name === "AbortError" || sequence !== state.selectionSequence) return;
@@ -5238,30 +5399,44 @@ function bindTimelineActions() {
 function renderCurrentRendezvous() {
   const root = $("current-rendezvous");
   if (!root) return;
-  const parent = currentThread()?.channel === "in_person" ? $("composer") : $("text-surface");
+  const inPerson = currentThread()?.channel === "in_person";
+  const notice = $("joint-movement-notice");
+  if (notice && (!inPerson || notice.dataset.characterId !== state.selected)) {
+    notice.hidden = true;
+    window.clearTimeout(state.jointMovementNoticeTimer);
+  }
+  const parent = inPerson ? $("scene-invitation-anchor") : $("text-surface");
   if (root.parentElement !== parent) {
-    if (parent === $("composer")) parent.prepend(root);
+    if (inPerson) parent.prepend(root);
     else parent.insertBefore(root, $("timeline"));
   }
   const pending = sceneActionsV2Enabled() ? signedPendingRendezvous().value : null;
   const thread = currentThread();
-  const active = sceneActionsV2Enabled() && thread ? decodeSidecar(dialoguePackage(thread)).active_invitation : null;
-  const invitation = active && ["accepted", "deferred", "proposed", "clarify"].includes(active.status) ? active : null;
+  const context = sceneActionsV2Enabled() && thread ? decodeSidecar(dialoguePackage(thread)) : {};
+  const active = context.active_invitation;
+  const invitation = active && ["accepted", "deferred", "proposed", "clarify"].includes(active.status)
+    && !alreadyCompletedJointInvitation(active, context) ? active : null;
   root.hidden = !pending && !invitation;
-  if (!pending && !invitation) { root.replaceChildren(); return; }
+  if (!pending && !invitation) { state.invitationPopoverKey = ""; root.replaceChildren(); return; }
   const key = plain(pending?.rendezvous_id || invitation.invitation_id);
   const location = pending?.location_name || (state.config?.movement_catalog || []).find(item => item.location_id === invitation?.location_id)?.display_name || "地点待定";
-  const title = pending ? "约定" : ({ accepted: "稍后约定", deferred: "暂缓约定", proposed: "邀请待确认", clarify: "邀请待澄清" }[invitation.status]);
-  const collapsed = state.rendezvousDismissals.has(key);
-  root.innerHTML = `<div><strong>${title} · ${escapeHtml(location)}</strong>${!pending && !collapsed ? '<small>时间待定 · 确认后再赴约</small>' : ""}${collapsed
-    ? '<button type="button" class="secondary-button" data-current-rendezvous="open">查看约定</button>'
-    : `${pending ? '<button type="button" class="primary-button" data-current-rendezvous="go">赴约</button>' : ""}<button type="button" class="secondary-button" data-current-rendezvous="stay">留在通讯器</button><button type="button" class="secondary-button" data-current-rendezvous="cancel">取消约定</button>`}</div>`;
+  const title = pending ? "约定" : ({ accepted: invitation.time_scope === "future" ? "稍后约定" : "已确认邀请", deferred: "暂缓约定", proposed: "邀请待确认", clarify: "邀请待澄清" }[invitation.status]);
+  const collapsed = inPerson ? state.invitationPopoverKey !== key : state.rendezvousDismissals.has(key);
+  const detail = pending ? "她已在约定地点等你。" : invitation.time_scope === "future" ? "时间待定 · 确认后再赴约" : "以当前已确认场景为准。";
+  const controls = `${pending ? '<button type="button" class="primary-button" data-current-rendezvous="go">赴约</button>' : ""}<button type="button" class="secondary-button" data-current-rendezvous="stay">${inPerson ? "收起" : "留在通讯器"}</button><button type="button" class="secondary-button" data-current-rendezvous="cancel">取消约定</button>`;
+  root.innerHTML = inPerson
+    ? `<button type="button" class="secondary-button scene-invitation-chip" data-current-rendezvous="${collapsed ? "open" : "stay"}" aria-expanded="${!collapsed}" aria-controls="scene-invitation-details">${title} · ${escapeHtml(location)}</button>${collapsed ? "" : `<div id="scene-invitation-details" class="scene-invitation-details" role="region" aria-label="约定详情"><strong>${title} · ${escapeHtml(location)}</strong><small>${escapeHtml(detail)}</small><div class="rendezvous-actions">${controls}</div></div>`}`
+    : `<div><strong>${title} · ${escapeHtml(location)}</strong>${!collapsed && !pending ? `<small>${escapeHtml(detail)}</small>` : ""}${collapsed ? '<button type="button" class="secondary-button" data-current-rendezvous="open">查看约定</button>' : controls}</div>`;
   root.querySelectorAll("[data-current-rendezvous]").forEach(button => {
     button.disabled = globalRequestBusy() || !state.writerOwned;
     button.onclick = async () => {
       if (globalRequestBusy() || !state.writerOwned) return;
       const action = button.dataset.currentRendezvous;
       if (action === "open" || action === "stay") {
+        if (inPerson) {
+          closeActionPopover();
+          state.invitationPopoverKey = action === "open" ? key : "";
+        }
         if (action === "open") state.rendezvousDismissals.delete(key); else state.rendezvousDismissals.add(key);
         renderCurrentRendezvous();
         root.querySelector(`[data-current-rendezvous="${action === "stay" ? "open" : pending ? "go" : "cancel"}"]`)?.focus({ preventScroll: true });
@@ -5276,6 +5451,49 @@ function renderCurrentRendezvous() {
       } catch (error) { showBanner(displayError(error)); }
     };
   });
+}
+function alreadyCompletedJointInvitation(invitation, context) {
+  // Older signed contexts kept an accepted-now invitation after applying its
+  // movement. Only hide that exact event at its still-confirmed destination.
+  const overlay = context?.scene_overlay;
+  const decoded = decodeSidecar(state.worldPackage || "");
+  const world = decoded.world || decoded;
+  const location = plain(overlay?.character_location);
+  return Boolean(invitation?.status === "accepted" && invitation.time_scope === "now"
+    && overlay?.source_event_id && invitation.invitation_id === `invite:${overlay.source_event_id}`
+    && invitation.location_id && invitation.location_id === overlay.location_id
+    && overlay.communication_channel === "in_person" && !overlay.pending_rendezvous
+    && location && overlay.analyst_location === location
+    && world.analyst_location === location && world.presence?.[context.character_id]?.location === location);
+}
+function showJointMovementNotice({ characterId, requestId, locationName }) {
+  const root = $("joint-movement-notice");
+  if (!root || !requestId || characterId !== state.selected || currentThread()?.channel !== "in_person"
+    || state.jointMovementNoticeIds.has(requestId)) return;
+  state.jointMovementNoticeIds.add(requestId);
+  if (state.jointMovementNoticeIds.size > 80) state.jointMovementNoticeIds.delete(state.jointMovementNoticeIds.values().next().value);
+  window.clearTimeout(state.jointMovementNoticeTimer);
+  root.dataset.characterId = characterId;
+  root.textContent = `已一起到达${plain(locationName || "约定地点")}`;
+  root.hidden = false;
+  state.jointMovementNoticeTimer = window.setTimeout(() => { root.hidden = true; }, 4000);
+}
+function closeActionPopover({ restoreFocus = false } = {}) {
+  const wasOpen = state.actionComposerOpen;
+  state.actionComposerOpen = false;
+  $("analyst-action-field").hidden = true;
+  $("toggle-action").setAttribute("aria-expanded", "false");
+  if (wasOpen && restoreFocus) $("toggle-action").focus({ preventScroll: true });
+}
+function closeImmersivePopovers({ restoreFocus = false } = {}) {
+  const actionOpen = state.actionComposerOpen;
+  const invitationOpen = Boolean(state.invitationPopoverKey);
+  closeActionPopover({ restoreFocus });
+  state.invitationPopoverKey = "";
+  if (invitationOpen) {
+    renderCurrentRendezvous();
+    if (restoreFocus && !actionOpen) $("current-rendezvous").querySelector('[data-current-rendezvous="open"]')?.focus({ preventScroll: true });
+  }
 }
 function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   renderCurrentRendezvous();
@@ -5305,11 +5523,12 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     const emptyCopy = "从一句问候开始吧。历史只保存在此浏览器。";
     // 雪境 ADV (P5)：空会话用角色色问候卡取代纯灰文字；文案不变。关闭态保持原样。
     const emptyBody = snowAdvActive() && currentCharacter()
-      ? `<div class="snow-empty-greeting"><span class="snow-empty-avatar" aria-hidden="true">${escapeHtml((currentCharacter().display_name || "").slice(0, 1))}</span><p>${escapeHtml(emptyCopy)}</p></div>`
+      ? `<div class="snow-empty-greeting">${avatarMarkup(currentCharacter(), { thumbnail: false, priority: true, className: "snow-empty-avatar" })}<p>${escapeHtml(emptyCopy)}</p></div>`
       : `<p>${escapeHtml(emptyCopy)}</p>`;
     reconcileMarkup(timeline, `${older}${timelineTypingMarkup()}<div class="empty-conversation">${emptyBody}${starterPromptsMarkup()}</div>`);
     timeline.dataset.messageCount = "0";
     bindTimelineActions();
+    bindAvatarImages(timeline);
     observeTimelineViewport();
     return;
   }
@@ -5736,7 +5955,7 @@ function updateComposerAvailability() {
   $("toggle-sticker").hidden = inPerson;
   $("toggle-action").hidden = !inPerson;
   $("toggle-sticker").disabled = !selected || requestPending || inPerson;
-  $("toggle-action").disabled = !selected || requestPending || !inPerson;
+  $("toggle-action").disabled = !selected || !state.writerOwned || !inPerson;
   if ($("confirm-presence-transition")) $("confirm-presence-transition").disabled = !selected || requestPending;
   if ($("stay-on-communicator")) $("stay-on-communicator").disabled = !selected || requestPending;
   if ($("delete-character-history")) $("delete-character-history").disabled = requestPending;
@@ -5746,11 +5965,13 @@ function updateComposerAvailability() {
   $("current-rendezvous")?.querySelectorAll("button").forEach(button => { button.disabled = requestPending; });
   $("analyst-action-field").hidden = !inPerson || !state.actionComposerOpen;
   $("toggle-action").setAttribute("aria-expanded", String(inPerson && state.actionComposerOpen));
+  updateActionDraftIndicator();
   $("message-input").placeholder = !selected ? "选择角色后输入消息……" : configured() ? (inPerson ? "说些什么，也可只填写动作……" : "输入文字通讯……") : "可浏览历史；发送前请在设置中配置模型";
   renderSelectedSticker();
 }
 async function setChannel(channel, persist = true, targetThread = null) {
   const thread = targetThread || currentThread();
+  if (thread?.channel === "text" && channel !== "text") flushCommunicatorPresentation(thread.characterId, { render: false });
   const restoreCollapsedSidebarFocus = channel !== "in_person"
     && $("chat-app").classList.contains("sidebar-collapsed");
   // Selection already saved the previous owner's composer. Its stale DOM
@@ -5766,6 +5987,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   // A character switch may happen while the persistence write is pending.
   // Only the selected thread owns the visible surface and composer controls.
   if (thread && thread.characterId !== state.selected) return;
+  if (state.composerDraftKey !== draftKey(state.selected, channel)) closeImmersivePopovers({ restoreFocus: false });
   if (channel !== "in_person") cancelSnowScenePresentation();
   const composerChanged = state.composerDraftKey !== draftKey(state.selected, channel);
   if (channel === "in_person" && !$("text-surface").hidden) rememberTimelineViewport();
@@ -5863,7 +6085,16 @@ function updateInputCount() {
   $("input-count").style.color = count > 2000 ? "#ff9dac" : "";
   const foot = $("input-count").closest(".composer-foot");
   if (foot) foot.hidden = count === 0;
+  updateActionDraftIndicator();
   resizeMessageInput();
+}
+function updateActionDraftIndicator() {
+  const button = $("toggle-action");
+  const hasDraft = Boolean($("action-input").value.trim());
+  button.querySelector(".composer-tool-label").textContent = hasDraft ? "已有动作" : "动作";
+  button.querySelector(".action-draft-dot").hidden = !hasDraft;
+  button.setAttribute("aria-label", hasDraft ? "编辑已有动作或神态" : "添加动作或神态");
+  button.title = hasDraft ? "编辑已有动作或神态" : "添加动作或神态";
 }
 function renderSelectedSticker() {
   const root = $("selected-sticker");
@@ -6229,6 +6460,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   const ownsRequest = () => ownsTypingState(characterId, requestId) && thread.historyEpoch === state.historyEpoch
     && state.historyEpoch === requestEpoch && thread.conversationSegmentId === requestSegment && state.writerOwned;
   const ownsVisibleRequest = () => ownsRequest() && state.selected === characterId;
+  flushCommunicatorPresentation(characterId, { render: false });
   cancelPresentationQueue(characterId);
   state.chatRequestByCharacter.get(characterId)?.controller.abort();
   const requestController = new AbortController();
@@ -6247,6 +6479,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   setTypingState({ characterId, requestId, channel: userMessage.communicationChannel, phase: "waiting" });
   setRequestStatus(characterId, "", requestId);
   const latencyV2 = featureEnabled("chat_latency_v2");
+  const communicatorPaced = latencyV2 && userMessage.communicationChannel === "text";
   const streamV2 = featureEnabled("verified_block_stream") || featureEnabled("verified_block_replay");
   const metrics = { sentAt: sendStartedAt, bodyReceivedAt: 0, firstPaintAt: 0, naturalWaitMs: 0, presented: false, transport: streamV2 ? "verified_blocks" : "complete_reply", segmentSpent: 0, lastBodyPaintAt: 0 };
   const publicProvider = ["openai", "deepseek", "dashscope", "zhipu", "moonshot"].includes(state.provider) ? state.provider : "other";
@@ -6269,6 +6502,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       visibleCount: Math.min(provisionalReply.contentBlocks.length, committedReply.blocks.length) });
   }
   let commitDisplay = Promise.resolve();
+  let commitPersistence = Promise.resolve();
   const commitPresentationController = new AbortController();
   const materializeCommitted = (count = committedReply?.blocks.length) => {
     if (!committedReply?.blocks.length) return;
@@ -6279,8 +6513,8 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     else { provisionalReply = record; thread.messages.push(record); thread.messageCount = Number(thread.messageCount || 0) + 1; }
     metrics.messageId = record.id;
     const streaming = state.streamingPresentationByCharacter.get(characterId);
-    if (streaming?.requestId === requestId) streaming.visibleCount = count;
-    if (ownsVisibleRequest()) { updateTypingPhase(characterId, requestId, "streaming"); renderAll(); }
+    if (!communicatorPaced && streaming?.requestId === requestId) streaming.visibleCount = count;
+    if (!communicatorPaced && ownsVisibleRequest()) { updateTypingPhase(characterId, requestId, "streaming"); renderAll(); }
   };
   const onCommitted = () => {
     if (!metrics.bodyReceivedAt) metrics.bodyReceivedAt = performance.now();
@@ -6288,6 +6522,17 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     const streaming = state.streamingPresentationByCharacter.get(characterId) || { requestId, visibleCount: 0 };
     streaming.receivedCount = count;
     state.streamingPresentationByCharacter.set(characterId, streaming);
+    if (communicatorPaced) {
+      // Receipt and storage never wait for the cosmetic delivery cursor. Saving
+      // the whole accepted prefix also makes reload/recovery immediately readable.
+      materializeCommitted();
+      const queue = enqueueCommunicatorReply(characterId, requestId, provisionalReply, { start: false });
+      commitPersistence = commitPersistence.then(() => dbPutThread(thread));
+      void commitPersistence.then(() => driveCommunicatorReply(queue)).catch(() => {
+        flushCommunicatorPresentation(characterId);
+      });
+      return;
+    }
     syncFastForward();
     commitDisplay = commitDisplay.then(async () => {
       if (latencyV2) await waitForNaturalReply(requestId, commitPresentationController.signal);
@@ -6318,7 +6563,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       if (error?.name === "AbortError") return;
       throw error;
     }
-    if (!ownsRequest() || metrics.presented || typingStateFor(characterId)?.networkDone) return;
+    if (!ownsRequest() || metrics.presented || (typingStateFor(characterId)?.networkDone && !communicatorPaced)) return;
     metrics.feedbackAllowed = true;
     timing.shownAt = performance.now();
     updateTypingPhase(characterId, requestId, "typing");
@@ -6336,6 +6581,10 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     for (let attempt = 0; attempt < backoffs.length; attempt += 1) {
       if (attempt > 0) {
         if (!recoverableChatError(lastError) || requestController.signal.aborted) throw lastError;
+        if (communicatorPaced) {
+          metrics.recovery = true;
+          flushCommunicatorPresentation(characterId);
+        }
         // Transport recovery is actionable immediately, even while the normal
         // typing indicator is still inside its natural onset window.
         updateTypingPhase(characterId, requestId, "recovering");
@@ -6374,6 +6623,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     const activeRequest = state.chatRequestByCharacter.get(characterId);
     if (activeRequest?.requestId === requestId) activeRequest.completed = true;
     await result.statePersistence;
+    await commitPersistence;
     commitPresentationController.abort();
     metrics.serverTimings = result.serverTimings;
     if (!metrics.bodyReceivedAt) metrics.bodyReceivedAt = performance.now();
@@ -6393,7 +6643,9 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     completedReply.evidenceSources = normalizeMessage({ evidenceSources: result.evidenceSources }).evidenceSources;
     confirmedAssistant = assistantMessage;
     metrics.messageId = assistantMessage.id;
-    const receivedPresentationCount = state.streamingPresentationByCharacter.get(characterId)?.visibleCount || 0;
+    const receivedPresentationCount = communicatorPaced
+      ? presentationFor(characterId)?.visibleCount || 0
+      : state.streamingPresentationByCharacter.get(characterId)?.visibleCount || 0;
     if (latencyV2 && !receivedPresentationCount) state.readyReplyIds.add(assistantMessage.id);
     if (provisionalReply) Object.assign(provisionalReply, completedReply);
     else { thread.messages.push(assistantMessage); thread.messageCount = Number(thread.messageCount || 0) + 1; }
@@ -6422,7 +6674,10 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       if (ownsVisibleRequest()) {
         state.scene = result.pendingSceneState;
         renderScene();
-        if (result.pendingStateEvent?.event_type === "joint_movement") setRequestStatus(characterId, `已一起前往${result.pendingSceneState.character_location || "新的地点"}`, requestId);
+        if (result.pendingStateEvent?.event_type === "joint_movement") {
+          setRequestStatus(characterId, "", requestId);
+          showJointMovementNotice({ characterId, requestId, locationName: result.pendingSceneState.character_location || "新的地点" });
+        }
       }
     }
     if (ownsRequest()) {
@@ -6438,6 +6693,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     renderCharacters();
   } catch (caught) {
     commitPresentationController.abort();
+    await commitPersistence.catch(() => {});
     await commitDisplay.catch(() => {});
     await userPersistence.catch(() => {});
     if (terminalResult) {
@@ -6509,8 +6765,10 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     requestController.abort();
     if (state.chatRequestByCharacter.get(characterId)?.requestId === requestId) state.chatRequestByCharacter.delete(characterId);
     if (state.streamingPresentationByCharacter.get(characterId)?.requestId === requestId) state.streamingPresentationByCharacter.delete(characterId);
-    if (state.completedPresentationByCharacter.get(characterId)?.requestId !== requestId) clearTypingState(characterId, requestId);
-    if (state.completedPresentationByCharacter.get(characterId)?.requestId !== requestId) feedbackController.abort();
+    const stillPresenting = state.completedPresentationByCharacter.get(characterId)?.requestId === requestId
+      || (presentationFor(characterId)?.kind === "communicator" && presentationFor(characterId)?.requestId === requestId);
+    if (!stillPresenting) clearTypingState(characterId, requestId);
+    if (!stillPresenting) feedbackController.abort();
     updateComposerAvailability();
     void flushDeferredPresenceRefresh();
   }
@@ -6743,6 +7001,16 @@ async function performSceneAction(action, characterId = state.selected, signal =
     thread.channel = result.communication_channel === "in_person" && result.scene_state?.co_located ? "in_person" : "text";
     thread.continuityDecision = "";
     const cleared = { ...state.dialogueByCharacter.get(characterId), sceneActionSnapshot: null };
+    if (result.scene_action?.status === "joined" && result.arrival_ticket && configured()
+      && cleared.arrivalSnapshot?.envelope?.arrival_id !== envelope.request_id
+      && !thread.messages.some(message => message.source === "presence_arrival" && message.requestId === envelope.request_id)) {
+      // Persist the immutable arrival with the confirmed join. Credentials are
+      // attached only at dispatch and never enter browser request snapshots.
+      if (cleared.arrivalSnapshot) {
+        cleared.arrivalRecoveryArchive = [...(cleared.arrivalRecoveryArchive || []), cleared.arrivalSnapshot];
+      }
+      cleared.arrivalSnapshot = createPresenceArrivalSnapshot(result, envelope, thread);
+    }
     state.dialogueByCharacter.set(characterId, cleared);
     if (result.scene_action?.status === "joined") {
       const requestId = envelope.request_id;
@@ -6784,17 +7052,139 @@ async function performSceneAction(action, characterId = state.selected, signal =
     if (state.sceneActionByCharacter.get(characterId) === owner) state.sceneActionByCharacter.delete(characterId);
   }
 }
+function createPresenceArrivalSnapshot(result, join, thread) {
+  const envelope = fitPublicRequestPayload({
+    protocol: "public-presence-arrival-v2", arrival_id: join.request_id,
+    arrival_ticket: result.arrival_ticket, character_id: thread.characterId,
+    segment_id: join.segment_id, state_package: result.state_package,
+    session_context_package: result.session_context_package,
+    provider: state.provider, model: state.model, ...subscriptionReasoningPayload(),
+    recent_history: requestHistory(thread.messages || [], "", thread.conversationSegmentId),
+    history_summary: thread.continuityDecision === "start_today" ? "" : thread.summary || "",
+  }, { arrays: [{ key: "recent_history", minimum: 0 }], texts: ["history_summary"] });
+  return { endpoint: "/public/v2/presence/arrival", envelope, dispatched: false, status: "pending", createdAt: Date.now() };
+}
+async function recoverPresenceArrival(characterId = state.selected) {
+  const snapshot = state.dialogueByCharacter.get(characterId)?.arrivalSnapshot;
+  if (!snapshot || snapshot.status === "unavailable" || globalRequestBusy()) return;
+  // A durable undispatched snapshot proves that no HTTP attempt began. Resume
+  // that same entry once; any dispatched snapshot is strictly lookup-only.
+  await sendPresenceArrival(characterId, { recoveryOnly: Boolean(snapshot.dispatched) });
+}
+async function sendPresenceArrival(characterId, { recoveryOnly = false } = {}) {
+  if (state.arrivalRequestByCharacter.has(characterId) || !state.writerOwned) return;
+  const thread = await dbGetThread(characterId);
+  const record = await loadDialogueRecord(characterId);
+  const snapshot = record.arrivalSnapshot;
+  const envelope = snapshot?.envelope;
+  if (!envelope || envelope.segment_id !== thread.conversationSegmentId || envelope.character_id !== characterId) return;
+  const requestId = envelope.arrival_id;
+  const epoch = state.historyEpoch;
+  const previousPending = state.arrivalPending;
+  let recovering = recoveryOnly || snapshot.dispatched;
+  state.arrivalRequestByCharacter.set(characterId, requestId);
+  state.arrivalPending = true;
+  const owns = () => state.writerOwned && state.historyEpoch === epoch && thread.historyEpoch === epoch
+    && thread.conversationSegmentId === envelope.segment_id && state.arrivalRequestByCharacter.get(characterId) === requestId;
+  const visible = () => owns() && state.selected === characterId && thread.channel === "in_person";
+  setTypingState({ characterId, requestId, channel: "in_person", phase: "arrival" });
+  setRequestStatus(characterId, recovering ? "正在恢复这次到场回应……" : "她注意到了你的到来，正在回应……", requestId);
+  updateComposerAvailability();
+  try {
+    const dispatched = { ...record, arrivalSnapshot: { ...snapshot, dispatched: true } };
+    await storePut("app_state", dispatched);
+    if (!state.storageAvailable) throw new Error("arrival_storage_unavailable");
+    if (!owns()) return;
+    state.dialogueByCharacter.set(characterId, dispatched);
+    let result;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt) await delay(attempt * 600);
+      try {
+        result = await dialogueHttp.request("/presence/arrival", {
+          method: "POST", timeoutMs: 120000,
+          headers: recovering || attempt ? { "X-Snow-Recovery-Only": "1" } : {},
+          body: JSON.stringify({ ...envelope, credential: state.credential || "" }),
+        });
+        break;
+      } catch (error) {
+        recovering = true;
+        if (attempt === 2 || !recoverableChatError(error)) throw error;
+      }
+    }
+    if (!owns()) return;
+    if (result?.arrival_id !== requestId || result.character_id !== characterId) throw new Error("stream_commit_conflict");
+    let message = thread.messages.find(item => item.source === "presence_arrival" && item.requestId === requestId);
+    if (!message && result.reaction) {
+      message = normalizeMessage({ id: result.reaction.message_id || `arrival:${requestId}`, characterId,
+        role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person",
+        expressionState: result.reaction.expression_state, stageMotion: result.reaction.stage_motion,
+        performanceId: result.reaction.performance_id, createdAt: Date.now(), requestId,
+        source: "presence_arrival", status: "sent", conversationSegmentId: envelope.segment_id,
+        usage: result.usage || result.reaction.usage || {} });
+      thread.messages.push(message);
+      thread.messageCount = Math.max(Number(thread.messageCount || 0), thread.messages.length);
+    }
+    const current = state.dialogueByCharacter.get(characterId);
+    const completed = current?.arrivalSnapshot?.envelope?.arrival_id === requestId
+      ? { ...current, arrivalSnapshot: null } : current;
+    // Persist message and removal of its recovery snapshot in one v4 transaction.
+    await dbPutThread(thread, { appState: completed ? [completed] : [] });
+    if (!owns()) return;
+    if (completed) state.dialogueByCharacter.set(characterId, completed);
+    if (visible()) {
+      setRequestStatus(characterId, result.terminal_error ? arrivalReactionUnavailableMessage(result.terminal_error) : "", requestId);
+      renderAll();
+      if (message && !recoveryOnly) {
+        void warmCharacterStage(characterById(characterId), message.expressionState, message.performanceId);
+        await presentAssistantTurn(characterId, requestId, message);
+      }
+    }
+  } catch (error) {
+    if (!owns()) return;
+    const unavailable = ["request_result_unavailable", "arrival_ticket_expired", "invalid_arrival_ticket",
+      "state_subject_mismatch", "session_context_subject_mismatch"].includes(error.message);
+    const current = state.dialogueByCharacter.get(characterId);
+    if (current?.arrivalSnapshot?.envelope?.arrival_id === requestId) {
+      const failed = { ...current, arrivalSnapshot: { ...current.arrivalSnapshot, status: unavailable ? "unavailable" : "recoverable" } };
+      state.dialogueByCharacter.set(characterId, failed);
+      await storePut("app_state", failed);
+    }
+    if (visible()) setRequestStatus(characterId, error.message === "arrival_storage_unavailable"
+      ? "位置切换已完成；本地保存未成功，到场回应尚未发送。"
+      : unavailable
+      ? "位置切换已完成；这次到场回应无法恢复，可以直接开始对话。"
+      : "位置切换已完成；到场回应尚未确认，可查询原请求结果。", requestId, unavailable ? "" : "recover_arrival");
+  } finally {
+    if (state.arrivalRequestByCharacter.get(characterId) === requestId) state.arrivalRequestByCharacter.delete(characterId);
+    state.arrivalPending = previousPending;
+    clearTypingState(characterId, requestId);
+    updateComposerAvailability();
+    if (state.selected === characterId) renderStage();
+    void flushDeferredPresenceRefresh();
+  }
+}
 async function arriveSceneAction(userText = "") {
   // P6a：用户亲身进入室内，世界背景从此为当前室内地点，不再跳回外景。
   state.snowBeenInPerson = true;
   const characterId = state.selected;
   const thread = currentThread();
   const previousChannel = thread?.channel || "text";
+  let joined = false;
   state.arrivalPending = true;
   setRequestStatus(characterId, "正在确认会合地点……");
   updateComposerAvailability();
   try {
     await saveDraftNow();
+    const previousArrival = state.dialogueByCharacter.get(characterId)?.arrivalSnapshot;
+    if (previousArrival && previousArrival.status !== "unavailable"
+      && previousArrival.envelope?.segment_id === thread.conversationSegmentId) {
+      await sendPresenceArrival(characterId, { recoveryOnly: Boolean(previousArrival.dispatched) });
+      const unresolved = state.dialogueByCharacter.get(characterId)?.arrivalSnapshot;
+      if (unresolved && unresolved.status !== "unavailable") {
+        showBanner("上一次到场回应还未确认，请先恢复原请求结果，再重新进入。");
+        return false;
+      }
+    }
     const hadRendezvous = Boolean(signedPendingRendezvous(characterId).value);
     await ensureContinuityDecision(thread);
     if (thread.continuityDecision) {
@@ -6807,6 +7197,7 @@ async function arriveSceneAction(userText = "") {
     const pending = signedPendingRendezvous(characterId).value;
     const result = await performSceneAction(pending ? "join_rendezvous" : "join_character", characterId, undefined,
       { rendezvousId: plain(pending?.rendezvous_id), userText });
+    joined = result.scene_action?.status === "joined";
     if (state.selected !== characterId || thread.historyEpoch !== state.historyEpoch) return false;
     await setChannel(result.communication_channel === "in_person" ? "in_person" : "text", true, thread);
     renderScene();
@@ -6818,16 +7209,21 @@ async function arriveSceneAction(userText = "") {
     } else {
       setRequestStatus(characterId, "");
     }
+    if (joined && result.arrival_ticket) {
+      if (configured()) await sendPresenceArrival(characterId);
+      else showBanner("场景已更新。配置模型后可以开始对话。");
+    }
     return true;
   } catch (error) {
     if (state.selected === characterId && thread.historyEpoch === state.historyEpoch) {
-      await setChannel(previousChannel, false, thread);
+      if (!joined) await setChannel(previousChannel, false, thread);
       showBanner(displayError(error));
     }
     return false;
   } finally {
     state.arrivalPending = false;
     updateComposerAvailability();
+    void flushDeferredPresenceRefresh();
   }
 }
 async function transitionPresence(targetChannel, characterId = state.selected, targetThread = null, signal = undefined) {
@@ -7041,6 +7437,7 @@ function syncResponsiveLayout() {
 function toggleContacts({ mobileOpen = false } = {}) {
   const panel = $("contact-panel");
   const mobile = window.matchMedia("(max-width: 820px)").matches;
+  closeImmersivePopovers();
   if (mobile) {
     const open = mobileOpen || !panel.classList.contains("open");
     if (open) state.contactReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -7058,11 +7455,29 @@ function toggleContacts({ mobileOpen = false } = {}) {
   const collapsed = $("chat-app").classList.toggle("sidebar-collapsed");
   const expanded = !collapsed;
   const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  if (expanded) state.contactReturnFocus = trigger;
   panel.setAttribute("aria-hidden", String(collapsed));
   panel.inert = collapsed;
   syncContactToggleState(expanded);
-  trigger?.focus?.();
+  if (expanded && currentThread()?.channel === "in_person") $("close-contacts").focus({ preventScroll: true });
+  else if (!expanded) restoreContactsFocus();
+  else trigger?.focus?.();
   return expanded;
+}
+function restoreContactsFocus() {
+  const trigger = state.contactReturnFocus;
+  const fallback = currentThread()?.channel === "in_person" ? $("open-stage-contacts") : $("open-contacts");
+  (trigger?.isConnected && !trigger.closest('[inert], [hidden]') && !$("contact-panel").contains(trigger) ? trigger : fallback)?.focus({ preventScroll: true });
+  state.contactReturnFocus = null;
+}
+function closeContactsPanel({ restoreFocus = false } = {}) {
+  $("contact-panel").classList.remove("open");
+  if (!window.matchMedia("(max-width: 820px)").matches) $("chat-app").classList.add("sidebar-collapsed");
+  $("contact-panel").setAttribute("aria-hidden", "true");
+  $("contact-panel").inert = true;
+  syncContactToggleState(false);
+  if (restoreFocus) restoreContactsFocus();
+  else state.contactReturnFocus = null;
 }
 function openSettings(tab = "models") {
   if (tab !== "models") { modelSetupController?.abort(); stopSubscriptionPolling(); }
@@ -7172,13 +7587,25 @@ $("message-input").oninput = () => { updateInputCount(); scheduleDraftSave(); };
 $("action-input").oninput = () => { updateInputCount(); scheduleDraftSave(); };
 $("message-input").onkeydown = (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); $("composer").requestSubmit(); } };
 $("toggle-action").onclick = () => {
-  if (globalRequestBusy() || currentThread()?.channel !== "in_person") return;
-  state.actionComposerOpen = !state.actionComposerOpen;
-  if (!state.actionComposerOpen) scheduleDraftSave();
+  if (!state.selected || !state.writerOwned || currentThread()?.channel !== "in_person") return;
+  const open = !state.actionComposerOpen;
+  closeImmersivePopovers();
+  state.actionComposerOpen = open;
+  if (!open) void saveDraftNow();
   updateComposerAvailability();
   if (state.actionComposerOpen) $("action-input").focus();
   updateInputCount();
 };
+$("close-action").onclick = () => { closeActionPopover({ restoreFocus: true }); void saveDraftNow(); };
+document.addEventListener("pointerdown", (event) => {
+  if (!event.target.closest("#analyst-action-field, #toggle-action") && state.actionComposerOpen) {
+    closeActionPopover(); void saveDraftNow();
+  }
+  if (state.invitationPopoverKey && !event.target.closest("#current-rendezvous")) {
+    state.invitationPopoverKey = "";
+    renderCurrentRendezvous();
+  }
+});
 $("toggle-sticker").onclick = openStickerPicker;
 $("clear-sticker").onclick = clearSelectedSticker;
 $("open-movement-shortcuts").onclick = openMovementShortcuts;
@@ -7267,7 +7694,7 @@ $("open-communicator").onclick = async () => {
 };
 $("open-contacts").onclick = () => toggleContacts({ mobileOpen: true });
 $("open-stage-contacts").onclick = () => toggleContacts();
-$("close-contacts").onclick = () => toggleContacts({ mobileOpen: false });
+$("close-contacts").onclick = () => closeContactsPanel({ restoreFocus: true });
 $("open-info").onclick = () => openDrawer("info-panel");
 $("open-announcements").onclick = $("stage-open-announcements").onclick = () => openAnnouncements();
 $("retry-announcements").onclick = () => refreshAnnouncements();
@@ -7377,8 +7804,11 @@ $("sticker-picker").addEventListener("close", () => $("toggle-sticker").setAttri
 window.addEventListener("keydown", (event) => {
   if (document.querySelector("dialog[open]")) return;
   if (trapDrawerFocus(event)) return;
-  if (window.matchMedia("(max-width: 820px)").matches && $("contact-panel").classList.contains("open")) {
-    if (event.key === "Escape") { event.preventDefault(); toggleContacts(); return; }
+  if (event.key === "Escape" && (state.actionComposerOpen || state.invitationPopoverKey)) {
+    event.preventDefault(); closeImmersivePopovers({ restoreFocus: true }); void saveDraftNow(); return;
+  }
+  if ((window.matchMedia("(max-width: 820px)").matches || currentThread()?.channel === "in_person") && contactsExpanded()) {
+    if (event.key === "Escape") { event.preventDefault(); closeContactsPanel({ restoreFocus: true }); return; }
     if (focusWithin(event, $("contact-panel"))) return;
   }
   if (event.key.toLocaleLowerCase() === "h" && currentThread()?.channel === "in_person" && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) {

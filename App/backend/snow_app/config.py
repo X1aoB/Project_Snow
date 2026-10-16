@@ -169,7 +169,7 @@ class PublicSettings:
     media_version: str = "2026.08.19.avatar.1"
     media_root: Path = Path("/srv/project-snow/media/current")
     experience_notice_version: str = "0.9.2"
-    arrival_probability: float = 0.5
+    arrival_probability: float = 1.0
     sticker_version: str = "2026.08.19.sticker.1"
     sticker_root: Path = Path("/srv/project-snow/media/stickers/current")
     feedback_email_to: str = "admin@xiaob.dev"
@@ -217,9 +217,9 @@ class PublicSettings:
             if value.strip()
         )
         try:
-            arrival_probability = float(os.getenv("PUBLIC_ARRIVAL_PROBABILITY", "0.5"))
+            arrival_probability = float(os.getenv("PUBLIC_ARRIVAL_PROBABILITY", "1.0"))
         except (TypeError, ValueError):
-            arrival_probability = 0.5
+            arrival_probability = 1.0
         try:
             feedback_smtp_port = int(os.getenv("PUBLIC_FEEDBACK_SMTP_PORT", "465"))
         except (TypeError, ValueError):

@@ -2018,7 +2018,9 @@ class PublicAPITests(TestCase):
             "history_summary": "",
             "state_package": "",
         }
-        with patch("backend.snow_app.public_service.secrets.randbelow", return_value=1), patch.object(
+        with patch.object(self.app.state.chat_service, "public_settings",
+                          replace(self.settings, arrival_probability=0.5)), \
+                patch("backend.snow_app.public_service.secrets.randbelow", return_value=1), patch.object(
             self.app.state.chat_service.mvp,
             "chat",
         ) as chat:

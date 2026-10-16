@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from .async_store import AsyncPublicStore
+from .arrival_ticket import ArrivalTicketExpired, verify_arrival_ticket
 from .config import PublicSettings, Settings
 from .frontend_identity import read_frontend_identity
 from .generation_stream import GenerationObserver, observe_generation
@@ -39,6 +40,7 @@ from .public_contracts import (
     FeedbackRequest,
     ModelDiscoveryRequest,
     PresenceArrivalRequest,
+    PresenceArrivalV2Request,
     PresenceResolveRequest,
     PresenceTransitionRequest,
     SceneActionRequest,
@@ -1410,6 +1412,103 @@ def create_app(
             raise _error("invalid_request", 422, retryable=False)
         return value == "1"
 
+    @app.post("/public/v2/presence/arrival")
+    async def presence_arrival_v2(request: Request, payload: PresenceArrivalV2Request):
+        replay_only = recovery_only(request)
+        request.state.public_request_id = str(payload.arrival_id)
+        subject = request.state.subject_hash
+        cache_id = "presence-arrival-v2:" + str(payload.arrival_id)
+        request_hash = _request_hash(_model_request_body(payload))
+
+        def response(value):
+            # A greeting cannot overwrite the already committed world/context,
+            # including when its ACK arrives after the browser selects someone else.
+            return {"arrival_id": str(payload.arrival_id), "character_id": payload.character_id,
+                    "communication_channel": "in_person", "decision": "noticed",
+                    "reaction": None, "model_called": value.get("terminal_error") == "generation_interrupted",
+                    "terminal_error": "", **{key: value[key] for key in (
+                        "reaction", "model_called", "terminal_error", "error", "diagnostics", "usage",
+                    ) if key in value}}
+
+        # Lookup precedes credentials, feature switches and ticket expiry. It
+        # never claims a missing/expired UUID, even after a lost first response.
+        status, cached = await async_store.call("lookup_request", cache_id, subject, request_hash)
+        if status == "conflict":
+            raise _error("request_id_conflict", 409)
+        if status == "completed" and cached is not None:
+            return {**response(cached), "idempotent_replay": True}
+        if status == "processing":
+            raise _error("request_in_progress", 409, request_id=str(payload.arrival_id))
+        if replay_only:
+            raise _error("request_result_unavailable", 410, request_id=str(payload.arrival_id), retryable=False)
+        if not public_settings.scene_actions_v2:
+            raise _error("scene_actions_v2_disabled", 503, retryable=False)
+        try:
+            joined = await async_store.call("request_result", "scene-action:" + str(payload.arrival_id), subject)
+            prepared = get_dialogue_v2_service().prepare_arrival(payload, subject, joined)
+        except ArrivalTicketExpired as exc:
+            raise _error("arrival_ticket_expired", 410, retryable=False) from exc
+        except (PublicSecurityError, ValueError) as exc:
+            raise _error("invalid_arrival_ticket", 422, retryable=False) from exc
+        spec = provider_spec(payload.provider, public_settings.enabled_providers)
+        if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
+            raise _error("reasoning_effort_not_supported", 422)
+        claims = open_byok_credential(public_settings, anonymous_id=request.state.anonymous_id,
+                                     token=payload.credential, expected_provider=spec.provider_id)
+        owns_subject = await acquire_subject_generation(subject, cache_id)
+        request_claimed = False
+        generation_started = False
+        try:
+            status, cached = await claim_owned_request(cache_id, subject, request_hash)
+            request_claimed = status == "claimed"
+            owns_subject = owns_subject or request_claimed
+            if status == "conflict":
+                raise _error("request_id_conflict", 409)
+            if status == "processing":
+                raise _error("request_in_progress", 409)
+            if status == "completed" and cached is not None:
+                return {**response(cached), "idempotent_replay": True}
+            # Admission may have waited behind database work. Expiry is checked
+            # again while owning the claim, immediately before paid admission.
+            try:
+                verify_arrival_ticket(public_settings, payload, subject)
+            except ArrivalTicketExpired as exc:
+                raise _error("arrival_ticket_expired", 410, retryable=False) from exc
+            if spec.provider_id == SUBSCRIPTION_PROVIDER:
+                payload.reasoning_effort = subscription_broker.preflight(
+                    str(claims["api_key"]), payload.model, payload.reasoning_effort)
+            try:
+                await async_store.call("consume_limits", subject,
+                    [("chat_hour", "hour", 50), ("chat_day", "day", 200)])
+            except RateLimitExceeded:
+                result = PublicChatService.failed_presence_arrival(prepared, "rate_limit_exceeded", model_called=False)
+            else:
+                generation_started = True
+                try:
+                    result = await chat_service.finish_presence_arrival(
+                        prepared, payload, subject, spec, str(claims["api_key"]))
+                except GenerationBusy:
+                    generation_started = False
+                    raise
+            result = response(result)
+            await complete_owned_request(cache_id, result)
+            return result
+        except (Exception, asyncio.CancelledError):
+            if request_claimed:
+                if generation_started:
+                    interrupted = response(PublicChatService.failed_presence_arrival(
+                        prepared, "generation_interrupted", model_called=True))
+                    try:
+                        await complete_owned_request(cache_id, interrupted)
+                    except PublicStoreUnavailable:
+                        LOGGER.warning("public_arrival_v2_terminal_write_unavailable")
+                else:
+                    await release_owned_request(cache_id)
+            raise
+        finally:
+            if owns_subject:
+                await release_subject_generation(subject, cache_id)
+
     @app.post("/public/v2/scene/action")
     async def dialogue_v2_scene_action(request: Request, envelope: SceneActionRequest):
         replay_only = recovery_only(request)
@@ -2337,6 +2436,7 @@ def create_app(
             # feedback never regenerates or replays a provider request.
             for cache_id, request_kind in (
                 (reference_id, "chat"),
+                ("presence-arrival-v2:" + reference_id, "presence_arrival"),
                 ("presence-arrival:" + reference_id, "presence_arrival"),
                 ("scene-action:" + reference_id, "scene_action"),
             ):

@@ -1073,7 +1073,7 @@ build_candidate_public_env() {
       "$candidate_media_version" "$candidate_media_root" || return 1
     printf '%s\n' \
       'PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2' \
-      'PUBLIC_ARRIVAL_PROBABILITY=0.5' || return 1
+      'PUBLIC_ARRIVAL_PROBABILITY=1.0' || return 1
     printf 'PUBLIC_STICKER_VERSION=%s\nPUBLIC_STICKER_ROOT=%s\n' \
       "$candidate_sticker_version" "$candidate_sticker_root" || return 1
     printf 'TURNSTILE_SITE_KEY=%s\n' "$public_turnstile_site_key" || return 1
