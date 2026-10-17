@@ -1832,6 +1832,11 @@ class SnowAdvPolishTests(TestCase):
                   boot: Boolean(document.getElementById('snow-boot')),
                 })""")
                 self.assertEqual(waiting, {"hold": "1", "shell": "hidden", "boot": False})
+                # 模块在打开本地存储后才请求 config；慢机器上此时可能尚未发出，等它到达再放行。
+                for _ in range(80):
+                    if held:
+                        break
+                    page.wait_for_timeout(25)
                 self.assertEqual(len(held), 1)
                 payload = held[0].fetch().json()
                 payload["features"] = {**payload.get("features", {}), "ui_snow_adv": enabled}
