@@ -557,3 +557,9 @@ html[data-motion-level="off"] *, html[data-motion-level="off"] *::before, html[d
   html[data-motion="v2"] .scene-transition-layer, html[data-motion="v2"] .mode-transition-layer { backdrop-filter: none; }
   .request-status-row { flex-wrap: wrap; }
 }
+/* 首帧保持：index.html 静态带 data-snow-hold，配置解析前只显示品牌底色与小吉终端图标，
+   不露出尚未就绪（也未换肤）的界面；app.js 在配置解析或失败时移除（配置迟迟不来最多保持 2.5 秒）。
+   脚本完全没运行时，4 秒后由动画兜底显示界面，绝不长时间空白。 */
+html[data-snow-hold] body { background: url("/shared/brand/xiaoji-icon-192.png") 50% 45% / 72px 72px no-repeat, linear-gradient(180deg, #ffffff, #eef4f8 60%, #bcd5e5); }
+html[data-snow-hold] :is(.app-shell, #snow-statistics-notice) { visibility: hidden; animation: snow-hold-release 1ms linear 4s forwards; }
+@keyframes snow-hold-release { to { visibility: visible; } }

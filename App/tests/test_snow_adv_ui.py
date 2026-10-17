@@ -1799,3 +1799,193 @@ class SnowAdvOpeningTests(TestCase):
         self.assertEqual(state, {"ui": None, "lock": 0})
         self.assertEqual(self.errors, [])
         self.assertEqual(self._failed_skin_requests(), [])
+
+
+@skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
+class SnowAdvPolishTests(TestCase):
+    """P7 上线后修整：首帧保持、开机交接、全屏舞台、弹窗叠放、锁屏雪白、外景镜像、空会话。"""
+
+    setUpClass = classmethod(SnowAdvOpeningTests.setUpClass.__func__)
+    tearDownClass = classmethod(SnowAdvOpeningTests.tearDownClass.__func__)
+    setUp = SnowAdvOpeningTests.setUp
+    tearDown = SnowAdvOpeningTests.tearDown
+    _page = SnowAdvOpeningTests._page
+    _open = SnowAdvOpeningTests._open
+    _failed_skin_requests = SnowAdvOpeningTests._failed_skin_requests
+    _dismiss_opening = SnowAdvOpeningTests._dismiss_opening
+    _dismiss_notice = SnowAdvOpeningTests._dismiss_notice
+    _reach_in_person = SnowAdvOpeningTests._reach_in_person
+
+    def test_static_first_paint_hold_covers_shell_until_config(self):
+        # index.html 静态带 data-snow-hold；config 未到时只显示品牌底色，界面不可见。
+        self.assertIn('data-snow-hold="1"', (PUBLIC_ROOT / "index.html").read_text(encoding="utf-8"))
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled):
+                page = self._page(1280, 820)
+                held = []
+                page.route("**/public/v1/config", lambda route: held.append(route))
+                page.goto(self.base_url, wait_until="domcontentloaded")
+                page.wait_for_function("document.getElementById('chat-app')")
+                waiting = page.evaluate("""() => ({
+                  hold: document.documentElement.dataset.snowHold || null,
+                  shell: getComputedStyle(document.getElementById('chat-app')).visibility,
+                  boot: Boolean(document.getElementById('snow-boot')),
+                })""")
+                self.assertEqual(waiting, {"hold": "1", "shell": "hidden", "boot": False})
+                # 模块在打开本地存储后才请求 config；慢机器上此时可能尚未发出，等它到达再放行。
+                for _ in range(80):
+                    if held:
+                        break
+                    page.wait_for_timeout(25)
+                self.assertEqual(len(held), 1)
+                payload = held[0].fetch().json()
+                payload["features"] = {**payload.get("features", {}), "ui_snow_adv": enabled}
+                held[0].fulfill(json=payload)
+                page.wait_for_function("!document.documentElement.dataset.snowHold", timeout=4000)
+                self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('chat-app')).visibility"), "visible")
+                self.assertEqual(page.evaluate("document.documentElement.dataset.ui || null"), "snow-adv" if enabled else None)
+                page.close()
+        self.assertEqual(self.errors, [])
+
+    def test_first_paint_hold_released_on_config_failure(self):
+        page = self._page(1280, 820)
+        page.route("**/public/v1/config", lambda route: route.fulfill(
+            status=500, content_type="application/json", body='{"error":"boom"}'))
+        page.goto(self.base_url, wait_until="domcontentloaded")
+        page.wait_for_function("!document.documentElement.dataset.snowHold", timeout=2000)
+        self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('chat-app')).visibility"), "visible")
+
+    def test_desktop_boot_hands_over_only_after_entrance(self):
+        # 完整档：标志收起→底色淡开（不拦截点击）→通讯器入场→开机层移除→体验须知。
+        page = self._page(1280, 820)
+        held = []
+        page.route("**/public/v1/characters", lambda route: held.append(route))
+        self._open(page, True, motion="auto", wait_until="domcontentloaded", init_script="""(() => {
+          const log = []; window.__p7log = log; const t = () => Math.round(performance.now());
+          new MutationObserver(() => {
+            const boot = document.getElementById('snow-boot');
+            const app = document.getElementById('chat-app');
+            const notice = document.getElementById('experience-notice-dialog');
+            const s = [boot ? (boot.dataset.phase || 'in') : 'gone', app && app.dataset.snowEntering ? 'enter' : '-', notice && notice.open ? 'notice' : '-'].join('|');
+            if (log.length === 0 || log[log.length - 1][1] !== s) log.push([t(), s]);
+          }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-phase', 'data-snow-entering', 'open'] });
+        })();""")
+        try:
+            page.locator("#snow-boot").wait_for(state="visible")
+        finally:
+            for route in held:
+                route.continue_()
+        page.wait_for_function("document.querySelector('.snow-boot[data-phase=out]')")
+        self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('snow-boot')).pointerEvents"), "none")
+        page.locator("#snow-boot").wait_for(state="detached", timeout=8000)
+        page.locator("#accept-experience-notice").wait_for(state="visible", timeout=4000)
+        states = [state for _, state in page.evaluate("window.__p7log")]
+        self.assertIn("out|enter|-", states)
+        out_at = states.index("out|enter|-")
+        self.assertNotIn("notice", "".join(states[:out_at + 1]), "须知不得在开机层退场完成前弹出")
+        after = states[out_at + 1:]
+        self.assertTrue(after and after[0].startswith("gone|-"), f"开机层应在入场结束时才移除: {states}")
+        self.assertIn("gone|-|notice", after)
+        self.assertEqual(self.errors, [])
+
+    def test_in_person_stage_is_full_bleed_with_narration_in_dialogue(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._reach_in_person(page)
+        layout = page.evaluate("""() => {
+          const rect = (id) => document.getElementById(id).getBoundingClientRect();
+          const shown = (id) => { const n = document.getElementById(id); return Boolean(n) && getComputedStyle(n).display !== 'none' && !n.closest('[hidden]'); };
+          const hud = document.querySelector('#in-person-surface .scene-hud');
+          return {
+            narrationInDialogue: Boolean(document.querySelector('#stage-dialogue #stage-narration')),
+            stageTop: Math.round(rect('scene-stage').top - rect('in-person-surface').top),
+            hudBorder: getComputedStyle(hud).borderBottomWidth,
+            quickMenu: Boolean(document.getElementById('stage-quick-menu')),
+            hudTranscript: shown('open-transcript'),
+            hudHide: shown('toggle-stage-ui'),
+          };
+        }""")
+        self.assertEqual(layout, {
+            "narrationInDialogue": True, "stageTop": 0, "hudBorder": "0px",
+            "quickMenu": True, "hudTranscript": False, "hudHide": False,
+        })
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_flag_off_keeps_legacy_narration_and_hud_buttons(self):
+        page = self._page(1280, 820)
+        self._open(page, False)
+        self._reach_in_person(page)
+        layout = page.evaluate("""() => ({
+          narrationInStage: document.getElementById('stage-narration').parentElement.id,
+          hudTranscript: getComputedStyle(document.getElementById('open-transcript')).display !== 'none',
+          hold: document.documentElement.dataset.snowHold || null,
+        })""")
+        self.assertEqual(layout, {"narrationInStage": "scene-stage", "hudTranscript": True, "hold": None})
+        self.assertEqual(self.errors, [])
+
+    def test_dialogs_hide_onboarding_and_keep_controls_in_view(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._dismiss_opening(page)
+        page.locator("#accept-experience-notice").wait_for(state="visible")
+        # 须知复选框紧贴文字。
+        gap = page.evaluate("""() => {
+          const input = document.getElementById('notice-auto-summary');
+          const range = document.createRange(); range.selectNodeContents(input.parentElement);
+          const text = [...range.getClientRects()].filter(r => r.left > input.getBoundingClientRect().right - 1);
+          return Math.round(Math.min(...text.map(r => r.left)) - input.getBoundingClientRect().right);
+        }""")
+        self.assertLess(gap, 24)
+        page.locator("#accept-experience-notice").click()
+        guide = page.locator("#onboarding-guide:not([hidden])")
+        guide.wait_for(state="visible")
+        # 任一模态弹窗打开时引导暂隐，关闭后恢复。
+        page.locator("#open-announcements").click()
+        page.locator("#announcements-dialog[open]").wait_for()
+        self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('onboarding-guide')).visibility"), "hidden")
+        ack = page.locator("#acknowledge-announcements").bounding_box()
+        self.assertLessEqual(ack["y"] + ack["height"], 820, "公告「知道了」须在首屏内")
+        page.locator("#acknowledge-announcements").click()
+        page.locator("#announcements-dialog:not([open])").wait_for(state="attached")
+        self.assertEqual(page.evaluate("getComputedStyle(document.getElementById('onboarding-guide')).visibility"), "visible")
+        self.assertEqual(self.errors, [])
+
+    def test_empty_conversation_prompts_sit_under_greeting(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._dismiss_opening(page)
+        self._dismiss_notice(page)
+        page.locator(".empty-conversation .starter-prompts").first.wait_for()
+        gap = page.evaluate("""() => {
+          const box = document.querySelector('.empty-conversation');
+          const prompts = box.querySelector('.starter-prompts');
+          const before = prompts.previousElementSibling;
+          return Math.round(prompts.getBoundingClientRect().top - before.getBoundingClientRect().bottom);
+        }""")
+        self.assertLessEqual(gap, 32)
+
+    def test_generic_backdrop_is_mirrored_so_the_door_sits_right(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        self._dismiss_opening(page)
+        page.locator("#snow-backdrop-stage .snow-layer-room svg").wait_for(state="attached")
+        transform = page.evaluate("getComputedStyle(document.querySelector('#snow-backdrop-stage > .snow-layer-room > svg')).transform")
+        self.assertEqual(transform, "matrix(-1, 0, 0, 1, 0, 0)")
+
+    def test_phone_lock_screen_is_snow_white(self):
+        from PIL import Image
+        import io as _io
+
+        page = self._page(390, 844)
+        self._open(page, True)
+        lock = page.locator("#snow-lock")
+        lock.wait_for(state="visible")
+        img = Image.open(_io.BytesIO(page.screenshot())).convert("L")
+        top = img.crop((0, 0, 390, 300)).resize((1, 1)).getpixel((0, 0))
+        self.assertGreater(top, 225, "锁屏上部应为雪白")
+        self.assertLess(page.evaluate("""() => {
+          const [r, g, b] = getComputedStyle(document.getElementById('snow-lock')).color.match(/\\d+/g).map(Number);
+          return (r + g + b) / 3;
+        }"""), 90, "锁屏文字应为深色")
+        self.assertEqual(self.errors, [])

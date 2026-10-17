@@ -1111,6 +1111,10 @@ html[data-ui="snow-adv"] #chat-app[data-snow-world] #timeline .empty-conversatio
 html[data-ui="snow-adv"] body:has(#snow-boot, #snow-lock) #snow-statistics-notice {
   display: none !important;
 }
+/* P7：模态弹窗（体验须知、公告等）打开时，统计提示与新手引导暂隐，关闭后原样回来。 */
+html[data-ui="snow-adv"] body:has(dialog[open]) :is(#snow-statistics-notice, #onboarding-guide) {
+  visibility: hidden !important;
+}
 html[data-ui="snow-adv"] .snow-boot {
   position: fixed;
   inset: 0;
@@ -1201,3 +1205,238 @@ html[data-ui="snow-adv"] .snow-lock[data-tier="auto"] .snow-lock-hint { animatio
 
 /* 通讯器背后世界已改为独立的 body 级 #snow-backdrop 容器（见上），无需把 #scene-stage
  * 提为视口背景；#in-person-surface 在文字模式保持原生 hidden 行为。 */
+
+/* ============================================================= P7 上线后修整
+ * 依据线上实拍的修整：开机退场与入场、通讯器背后世界、面对面舞台与 HUD、输入工具、
+ * 须知与公告弹窗、手机锁屏。仍只在 html[data-ui="snow-adv"] 下生效；只动 transform/opacity。
+ * ============================================================= */
+
+/* HUD 下方留给立绘与提示的净空（舞台延伸到 HUD 之下后，立绘仍按 HUD 以下的高度定尺寸）。 */
+html[data-ui="snow-adv"] .app-shell { --snow-hud-clear: 84px; }
+@media (max-width: 1050px) { html[data-ui="snow-adv"] .app-shell { --snow-hud-clear: 118px; } }
+@media (max-width: 560px) { html[data-ui="snow-adv"] .app-shell { --snow-hud-clear: 100px; } }
+
+/* ---- A1 开机层退场：先收标志，再淡开底色；底下的通讯器按顺序入场 ---- */
+html[data-ui="snow-adv"] .snow-boot-mark { transition: opacity 180ms var(--ease-snow), transform 220ms var(--ease-snow); }
+html[data-ui="snow-adv"] .snow-boot[data-phase="out"] { opacity: 0; pointer-events: none; transition: opacity 260ms var(--ease-snow) 150ms; }
+html[data-ui="snow-adv"] .snow-boot[data-phase="out"] .snow-boot-mark { opacity: 0; transform: translateY(-8px) scale(0.97); }
+html[data-ui="snow-adv"] .snow-boot[data-tier="light"][data-phase="out"] { transition: opacity 200ms ease; }
+html[data-ui="snow-adv"] .snow-boot[data-tier="light"][data-phase="out"] .snow-boot-mark { transform: none; }
+html[data-ui="snow-adv"] .snow-boot[data-tier="off"] .snow-boot-mark { transition: none; }
+/* 入场只在完整动效档：侧栏从左滑入，顶栏、消息区、输入区依次上浮。开机层淡开时它们正好露出。 */
+html[data-ui="snow-adv"][data-motion-level="auto"] #chat-app[data-snow-entering] .contact-panel { animation: snow-enter-side 420ms var(--ease-settle) 110ms both; }
+html[data-ui="snow-adv"][data-motion-level="auto"] #chat-app[data-snow-entering] #text-surface .chat-header { animation: snow-enter-rise 380ms var(--ease-settle) 170ms both; }
+html[data-ui="snow-adv"][data-motion-level="auto"] #chat-app[data-snow-entering] #timeline { animation: snow-enter-rise 420ms var(--ease-settle) 230ms both; }
+html[data-ui="snow-adv"][data-motion-level="auto"] #chat-app[data-snow-entering] .chat-panel > #composer { animation: snow-enter-rise 380ms var(--ease-settle) 290ms both; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-ui="snow-adv"] #chat-app[data-snow-entering] :is(.contact-panel, .chat-header, #timeline, #composer) { animation: none; }
+}
+@keyframes snow-enter-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes snow-enter-side { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
+
+/* ---- A2 通讯器背后世界：雪景清楚可见，只有侧栏、顶栏和输入区是磨砂面 ---- */
+/* 外景建筑与亮灯入口换到右侧，不被左侧通讯栏挡住；首次入室的镜头正是推向这扇门。 */
+html[data-ui="snow-adv"] .snow-backdrop-stage:has(> .snow-layer-far[data-scene="generic"]) > .snow-layer-room > svg { transform: scaleX(-1); }
+html[data-ui="snow-adv"] #chat-app[data-snow-world] .contact-panel {
+  background: color-mix(in oklab, var(--snow-0) 84%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
+  backdrop-filter: blur(18px) saturate(1.1);
+}
+html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface .chat-header,
+html[data-ui="snow-adv"] #chat-app[data-snow-world] .chat-panel > #composer {
+  background: color-mix(in oklab, var(--snow-0) 82%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  backdrop-filter: blur(14px) saturate(1.1);
+}
+/* 消息区不再整体磨砂（原来 62% 白 + 模糊把雪景洗成灰影）：上下轻薄白雾，中间透出雪景。 */
+html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface {
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--snow-0) 38%, transparent) 0%,
+    color-mix(in oklab, var(--snow-0) 10%, transparent) 42%,
+    color-mix(in oklab, var(--snow-0) 34%, transparent) 100%);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-ui="snow-adv"] body:has(.snow-backdrop .snow-layer-far:is([data-time="dusk"], [data-time="night"])) #chat-app[data-snow-world] #text-surface {
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--snow-0) 58%, transparent) 0%,
+    color-mix(in oklab, var(--snow-0) 34%, transparent) 42%,
+    color-mix(in oklab, var(--snow-0) 56%, transparent) 100%);
+}
+/* 入室后背后是室内景：下半部的沙发、桌台离镜头近，铺浓一些白雾，只让窗与远景透出来。 */
+html[data-ui="snow-adv"] #chat-app[data-snow-world="interior"] #text-surface {
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--snow-0) 40%, transparent) 0%,
+    color-mix(in oklab, var(--snow-0) 16%, transparent) 38%,
+    color-mix(in oklab, var(--snow-0) 70%, transparent) 78%,
+    color-mix(in oklab, var(--snow-0) 82%, transparent) 100%);
+}
+/* 直接落在雪景上的小字（时间、发送者行、状态）加雪白光晕，任何时段都读得清。 */
+html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface :is(.message-time, .message .meta, .message-usage, .request-status, .typing-label) {
+  text-shadow: 0 0 2px var(--snow-0), 0 0 6px var(--snow-0), 0 0 12px var(--snow-0);
+}
+
+/* ---- A3 空会话：问候卡与开场建议排在一起，不再一上一下拉开 ---- */
+html[data-ui="snow-adv"] .empty-conversation { align-content: center; gap: 16px; }
+html[data-ui="snow-adv"] .empty-conversation .starter-prompts { margin-top: 0; }
+
+/* ---- B1 旁白进对白框（app.js 在开关开启时把 #stage-narration 挂进对白框，关闭时放回舞台） ---- */
+html[data-ui="snow-adv"] .stage-dialogue-copy:has(> .stage-narration) { grid-template-rows: auto auto minmax(0, 1fr); }
+html[data-ui="snow-adv"] .stage-dialogue .stage-narration {
+  position: static;
+  z-index: auto;
+  translate: none;
+  width: auto;
+  max-height: 4.8em;
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink-600);
+  background: none;
+  box-shadow: none;
+  font-size: var(--fs-14);
+  font-style: italic;
+  line-height: 1.6;
+  text-align: left;
+}
+html[data-ui="snow-adv"] .stage-dialogue .stage-narration:empty { display: none; }
+
+/* ---- B2/B3 面对面 HUD：舞台延伸到顶栏之下，顶栏只剩浮在雪景上的胶囊 ---- */
+html[data-ui="snow-adv"] .in-person-surface:not(.ui-hidden) .scene-stage { grid-row: 1 / 4; }
+/* 舞台占了第 1 行后，HUD 必须显式放回第 1 行（否则自动排到舞台之后，掉到对白框下面）。 */
+html[data-ui="snow-adv"] .in-person-surface .scene-hud { grid-row: 1; grid-column: 1; align-self: start; }
+html[data-ui="snow-adv"] .in-person-surface.ui-hidden { --snow-hud-clear: 0px; }
+html[data-ui="snow-adv"] .in-person-surface .scene-hud {
+  /* 去掉下边框：渐变背景按 padding-box 定位，会在透明边框处重复出一条白线。 */
+  border-bottom: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0));
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-ui="snow-adv"] .in-person-surface .scene-character-button,
+html[data-ui="snow-adv"] .in-person-surface .scene-location > span {
+  border-color: color-mix(in srgb, var(--ice-300) 55%, transparent);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 6px 18px rgba(32, 62, 92, 0.1);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+html[data-ui="snow-adv"] .in-person-surface .scene-location > span { padding: 6px 18px; border: 1px solid color-mix(in srgb, var(--ice-300) 55%, transparent); border-radius: 999px; }
+html[data-ui="snow-adv"] .in-person-surface :is(.stage-character-art, .stage-character-art-outgoing) {
+  height: calc((100% - var(--snow-hud-clear)) * 0.96 * var(--stage-character-scale, 1));
+}
+/* 快捷菜单已有「回看」「隐藏」，HUD 不再重复放同样的两个按钮（H 键和菜单项照常可用）。 */
+html[data-ui="snow-adv"] .in-person-surface:has(#stage-quick-menu) :is(#open-transcript, #toggle-stage-ui) { display: none; }
+@media (max-width: 560px) {
+  html[data-ui="snow-adv"] .in-person-surface .scene-character-button { border-color: color-mix(in srgb, var(--ice-300) 55%, transparent); }
+  html[data-ui="snow-adv"] .in-person-surface .scene-location { padding-inline: 10px; }
+  html[data-ui="snow-adv"] .in-person-surface .scene-location > span { display: inline-grid; max-width: 100%; padding: 4px 14px; }
+}
+
+/* ---- B4 面对面里的系统提示：HUD 下方的小提示条，不再整宽压住舞台；转场时让开 ---- */
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] #system-banner {
+  position: absolute;
+  z-index: 30;
+  top: calc(var(--snow-hud-clear) + 6px);
+  /* 用 margin 居中，不用 translate：既有的 snow-panel-enter 入场动画会接管 translate/opacity。 */
+  right: 0;
+  left: 0;
+  width: fit-content;
+  max-width: min(560px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 8px 16px;
+  border: 1px solid color-mix(in srgb, var(--ice-300) 60%, transparent);
+  border-radius: var(--radius-m);
+  color: var(--ink-700);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: var(--shadow-lift);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  font-size: var(--fs-13);
+  text-align: center;
+}
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"][data-snow-pushing="1"] #system-banner,
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"]:has(.snow-scene-veil:not([data-phase="idle"])) #system-banner { visibility: hidden; }
+
+/* ---- C1 输入工具：表情包 / 动作 / 一起去 统一成同一种浅色胶囊，只有发送是主按钮 ---- */
+html[data-ui="snow-adv"] .composer-tools .composer-tool-button {
+  min-height: 40px;
+  padding-inline: 12px;
+  gap: 6px;
+  border: 1px solid var(--snow-200);
+  border-radius: 999px;
+  color: var(--ice-700);
+  background: var(--snow-100);
+  box-shadow: none;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 1;
+}
+html[data-ui="snow-adv"] .composer-tools .composer-tool-button:hover:not(:disabled) { border-color: var(--ice-300); background: var(--snow-0); }
+html[data-ui="snow-adv"] .composer-tools .composer-tool-button[aria-expanded="true"] { border-color: var(--ice-400); color: var(--ice-700); background: color-mix(in oklab, var(--ice-300) 26%, var(--snow-0)); }
+html[data-ui="snow-adv"] .composer-tools .composer-tool-label { font-size: var(--fs-13); line-height: 1; }
+
+/* ---- C2 体验须知：勾选框紧挨着文字，使用主题色 ---- */
+html[data-ui="snow-adv"] .notice-choice { justify-content: flex-start; gap: 12px; }
+html[data-ui="snow-adv"] :is(.notice-choice, .setting-toggle) input[type="checkbox"] { accent-color: var(--ice-600); }
+
+/* ---- C3 公告弹窗：只滚动公告内容，「知道了」始终在底部可见 ---- */
+html[data-ui="snow-adv"] .announcements-modal[open] { display: flex; flex-direction: column; overflow: hidden; }
+html[data-ui="snow-adv"] .announcements-modal > :is(header, .announcement-tabs, .announcement-status, footer) { flex: none; }
+html[data-ui="snow-adv"] .announcements-modal > .announcement-panel { flex: 1 1 auto; min-height: 0; overflow: auto; }
+html[data-ui="snow-adv"] .announcements-modal > .announcements-footer { border-top: 1px solid var(--snow-200); background: var(--snow-0); }
+
+/* ---- D1 手机锁屏：和界面一样保持雪白（只有舞台背景跟随时间），远处是柔和的雪丘 ---- */
+html[data-ui="snow-adv"] .snow-lock {
+  isolation: isolate;
+  overflow: hidden;
+  color: var(--ink-900);
+  background: linear-gradient(180deg, var(--snow-0) 0%, var(--snow-50) 46%, color-mix(in oklab, var(--ice-300) 34%, var(--snow-50)) 100%);
+}
+html[data-ui="snow-adv"] .snow-lock::before,
+html[data-ui="snow-adv"] .snow-lock::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+}
+/* 远丘与近丘：两层椭圆渐变，静态，不请求图片。 */
+html[data-ui="snow-adv"] .snow-lock::before {
+  inset: auto -20% 0 -20%;
+  height: 34%;
+  background:
+    radial-gradient(60% 70% at 28% 100%, color-mix(in oklab, var(--ice-300) 58%, var(--snow-0)) 0 62%, transparent 63%),
+    radial-gradient(58% 64% at 78% 100%, color-mix(in oklab, var(--ice-300) 42%, var(--snow-0)) 0 62%, transparent 63%);
+}
+/* 首次打开没有任何通知时，通知区给一句安静的说明，不让屏幕中部整片空白。 */
+html[data-ui="snow-adv"] .snow-lock-notes:empty::before {
+  content: "没有新的通知";
+  justify-self: center;
+  padding: 8px 18px;
+  border: 1px solid var(--snow-200);
+  border-radius: 999px;
+  color: var(--ink-600);
+  background: rgba(255, 255, 255, 0.7);
+  font-size: var(--fs-13);
+}
+html[data-ui="snow-adv"] .snow-lock::after {
+  inset: auto -10% 0 -10%;
+  height: 18%;
+  background: radial-gradient(70% 90% at 50% 100%, var(--snow-0) 0 60%, transparent 61%);
+}
+html[data-ui="snow-adv"] .snow-lock-bar { opacity: 1; color: var(--ink-700); }
+html[data-ui="snow-adv"] .snow-lock-time { color: var(--ink-900); }
+html[data-ui="snow-adv"] .snow-lock-date { color: var(--ink-700); opacity: 1; }
+html[data-ui="snow-adv"] .snow-lock-hint { color: var(--ink-600); opacity: 1; }
+html[data-ui="snow-adv"] .snow-note-card {
+  border: 1px solid var(--snow-200);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 10px 26px rgba(32, 62, 92, 0.1);
+}
+html[data-ui="snow-adv"] .snow-note-card.is-primary { border-color: color-mix(in srgb, var(--char, var(--ice-500)) 40%, var(--snow-200)); background: color-mix(in oklab, var(--char, var(--ice-500)) 12%, var(--snow-0)); }
+html[data-ui="snow-adv"] .snow-note-card .snow-note-glyph { color: var(--ice-700); background: var(--snow-100); }
+html[data-ui="snow-adv"] .snow-note-card .snow-note-meta span,
+html[data-ui="snow-adv"] .snow-note-card time { color: var(--ink-600); opacity: 1; }
