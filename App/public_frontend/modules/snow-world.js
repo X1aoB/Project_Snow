@@ -228,7 +228,17 @@ const ROOMS = {
     s += `<rect x="380" y="626" width="840" height="130" rx="44" fill="${mix(sofa, "#1f2d3a", 0.08)}"/><rect x="330" y="712" width="940" height="120" rx="40" fill="${sofa}"/>`;
     s += `<rect x="300" y="664" width="110" height="180" rx="40" fill="${mix(sofa, "#1f2d3a", 0.12)}"/><rect x="1190" y="664" width="110" height="180" rx="40" fill="${mix(sofa, "#1f2d3a", 0.12)}"/>`;
     s += `<ellipse cx="800" cy="866" rx="280" ry="30" fill="${tone(p, 0.3)}"/>`;
-    s += `<g fill="${mix(tone(p, 0.3), "#6f9a84", 0.5)}"><ellipse cx="70" cy="560" rx="40" ry="140" transform="rotate(-12 70 560)"/><ellipse cx="120" cy="590" rx="34" ry="120" transform="rotate(16 120 590)"/><ellipse cx="1520" cy="570" rx="40" ry="140" transform="rotate(12 1520 570)"/></g></g>`;
+    // P7：两侧盆栽——花盆 + 扇形细叶，颜色压淡，不再是两块模糊的大绿椭圆。
+    const leaf = mix(tone(p, 0.3), "#7fa592", 0.42), leafDeep = mix(leaf, "#1f2d3a", 0.16), pot = mix(p.wall[0], "#ffffff", 0.3);
+    const plant = (x, base, flip) => {
+      let g = `<g transform="translate(${x} ${base})${flip ? " scale(-1 1)" : ""}">`;
+      for (const [ang, len, w, c] of [[-40, 118, 13, leafDeep], [-18, 150, 15, leaf], [4, 162, 14, leafDeep], [24, 136, 13, leaf], [44, 104, 11, leafDeep]]) {
+        g += `<ellipse cx="0" cy="${-len / 2}" rx="${w}" ry="${len / 2}" fill="${c}" transform="rotate(${ang})"/>`;
+      }
+      g += `<path d="M-36 0h72l-9 66h-54z" fill="${pot}"/><rect x="-40" y="-6" width="80" height="12" rx="5" fill="${mix(pot, "#1f2d3a", 0.12)}"/>`;
+      return `${g}</g>`;
+    };
+    s += plant(96, 700, false) + plant(1504, 700, true) + `</g>`;
     s += [320, 800, 1280].map((lx) => lamp(p, id, lx, 126, 120, 1.3)).join("");
     return { room: s, horizon: 410 };
   },
@@ -238,7 +248,8 @@ const ROOMS = {
     for (let x = 70 + 146; x < 1530; x += 146) s += `<rect x="${x - 3}" y="80" width="6" height="250" fill="${p.frame}"/>`;
     s += floor(id, fy) + shaft(id, 200, 330, 1200, fy, 60);
     s += `<g filter="url(#${id}-soft)"><rect x="180" y="380" width="300" height="110" rx="10" fill="${mix(p.wall[0], "#ffffff", 0.4)}" opacity=".85"/>`;
-    s += `<rect x="1120" y="500" width="520" height="260" rx="10" fill="${tone(p, 0.32)}"/><rect x="1110" y="490" width="540" height="24" rx="8" fill="${mix(p.wall[0], "#ffffff", 0.3)}"/>`;
+    // P7：右侧出餐台原为 32% 深灰块，压过人物；调浅并给台面一点暖白。
+    s += `<rect x="1120" y="500" width="520" height="260" rx="10" fill="${tone(p, 0.18)}"/><rect x="1110" y="490" width="540" height="24" rx="8" fill="${mix(p.wall[0], "#fff6ea", 0.55)}"/>`;
     const tableC = tone(p, 0.26);
     for (const [y, w, hgt] of [[650, 760, 18], [748, 940, 22], [866, 1180, 26]]) {
       const x = 560 - w / 2;
@@ -255,9 +266,10 @@ const ROOMS = {
     s += floor(id, fy) + [0, 1, 2, 3, 4].map((i) => shaft(id, 80 + i * 300, 230, 240, fy, 160)).join("");
     const mark = mix(p.floor[0], "#5d9bc2", 0.35);
     s += `<ellipse cx="800" cy="780" rx="440" ry="92" fill="none" stroke="${mark}" stroke-width="6" opacity=".7"/><path d="M0 660H1600M800 660V900" stroke="${mark}" stroke-width="4" opacity=".5"/>`;
-    s += `<g filter="url(#${id}-soft)"><rect x="60" y="320" width="310" height="250" rx="10" fill="none" stroke="${tone(p, 0.38)}" stroke-width="12"/>`;
-    for (let y = 370; y < 560; y += 46) s += `<rect x="70" y="${y}" width="290" height="8" fill="${tone(p, 0.32)}"/>`;
-    s += `<path d="M1360 0V250" stroke="${tone(p, 0.4)}" stroke-width="5"/><rect x="1316" y="250" width="88" height="250" rx="40" fill="${mix(tone(p, 0.32), "#3a7ca5", 0.25)}"/></g>`;
+    // P7：左侧器械架与右侧沙袋原色偏深，调浅到与墙面同一明度区间，沙袋偏冰蓝。
+    s += `<g filter="url(#${id}-soft)"><rect x="60" y="320" width="310" height="250" rx="10" fill="none" stroke="${tone(p, 0.24)}" stroke-width="12"/>`;
+    for (let y = 370; y < 560; y += 46) s += `<rect x="70" y="${y}" width="290" height="8" fill="${tone(p, 0.2)}"/>`;
+    s += `<path d="M1360 0V250" stroke="${tone(p, 0.28)}" stroke-width="5"/><rect x="1316" y="250" width="88" height="250" rx="40" fill="${mix(tone(p, 0.16), "#7fb0cf", 0.35)}"/></g>`;
     return { room: s, horizon: 200 };
   },
   medical(p, r, id) {

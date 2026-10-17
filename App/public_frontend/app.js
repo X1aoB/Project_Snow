@@ -5,23 +5,20 @@ import { mountSnowWorld, activeSnowLoops } from "/modules/snow-world.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
-// 雪境 ADV P6a：开关随 /public/v1/config 下发，皮肤只能在 config 解析后才切换。为避免
-// 旧界面先闪一帧，仅当本机存在「上次见过雪境皮肤」标记时，才在 config 解析前把界面保持中性
-// （data-snow-booting，由 loadConfig 解析后删除）。首访用户没有该标记，不做保持，直接接受切换。
+// 雪境 ADV P6a/P7：开关随 /public/v1/config 下发，皮肤只能在 config 解析后才切换。
+// P7：index.html 静态带 data-snow-hold，app.css 据此在 config 解析前只显示品牌底色（小吉终端图标），
+// 不露出未换肤的界面（线上首访实测旧界面会先露出 0.5–0.9 秒再被开机层盖住）。config 解析或
+// 失败时由 snowClearFirstFlashHold() 移除（配置迟迟不来最多保持 2.5 秒）；JS 根本没跑起来时 app.css 的 4 秒动画兜底自动显示。
+// data-snow-booting 继续标记「上次见过雪境皮肤」的返回用户（兼容既有检查），不再把整页设为不可见。
 const SNOW_LAST_SEEN_KEY = "project-snow-public:snow-adv:last-seen";
-// 仅当存在标记时，用内联属性（非 <style> 元素，CSP 安全）把根节点暂设为不可见，直到
-// config 解析后恢复，避免返回用户看到旧界面闪一帧。首访无标记则不保持，直接接受切换。
-// 兜底：即使 config 迟迟不来，也在 1s 后恢复可见，绝不长时间卡白。
 try {
-  if (localPreferences.getItem(SNOW_LAST_SEEN_KEY) === "1") {
-    document.documentElement.dataset.snowBooting = "1";
-    document.documentElement.style.visibility = "hidden";
-    window.setTimeout(() => { document.documentElement.style.visibility = ""; }, 1000);
-  }
-} catch { /* 存储不可用则不保持 */ }
+  if (localPreferences.getItem(SNOW_LAST_SEEN_KEY) === "1") document.documentElement.dataset.snowBooting = "1";
+} catch { /* 存储不可用则按首访处理 */ }
+window.setTimeout(() => snowClearFirstFlashHold(), 2500);
 function snowClearFirstFlashHold() {
   document.documentElement.style.visibility = "";
   delete document.documentElement.dataset.snowBooting;
+  delete document.documentElement.dataset.snowHold;
 }
 const apiRoot = "/public/v1";
 const publicHttp = createHttpClient(apiRoot);
@@ -971,7 +968,23 @@ function syncStageQuickMenu() {
 function syncStageQuickMenuMount() {
   if (featureEnabled("ui_snow_adv")) buildStageQuickMenu();
   else removeStageQuickMenu();
+  syncStageNarrationMount();
   syncSnowVeilMount();
+}
+// 雪境 ADV（P7）：旁白放进对白框，排在名牌与台词之间，不再作为单独的条压在立绘上。
+// 只移动既有 #stage-narration 节点（id、aria-live、文本写入方式都不变）；关闭开关时放回舞台。
+function syncStageNarrationMount() {
+  const narration = $("stage-narration");
+  const copy = document.querySelector("#stage-dialogue .stage-dialogue-copy");
+  const speech = $("stage-speech");
+  const stage = $("scene-stage");
+  if (!narration || !copy || !speech || !stage) return;
+  if (featureEnabled("ui_snow_adv")) {
+    if (narration.parentElement !== copy) copy.insertBefore(narration, speech);
+  } else if (narration.parentElement !== stage) {
+    const restore = $("restore-stage-ui");
+    stage.insertBefore(narration, restore?.parentElement === stage ? restore : null);
+  }
 }
 // 雪境 ADV (P4 后续)：白雪转场遮罩。生产环境 motion_v2/scene_actions_v2 开启时，旧的三个
 // 转场层根本不显示，所以用这个独立的、仅装饰的覆盖层来呈现地点转场。节点仅在开关开启时建、
@@ -1184,8 +1197,17 @@ function dismissSnowBoot(onRemoved) {
   const finish = () => { boot.remove(); if (onRemoved) onRemoved(); };
   if (tier === "off" || typeof boot.animate !== "function") { finish(); return; }
   boot.dataset.phase = "out";
-  // ≤300ms 淡出；不额外拖延。
-  window.setTimeout(finish, 320);
+  if (tier === "auto") {
+    // 完整动效：标志先收起（≈200ms），底色随后淡开（≈260ms），底下的通讯器各部分依次入场；
+    // 入场结束后再交还给体验须知等，避免弹窗压在正在入场的界面上。不额外等待网络。
+    // 淡开后的开机层已透明且不拦截点击，保留到入场结束才移除，使「开机层移除」始终等于「开场完成」。
+    const app = $("chat-app");
+    app.dataset.snowEntering = "1";
+    window.setTimeout(() => { delete app.dataset.snowEntering; finish(); }, 720);
+    return;
+  }
+  // 轻量档：只做 200ms 淡出。
+  window.setTimeout(finish, 220);
 }
 // 开机层只在：桌面开场、开关开启、且今天还没见过时显示；否则不建（不加任何延迟）。
 function maybeStartSnowBoot() {
@@ -3959,6 +3981,9 @@ function renderOnboarding() {
   // P6a：开机/锁屏层占屏时不显示新手引导，避免盖在开场层之上；消隐/解锁后由
   // snowRunDeferredOpenings() 再次调用本函数按正常顺序显示。
   if (snowOpeningActive()) { $("onboarding-guide").hidden = true; return; }
+  // P7：雪境界面下，体验须知、公告等模态弹窗打开时引导卡先让开（否则会在弹窗背后同时出现），
+  // 弹窗关闭时由下方的 close 监听重新调用本函数。
+  if (featureEnabled("ui_snow_adv") && document.querySelector("dialog[open]")) { $("onboarding-guide").hidden = true; return; }
   const step = Math.min(state.onboardingStep, ONBOARDING_STEPS.length - 1);
   const item = ONBOARDING_STEPS[step];
   $("onboarding-guide").hidden = false;
@@ -3972,6 +3997,10 @@ function advanceOnboarding() {
   state.onboardingStep += 1;
   renderOnboarding();
 }
+// close 事件不冒泡，在捕获阶段监听所有 <dialog> 的关闭；只在雪境界面下补显引导。
+document.addEventListener("close", (event) => {
+  if (event.target instanceof HTMLDialogElement && featureEnabled("ui_snow_adv")) renderOnboarding();
+}, true);
 async function loadCharacters() {
   const payload = await api("/characters", { headers: {} });
   state.characters = payload.characters || [];
