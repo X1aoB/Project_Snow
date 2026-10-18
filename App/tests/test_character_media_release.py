@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest import TestCase
+from unittest import TestCase, skipUnless
 from unittest.mock import patch
 
 import numpy as np
@@ -17,6 +19,46 @@ from scripts.character_layered_release import REVIEW_FLAGS
 
 def _digest(path):
     return sha256(path.read_bytes()).hexdigest()
+
+
+def _synthetic_layer_deriver(release_root, cid, runtime, approved, review_root, compositor, cache=None):
+    """Builder integration fixture; codec/visual quality have independent core regressions."""
+    derived = copy.deepcopy(runtime)
+    mapping = []
+    replacements = {}
+    for relative, layer in release._runtime_layers(runtime).items():
+        content = (release_root / relative).read_bytes()
+        with Image.open(release_root / relative) as image:
+            output = BytesIO()
+            image.save(output, format="WEBP", quality=92, method=4, exact=True)
+        encoded = output.getvalue()
+        digest = sha256(encoded).hexdigest()
+        target = f"expressions/{cid}/layers/{Path(relative).name.split('.')[0]}.{digest[:16]}.webp"
+        (release_root / target).write_bytes(encoded)
+        replacements[relative] = (target, digest)
+        mapping.append({"source_asset_path": relative, "source_sha256": layer["asset_sha256"],
+                        "delivery_asset_path": target, "delivery_sha256": digest,
+                        "dimensions": layer["dimensions"], "source_bytes": len(content),
+                        "delivery_bytes": len(encoded)})
+    for presentation in derived["presentations"].values():
+        for layer in presentation["layers"]:
+            layer["asset_path"], layer["asset_sha256"] = replacements[layer["asset_path"]]
+    directory = review_root / cid
+    directory.mkdir()
+    (directory / "report.json").write_text('{"synthetic_builder_fixture":true}\n', encoding="utf-8")
+    summary = {"schema_version": "project-snow-character-webp-derivatives-1", "character_id": cid,
+               "encoding": {"format": "webp", "quality": 92, "lossless": False, "method": 4,
+                            "alpha_quality": 100, "exact": True},
+               "thresholds": {"premultiplied_rgb_mae_max": 2.0, "premultiplied_rgb_p99_max": 10.0,
+                              "luminance_ssim_min": 0.99, "alpha_max_delta": 0},
+               "engine_versions": {"pillow": "fixture", "libwebp": "fixture", "chromium": "fixture"},
+               "report_sha256": _digest(directory / "report.json"), "layer_mapping": mapping,
+               "presentations": {pid: {"passed": True, "metrics": {"visible_pixels": 1,
+                                   "alpha_max_delta": 0, "premultiplied_rgb_mae": 0.0,
+                                   "premultiplied_rgb_p99": 0.0, "luminance_ssim": 1.0}}
+                                 for pid in derived["presentations"]},
+               "passed": True, "technical_qa_only": True, "human_approval": False}
+    return derived, summary
 
 
 class CharacterMediaReleaseTests(TestCase):
@@ -180,3 +222,78 @@ class CharacterMediaReleaseTests(TestCase):
         manifest["characters"][-1]["approval_manifest_sha256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "rights approval hash mismatch"):
             release._validate_rights_rows(manifest, sources, approvals)
+
+    def test_webp_requires_a_new_review_directory_outside_sources_and_delivery(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "source", root / "delivery"
+            source.mkdir(); output.mkdir()
+            with self.assertRaisesRegex(ValueError, "requires a new"):
+                release._layer_review_destination("webp-q92", None, [source, output])
+            for target in (source / "review", output / "review", root):
+                with self.subTest(target=target), self.assertRaises((ValueError, FileExistsError)):
+                    release._layer_review_destination("webp-q92", target, [source, output])
+            review = root / "private-review"
+            self.assertEqual(release._layer_review_destination("webp-q92", review, [source, output]), review)
+            review.mkdir(); (review / "decision.json").write_bytes(b"preserve")
+            with self.assertRaises(FileExistsError):
+                release._layer_review_destination("webp-q92", review, [source, output])
+            self.assertEqual((review / "decision.json").read_bytes(), b"preserve")
+            with self.assertRaisesRegex(ValueError, "requires webp-q92"):
+                release._layer_review_destination("png", root / "unused", [])
+
+    def test_failed_layer_review_retains_private_evidence_without_overwriting(self):
+        with TemporaryDirectory() as directory:
+            review = Path(directory) / "review"
+            with self.assertRaisesRegex(ValueError, "synthetic quality failure"):
+                with release._layer_review_attempt(review, "fixture"):
+                    (review / "comparison.png").write_bytes(b"failed candidate evidence")
+                    raise ValueError("synthetic quality failure")
+            status = json.loads((review / "build-status.json").read_bytes())
+            self.assertEqual(status["status"], "failed")
+            self.assertEqual(status["failure_type"], "ValueError")
+            self.assertFalse(status["human_approval"])
+            with self.assertRaises(FileExistsError):
+                with release._layer_review_attempt(review, "another"):
+                    self.fail("an existing review directory must not be reused")
+            self.assertEqual((review / "comparison.png").read_bytes(), b"failed candidate evidence")
+
+    def test_webp_conversion_cannot_change_fallbacks_geometry_or_leak_private_metadata(self):
+        for fault in ("fallback", "geometry", "private_summary", "quality", "encoding_method", "report"):
+            with (self.subTest(fault=fault), TemporaryDirectory() as directory,
+                  patch.object(release, "EXPRESSION_STATES", ("neutral", "happy"))):
+                root, cid = Path(directory), "a" * 12
+                self._write_approved_character(root, cid)
+                approved = release._validate_character_approval(root, {"character_id": cid})
+                runtime = release._render_runtime_manifest(root / "delivery", cid, "Fixture", approved, {}, "test", {})
+                before = copy.deepcopy(runtime)
+                review = root / "review"; review.mkdir()
+                def faulty(*args, **kwargs):
+                    changed, summary = _synthetic_layer_deriver(*args, **kwargs)
+                    if fault == "fallback": changed["expressions"]["neutral"]["face_asset_sha256"] = "0" * 64
+                    elif fault == "geometry": changed["presentations"]["expression.neutral"]["layers"][0]["position"]["x"] = 1
+                    elif fault == "private_summary": summary["private_path"] = "C:/private/source"
+                    elif fault == "quality": summary["presentations"]["expression.neutral"]["metrics"]["alpha_max_delta"] = 1
+                    elif fault == "encoding_method": summary["encoding"]["method"] = 6
+                    else: summary["report_sha256"] = "0" * 64
+                    return changed, summary
+                with patch.object(release, "_derive_runtime_layers", side_effect=faulty), self.assertRaises(ValueError):
+                    release._checked_webp_runtime(root / "delivery", cid, runtime, approved, review, object(), {})
+                self.assertEqual(runtime, before)
+
+    @skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
+    def test_real_webp_derivatives_satisfy_the_builder_public_summary_boundary(self):
+        from tests.test_character_webp_derivatives import fixture
+        with TemporaryDirectory() as directory, release.layered_release.NativeBrowserCompositor() as compositor:
+            cid, _, delivery, review, approved, runtime = fixture(Path(directory))
+            runtime["transforms"] = {"format": "original_native_png_layers_with_lossless_webp_derivatives"}
+            before = copy.deepcopy(runtime)
+            converted, summary = release._checked_webp_runtime(
+                delivery, cid, runtime, approved, review, compositor, {}
+            )
+            self.assertEqual(runtime, before)
+            self.assertTrue(summary["passed"])
+            self.assertEqual(summary["encoding"]["quality"], 92)
+            self.assertEqual(summary["encoding"]["method"], 4)
+            self.assertEqual(converted["transforms"]["format"],
+                             "q92_webp_native_layers_with_original_lossless_webp_derivatives")

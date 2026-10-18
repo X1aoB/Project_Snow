@@ -6,6 +6,17 @@
 
 已审核私有包入口必须同时提供 `--expression-package-root`、`--expression-package-manifest-sha256`、`--expression-package-checksums-sha256` 以及 `--rights-sha256`。`--expression-root` 和 `--approval-root` 仍指向私有原始来源与已封存的逐角色批准。构建先运行既有审批、原生图层合成与来源验证，再核对私有包的完整清单、批准预览哈希、图层原始 PNG 哈希、图层位置和剧情动作回退。通过后保留已审核 PNG/WebP 字节，仅在新包的运行时清单中加入这次发布决定与来源绑定。私有运行时元数据逐层限定公开字段；静态契约和转换说明必须与构建器的固定公开值一致，禁止未知字段或已知字段中的私有对象、备注进入新清单。
 
+需要减小交付图层体积时，在以上全部输入和固定哈希之外显式增加：
+
+```powershell
+  --layer-format webp-q92 `
+  --layer-review-root <new-private-review-directory>
+```
+
+此模式仍严格验证私有包内的原 PNG 路径、字节和批准层栈，随后才生成新的 q92 WebP 交付层。源包、审批原件和旧媒体版本保持只读；已审核头像、表情头像和整图后备继续按原字节复用。新的内容寻址 WebP 图层、来源映射及验证摘要进入新版本，未再引用的原 PNG 图层仅从本次临时交付目录移除。审阅图和失败报告保存在独立私有目录，不随公开包分发。
+
+有损衍生与源审批是两项独立门禁：源 PNG 合成继续要求零差异，WebP 合成按固定容差检查并输出真实 Chromium 对比图。完整参数、指标和人工检查边界见 [全角色分层表现发布](character_runtime_release.md#q92-webp-交付图层)。默认 `--layer-format png` 保持已有构建行为。
+
 发布决定继续采用 `project-snow-character-expression-rights-1`，须列出全部角色对应的原始来源和批准清单哈希，以及完整基础状态/剧情动作数量。采用用户指令的权利核验豁免时，`rights` 必须准确记录 `independent_verification:false`、`verification_status:"not_performed"`、`public_use_authorized:true` 和明确的 `waiver` 范围，不能据此声称取得第三方许可或完成权利清查。
 
 复用私有包的 `rights.publication_authorization` 必须含下列字段：

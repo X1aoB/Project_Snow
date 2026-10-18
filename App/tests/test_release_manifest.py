@@ -29,7 +29,7 @@ class ReleaseManifestTests(TestCase):
         self.assertEqual(manifest["schema_version"], "project-snow-release-1")
         self.assertEqual(manifest["app_version"], "1.0.0")
         self.assertEqual(manifest["data_version"], "2026.08.19.1")
-        self.assertEqual(manifest["media_version"], "2026.09.09.character.1")
+        self.assertEqual(manifest["media_version"], "2026.10.18.character.webp92.2")
         self.assertEqual(manifest["sticker_version"], "2026.08.19.sticker.1")
         self.assertEqual(set(manifest["release_artifacts"]), {"data", "avatar", "sticker"})
         self.assertEqual(

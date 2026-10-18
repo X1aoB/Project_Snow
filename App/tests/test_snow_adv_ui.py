@@ -2140,14 +2140,24 @@ class SnowAdvP8VisualTests(TestCase):
 
     def test_terminal_icon_is_cropped_to_its_disc_and_location_has_an_area_code(self):
         page = self._page(1280, 820)
-        self._open(page, True)
-        page.locator("#snow-boot .snow-boot-mark img").wait_for(state="attached")
-        boot = page.evaluate("""() => ({
-          clip: getComputedStyle(document.querySelector('#snow-boot .snow-boot-mark img')).clipPath,
-          text: document.getElementById('snow-boot').textContent,
-        })""")
-        self.assertIn("circle", boot["clip"])
-        self.assertNotIn("海姆达尔", boot["text"])
+        held = []
+        # Keep the real boot active while inspecting it: networkidle may return
+        # after this short-lived node has already been removed by a fast fixture.
+        page.route("**/public/v1/characters", lambda route: held.append(route))
+        self._open(page, True, wait_until="domcontentloaded")
+        try:
+            page.locator("#snow-boot .snow-boot-mark img").wait_for(state="attached")
+            boot = page.evaluate("""() => {
+              const style = getComputedStyle(document.querySelector('#snow-boot .snow-boot-mark img'));
+              return { clip: style.clipPath, size: [style.width, style.height],
+                text: document.getElementById('snow-boot').textContent };
+            }""")
+            self.assertEqual(boot["size"], ["72px", "72px"])
+            self.assertIn("circle", boot["clip"])
+            self.assertNotIn("海姆达尔", boot["text"])
+        finally:
+            for route in held:
+                route.continue_()
         self._reach_in_person(page)
         code = page.evaluate("""() => getComputedStyle(document.querySelector('.in-person-surface .scene-location > span'), '::before').content""")
         self.assertRegex(code, r'^"(EXT|B-0\d)"')

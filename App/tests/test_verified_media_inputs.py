@@ -4,7 +4,9 @@ import copy
 import json
 import os
 import shutil
+from contextlib import nullcontext
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -24,6 +26,13 @@ def digest(path):
 
 def write_json(path, value):
     path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+
+
+def fixture_webp(image):
+    # Reuse tests care about immutable fallback bytes, not production encoding effort.
+    output = BytesIO()
+    image.save(output, format="WEBP", lossless=True, quality=0, method=0, exact=True)
+    return output.getvalue()
 
 
 def seal(root):
@@ -230,6 +239,15 @@ class VerifiedMediaInputTests(TestCase):
             self.assertFalse((root / "output" / path).exists())
 
     def test_full_combined_release_reuses_approved_native_and_avatar_bytes(self):
+        self._check_full_combined_release("png")
+
+    def test_webp_combined_release_derives_only_layers_and_keeps_sources_and_fallbacks(self):
+        self._check_full_combined_release("webp-q92")
+
+    def test_webp_quality_failure_preserves_review_and_sources_without_publishing(self):
+        self._check_full_combined_release("webp-q92", derivation_fault=True)
+
+    def _check_full_combined_release(self, layer_format, derivation_fault=False):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             raw, private = root / "raw", root / "private"
@@ -250,15 +268,16 @@ class VerifiedMediaInputTests(TestCase):
                 approvals[cid] = approved
                 sources[cid] = {"character_id": cid, "source_sha256": "c" * 64}
                 if template is None:
-                    runtime = builder._render_runtime_manifest(
-                        private,
-                        cid,
-                        character["display_name"],
-                        approved,
-                        {"approval_manifest_sha256": approved["approval_manifest_sha256"]},
-                        "pending_not_public",
-                        {},
-                    )
+                    with patch.object(builder, "_webp_bytes", side_effect=fixture_webp):
+                        runtime = builder._render_runtime_manifest(
+                            private,
+                            cid,
+                            character["display_name"],
+                            approved,
+                            {"approval_manifest_sha256": approved["approval_manifest_sha256"]},
+                            "pending_not_public",
+                            {},
+                        )
                     template, template_cid = copy.deepcopy(runtime), cid
                 else:
                     # All synthetic characters use identical pixels. Encode once;
@@ -358,6 +377,13 @@ class VerifiedMediaInputTests(TestCase):
                 expression_package_checksums_sha256=private_pins[1],
                 rights_sha256=digest(rights_path),
             )
+            if layer_format == "webp-q92":
+                args.update(layer_format=layer_format, layer_review_root=root / "private-layer-review")
+            def derive_candidate(*values, **options):
+                runtime, summary = character_tests._synthetic_layer_deriver(*values, **options)
+                if derivation_fault:
+                    next(iter(summary["presentations"].values()))["metrics"]["alpha_max_delta"] = 1
+                return runtime, summary
             with (
                 patch.object(builder, "_source_index", return_value=({}, sources, digest(source_path))),
                 patch.object(
@@ -368,13 +394,38 @@ class VerifiedMediaInputTests(TestCase):
                     "_render_runtime_manifest",
                     side_effect=AssertionError("must preserve reviewed encodings"),
                 ),
+                patch.object(builder, "_derive_runtime_layers", side_effect=derive_candidate) as derive,
+                patch.object(builder.layered_release, "NativeBrowserCompositor", return_value=nullcontext(object())),
             ):
+                if derivation_fault:
+                    with self.assertRaisesRegex(ValueError, "exceeds the fixed"):
+                        builder.build_release(**args)
+                    self.assertFalse((root / "out/fixture-combined").exists())
+                    self.assertEqual(list((root / "out").glob(".fixture-combined.candidate.*")), [])
+                    inputs.VerifiedPackage(private, *private_pins).verify()
+                    reports = list((root / "private-layer-review").glob("*/report.json"))
+                    self.assertEqual(len(reports), 1)
+                    before = reports[0].read_bytes()
+                    self.assertEqual(json.loads((root / "private-layer-review/build-status.json").read_bytes())["status"],
+                                     "failed")
+                    with self.assertRaises(FileExistsError):
+                        builder.build_release(**args)
+                    self.assertEqual(reports[0].read_bytes(), before)
+                    return
                 output = builder.build_release(**args)
                 with self.assertRaises(FileExistsError):
                     builder.build_release(**args)
+                self.assertEqual(derive.call_count, 22 if layer_format == "webp-q92" else 0)
             original = inputs.VerifiedPackage(private, *private_pins)
             for relative, expected in original.files.items():
                 if not relative.endswith("manifest.json"):
+                    if layer_format == "webp-q92" and "/layers/" in relative:
+                        self.assertFalse((output / relative).exists())
+                    else:
+                        self.assertEqual(digest(output / relative), expected)
+            avatar_original = inputs.VerifiedPackage(root / "avatar", *avatar_pins)
+            for relative, expected in avatar_original.files.items():
+                if relative != "manifest.json":
                     self.assertEqual(digest(output / relative), expected)
             manifest = json.loads((output / "manifest.json").read_bytes())
             self.assertEqual(manifest["schema_version"], "project-snow-character-media-4")
@@ -387,6 +438,29 @@ class VerifiedMediaInputTests(TestCase):
                     "independent_verification"
                 ]
             )
+            if layer_format == "webp-q92":
+                derivation = manifest["expression_layer_derivation"]
+                self.assertEqual(derivation["character_count"], 22)
+                self.assertTrue(derivation["source_approval_exact"])
+                self.assertFalse(derivation["human_approval"])
+                self.assertEqual(len(derivation["characters"]), 22)
+                self.assertEqual(list((output / "expressions").rglob("*.png")), [])
+                self.assertNotIn(str(root), json.dumps(manifest))
+                for summary in derivation["characters"]:
+                    cid = summary["character_id"]
+                    report = root / "private-layer-review" / cid / "report.json"
+                    self.assertEqual(digest(report), summary["report_sha256"])
+                    public_runtime = json.loads((output / f"expressions/{cid}/manifest.json").read_bytes())
+                    with self.assertRaisesRegex(ValueError, "outside the public"):
+                        builder._public_runtime_shape(public_runtime)
+                    for layer in builder._runtime_layers(public_runtime).values():
+                        self.assertTrue(layer["asset_path"].endswith(".webp"))
+                        self.assertEqual(digest(output / layer["asset_path"]), layer["asset_sha256"])
+                self.assertEqual(json.loads((root / "private-layer-review/build-status.json").read_bytes())["status"],
+                                 "built_for_review")
+                self.assertEqual(list(output.rglob("report.json")), [])
+            else:
+                self.assertNotIn("expression_layer_derivation", manifest)
             # The same pinned private package cannot be republished under a different decision binding.
             changed = copy.deepcopy(rights)
             changed["rights"]["publication_authorization"]["approval_event_sha256"] = "0" * 64
