@@ -1,0 +1,140 @@
+/* Loaded only by the Snow ADV map module; no rules affect the original UI. */
+html[data-ui="snow-adv"] #open-snow-base-map {
+  grid-column: 1 / -1;
+  gap: 6px;
+  justify-self: stretch;
+  color: var(--ink-700);
+  font: 14px/1.5 system-ui, sans-serif;
+}
+html[data-ui="snow-adv"] #open-snow-base-map:hover:not(:disabled),
+html[data-ui="snow-adv"] #open-snow-base-map:focus-visible {
+  border-color: var(--ice-400);
+  background: var(--snow-100);
+  color: var(--ink-700);
+}
+html[data-ui="snow-adv"] #open-snow-base-map:focus-visible { outline: 2px solid var(--ice-700); outline-offset: 2px; }
+html[data-ui="snow-adv"] .snow-base-map {
+  box-sizing: border-box;
+  width: min(1100px, calc(100vw - 28px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--snow-200);
+  border-radius: 18px;
+  background: var(--snow-0);
+  color: var(--ink-900);
+  font: 14px/1.6 system-ui, sans-serif;
+}
+html[data-ui="snow-adv"] .snow-base-map[open] {
+  display: flex;
+  flex-direction: column;
+}
+html[data-ui="snow-adv"] .snow-base-map::backdrop {
+  background: color-mix(in srgb, var(--ink-900) 34%, transparent);
+}
+html[data-ui="snow-adv"][data-motion-level="off"] .snow-base-map::backdrop { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-ui="snow-adv"] .snow-base-map::backdrop { animation: none !important; }
+}
+html[data-ui="snow-adv"] .snow-base-map :is(h2, h3, p) { margin: 0; }
+html[data-ui="snow-adv"] .snow-base-map :is(button, section, div) { box-sizing: border-box; }
+html[data-ui="snow-adv"] .snow-base-map button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--snow-200);
+  border-radius: 10px;
+  background: var(--snow-0);
+  color: var(--ink-700);
+  font: inherit;
+  cursor: pointer;
+}
+html[data-ui="snow-adv"] .snow-base-map button:disabled { cursor: default; opacity: 0.6; }
+html[data-ui="snow-adv"] .snow-base-map button:focus-visible {
+  outline: 2px solid var(--ice-700);
+  outline-offset: 2px;
+}
+html[data-ui="snow-adv"] .snow-base-map-header {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border-bottom: 1px solid var(--snow-200);
+}
+html[data-ui="snow-adv"] .snow-base-map-header h2 { font-size: 20px; line-height: 1.5; }
+html[data-ui="snow-adv"] #snow-base-map-summary { margin-top: 4px; color: var(--ink-600); }
+html[data-ui="snow-adv"] .snow-base-map .snow-base-map-close { flex: none; width: 44px; padding: 10px; }
+html[data-ui="snow-adv"] .snow-base-map .snow-icon { display: block; width: 20px; height: 20px; }
+html[data-ui="snow-adv"] .snow-base-map-list {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+html[data-ui="snow-adv"] .snow-base-map-item { min-width: 0; }
+html[data-ui="snow-adv"] .snow-base-map .snow-base-map-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  height: 112px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--snow-200);
+  border-radius: 12px;
+  background: var(--snow-50);
+  overflow: hidden;
+  text-align: left;
+  font-size: 12px;
+  line-height: 18px;
+}
+html[data-ui="snow-adv"] .snow-base-map .snow-base-map-card[data-selected="true"] { border-color: var(--ice-700); background: var(--snow-100); }
+html[data-ui="snow-adv"] .snow-base-map .snow-base-map-card:disabled { opacity: 1; }
+html[data-ui="snow-adv"] .snow-base-map-identity { display: flex; align-items: center; gap: 8px; min-width: 0; }
+html[data-ui="snow-adv"] .snow-base-map-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 24px; }
+html[data-ui="snow-adv"] .snow-base-map-initial {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--snow-200);
+  border-radius: 50%;
+  background: var(--snow-0);
+  color: var(--ink-700);
+  font-size: 14px;
+}
+html[data-ui="snow-adv"] .snow-base-map-location { display: block; max-width: 100%; overflow: hidden; color: var(--ink-900); text-overflow: ellipsis; white-space: nowrap; }
+html[data-ui="snow-adv"] .snow-base-map-activity { display: -webkit-box; overflow: hidden; color: var(--ink-600); overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+html[data-ui="snow-adv"] .snow-base-map .snow-base-map-select:hover:not(:disabled) { border-color: var(--ice-700); }
+html[data-ui="snow-adv"] .snow-base-map-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--snow-200);
+}
+html[data-ui="snow-adv"] #snow-base-map-status { max-height: 72px; overflow: auto; color: var(--ink-600); overflow-wrap: anywhere; }
+html[data-ui="snow-adv"] .snow-base-map .snow-base-map-visit {
+  flex: none;
+  border-color: var(--ice-700);
+  background: var(--ice-700);
+  color: var(--snow-0);
+  font-weight: 600;
+}
+@media (max-width: 900px) {
+  html[data-ui="snow-adv"] .snow-base-map-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  html[data-ui="snow-adv"] .snow-base-map { max-height: calc(100dvh - 20px); }
+  html[data-ui="snow-adv"] :is(.snow-base-map-header, .snow-base-map-list) { padding: 14px; }
+  html[data-ui="snow-adv"] .snow-base-map-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html[data-ui="snow-adv"] .snow-base-map-actions { align-items: flex-start; padding: 14px; }
+}

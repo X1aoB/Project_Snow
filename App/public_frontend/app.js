@@ -3923,6 +3923,7 @@ function clearTypingState(characterId, requestId) {
 }
 function bindAvatarImages(root = document) {
   root.querySelectorAll(".portrait img").forEach((image) => {
+    image.closest(".snow-empty-avatar")?.classList.toggle("has-image", image.complete && image.naturalWidth > 0);
     if (image.dataset.bound) return;
     image.dataset.bound = "1";
     image.addEventListener("error", () => {
@@ -7508,6 +7509,15 @@ async function openPresenceDialog() {
   $("presence-dialog-activity").textContent = state.scene?.character_activity || "场景建立后即可前往。";
   $("presence-dialog").showModal();
 }
+async function visitFromMap(characterId) {
+  if (!characterById(characterId) || globalRequestBusy()) return false;
+  await selectCharacter(characterId);
+  if (state.selected !== characterId || globalRequestBusy()) return false;
+  closeContactsPanel();
+  if (currentThread()?.channel === "in_person" && state.scene?.co_located) return true;
+  await openPresenceDialog();
+  return state.selected === characterId && $("presence-dialog").open;
+}
 
 function openDrawer(name) {
   state.drawerReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -8305,6 +8315,12 @@ async function boot() {
   if (!state.storageAvailable) showBanner("浏览器未开放本地存储，本次聊天不会保存；仍可继续使用。 ");
   startAnnouncements();
   settleFirstScreen();
+  deferUntilFirstScreenSettled(() => {
+    if (snowAdvActive()) void import("/modules/snow-base-map.js").then(module => module.installBaseMap({
+      snapshot: () => ({ characters: state.characters, worldPackage: state.worldPackage, selected: state.selected, busy: globalRequestBusy() }),
+      visit: visitFromMap, icon: createSnowIcon,
+    })).catch(() => {});
+  });
   void checkBuildUpdate();
   window.setInterval(() => { void checkBuildUpdate(); }, 300000);
 }

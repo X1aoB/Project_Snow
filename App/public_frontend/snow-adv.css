@@ -749,6 +749,7 @@ html[data-ui="snow-adv"] .empty-conversation .snow-empty-greeting .snow-empty-av
   font-size: var(--fs-28);
   line-height: 1;
 }
+html[data-ui="snow-adv"] .snow-empty-avatar:not(.has-image) img { display: none; }
 html[data-ui="snow-adv"] .empty-conversation .snow-empty-greeting p { max-width: none; margin: 0; color: var(--ink-700); font-size: var(--fs-14); line-height: 1.7; }
 html[data-ui="snow-adv"][data-motion-level="auto"] .empty-conversation .snow-empty-greeting { animation: snow-bubble-pop 320ms var(--ease-snow) both; }
 html[data-ui="snow-adv"][data-motion-level="off"] .empty-conversation .snow-empty-greeting { animation: none; }
