@@ -38,6 +38,7 @@ PREFIX = 'html[data-ui="snow-adv"]'
 # night). Existing assertions describe the snow-white tone, so every page
 # pins it; the dark-tone tests opt in explicitly.
 PIN_LIGHT_TONE = "window.localStorage.setItem('project-snow-public:tone', 'light')"
+DAYLIGHT_CONTRAST_MARKER = "/* C8.1 daylight contrast */"
 
 
 def _rules(css: str) -> list[tuple[str, str]]:
@@ -356,22 +357,41 @@ class SnowAdvBrowserTests(TestCase):
         self.open(True)
         self._reach_in_person()
         self.page.wait_for_function("document.querySelector('#scene-stage canvas.snow-canvas-far')")
+        self.page.wait_for_function("""() => {
+          const probe = window.__projectSnowTest.snowProbe();
+          return probe.bootDone && probe.worldScene === 'observation' && !probe.pushing
+            && document.getElementById('stage-presence-status').hidden
+            && document.getElementById('stage-speech').textContent.trim() === '你来了。'
+            && !document.getAnimations().some(animation =>
+              (animation.playState === 'running' || animation.pending)
+              && Number.isFinite(animation.effect?.getComputedTiming().endTime));
+        }""")
+        self.page.evaluate("() => document.fonts.ready.then(() => undefined)")
         self.assertEqual(self.page.evaluate("() => document.documentElement.dataset.motionLevel"), "off")
         # With motion off there must be no persistent rAF loop repainting the
         # snow canvases.  A running loop clears + redraws every frame, so the
         # drawn pixels drift; a stopped loop leaves them byte-identical.  Sample
         # the far canvas across several animation frames and require no change.
-        drifted = self.page.evaluate("""async () => {
+        observation = self.page.evaluate("""async () => {
           const canvas = document.querySelector('#scene-stage canvas.snow-canvas-far');
           const ctx = canvas.getContext('2d');
           const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
           const sample = () => ctx.getImageData(0, 0, canvas.width, canvas.height).data.join(',');
           await frame();
+          // Chrome can round its initial canvas readback differently without
+          // any redraw. Prime it once before the strict eight-frame comparison.
+          ctx.getImageData(0, 0, canvas.width, canvas.height);
+          await frame();
           const first = sample();
-          for (let i = 0; i < 8; i += 1) await frame();
-          return first !== sample();
+          const loopCounts = [window.__projectSnowTest.snowProbe().activeLoops];
+          for (let i = 0; i < 8; i += 1) {
+            await frame();
+            loopCounts.push(window.__projectSnowTest.snowProbe().activeLoops);
+          }
+          return {drifted: first !== sample(), loopCounts};
         }""")
-        self.assertFalse(drifted, "motion off must not keep repainting the snow canvas")
+        self.assertEqual(observation["loopCounts"], [0] * 9)
+        self.assertFalse(observation["drifted"], "motion off must not keep repainting the snow canvas")
         self.assertEqual(self.errors, [])
         self.assertEqual([url for url in self.failed if "snow-adv" in url or "/modules/snow-world" in url], [])
 
@@ -2162,3 +2182,207 @@ class SnowAdvP8VisualTests(TestCase):
         code = page.evaluate("""() => getComputedStyle(document.querySelector('.in-person-surface .scene-location > span'), '::before').content""")
         self.assertRegex(code, r'^"(EXT|B-0\d)"')
         self.assertEqual(self.errors, [])
+
+
+@skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
+class SnowAdvDaylightContrastTests(TestCase):
+    """Screenshot pixels behind temporary synthetic text, with no live runtime."""
+
+    setUpClass = classmethod(SnowAdvOpeningTests.setUpClass.__func__)
+    tearDownClass = classmethod(SnowAdvOpeningTests.tearDownClass.__func__)
+    tearDown = SnowAdvOpeningTests.tearDown
+
+    def setUp(self):
+        SnowAdvOpeningTests.setUp(self)
+        # One source serves both sides of every comparison while other work on
+        # model hints/network wording proceeds independently.
+        self.pinned_script = (PUBLIC_ROOT / "app.js").read_bytes()
+        self.blocked = []
+
+    def _save_evidence(self, name, payload):
+        root = os.getenv("SNOW_CONTRAST_EVIDENCE_DIR")
+        if root:
+            directory = Path(root)
+            directory.mkdir(parents=True, exist_ok=True)
+            with (directory / name).open("xb") as stream:
+                stream.write(payload)
+
+    def _contrast_page(self, time, tone, interior, stylesheet=None, enabled=True):
+        page = self.browser.new_page(viewport={"width": 1440, "height": 900},
+                                     reduced_motion="reduce", timezone_id="Asia/Hong_Kong")
+        page.set_default_timeout(10000)
+        page.add_init_script(PIN_LIGHT_TONE + ";" + SnowAdvP8VisualTests._stage_time(time, tone))
+        page.add_init_script("localStorage.setItem('project-snow-public:motion', 'off')")
+        page.on("pageerror", lambda error: self.errors.append(type(error).__name__))
+
+        def network(route):
+            if route.request.url.startswith(self.base_url + "/"):
+                route.continue_()
+            else:
+                self.blocked.append(route.request.resource_type)
+                route.abort()
+
+        page.route("**/*", network)
+        page.route(self.base_url + "/app.js*", lambda route: route.fulfill(
+            content_type="text/javascript", body=self.pinned_script))
+        if stylesheet is not None:
+            page.route(self.base_url + "/snow-adv.css*", lambda route: route.fulfill(
+                content_type="text/css", body=stylesheet))
+
+        def config(route):
+            payload = route.fetch().json()
+            payload["features"] = {"ui_snow_adv": enabled}
+            route.fulfill(json=payload)
+
+        page.route(self.base_url + "/public/v1/config", config)
+        # An empty roster retains the real initial empty-session hint. The six
+        # CSS samples below are synthetic DOM fixtures, never user messages.
+        page.route(self.base_url + "/public/v1/characters", lambda route: route.fulfill(
+            json={"count": 0, "characters": []}))
+        page.goto(self.base_url, wait_until="networkidle")
+        if enabled:
+            SnowAdvOpeningTests._dismiss_opening(self, page)
+        page.locator("#accept-experience-notice").click()
+        page.locator("#skip-onboarding").wait_for(state="visible")
+        page.locator("#skip-onboarding").click()
+        fixture.PublicFrontendE2ETests._configure_model(page)
+        page.locator("#toast").wait_for(state="hidden")
+        if enabled:
+            page.evaluate("""interior => {
+              window.__projectSnowTest.snowSetBeenInPerson(interior);
+              window.__projectSnowTest.snowRenderSceneWith({visual_key: 'observation',
+                character_location: '观景区', character_activity: '合成对比度夹具', co_located: false});
+            }""", interior)
+            page.wait_for_function("""({time, world}) => {
+              const far = document.querySelector('.snow-backdrop .snow-layer-far');
+              return far?.dataset.time === time && document.querySelector('#chat-app').dataset.snowWorld === world;
+            }""", arg={"time": time, "world": "interior" if interior else "exterior"})
+        page.evaluate("""() => {
+          const root = document.querySelector('#timeline');
+          Object.assign(root.style, {display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', gap: '26px'});
+          root.innerHTML = `<div class="empty-conversation" style="min-height:0"><p data-contrast="empty">选择一位角色开始通讯。</p></div>
+            <div class="message-time" data-contrast="message-time">合成时间 · 12:00</div>
+            <article class="message" style="display:block;width:auto;margin:0"><span class="meta" data-contrast="meta">合成角色 · 文字通讯</span></article>
+            <span class="message-usage" style="margin:0" data-contrast="message-usage">合成用量 · 0 次调用</span>
+            <span class="request-status" data-contrast="request-status">合成状态 · 已就绪</span>
+            <span class="typing-label" data-contrast="typing-label">合成输入提示</span>`;
+        }""")
+        self._wait_for_contrast_paint(page)
+        return page
+
+    @staticmethod
+    def _wait_for_contrast_paint(page):
+        page.evaluate("() => document.fonts.ready")
+        page.wait_for_function("""() => document.getAnimations().every(animation => {
+          const timing = animation.effect?.getComputedTiming();
+          return !timing || !Number.isFinite(timing.endTime) || ['finished', 'idle'].includes(animation.playState);
+        })""")
+        page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+
+    @staticmethod
+    def _pixel_contrast(page):
+        import numpy as np
+        from PIL import Image
+
+        targets = page.locator("[data-contrast]").evaluate_all("""nodes => nodes.map(node => {
+          const rect = node.getBoundingClientRect();
+          return {name: node.dataset.contrast, color: getComputedStyle(node).color,
+            shadow: getComputedStyle(node).textShadow,
+            rect: [Math.floor(rect.left), Math.floor(rect.top), Math.ceil(rect.right), Math.ceil(rect.bottom)]};
+        })""")
+        normal = page.screenshot(animations="disabled")
+        # Keep the actual painted halo while removing the glyph fill, so these
+        # pixels are the real browser background immediately behind each glyph.
+        page.locator("[data-contrast]").evaluate_all("nodes => nodes.forEach(node => node.style.webkitTextFillColor = 'transparent')")
+        background = page.screenshot(animations="disabled")
+        page.locator("[data-contrast]").evaluate_all("nodes => nodes.forEach(node => node.style.removeProperty('-webkit-text-fill-color'))")
+        foreground_image = np.asarray(Image.open(_BytesIO(normal)).convert("RGB"), dtype=float)
+        background_image = np.asarray(Image.open(_BytesIO(background)).convert("RGB"), dtype=float)
+
+        def luminance(values):
+            rgb = values / 255
+            linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+            return linear @ np.array([0.2126, 0.7152, 0.0722])
+
+        measurements = []
+        for target in targets:
+            left, top, right, bottom = target["rect"]
+            visible = foreground_image[top:bottom, left:right]
+            behind = background_image[top:bottom, left:right]
+            ink = np.array(_rgb(target["color"]), dtype=float)
+            full_delta = np.linalg.norm(ink - behind, axis=2)
+            fill_delta = np.linalg.norm(visible - behind, axis=2)
+            # Ignore antialiased edge pixels; test the background behind opaque
+            # glyph cores rather than the foreground itself or an unrelated swatch.
+            mask = (full_delta > 1) & (fill_delta >= full_delta * 0.9)
+            samples = behind[mask]
+            if not len(samples):
+                raise AssertionError(f"No painted glyph cores sampled: {target['name']}")
+            ink_lum, background_lum = luminance(ink), luminance(samples)
+            ratios = (np.maximum(ink_lum, background_lum) + 0.05) / (np.minimum(ink_lum, background_lum) + 0.05)
+            measurements.append({**target, "sampled_glyph_pixels": len(samples),
+                "minimum_contrast": float(ratios.min()),
+                "worst_background_rgb": samples[int(ratios.argmin())].astype(int).tolist()})
+        return normal, background, measurements
+
+    def test_dark_daylight_communicator_text_has_screenshot_contrast(self):
+        for time in ("dawn", "day"):
+            for interior in (False, True):
+                with self.subTest(time=time, interior=interior):
+                    page = self._contrast_page(time, "dark", interior)
+                    normal, background, measurements = self._pixel_contrast(page)
+                    label = f"dark-{time}-{'interior' if interior else 'exterior'}"
+                    self._save_evidence(label + ".png", normal)
+                    self._save_evidence(label + "-background.png", background)
+                    self._save_evidence(label + ".json", json.dumps(measurements, ensure_ascii=False, indent=2).encode())
+                    for item in measurements:
+                        self.assertGreaterEqual(item["minimum_contrast"], 4.5, item)
+                    page.close()
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self.blocked, [])
+        self.assertEqual(fixture.PublicFrontendHandler.chat_payloads, [])
+
+    def test_daylight_fix_keeps_other_tones_pixel_identical(self):
+        from PIL import Image, ImageChops
+
+        candidate = SKIN_CSS.read_text(encoding="utf-8")
+        start = candidate.index(DAYLIGHT_CONTRAST_MARKER)
+        # Retain the complete pre-existing P8 tail, including its separator.
+        end = candidate.index("\n/* P8 尘白元素（轻量）", start)
+        baseline = candidate[:start] + candidate[end:]
+        source_evidence = {"baseline_lf_sha256": hashlib.sha256(baseline.encode()).hexdigest(),
+            "candidate_lf_sha256": hashlib.sha256(candidate.encode()).hexdigest(),
+            "baseline_lf_bytes": len(baseline.encode()), "candidate_lf_bytes": len(candidate.encode()),
+            "complete_existing_p8_tail_preserved": True}
+        sealed_path = os.getenv("SNOW_CONTRAST_BASELINE_CSS")
+        if sealed_path:
+            sealed = Path(sealed_path).read_text(encoding="utf-8")
+            self.assertEqual(baseline.encode(), sealed.encode())
+            source_evidence["sealed_before_lf_sha256"] = hashlib.sha256(sealed.encode()).hexdigest()
+            source_evidence["baseline_matches_sealed_before_lf_bytes"] = True
+        self._save_evidence("unchanged-sources.json", json.dumps(source_evidence, indent=2).encode())
+        cases = [(tone, time) for tone in ("light", "auto") for time in ("dawn", "day", "dusk", "night")]
+        cases += [("dark", "dusk"), ("dark", "night")]
+        comparisons = []
+        for tone, time in cases:
+            for interior in (False, True):
+                with self.subTest(tone=tone, time=time, interior=interior):
+                    page = self._contrast_page(time, tone, interior, stylesheet=baseline)
+                    before = page.screenshot(animations="disabled")
+                    # The complete candidate preserves its internal rule order.
+                    page.add_style_tag(content=candidate)
+                    self._wait_for_contrast_paint(page)
+                    after = page.screenshot(animations="disabled")
+                    difference = ImageChops.difference(Image.open(_BytesIO(before)).convert("RGB"),
+                                                       Image.open(_BytesIO(after)).convert("RGB"))
+                    label = f"unchanged-{tone}-{time}-{'interior' if interior else 'exterior'}"
+                    self._save_evidence(label + "-before.png", before)
+                    self._save_evidence(label + "-after.png", after)
+                    comparisons.append({"case": label, "before_sha256": hashlib.sha256(before).hexdigest(),
+                        "after_sha256": hashlib.sha256(after).hexdigest(), "different_pixels": 0 if difference.getbbox() is None else 1})
+                    self.assertIsNone(difference.getbbox(), label)
+                    page.close()
+        self._save_evidence("unchanged-combinations.json", json.dumps(comparisons, indent=2).encode())
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self.blocked, [])

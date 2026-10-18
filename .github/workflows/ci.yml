@@ -160,7 +160,19 @@ jobs:
         env:
           RUN_PUBLIC_E2E: "1"
           PROJECT_SNOW_PLAYWRIGHT_CHANNEL: chrome
-        run: python -m pytest tests/test_ui_v050.py tests/test_public_frontend_e2e.py tests/test_public_frontend_reliability.py tests/test_public_frontend_bundle.py tests/test_stage_presentation_timing.py tests/test_public_subscription_frontend_e2e.py tests/test_public_frontend_latency_motion.py tests/test_feedback_followup_ui.py tests/test_dialogue_v2_frontend.py tests/test_snow_adv_ui.py tests/test_immersive_ui_followup.py tests/test_presence_arrival_frontend.py tests/test_communicator_pacing.py -q
+          SNOW_CONTRAST_EVIDENCE_DIR: ${{ runner.temp }}/snow-contrast-ui
+          SNOW_ANNOUNCEMENT_EVIDENCE_DIR: ${{ runner.temp }}/snow-contrast-ui
+        run: python -m pytest tests/test_ui_v050.py tests/test_public_frontend_e2e.py tests/test_public_frontend_reliability.py tests/test_public_frontend_bundle.py tests/test_stage_presentation_timing.py tests/test_public_subscription_frontend_e2e.py tests/test_public_frontend_latency_motion.py tests/test_feedback_followup_ui.py tests/test_dialogue_v2_frontend.py tests/test_snow_adv_ui.py tests/test_snow_adv_input_network.py tests/test_snow_adv_announcement_contrast.py tests/test_immersive_ui_followup.py tests/test_presence_arrival_frontend.py tests/test_communicator_pacing.py -q
+      - name: Upload synthetic UI contrast evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: snow-contrast-ui-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/snow-contrast-ui/*.png
+            ${{ runner.temp }}/snow-contrast-ui/*.json
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "22"
@@ -462,7 +474,19 @@ jobs:
         env:
           RUN_PUBLIC_E2E: "1"
           PROJECT_SNOW_PLAYWRIGHT_CHANNEL: chrome
-        run: python -m pytest tests/test_public_frontend_e2e.py tests/test_public_frontend_reliability.py tests/test_public_frontend_bundle.py tests/test_stage_presentation_timing.py tests/test_public_subscription_frontend_e2e.py tests/test_public_frontend_latency_motion.py tests/test_feedback_followup_ui.py tests/test_dialogue_v2_frontend.py tests/test_snow_adv_ui.py tests/test_immersive_ui_followup.py tests/test_presence_arrival_frontend.py tests/test_communicator_pacing.py -q
+          SNOW_CONTRAST_EVIDENCE_DIR: ${{ runner.temp }}/snow-contrast-full
+          SNOW_ANNOUNCEMENT_EVIDENCE_DIR: ${{ runner.temp }}/snow-contrast-full
+        run: python -m pytest tests/test_public_frontend_e2e.py tests/test_public_frontend_reliability.py tests/test_public_frontend_bundle.py tests/test_stage_presentation_timing.py tests/test_public_subscription_frontend_e2e.py tests/test_public_frontend_latency_motion.py tests/test_feedback_followup_ui.py tests/test_dialogue_v2_frontend.py tests/test_snow_adv_ui.py tests/test_snow_adv_input_network.py tests/test_snow_adv_announcement_contrast.py tests/test_immersive_ui_followup.py tests/test_presence_arrival_frontend.py tests/test_communicator_pacing.py -q
+      - name: Upload synthetic full-suite contrast evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: snow-contrast-full-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/snow-contrast-full/*.png
+            ${{ runner.temp }}/snow-contrast-full/*.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Full private-runtime suite when a release is attached
         if: hashFiles('App/runtime/manifest.json') != ''
         run: python -m pytest tests -m runtime_data -q

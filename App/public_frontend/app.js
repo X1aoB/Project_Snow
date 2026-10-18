@@ -413,6 +413,7 @@ const errorMessages = {
   turnstile_unavailable: "人机验证组件加载失败，请刷新页面后重试。",
   chat_failed: "对话请求失败，请稍后重试。",
   request_failed: "请求失败，请稍后重试。",
+  network_unavailable: "网络连接失败，请检查网络后重试。",
   request_timeout: "提交超时，反馈未能确认是否送达；请稍后重试。",
   request_too_large: "本轮上下文过长，已无法在安全请求上限内发送；请先整理摘要或开始新的连续性段。",
   request_cancelled: "已停止等待。模型供应商仍可能完成本次生成或产生费用。",
@@ -560,6 +561,7 @@ function chatError(code = "request_failed", detail = {}, status = 0) {
 }
 function displayError(error) {
   const code = error instanceof Error ? error.message : plain(error);
+  if (["Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed"].includes(code)) return errorMessages.network_unavailable;
   if (code === "credential_invalid" && state.provider === SUBSCRIPTION_PROVIDER) return errorMessages.subscription_not_connected;
   const stage = normalizedErrorStage(error instanceof Error ? error.errorStage : "");
   if (stage && ["request_failed", "chat_failed", "generation_failed"].includes(code)) {
@@ -6097,7 +6099,7 @@ function updateComposerAvailability() {
   $("analyst-action-field").hidden = !inPerson || !state.actionComposerOpen;
   $("toggle-action").setAttribute("aria-expanded", String(inPerson && state.actionComposerOpen));
   updateActionDraftIndicator();
-  $("message-input").placeholder = !selected ? "选择角色后输入消息……" : configured() ? (inPerson ? "说些什么，也可只填写动作……" : "输入文字通讯……") : "可浏览历史；发送前请在设置中配置模型";
+  $("message-input").placeholder = !selected ? "选择角色后输入消息……" : configured() ? (inPerson ? "说些什么，也可只填写动作……" : "输入文字通讯……") : "请到设置配置模型";
   renderSelectedSticker();
 }
 async function setChannel(channel, persist = true, targetThread = null) {

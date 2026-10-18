@@ -41,6 +41,7 @@ UI_PATTERNS = (
     "App/package*.json",
     "App/tsconfig*.json",
     "App/tests/test_ui_*.py",
+    "App/tests/test_snow_adv*.py",
     "App/tests/test_public_frontend*.py",
     "App/tests/test_stage_presentation_timing.py",
     "App/tests/test_public_subscription_frontend_e2e.py",
