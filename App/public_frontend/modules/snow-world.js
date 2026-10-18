@@ -1,17 +1,12 @@
-/* 雪境 ADV 世界层（P2）：程序化分层雪景 + Canvas 远近雪。
- * 所有图形在浏览器内由 DOM / SVG 字符串生成，不请求任何图片，没有内联样式元素、
- * 没有外链 URL、不动态执行代码，满足生产 CSP。仅在 html[data-ui="snow-adv"] 下由 app.js 挂载。
- * 从样稿 .tmp/snow-adv-mockups/snowfx.js 移植；去掉了样稿控制台、localStorage、
- * 白雪转场、相机推进、立绘中轴等后续阶段拥有的内容。 */
+/* 雪境 ADV 世界层 */
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-// 活动中的 SnowField rAF 循环计数（供测试断言「同一时刻只有一个世界在动画」）。
-// 每个世界实例的 loop 开始/停止时增减。读取见下方导出的 activeSnowLoops()。
+// 活动中的 SnowField rAF 循环计数
 let activeSnowLoopCount = 0;
 export function activeSnowLoops() { return activeSnowLoopCount; }
 
-// ---------------------------------------------------------------- 配色
+// 配色
 const PALETTES = {
   dawn: { sky: ["#b5c4e2", "#ead3dc", "#fbe7d9"], sun: "#ffdcc2", sunPos: [0.76, 0.52], glow: 170, disc: 46, far: ["#fbf2f1", "#b6c1d9"], mid: ["#f1f1f5", "#8f9fbe"], near: "#6c7c9c", snow: "#fff6f2", ground: ["#fbf3f1", "#dde0ea"], wall: ["#eff0f5", "#d8dce7"], frame: "#c7cddb", floor: ["#e3e6ef", "#c6cbda"], light: "#ffe2cc", lightOpacity: 0.36, lamp: "#ffd6a6", lampOpacity: 0.28, stars: 0, aurora: 0, flake: "#ffffff" },
   day: { sky: ["#8fbde3", "#cde4f4", "#f3f9fd"], sun: "#fffaf0", sunPos: [0.72, 0.2], glow: 170, disc: 26, far: ["#ffffff", "#a6c1da"], mid: ["#f8fbfe", "#7c9fbf"], near: "#5c81a2", snow: "#ffffff", ground: ["#ffffff", "#e1ecf5"], wall: ["#f4f7fa", "#e0e8ef"], frame: "#cddae5", floor: ["#e8eff5", "#cad8e4"], light: "#ffffff", lightOpacity: 0.44, lamp: "#fff3dd", lampOpacity: 0.08, stars: 0, aurora: 0, flake: "#ffffff" },
@@ -19,7 +14,7 @@ const PALETTES = {
   night: { sky: ["#0b152e", "#1c2e54", "#35507b"], sun: "#e9f1ff", sunPos: [0.24, 0.2], glow: 60, disc: 26, far: ["#c8d5ee", "#2b3e65"], mid: ["#9db0d2", "#1e2e51"], near: "#131e39", snow: "#c6d4ee", ground: ["#9eafcf", "#32456d"], wall: ["#2a3450", "#1c243a"], frame: "#3a4665", floor: ["#232c45", "#151c30"], light: "#bccfff", lightOpacity: 0.16, lamp: "#ffcf88", lampOpacity: 0.88, stars: 1, aurora: 1, flake: "#dfe9ff" },
 };
 
-/** 只有舞台背景跟随本机时间；换表情/换角色不改时间。可用 html[data-snow-time] 覆盖（仅测试与截图用）。 */
+/** 只有舞台背景跟随本机时间 */
 export function resolveTime(now = new Date()) {
   const override = document.documentElement.dataset.snowTime;
   if (override && PALETTES[override]) return override;
@@ -30,7 +25,28 @@ export function resolveTime(now = new Date()) {
   return "night";
 }
 
-// ---------------------------------------------------------------- 工具
+// P8：共享时段时钟
+const snowTimeSubscribers = new Set();
+let snowTimeTimer = 0;
+let snowTimeLast = "";
+export function subscribeSnowTime(callback) {
+  snowTimeSubscribers.add(callback);
+  if (!snowTimeTimer) {
+    snowTimeLast = resolveTime();
+    snowTimeTimer = window.setInterval(() => {
+      const next = resolveTime();
+      if (next === snowTimeLast) return;
+      snowTimeLast = next;
+      for (const fn of [...snowTimeSubscribers]) { try { fn(next); } catch { /* one subscriber never blocks another */ } }
+    }, 30000);
+  }
+  return () => {
+    snowTimeSubscribers.delete(callback);
+    if (!snowTimeSubscribers.size && snowTimeTimer) { window.clearInterval(snowTimeTimer); snowTimeTimer = 0; }
+  };
+}
+
+// 工具
 function rng(seed) {
   let a = 0;
   for (const ch of String(seed)) a = (Math.imul(a, 31) + ch.charCodeAt(0)) | 0;
@@ -94,7 +110,37 @@ function pines(r, { baseY, count, hMin, hMax, color, snow, x0 = -30, x1 = 1630, 
   return `<path d="${body}" fill="${color}"/><path d="${caps}" fill="${snow}" opacity=".92"/>`;
 }
 
-// ---------------------------------------------------------------- 远景（室外，透过窗看到或 generic 全屏）
+// 远景（室外，透过窗看到或 generic 全屏）
+function worldTree(p, id, H) {
+  const cx = 600, top = H - 400, base = H - 120;
+  const light = mix(p.far[1], "#dff7ff", 0.42), dark = mix(p.far[1], "#6fb7d8", 0.22);
+  const k = p.stars ? 1 : 0.6;
+  const shards = [
+    [[cx, top], [cx + 24, top + 140], [cx + 13, base], [cx - 14, base], [cx - 26, top + 152]],
+    [[cx - 38, top + 80], [cx - 20, top + 172], [cx - 24, base], [cx - 60, base], [cx - 72, top + 194]],
+    [[cx + 42, top + 106], [cx + 70, top + 206], [cx + 57, base], [cx + 24, base], [cx + 20, top + 176]],
+    [[cx - 96, top + 176], [cx - 75, top + 238], [cx - 82, base], [cx - 110, base], [cx - 120, top + 246]],
+  ];
+  let s = `<g opacity="${(0.42 * k + 0.06).toFixed(2)}">`;
+  s += `<circle cx="${cx - 16}" cy="${top + 124}" r="190" fill="url(#${id}-tree)" opacity="${p.stars ? 0.22 : 0.08}"/>`;
+  shards.forEach((pts, i) => {
+    const [a, b, c, d, e] = pts;
+    s += `<path d="M${a[0]} ${a[1]}L${b[0]} ${b[1]}L${c[0]} ${c[1]}L${d[0]} ${d[1]}L${e[0]} ${e[1]}Z" fill="${i % 2 ? dark : light}"/>`;
+    s += `<path d="M${a[0]} ${a[1]}L${b[0]} ${b[1]}L${c[0]} ${c[1]}Z" fill="${i % 2 ? light : dark}" opacity=".55"/>`;
+  });
+  return s + "</g>";
+}
+function containmentWall(p, H) {
+  const y = H - 96, h = 22;
+  const body = mix(p.mid[1], p.far[1], 0.45), edge = mix(body, "#ffffff", 0.35);
+  const beacon = p.stars ? "#ffc08a" : mix("#ffc08a", p.far[1], 0.35);
+  let s = `<g opacity="${p.stars ? 0.8 : 0.62}"><rect x="0" y="${y}" width="1600" height="${h}" fill="${body}"/><rect x="0" y="${y}" width="1600" height="2" fill="${edge}"/>`;
+  for (let x = 70; x < 1600; x += 250) {
+    s += `<rect x="${x}" y="${y - 30}" width="16" height="${30 + h}" fill="${body}"/><rect x="${x - 4}" y="${y - 34}" width="24" height="5" fill="${edge}"/>`;
+    s += `<circle cx="${x + 8}" cy="${y - 40}" r="${p.stars ? 9 : 6}" fill="${beacon}" opacity="${p.stars ? 0.32 : 0.18}"/><circle cx="${x + 8}" cy="${y - 40}" r="2.6" fill="${beacon}"/>`;
+  }
+  return s + "</g>";
+}
 function outdoor(p, r, H) {
   const id = "f";
   let defs = lg(`${id}-sky`, [[0, p.sky[0]], [0.58, p.sky[1]], [1, p.sky[2]]], { y1: 0, y2: H + 40 });
@@ -120,8 +166,11 @@ function outdoor(p, r, H) {
   const [sx, sy] = p.sunPos;
   body += `<circle cx="${f(sx * 1600)}" cy="${f(sy * H)}" r="${p.glow * 3}" fill="url(#${id}-sun)"/>`;
   body += `<circle cx="${f(sx * 1600)}" cy="${f(sy * H)}" r="${p.disc}" fill="${p.sun}" opacity=".96"/>`;
+  defs += rg(`${id}-tree`, [[0, "#9fe6ff", 1], [0.4, "#9fe6ff", 0.35], [1, "#9fe6ff", 0]]);
+  body += worldTree(p, id, H);
   body += `<path d="${ridge(r, { y: H - 190, amp: 250, n0: 6 })}" fill="url(#${id}-far)"/>`;
   body += `<rect y="${H - 230}" width="1600" height="260" fill="url(#${id}-haze)" opacity=".6"/>`;
+  body += containmentWall(p, H);
   body += `<path d="${ridge(r, { y: H - 70, amp: 120, n0: 5, rough: 0.5 })}" fill="url(#${id}-mid)"/>`;
   body += pines(r, { baseY: H + 6, count: 80, hMin: 22, hMax: 50, color: mix(p.near, p.mid[1], 0.5), snow: p.snow, jitter: 10 });
   body += `<rect y="${H + 8}" width="1600" height="${900 - H}" fill="url(#${id}-ground)"/>`;
@@ -130,7 +179,7 @@ function outdoor(p, r, H) {
   return svg(`<defs>${defs}</defs>${body}`, "far");
 }
 
-// ---------------------------------------------------------------- 室内（墙带窗洞，雪只透过窗显示）
+// 室内（墙带窗洞，雪只透过窗显示）
 function roomDefs(p, id) {
   return lg(`${id}-wall`, [[0, p.wall[0]], [1, p.wall[1]]])
     + lg(`${id}-floor`, [[0, p.floor[0]], [1, p.floor[1]]])
@@ -141,7 +190,46 @@ function roomDefs(p, id) {
 }
 const tone = (p, k) => mix(p.wall[1], "#1f2d3a", k);
 const lamp = (p, id, x, y, rad, k = 1) => `<circle cx="${x}" cy="${y}" r="${rad}" fill="url(#${id}-lamp)" opacity="${Math.min(1, p.lampOpacity * k).toFixed(2)}"/>`;
-const wall = (id, holes) => `<path d="M0 0H1600V900H0Z${holes.join("")}" fill="url(#${id}-wall)" fill-rule="evenodd"/>`;
+let buildPalette = null;
+const wall = (id, holes) => `<path d="M0 0H1600V900H0Z${holes.join("")}" fill="url(#${id}-wall)" fill-rule="evenodd"/>`
+  + (buildPalette ? wallPanels(buildPalette, id, holes, id.replace(/^r-/, "")) : "");
+// P8 尘白元素
+const ROOM_MARKS = {
+  archive: ["B-02", "资料室", 405, 170, 1, "v"], quarters: ["B-03", "宿舍", 250, 330, 1],
+  lounge: ["B-04", "休息区", 460, 160, 1, "v"], canteen: ["B-05", "食堂", 1262, 462, 0.8], training: ["B-06", "训练区", 230, 272, 1],
+  medical: ["B-07", "医疗室", 1478, 170, 1, "v"],
+};
+function wallPanels(p, id, holes, key) {
+  const line = mix(p.wall[1], "#1f2d3a", 0.16), mark = ROOM_MARKS[key];
+  let s = `<defs><clipPath id="${id}-wallclip"><path d="M0 0H1600V900H0Z${holes.join("")}" clip-rule="evenodd"/></clipPath></defs>`;
+  s += `<g clip-path="url(#${id}-wallclip)" fill="none" stroke="${line}" stroke-width="2" opacity=".42">`;
+  // 腰线：每 400px 一段，段首做 45° 切角。
+  for (let x = 0; x < 1600; x += 400) s += `<path d="M${x} 640H${x + 360}L${x + 384} 616H${x + 400}"/>`;
+  // 竖向接缝：顶部切角。
+  for (let x = 200; x < 1600; x += 400) s += `<path d="M${x} 0V36L${x + 18} 54V640"/>`;
+  s += "</g>";
+  if (mark) {
+    const [code, name, x, y, k, dir] = mark;
+    // 深色墙（夜晚）上用浅色墨，浅色墙上用深色墨，保持同样的对比。
+    const [wr, wg, wb] = hex(p.wall[1]);
+    const ink = (wr * 0.299 + wg * 0.587 + wb * 0.114) < 110 ? mix(p.wall[1], "#cfe0ee", 0.42) : mix(p.wall[1], "#1f2d3a", 0.32);
+    const cjk = `font-family="'LXGW WenKai Screen', 'Microsoft YaHei', sans-serif" font-weight="600"`;
+    s += `<g clip-path="url(#${id}-wallclip)" opacity=".72" fill="${ink}" font-family="ui-monospace, Consolas, monospace" font-weight="700" transform="translate(${x} ${y}) scale(${k}) translate(${-x} ${-y})">`;
+    if (dir === "v") {
+      // 竖排：编号逐字向下，再空一格写房间名。
+      s += `<path d="M${x - 8} ${y - 40}h14l-14 14z"/><g text-anchor="middle" font-size="28">`;
+      [...code].forEach((ch, i) => { s += `<text x="${x}" y="${y + i * 32}">${ch === "-" ? "|" : ch}</text>`; });
+      s += `</g><g text-anchor="middle" font-size="20" ${cjk}>`;
+      [...name].forEach((ch, i) => { s += `<text x="${x}" y="${y + code.length * 32 + 22 + i * 26}">${ch}</text>`; });
+      s += "</g>";
+    } else {
+      s += `<path d="M${x} ${y - 30}h12l-12 12z"/><text x="${x + 20}" y="${y}" font-size="30" letter-spacing="6">${code}</text>`;
+      if (k >= 1) s += `<text x="${x + 22}" y="${y + 30}" font-size="18" letter-spacing="8" ${cjk}>${name}</text>`;
+    }
+    s += "</g>";
+  }
+  return s;
+}
 const glass = (id, holes) => `<path d="${holes.join("")}" fill="url(#${id}-glass)"/>`;
 function shaft(id, x, y, w, floorY, skew = 180) {
   return `<path d="${quad([[x, y], [x + w, y], [x + w + skew * 1.5, 900 + (900 - floorY) * 0.2], [x + skew, 900 + (900 - floorY) * 0.2]])}" fill="url(#${id}-shaft)"/>`;
@@ -347,7 +435,9 @@ function buildScene(key, time) {
   const p = PALETTES[time] || PALETTES.day;
   const builder = ROOMS[key] || ROOMS.generic;
   const id = `r-${key}`;
+  buildPalette = p;
   const room = builder(p, rng(`${key}:room`), id);
+  buildPalette = null;
   const far = outdoor(p, rng(`${key}:far`), room.horizon);
   return {
     far,
@@ -358,7 +448,7 @@ function buildScene(key, time) {
   };
 }
 
-// ---------------------------------------------------------------- Canvas 雪
+// Canvas 雪
 let sharedSprite = null;
 function baseSprite() {
   if (sharedSprite) return sharedSprite;
@@ -420,6 +510,8 @@ class SnowField {
     this.particles = Array.from({ length: n }, () => ({
       x: Math.random() * this.w, y: Math.random() * this.h, s: rnd(P.size), v: rnd(P.speed),
       a: rnd(P.alpha), sw: rnd(P.sway), ph: Math.random() * Math.PI * 2, fq: 0.3 + Math.random() * 0.6,
+      // P8：夜间约 12% 的雪片带冰青闪光
+      g: Math.random() < 0.12,
     }));
   }
   step(dt, t) {
@@ -439,13 +531,16 @@ class SnowField {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, this.w, this.h);
     const img = tintedSprite(this.color);
+    const glint = this.glint ? tintedSprite(this.glint) : null;
     const t = this.t || 0;
     for (const q of this.particles) {
       const x = q.x + Math.sin(t * q.fq + q.ph) * q.sw;
-      const a = this.kind === "motes" ? q.a * (0.55 + 0.45 * Math.sin(t * 1.3 * q.fq + q.ph)) : q.a;
+      const lit = glint && q.g;
+      const a = this.kind === "motes" ? q.a * (0.55 + 0.45 * Math.sin(t * 1.3 * q.fq + q.ph))
+        : lit ? Math.min(1, q.a * (0.7 + 0.5 * Math.abs(Math.sin(t * 2.2 * q.fq + q.ph)))) : q.a;
       ctx.globalAlpha = a;
       const d = q.s * 2;
-      ctx.drawImage(img, x - q.s, q.y - q.s, d, d);
+      ctx.drawImage(lit ? glint : img, x - q.s, q.y - q.s, d, d);
     }
     ctx.globalAlpha = 1;
   }
@@ -453,7 +548,7 @@ class SnowField {
 
 function el(tag, cls) { const n = document.createElement(tag); n.className = cls; return n; }
 
-/** 读取 app.js 写在 <html> 上的动态档位：auto=完整，light=静态单帧，off=静态单帧且不循环。 */
+/** 读取 app.js 写在 <html> 上的动态档位 */
 function resolveMotion(level) {
   const raw = level || document.documentElement.dataset.motionLevel || "auto";
   if (raw === "off") return "off";
@@ -461,12 +556,7 @@ function resolveMotion(level) {
   return "full";
 }
 
-/**
- * 在 stageEl（#scene-stage）内建立分层世界：
- *   layer-far（室外天空/远山或 generic 全屏） → snow-far（远雪）
- *   → layer-room（室内墙+窗洞） → [保留的 #stage-character-art] → snow-near（室外大雪/室内光尘）
- * 立绘保持在原 DOM 位置；世界层插在它前后，所以不接管立绘。
- */
+/** 在 stageEl 内建立分层世界（详见 docs/snow-adv-ui-notes.md） */
 export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, role = "stage" } = {}) {
   const far = el("div", "snow-layer snow-layer-far");
   const snowFar = el("canvas", "snow-layer snow-canvas snow-canvas-far");
@@ -495,8 +585,7 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
     const surface = document.getElementById("in-person-surface");
     const cameraVisible = document.getElementById("chat-app")?.dataset.snowPushing === "1";
     if (role === "backdrop") {
-      // 通讯器背后的世界：面对面可见时暂停（只让一个世界在动），文字界面可见时运行；
-      // 其容器自身被隐藏（flag 关 / 手机）时也暂停。
+      // 通讯器背后的世界
       const inPersonVisible = surface && !surface.hidden;
       if (inPersonVisible && !cameraVisible) return true;
       return !stageEl || stageEl.hidden || stageEl.offsetParent === null;
@@ -530,7 +619,7 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
   function render() {
     if (world.destroyed) return;
     const now = performance.now();
-    // 时间最多每 10 分钟刷新一次；但显式 html[data-snow-time] 覆盖（测试/截图用）立即生效。
+    // 时间最多每 10 分钟刷新一次
     const override = document.documentElement.dataset.snowTime;
     if (override) { world.time = resolveTime(); world.timeAt = now; }
     else if (!world.timeAt || now - world.timeAt > 600000) { world.time = resolveTime(); world.timeAt = now; }
@@ -543,11 +632,14 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
     // generic 的这一层也包含基地建筑和亮灯入口，必须保留可见。
     room.hidden = false;
     const tier = world.motion;
+    const glint = world.time === "night" ? "#9fe8ff" : null;
     farField.color = built.flake;
+    farField.glint = glint;
     farField.density = tier === "light" ? 0.45 : 1;
     farField.setKind("far");
     farField.spawn();
     nearField.color = built.outdoor ? built.flake : built.lamp;
+    nearField.glint = built.outdoor ? glint : null;
     nearField.density = 1;
     nearField.setKind(tier === "light" || tier === "off" ? "off" : built.outdoor ? "near" : "motes");
     nearField.spawn();
@@ -561,11 +653,7 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("resize", onResize);
 
-  // 相机推进（P6a）：从 generic 室外景朝亮灯入口 .push-target 推近，雪片迎面掠过，
-  // 在白光掩护里把世界切到室内场景。只动 transform/opacity（Web Animations，满足 CSP），
-  // 不改任何逻辑/请求/回复计时。调用方传 onWhiteout（白光峰值时执行场景切换与 veil），
-  // 本函数负责图层推近动画，并在推进到接近白光时调用 onWhiteout，再把图层恢复静止。
-  // off/light 档位与减少动态下，调用方不应调用本函数（直接走 veil）。
+  // 相机推进
   let cancelCamera = null;
   function pushCamera({ onWhiteout } = {}) {
     cancelCamera?.();
@@ -608,10 +696,9 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
       snowNear.animate([{ transform: "scale(1)", opacity: 1 }, { transform: "scale(2.6)", opacity: 0.35 }], opts),
     ];
     world.pushAnimations = anims;
-    // 用数据属性标记正在推进，供证据截图/测试断言读取（Web Animations 是否在跑）。
+    // 用数据属性标记正在推进，供证据截图/测试断言读取
     far.dataset.pushing = "1";
-    // 硬性兜底：无论动画是否正常 finish，推进总时长 + 余量后强制清除 pushing 状态，
-    // 避免被中途 setScene/暂停打断时 pushing 卡死（否则后续入室会误判为仍在推进）。
+    // 硬性兜底
     let whiteoutTimer, finishTimer, settle;
     const finish = new Promise(resolve => { settle = resolve; });
     const clearPushing = () => {
@@ -637,6 +724,7 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
   }
 
   render();
+  const unsubscribeTime = subscribeSnowTime(() => { world.timeAt = 0; render(); });
 
   return {
     get root() { return stageEl; },
@@ -648,7 +736,7 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
     isPushing() { return Boolean(world.pushing); },
     cancelPush() { cancelCamera?.(); },
     pushInto(key, options) {
-      // 推进完成后由 onWhiteout 回调切场景；若调用方未接管切换，这里兜底切到目标场景。
+      // 推进完成后由 onWhiteout 回调切场景
       const commit = () => { if (key && key !== world.scene) { world.scene = key; render(); } };
       const onWhiteout = options?.onWhiteout
         ? () => { const r = options.onWhiteout(); if (r === undefined) commit(); return r; }
@@ -667,6 +755,7 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
     isRunning() { return Boolean(world.raf); },
     destroy() {
       world.destroyed = true;
+      unsubscribeTime();
       cancelCamera?.();
       stopLoop();
       if (world.pushAnimations) { for (const a of world.pushAnimations) { try { a.cancel(); } catch {} } world.pushAnimations = null; }

@@ -34,6 +34,10 @@ SKIN_CSS = PUBLIC_ROOT / "snow-adv.css"
 FONT_CSS = PUBLIC_ROOT / "snow-adv-fonts.css"
 FONT_DIR = PUBLIC_ROOT / "assets" / "fonts" / "lxgw-wenkai-screen"
 PREFIX = 'html[data-ui="snow-adv"]'
+# P8: the interface tone follows the stage time of day (dark at dusk and
+# night). Existing assertions describe the snow-white tone, so every page
+# pins it; the dark-tone tests opt in explicitly.
+PIN_LIGHT_TONE = "window.localStorage.setItem('project-snow-public:tone', 'light')"
 
 
 def _rules(css: str) -> list[tuple[str, str]]:
@@ -207,6 +211,7 @@ class SnowAdvBrowserTests(TestCase):
         self.playwright = fixture.sync_playwright().start()
         self.browser = fixture._launch_browser(self.playwright)
         self.page = self.browser.new_page(viewport={"width": 1200, "height": 850})
+        self.page.add_init_script(PIN_LIGHT_TONE)
         self.errors = []
         self.failed = []
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
@@ -403,6 +408,7 @@ class SnowAdvStageTests(TestCase):
 
     def _page(self, width=1280, height=820):
         page = self.browser.new_page(viewport={"width": width, "height": height})
+        page.add_init_script(PIN_LIGHT_TONE)
         page.on("pageerror", lambda error: self.errors.append(str(error)))
         page.on("response", lambda response: self.failed.append(response.url) if response.status >= 400 else None)
         page.set_default_timeout(8000)
@@ -763,6 +769,7 @@ class SnowAdvPerformanceTests(TestCase):
 
     def _page(self, width=1280, height=820, reduced_motion=None):
         page = self.browser.new_page(viewport={"width": width, "height": height}, reduced_motion=reduced_motion)
+        page.add_init_script(PIN_LIGHT_TONE)
         page.on("pageerror", lambda error: self.errors.append(str(error)))
         page.on("response", lambda response: self.failed.append(response.url) if response.status >= 400 else None)
         page.set_default_timeout(8000)
@@ -1064,6 +1071,7 @@ class SnowAdvCommunicatorTests(TestCase):
 
     def _page(self, width=1280, height=820):
         page = self.browser.new_page(viewport={"width": width, "height": height})
+        page.add_init_script(PIN_LIGHT_TONE)
         page.on("pageerror", lambda error: self.errors.append(str(error)))
         page.on("response", lambda response: self.failed.append(response.url) if response.status >= 400 else None)
         page.set_default_timeout(8000)
@@ -1340,6 +1348,7 @@ class SnowAdvOpeningTests(TestCase):
 
     def _page(self, width=1280, height=820, reduced_motion=None):
         page = self.browser.new_page(viewport={"width": width, "height": height}, reduced_motion=reduced_motion)
+        page.add_init_script(PIN_LIGHT_TONE)
         page.on("pageerror", lambda error: self.errors.append(str(error)))
         page.on("response", lambda response: self.failed.append(response.url) if response.status >= 400 else None)
         page.set_default_timeout(8000)
@@ -1988,4 +1997,158 @@ class SnowAdvPolishTests(TestCase):
           const [r, g, b] = getComputedStyle(document.getElementById('snow-lock')).color.match(/\\d+/g).map(Number);
           return (r + g + b) / 3;
         }"""), 90, "锁屏文字应为深色")
+        self.assertEqual(self.errors, [])
+
+
+class SnowAdvP8ContractTests(TestCase):
+    """P8 静态契约：墙面涂装编号与地点胶囊编号一致；开机层不再显示身份行。"""
+
+    def test_wall_marks_match_location_pill_codes(self):
+        js = (PUBLIC_ROOT / "modules" / "snow-world.js").read_text(encoding="utf-8")
+        block = js[js.index("const ROOM_MARKS = {"):]
+        block = block[: block.index("};")]
+        marks = dict(re.findall(r'(\w+): \["(B-0\d)"', block))
+        css = SKIN_CSS.read_text(encoding="utf-8")
+        pills = dict(re.findall(r'\[data-scene="(\w+)"\] \.scene-location > span::before \{ content: "(B-0\d)"', css))
+        self.assertGreaterEqual(len(marks), 6)
+        for key, code in marks.items():
+            self.assertEqual(pills.get(key), code, key)
+        self.assertNotIn("corridor", marks, "走廊墙面是透视面，不放编号")
+
+    def test_boot_screen_has_no_identity_subtitle(self):
+        js = (PUBLIC_ROOT / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn("海姆达尔战队 · 分析员终端", js)
+        self.assertIn('id="tone-preference"', (PUBLIC_ROOT / "index.html").read_text(encoding="utf-8"))
+
+
+@skipUnless(os.getenv("RUN_PUBLIC_E2E") == "1", "browser regression tier")
+class SnowAdvP8VisualTests(TestCase):
+    """P8：界面色调三档（默认跟随舞台时段）、面对面无底部白条、圆形图标、区域编号。"""
+
+    setUpClass = classmethod(SnowAdvOpeningTests.setUpClass.__func__)
+    tearDownClass = classmethod(SnowAdvOpeningTests.tearDownClass.__func__)
+    setUp = SnowAdvOpeningTests.setUp
+    tearDown = SnowAdvOpeningTests.tearDown
+    _page = SnowAdvOpeningTests._page
+    _open = SnowAdvOpeningTests._open
+    _dismiss_opening = SnowAdvOpeningTests._dismiss_opening
+    _dismiss_notice = SnowAdvOpeningTests._dismiss_notice
+    _reach_in_person = SnowAdvOpeningTests._reach_in_person
+
+    @staticmethod
+    def _stage_time(time, tone=None):
+        # 后注入的脚本覆盖 PIN_LIGHT_TONE；时段经 html[data-snow-time] 固定。
+        script = ""
+        if tone is not None:
+            script += f"window.localStorage.setItem('project-snow-public:tone', {json.dumps(tone)});"
+        script += """(() => { const t = %s;
+          const set = () => { if (document.documentElement) { document.documentElement.dataset.snowTime = t; return true; } return false; };
+          if (!set()) { const mo = new MutationObserver(() => { if (set()) mo.disconnect(); }); mo.observe(document, { childList: true }); } })();""" % json.dumps(time)
+        return script
+
+    def _choose_tone(self, page, value):
+        page.evaluate("""(value) => { const select = document.getElementById('tone-preference');
+          select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); }""", value)
+
+    def _tone(self, page):
+        return page.evaluate("""() => ({
+          tone: document.documentElement.dataset.tone,
+          time: document.documentElement.dataset.toneTime || null,
+          snow0: getComputedStyle(document.documentElement).getPropertyValue('--snow-0').trim(),
+          stored: localStorage.getItem('project-snow-public:tone'),
+        })""")
+
+    def test_auto_tone_is_dusk_then_night_and_preference_overrides(self):
+        # 黄昏：暮色（深色规则 + 偏紫暖色变量）；夜晚：夜色；白天：雪白。
+        cases = (("night", "dark", None, "#142033"), ("dusk", "dark", "dusk", "#2e2439"), ("day", "light", None, None))
+        for time, expected, variant, snow0 in cases:
+            with self.subTest(time=time):
+                page = self._page(1280, 820)
+                self._open(page, True, init_script=self._stage_time(time, tone=None if time == "day" else "auto"))
+                self._dismiss_opening(page)
+                if time == "day":
+                    # 没有存过偏好：默认就是跟随时段。
+                    page.evaluate("localStorage.removeItem('project-snow-public:tone')")
+                    self._choose_tone(page, "auto")
+                state = self._tone(page)
+                self.assertEqual(state["tone"], expected)
+                self.assertEqual(state["time"], variant)
+                if snow0:
+                    self.assertEqual(state["snow0"], snow0)
+                else:
+                    self.assertNotIn(state["snow0"], ("#142033", "#2e2439"))
+                self.assertFalse(page.locator("#tone-preference-setting").evaluate("node => node.hidden"))
+                page.close()
+        page = self._page(1280, 820)
+        self._open(page, True, init_script=self._stage_time("dusk", tone="auto"))
+        self._dismiss_opening(page)
+        self._choose_tone(page, "light")
+        self.assertEqual(self._tone(page)["tone"], "light")
+        self.assertIsNone(self._tone(page)["time"])
+        self.assertEqual(self._tone(page)["stored"], "light")
+        self._choose_tone(page, "dark")
+        self.assertEqual((self._tone(page)["tone"], self._tone(page)["time"]), ("dark", None), "固定深色在黄昏也用夜色")
+        page.evaluate("document.documentElement.dataset.snowTime = 'day'")
+        self._choose_tone(page, "light")
+        self._choose_tone(page, "dark")
+        self.assertEqual(self._tone(page)["tone"], "dark", "深色档不看时段")
+        self.assertEqual(self.errors, [])
+
+    def test_tone_setting_is_hidden_without_the_skin(self):
+        page = self._page(1280, 820)
+        self._open(page, False, init_script=self._stage_time("night", tone="auto"))
+        page.wait_for_function("!document.documentElement.dataset.snowHold")
+        self.assertTrue(page.locator("#tone-preference-setting").evaluate("node => node.hidden"))
+        self.assertNotEqual(page.evaluate("document.documentElement.dataset.tone || ''"), "dark")
+
+    def test_returning_visitor_first_paint_hold_matches_dusk_and_night(self):
+        for time, hint in (("night", "dark"), ("dusk", "dusk")):
+            with self.subTest(time=time):
+                page = self._page(1280, 820)
+                held = []
+                page.add_init_script("window.localStorage.setItem('project-snow-public:snow-adv:last-seen', '1')")
+                page.add_init_script(self._stage_time(time, tone="auto"))
+                page.route("**/public/v1/config", lambda route: held.append(route))
+                page.goto(self.base_url, wait_until="domcontentloaded")
+                page.wait_for_function("document.getElementById('chat-app')")
+                state = page.evaluate("[document.documentElement.dataset.snowHold || null, document.documentElement.dataset.toneHint || null]")
+                self.assertEqual(state, ["1", hint])
+                for route in held:
+                    route.continue_()
+                page.close()
+
+    def test_in_person_stage_runs_under_the_composer(self):
+        page = self._page(1440, 900)
+        self._open(page, True)
+        self._reach_in_person(page)
+        layout = page.evaluate("""() => {
+          const app = document.getElementById('chat-app');
+          const stage = document.getElementById('scene-stage').getBoundingClientRect();
+          const composer = document.getElementById('composer');
+          return {
+            composerH: parseFloat(app.style.getPropertyValue('--snow-composer-h')) || 0,
+            stageBottom: Math.round(stage.bottom),
+            composerTop: Math.round(composer.getBoundingClientRect().top),
+            composerBg: getComputedStyle(composer).backgroundColor,
+          };
+        }""")
+        self.assertGreater(layout["composerH"], 40)
+        self.assertGreaterEqual(layout["stageBottom"], 899, "舞台要延伸到输入栏下面")
+        self.assertLess(layout["composerTop"], layout["stageBottom"])
+        self.assertEqual(layout["composerBg"], "rgba(0, 0, 0, 0)", "输入栏外层透明，不留白条")
+        self.assertEqual(self.errors, [])
+
+    def test_terminal_icon_is_cropped_to_its_disc_and_location_has_an_area_code(self):
+        page = self._page(1280, 820)
+        self._open(page, True)
+        page.locator("#snow-boot .snow-boot-mark img").wait_for(state="attached")
+        boot = page.evaluate("""() => ({
+          clip: getComputedStyle(document.querySelector('#snow-boot .snow-boot-mark img')).clipPath,
+          text: document.getElementById('snow-boot').textContent,
+        })""")
+        self.assertIn("circle", boot["clip"])
+        self.assertNotIn("海姆达尔", boot["text"])
+        self._reach_in_person(page)
+        code = page.evaluate("""() => getComputedStyle(document.querySelector('.in-person-surface .scene-location > span'), '::before').content""")
+        self.assertRegex(code, r'^"(EXT|B-0\d)"')
         self.assertEqual(self.errors, [])

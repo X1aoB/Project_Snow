@@ -692,6 +692,10 @@ class PublicFrontendReliabilityTests(TestCase):
 
             page.route("**/encoding-fixture.png", image)
             self.open(page)
+            # The neutral stage warm-up waits for the first screen to settle (P8);
+            # let it run with the real FileReader before the mocks below go in.
+            page.wait_for_function("window.__projectSnowTest.firstScreenSettled()")
+            page.wait_for_load_state("networkidle")
             result = page.evaluate("""async ({hash, fixtureSource}) => {
                 const originalReader = window.FileReader, nativeDecode = HTMLImageElement.prototype.decode;
                 const later = window.setTimeout, readers = [];
