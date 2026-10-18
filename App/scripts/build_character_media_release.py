@@ -10,11 +10,12 @@ agree by SHA256. Rejected whole-character redraws remain ineligible.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
 import tempfile
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from hashlib import sha256
 from io import BytesIO
@@ -87,6 +88,192 @@ EXPRESSION_RUNTIME_SCHEMA = "project-snow-character-expression-runtime-3"
 PRESENTATION_CONTRACT_SCHEMA = "project-snow-stage-presentation-2"
 ACTIVE_RENDER_STRATEGY = "layered_sprite"
 COMPLETE_SPRITE_SCOPE = "complete_character_sprite"
+LAYER_FORMATS = ("png", "webp-q92")
+
+
+def _layer_review_destination(
+    layer_format: str, review_root: Path | None, protected: list[Path]
+) -> Path | None:
+    if layer_format not in LAYER_FORMATS:
+        raise ValueError("layer format must be png or webp-q92")
+    if layer_format == "png":
+        if review_root is not None:
+            raise ValueError("a layer review root requires webp-q92")
+        return None
+    if review_root is None:
+        raise ValueError("webp-q92 requires a new independent private layer review root")
+    destination = review_root.absolute()
+    # Check the un-resolved ancestors so a junction cannot disguise a source path.
+    verified_inputs.regular_path(destination.parent, directory=True)
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError("layer review root already exists; preserve it and choose a new directory")
+    destination = destination.resolve()
+    for source in protected:
+        source = source.resolve()
+        if destination.is_relative_to(source) or source.is_relative_to(destination):
+            raise ValueError("layer review root must be independent of sources and release output")
+    return destination
+
+
+@contextmanager
+def _layer_review_attempt(review_root: Path | None, version: str):
+    if review_root is None:
+        yield
+        return
+    review_root.mkdir(mode=0o700)
+    status = {"schema_version": "project-snow-layer-review-build-1", "media_version": version,
+              "layer_format": "webp-q92", "technical_qa_only": True, "human_approval": False}
+    try:
+        yield
+    except BaseException as error:
+        status.update(status="failed", failure_type=type(error).__name__)
+        raise
+    else:
+        status["status"] = "built_for_review"
+    finally:
+        verified_inputs.regular_path(review_root, directory=True)
+        with (review_root / "build-status.json").open("x", encoding="utf-8") as handle:
+            json.dump(status, handle, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False)
+            handle.write("\n")
+
+
+def _runtime_layers(runtime: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    result = {}
+    for presentation in runtime["presentations"].values():
+        for layer in presentation["layers"]:
+            path = layer["asset_path"]
+            if path in result and result[path] != layer:
+                # One asset may be drawn at different positions. Its bytes and dimensions cannot differ.
+                if any(result[path][key] != layer[key] for key in ("asset_sha256", "dimensions")):
+                    raise ValueError("one layer asset has conflicting hashes or dimensions")
+            result[path] = layer
+    return result
+
+
+def _derive_runtime_layers(*args, **kwargs):
+    # Legacy PNG builds do not import or invoke the optional derivative pipeline.
+    try:
+        from scripts.character_webp_derivatives import derive_runtime_layers
+    except ModuleNotFoundError:
+        from character_webp_derivatives import derive_runtime_layers
+    return derive_runtime_layers(*args, **kwargs)
+
+
+def _checked_webp_runtime(
+    release_root: Path, character_id: str, runtime: dict[str, Any], approved: dict[str, Any],
+    review_root: Path, compositor: Any, cache: dict,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    original = copy.deepcopy(runtime)
+    derived, summary = _derive_runtime_layers(
+        release_root, character_id, copy.deepcopy(runtime), approved, review_root, compositor, cache=cache
+    )
+    comparable = copy.deepcopy(derived)
+    if set(comparable.get("presentations", {})) != set(original["presentations"]):
+        raise ValueError("WebP conversion changed the approved presentation inventory")
+    for key, presentation in comparable["presentations"].items():
+        old_layers, new_layers = original["presentations"][key]["layers"], presentation["layers"]
+        if len(old_layers) != len(new_layers):
+            raise ValueError("WebP conversion changed the approved layer count")
+        for old, new in zip(old_layers, new_layers, strict=True):
+            if {k: v for k, v in old.items() if k not in {"asset_path", "asset_sha256"}} != {
+                k: v for k, v in new.items() if k not in {"asset_path", "asset_sha256"}
+            }:
+                raise ValueError("WebP conversion changed layer geometry or composition")
+        presentation["layers"] = old_layers
+    if comparable != original:
+        raise ValueError("WebP conversion changed fallback bytes or approved runtime metadata")
+    _public_layer_summary(summary, character_id, original, derived, release_root, review_root)
+    derived["transforms"]["format"] = "q92_webp_native_layers_with_original_lossless_webp_derivatives"
+    return derived, summary
+
+
+def _public_layer_summary(summary, character_id, original, derived, release_root, review_root):
+    """Keep private review reports behind an exact, public-only summary contract."""
+    def exact(value, keys):
+        if not isinstance(value, dict) or set(value) != set(keys):
+            raise ValueError("layer derivative summary contains fields outside the public contract")
+    exact(summary, {"schema_version", "character_id", "encoding", "thresholds", "engine_versions",
+                    "report_sha256", "layer_mapping", "presentations", "passed", "technical_qa_only", "human_approval"})
+    if (summary["schema_version"] != "project-snow-character-webp-derivatives-1"
+            or summary["character_id"] != character_id or summary["passed"] is not True
+            or summary["technical_qa_only"] is not True or summary["human_approval"] is not False
+            or summary["encoding"] != {"format": "webp", "quality": 92, "lossless": False,
+                                        "method": 4, "alpha_quality": 100, "exact": True}
+            or summary["thresholds"] != {"premultiplied_rgb_mae_max": 2.0, "premultiplied_rgb_p99_max": 10.0,
+                                          "luminance_ssim_min": 0.99, "alpha_max_delta": 0}):
+        raise ValueError("layer derivative summary does not bind the q92 review policy")
+    exact(summary["engine_versions"], {"pillow", "libwebp", "chromium"})
+    if any(not isinstance(v, str) or not re.fullmatch(r"[A-Za-z0-9.+_-]{1,100}", v)
+           for v in summary["engine_versions"].values()):
+        raise ValueError("layer derivative engine version is not public metadata")
+    report = verified_inputs.read_regular(review_root / character_id / "report.json")
+    if _digest_bytes(report) != summary["report_sha256"]:
+        raise ValueError("layer derivative review report hash mismatch")
+    source_layers, delivery_layers = _runtime_layers(original), _runtime_layers(derived)
+    mappings = summary["layer_mapping"]
+    if not isinstance(mappings, list) or len(mappings) != len(source_layers):
+        raise ValueError("layer derivative source coverage mismatch")
+    seen_source, seen_delivery = set(), set()
+    for item in mappings:
+        exact(item, {"source_asset_path", "source_sha256", "delivery_asset_path", "delivery_sha256",
+                     "dimensions", "source_bytes", "delivery_bytes"})
+        source, target = item["source_asset_path"], item["delivery_asset_path"]
+        if source in seen_source or source not in source_layers or target not in delivery_layers:
+            raise ValueError("layer derivative mapping is incomplete or duplicated")
+        expected = source_layers[source]
+        if (item["source_sha256"] != expected["asset_sha256"] or item["dimensions"] != expected["dimensions"]
+                or delivery_layers[target]["asset_sha256"] != item["delivery_sha256"]
+                or delivery_layers[target]["dimensions"] != expected["dimensions"]
+                or not SHA256_PATTERN.fullmatch(str(item["delivery_sha256"]))
+                or not re.fullmatch(rf"expressions/{re.escape(character_id)}/layers/[A-Za-z0-9_-]+\.{item['delivery_sha256'][:16]}\.webp", target)):
+            raise ValueError("layer derivative mapping does not bind the approved source")
+        for relative, digest, size in ((source, item["source_sha256"], item["source_bytes"]),
+                                       (target, item["delivery_sha256"], item["delivery_bytes"])):
+            data = verified_inputs.read_regular(release_root / relative)
+            if type(size) is not int or len(data) != size or _digest_bytes(data) != digest:
+                raise ValueError("layer derivative bytes changed before publication")
+        seen_source.add(source); seen_delivery.add(target)
+    if seen_source != set(source_layers) or seen_delivery != set(delivery_layers):
+        raise ValueError("layer derivative delivery coverage mismatch")
+    exact(summary["presentations"], set(original["presentations"]))
+    for item in summary["presentations"].values():
+        exact(item, {"passed", "metrics"})
+        exact(item["metrics"], {"visible_pixels", "alpha_max_delta", "premultiplied_rgb_mae",
+                                "premultiplied_rgb_p99", "luminance_ssim"})
+        if item["passed"] is not True or any(type(v) not in (int, float) for v in item["metrics"].values()):
+            raise ValueError("layer derivative quality evidence is incomplete")
+        metrics = item["metrics"]
+        if (type(metrics["visible_pixels"]) is not int or metrics["visible_pixels"] <= 0
+                or metrics["alpha_max_delta"] != 0
+                or not 0 <= metrics["premultiplied_rgb_mae"] <= 2.0
+                or not 0 <= metrics["premultiplied_rgb_p99"] <= 10.0
+                or not 0.99 <= metrics["luminance_ssim"] <= 1.0):
+            raise ValueError("layer derivative quality exceeds the fixed review thresholds")
+    json.dumps(summary, allow_nan=False)
+
+
+def _remove_replaced_png_layers(release_root: Path, original_layers, runtimes):
+    def references(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "asset_path" or key.endswith("_asset_path"):
+                    yield item
+                else:
+                    yield from references(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from references(item)
+    retained = {path for runtime in runtimes for path in references(runtime)}
+    for relative, digest in original_layers.items():
+        if relative in retained:
+            continue
+        if not re.fullmatch(r"expressions/[0-9a-f]{12}/layers/[A-Za-z0-9_-]+\.[0-9a-f]{16}\.png", relative):
+            raise ValueError("only original temporary PNG layers may be removed")
+        path = release_root / relative
+        data = verified_inputs.read_regular(path)
+        if not path.resolve().is_relative_to(release_root.resolve()) or _digest_bytes(data) != digest:
+            raise ValueError("temporary source layer changed before removal")
+        path.unlink()
 
 
 def _digest_path(path: Path) -> str:
@@ -817,6 +1004,8 @@ def build_release(
     expression_package_manifest_sha256: str | None = None,
     expression_package_checksums_sha256: str | None = None,
     rights_sha256: str | None = None,
+    layer_format: str = "png",
+    layer_review_root: Path | None = None,
 ) -> Path:
     """Build an immutable v4 package after every private gate passes."""
 
@@ -826,6 +1015,13 @@ def build_release(
     release_target = output_root / version
     if release_target.exists():
         raise FileExistsError(f"release already exists; choose an empty output root: {release_target}")
+    layer_review_root = _layer_review_destination(
+        layer_format, layer_review_root,
+        [path for path in (expression_root, output_root, avatar_source_root, analyst_source_root,
+                           mia_runtime_root, existing_avatar_release_root, expression_package_root,
+                           approval_root, rights_path, APP_ROOT / "public_frontend",
+                           APP_ROOT / "frontend", APP_ROOT / "public_frontend_src") if path is not None],
+    )
     if existing_avatar_release_root is None and any(
         (existing_avatar_manifest_sha256, existing_avatar_checksums_sha256)
     ):
@@ -883,7 +1079,8 @@ def build_release(
         )
 
     output_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=f".{version}.candidate.", dir=output_root) as temporary:
+    with (_layer_review_attempt(layer_review_root, version),
+          tempfile.TemporaryDirectory(prefix=f".{version}.candidate.", dir=output_root) as temporary):
         temporary_root = Path(temporary)
         if avatar_package is not None:
             release_root = temporary_root / version
@@ -910,6 +1107,9 @@ def build_release(
         display_names = {
             str(character["character_id"]): str(character["display_name"]) for character in characters
         }
+        runtime_manifests = {}
+        original_layers = {}
+        derivative_summaries = []
         for character_id in sorted(source_by_id):
             approved = approved_by_id[character_id]
             source = {
@@ -919,7 +1119,7 @@ def build_release(
                 "approval_manifest_sha256": approved["approval_manifest_sha256"],
             }
             if expression_package is not None:
-                runtime_manifest = dict(reused_expressions[character_id])
+                runtime_manifest = copy.deepcopy(reused_expressions[character_id])
                 runtime_manifest.update(
                     {
                         "display_name": display_names[character_id],
@@ -938,6 +1138,28 @@ def build_release(
                     publication_status,
                     rights_block,
                 )
+            runtime_manifests[character_id] = runtime_manifest
+            if layer_format == "webp-q92":
+                original_layers.update({path: layer["asset_sha256"]
+                                        for path, layer in _runtime_layers(runtime_manifest).items()})
+
+        # Every approval and original fallback is complete before lossy delivery derivatives start.
+        context = layered_release.NativeBrowserCompositor() if layer_format == "webp-q92" else nullcontext(None)
+        with context as delivery_compositor:
+            encoding_cache = {}
+            for character_id, runtime_manifest in runtime_manifests.items():
+                if layer_format == "webp-q92":
+                    runtime_manifest, summary = _checked_webp_runtime(
+                        release_root, character_id, runtime_manifest, approved_by_id[character_id],
+                        layer_review_root, delivery_compositor, encoding_cache,
+                    )
+                    runtime_manifests[character_id] = runtime_manifest
+                    derivative_summaries.append(summary)
+        if layer_format == "webp-q92":
+            _remove_replaced_png_layers(release_root, original_layers, runtime_manifests.values())
+
+        for character_id, runtime_manifest in runtime_manifests.items():
+            approved = approved_by_id[character_id]
             runtime_manifest_path = release_root / "expressions" / character_id / "manifest.json"
             _write_json(runtime_manifest_path, runtime_manifest)
             row = rows[character_id]
@@ -982,13 +1204,21 @@ def build_release(
                 comparison["different_visible_pixels"] for comparison in comparisons
             ),
         }
+        if layer_format == "webp-q92":
+            manifest["expression_layer_derivation"] = {
+                "schema_version": "project-snow-character-layer-derivation-1",
+                "layer_format": "webp-q92", "character_count": len(derivative_summaries),
+                "source_approval_exact": True, "technical_qa_only": True, "human_approval": False,
+                "characters": derivative_summaries,
+            }
         if expression_package is not None:
             manifest["expression_source_package"] = {
                 "schema_version": expression_package.manifest["schema_version"],
                 "manifest_sha256": expression_package.manifest_sha256,
                 "checksums_sha256": expression_package.checksums_sha256,
                 "approval_event_sha256": expression_package.manifest["approval_event_sha256"],
-                "reuse": "original_approved_png_and_reviewed_webp_bytes_preserved",
+                "reuse": ("original_approved_png_and_reviewed_webp_bytes_preserved" if layer_format == "png"
+                          else "approved_png_sources_preserved_with_q92_layer_derivatives_and_original_fallbacks"),
             }
         _write_json(manifest_path, manifest)
         checksums = [path for path in release_root.rglob("*") if path.is_file() and path.name != "SHA256SUMS"]
@@ -1045,6 +1275,9 @@ def main() -> None:
     parser.add_argument("--expression-package-manifest-sha256")
     parser.add_argument("--expression-package-checksums-sha256")
     parser.add_argument("--rights-sha256")
+    parser.add_argument("--layer-format", choices=LAYER_FORMATS, default="png")
+    parser.add_argument("--layer-review-root", type=Path,
+                        help="New independent private directory for WebP comparisons; never overwritten")
     parser.add_argument("--mia-runtime-root", type=Path, default=DEFAULT_MIA_RUNTIME_ROOT)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--version", default=DEFAULT_VERSION)
@@ -1065,6 +1298,8 @@ def main() -> None:
         expression_package_manifest_sha256=arguments.expression_package_manifest_sha256,
         expression_package_checksums_sha256=arguments.expression_package_checksums_sha256,
         rights_sha256=arguments.rights_sha256,
+        layer_format=arguments.layer_format,
+        layer_review_root=arguments.layer_review_root,
     )
     print(
         json.dumps(

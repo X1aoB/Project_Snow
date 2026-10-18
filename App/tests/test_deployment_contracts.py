@@ -3565,7 +3565,7 @@ seal_configuration_snapshot "$seal_root"
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", public_env)
         self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=0.9.2", public_env)
         self.assertIn("PUBLIC_BYOK_LIFETIME_HOURS=12", public_env)
-        self.assertIn("PUBLIC_MEDIA_VERSION=2026.09.09.character.1", public_env)
+        self.assertIn("PUBLIC_MEDIA_VERSION=2026.10.18.character.webp92.2", public_env)
         self.assertIn("PUBLIC_STICKER_VERSION=2026.08.19.sticker.1", public_env)
         self.assertIn("@versioned_media path /media/*", caddyfile)
 

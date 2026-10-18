@@ -153,8 +153,9 @@ jobs:
         run: python scripts/prepare_ci_runtime.py --avatars
       - name: Native character media approval and composition contracts
         env:
+          RUN_PUBLIC_E2E: "1"
           PROJECT_SNOW_PLAYWRIGHT_CHANNEL: chrome
-        run: python -m pytest tests/test_character_media_release.py tests/test_character_layered_release_compositing.py -q
+        run: python -m pytest tests/test_character_media_release.py tests/test_character_layered_release_compositing.py tests/test_character_webp_derivatives.py -q
       - name: Static and browser UI tests
         env:
           RUN_PUBLIC_E2E: "1"

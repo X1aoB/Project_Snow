@@ -110,6 +110,53 @@ class NativeBrowserCompositor:
         }""", payload)
         return {"renderer": BROWSER_COMPOSITING, "browser_version": self._browser.version, **result}
 
+    def rasterize_delivery(
+        self, canvas: tuple[int, int], layers: list[dict[str, Any]],
+        preview: Path, preview_sha256: str,
+    ) -> dict[str, Any]:
+        """Rasterize a delivery stack separately from the exact source gate.
+
+        PNG approval validation above remains byte/pixel exact. This method
+        only supplies real Chromium source-over pixels to the explicit lossy
+        derivative review; it does not make an approval decision.
+        """
+        if self._page is None:
+            raise ValueError("delivery rasterization requires an open NativeBrowserCompositor")
+
+        def source(path: Path, digest: str) -> str:
+            raw = path.read_bytes()
+            if hashlib.sha256(raw).hexdigest() != digest:
+                raise ValueError("asset changed before delivery browser comparison")
+            if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+                mime = "image/png"
+            elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+                mime = "image/webp"
+            else:
+                raise ValueError("delivery browser input must be PNG or WebP")
+            return "data:" + mime + ";base64," + base64.b64encode(raw).decode("ascii")
+
+        result = self._page.evaluate("""async p => {
+          const canvas=()=>{const c=document.createElement('canvas');c.width=p.width;c.height=p.height;return c;};
+          const decode=async(src,w,h)=>{const image=new Image();image.src=src;await image.decode();
+            if(image.naturalWidth!==w||image.naturalHeight!==h)throw Error('Native delivery size changed');return image;};
+          const reference=canvas(),delivery=canvas(),ctx=delivery.getContext('2d');
+          ctx.globalCompositeOperation='source-over';ctx.imageSmoothingEnabled=false;
+          for(const layer of p.layers)ctx.drawImage(await decode(layer.src,layer.width,layer.height),layer.x,layer.y);
+          reference.getContext('2d').drawImage(await decode(p.preview,p.width,p.height),0,0);
+          return {reference_png:reference.toDataURL('image/png').split(',')[1],
+            delivery_png:delivery.toDataURL('image/png').split(',')[1]};
+        }""", {
+            "width": canvas[0], "height": canvas[1],
+            "preview": source(preview, preview_sha256),
+            "layers": [{"src": source(layer["path"], layer["asset_sha256"]),
+                        "x": layer["position"]["x"], "y": layer["position"]["y"],
+                        "width": layer["dimensions"]["width"], "height": layer["dimensions"]["height"]}
+                       for layer in layers],
+        })
+        return {"renderer": BROWSER_COMPOSITING, "browser_version": self._browser.version,
+                **{key: base64.b64decode(result[key], validate=True)
+                   for key in ("reference_png", "delivery_png")}}
+
 
 def _size(value: object, label: str) -> tuple[int, int]:
     if not isinstance(value, dict) or any(
