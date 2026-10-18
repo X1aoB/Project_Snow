@@ -2268,13 +2268,17 @@ class SnowAdvDaylightContrastTests(TestCase):
             <span class="request-status" data-contrast="request-status">合成状态 · 已就绪</span>
             <span class="typing-label" data-contrast="typing-label">合成输入提示</span>`;
         }""")
+        self._wait_for_contrast_paint(page)
+        return page
+
+    @staticmethod
+    def _wait_for_contrast_paint(page):
         page.evaluate("() => document.fonts.ready")
         page.wait_for_function("""() => document.getAnimations().every(animation => {
           const timing = animation.effect?.getComputedTiming();
           return !timing || !Number.isFinite(timing.endTime) || ['finished', 'idle'].includes(animation.playState);
         })""")
         page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
-        return page
 
     @staticmethod
     def _pixel_contrast(page):
@@ -2368,6 +2372,7 @@ class SnowAdvDaylightContrastTests(TestCase):
                     before = page.screenshot(animations="disabled")
                     # The complete candidate preserves its internal rule order.
                     page.add_style_tag(content=candidate)
+                    self._wait_for_contrast_paint(page)
                     after = page.screenshot(animations="disabled")
                     difference = ImageChops.difference(Image.open(_BytesIO(before)).convert("RGB"),
                                                        Image.open(_BytesIO(after)).convert("RGB"))
