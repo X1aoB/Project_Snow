@@ -560,7 +560,6 @@ function chatError(code = "request_failed", detail = {}, status = 0) {
   return error;
 }
 function displayError(error) {
-  if (error instanceof TypeError) return errorMessages.network_unavailable;
   const code = error instanceof Error ? error.message : plain(error);
   if (["Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed"].includes(code)) return errorMessages.network_unavailable;
   if (code === "credential_invalid" && state.provider === SUBSCRIPTION_PROVIDER) return errorMessages.subscription_not_connected;

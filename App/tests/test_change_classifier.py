@@ -27,7 +27,8 @@ class ChangeClassifierTests(TestCase):
         self.assertTrue(classify(["App/public_frontend_src/src/runtime.ts"])["app_image"])
 
     def test_browser_reliability_only_change_runs_browser_tier(self):
-        for path in ("App/tests/test_public_frontend_reliability.py", "App/tests/test_stage_presentation_timing.py"):
+        for path in ("App/tests/test_public_frontend_reliability.py", "App/tests/test_stage_presentation_timing.py",
+                     "App/tests/test_snow_adv_announcement_contrast.py", "App/tests/test_snow_adv_input_network.py"):
             with self.subTest(path=path):
                 self.assertTrue(classify([path])["ui"])
 

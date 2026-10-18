@@ -55,11 +55,20 @@ class SnowAdvInputNetworkTests(TestCase):
                         **self.evidence}, handle, ensure_ascii=False, indent=2)
                     handle.write("\n")
 
-    def open_page(self, snow=True, width=1200, height=850, configured=False, subscription_error=None):
+    def open_page(self, snow=True, width=1200, height=850, configured=False, subscription_error=None,
+                  expose_display_error=False):
         self.page = self.browser.new_page(viewport={"width": width, "height": height}, reduced_motion="reduce")
         self.page.set_default_timeout(10000)
         self.page.add_init_script(PIN_LIGHT_TONE)
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
+        if expose_display_error:
+            def expose(route):
+                # Exercise the real module's display function with browser Error
+                # instances; the probe exists only in this synthetic response.
+                script = route.fetch().text()
+                route.fulfill(content_type="text/javascript", body=script
+                    + "\nwindow.__snowInputDisplayError = displayError;\n")
+            self.page.route("**/app.js*", expose)
         if subscription_error is not None:
             self.subscription_error = subscription_error
             self.subscription_requests = []
@@ -262,4 +271,33 @@ class SnowAdvInputNetworkTests(TestCase):
                     "restored_and_polled_display": expected, "status_requests": len(self.subscription_requests),
                     "session_unchanged": True, "network_copy": expected == NETWORK_COPY})
                 self.page.context.close()
+        self.assertEqual(self.errors, [])
+
+    def test_non_network_typeerror_keeps_its_message_and_exact_network_errors_translate(self):
+        self.open_page(expose_display_error=True)
+        rows = self.page.evaluate("""() => {
+          const messages = ['Failed to fetch',
+            'NetworkError when attempting to fetch resource.', 'Load failed'];
+          const programming = "Cannot read properties of undefined (reading 'x')";
+          return [programming, ...messages, 'Load failed (custom)'].flatMap(message =>
+            ['TypeError', 'Error', 'string'].map(kind => {
+              const error = kind === 'string' ? message
+                : kind === 'TypeError' ? new TypeError(message) : new Error(message);
+              const before = kind === 'string' ? error
+                : JSON.stringify({name: error.name, message: error.message,
+                    own: Object.getOwnPropertyDescriptors(error)});
+              const displayed = window.__snowInputDisplayError(error);
+              const after = kind === 'string' ? error
+                : JSON.stringify({name: error.name, message: error.message,
+                    own: Object.getOwnPropertyDescriptors(error)});
+              return {message, kind, displayed, unchanged: before === after};
+            }));
+        }""")
+        network_messages = {"Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed"}
+        for row in rows:
+            with self.subTest(kind=row["kind"], message=row["message"]):
+                self.assertEqual(row["displayed"], NETWORK_COPY if row["message"] in network_messages else row["message"])
+                self.assertTrue(row["unchanged"])
+        self.assertEqual(len(rows), 15)
+        self.evidence["display_errors"] = rows
         self.assertEqual(self.errors, [])
