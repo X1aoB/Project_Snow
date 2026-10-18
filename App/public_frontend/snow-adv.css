@@ -1508,6 +1508,14 @@ html[data-ui="snow-adv"][data-tone="dark"] .scene-menu-popover { border-color: r
 html[data-ui="snow-adv"][data-tone="dark"] :is(.presence-switch, .primary-button, .send-button, .scene-tool-button.primary, .stage-speaker-line strong, .announcement-tab-badge),
 html[data-ui="snow-adv"][data-tone="dark"] .message.user :is(.content-message, .content-speech) { color: #ffffff; }
 
+/* C8.1 daylight contrast */
+html[data-ui="snow-adv"][data-tone="dark"] body:has(.snow-backdrop .snow-layer-far:is([data-time="dawn"], [data-time="day"])) #chat-app[data-snow-world] #text-surface {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--snow-0) 86%, transparent), color-mix(in oklab, var(--snow-0) 80%, transparent) 42%, color-mix(in oklab, var(--snow-0) 86%, transparent));
+}
+html[data-ui="snow-adv"][data-tone="dark"] body:has(.snow-backdrop .snow-layer-far:is([data-time="dawn"], [data-time="day"])) #chat-app[data-snow-world] #text-surface :is(.empty-conversation, .message-time, .message .meta, .message-usage, .request-status, .typing-label) {
+  text-shadow: 0 0 2px rgb(var(--tn-base)), 0 0 6px rgb(var(--tn-base)), 0 0 12px rgb(var(--tn-base));
+}
+
 
 /* P8 尘白元素（轻量）：基地区域编号、对白框切角与角色色细线；图标圆形裁切 */
 /* 小吉终端图标原图是带白边的方形底，蓝色圆形主体中心 */
