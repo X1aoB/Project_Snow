@@ -693,10 +693,9 @@ class PublicFrontendReliabilityTests(TestCase):
             page.route("**/encoding-fixture.png", image)
             self.open(page)
             # The neutral stage warm-up waits for the first screen to settle (P8);
-            # let it run with the real FileReader before the mocks below go in.
+            # wait for that, and the mock below passes the warm-up's art through.
             page.wait_for_function("window.__projectSnowTest.firstScreenSettled()")
-            page.wait_for_load_state("networkidle")
-            result = page.evaluate("""async ({hash, fixtureSource}) => {
+            result = page.evaluate("""async ({hash, fixtureSource, fixtureSize}) => {
                 const originalReader = window.FileReader, nativeDecode = HTMLImageElement.prototype.decode;
                 const later = window.setTimeout, readers = [];
                 let aborts = 0, decodes = 0;
@@ -705,8 +704,22 @@ class PublicFrontendReliabilityTests(TestCase):
                 window.FileReader = class {
                     static LOADING = 1;
                     constructor() { this.readyState = 0; this.result = null; }
-                    readAsDataURL() { this.readyState = 1; this.lateLoad = this.onload; readers.push(this); }
-                    abort() { this.readyState = 2; aborts++; this.onabort?.(); }
+                    readAsDataURL(blob) {
+                        // The deferred startup warm-up may encode unrelated approved
+                        // character art meanwhile; hand it to the real reader and
+                        // count only this fixture.
+                        if (blob?.size !== fixtureSize) {
+                            const real = this.real = new originalReader();
+                            real.onload = event => { this.readyState = 2; this.result = real.result; this.onload?.(event); };
+                            real.onerror = event => { this.readyState = 2; this.error = real.error; this.onerror?.(event); };
+                            real.onabort = event => { this.readyState = 2; this.onabort?.(event); };
+                            this.readyState = 1;
+                            real.readAsDataURL(blob);
+                            return;
+                        }
+                        this.readyState = 1; this.lateLoad = this.onload; readers.push(this);
+                    }
+                    abort() { if (this.real) { this.real.abort(); return; } this.readyState = 2; aborts++; this.onabort?.(); }
                 };
                 HTMLImageElement.prototype.decode = function() {
                     // Startup warmup can decode unrelated approved character art.
@@ -746,7 +759,7 @@ class PublicFrontendReliabilityTests(TestCase):
                     HTMLImageElement.prototype.decode = nativeDecode;
                     window.setTimeout = later;
                 }
-            }""", {"hash": image_hash, "fixtureSource": "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")})
+            }""", {"hash": image_hash, "fixtureSource": "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii"), "fixtureSize": len(image_bytes)})
             self.assertTrue(result["cancelled"].startswith("AbortError:"))
             self.assertEqual(result["timedOut"], "Error:expression_image_encoding_timeout")
             self.assertEqual(result["aborts"], 2)
