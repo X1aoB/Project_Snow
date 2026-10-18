@@ -357,22 +357,41 @@ class SnowAdvBrowserTests(TestCase):
         self.open(True)
         self._reach_in_person()
         self.page.wait_for_function("document.querySelector('#scene-stage canvas.snow-canvas-far')")
+        self.page.wait_for_function("""() => {
+          const probe = window.__projectSnowTest.snowProbe();
+          return probe.bootDone && probe.worldScene === 'observation' && !probe.pushing
+            && document.getElementById('stage-presence-status').hidden
+            && document.getElementById('stage-speech').textContent.trim() === '你来了。'
+            && !document.getAnimations().some(animation =>
+              (animation.playState === 'running' || animation.pending)
+              && Number.isFinite(animation.effect?.getComputedTiming().endTime));
+        }""")
+        self.page.evaluate("() => document.fonts.ready.then(() => undefined)")
         self.assertEqual(self.page.evaluate("() => document.documentElement.dataset.motionLevel"), "off")
         # With motion off there must be no persistent rAF loop repainting the
         # snow canvases.  A running loop clears + redraws every frame, so the
         # drawn pixels drift; a stopped loop leaves them byte-identical.  Sample
         # the far canvas across several animation frames and require no change.
-        drifted = self.page.evaluate("""async () => {
+        observation = self.page.evaluate("""async () => {
           const canvas = document.querySelector('#scene-stage canvas.snow-canvas-far');
           const ctx = canvas.getContext('2d');
           const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
           const sample = () => ctx.getImageData(0, 0, canvas.width, canvas.height).data.join(',');
           await frame();
+          // Chrome can round its initial canvas readback differently without
+          // any redraw. Prime it once before the strict eight-frame comparison.
+          ctx.getImageData(0, 0, canvas.width, canvas.height);
+          await frame();
           const first = sample();
-          for (let i = 0; i < 8; i += 1) await frame();
-          return first !== sample();
+          const loopCounts = [window.__projectSnowTest.snowProbe().activeLoops];
+          for (let i = 0; i < 8; i += 1) {
+            await frame();
+            loopCounts.push(window.__projectSnowTest.snowProbe().activeLoops);
+          }
+          return {drifted: first !== sample(), loopCounts};
         }""")
-        self.assertFalse(drifted, "motion off must not keep repainting the snow canvas")
+        self.assertEqual(observation["loopCounts"], [0] * 9)
+        self.assertFalse(observation["drifted"], "motion off must not keep repainting the snow canvas")
         self.assertEqual(self.errors, [])
         self.assertEqual([url for url in self.failed if "snow-adv" in url or "/modules/snow-world" in url], [])
 
