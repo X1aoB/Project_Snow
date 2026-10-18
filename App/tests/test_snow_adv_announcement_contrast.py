@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import threading
 from unittest import TestCase, skipUnless
 from urllib.parse import urlsplit
@@ -19,8 +20,6 @@ CSS = PUBLIC / "snow-adv.css"
 PIN_LIGHT_TONE = "localStorage.setItem('project-snow-public:tone', 'light')"
 BASELINE_COMMIT = "0d6f97abb371bfd9a4b740c77f8d08e47943bf94"
 BASELINE_LF_SHA256 = "8bdfead121ba60ce8921c2cdf519412a306365b7240e194849c5d950d3bbf083"
-PATCH_MARKER = "/* C8 announcement contrast */"
-PATCH_FOLLOWING = 'html[data-ui="snow-adv"][data-tone="dark"] :is(.form-hint, .subscription-status[data-status="connected"])'
 QUERIES = {("/shared/immersive.css", "v=0.9.2"), ("/app.css", "v=1.0.0"),
            ("/snow-adv.css", "v=1.0.0"), ("/app.js", "v=1.0.0")}
 
@@ -236,10 +235,13 @@ def measure_announcement_contrast(page):
             "background_method": "actual ancestor CSS backgrounds composed source-over; ancestor opacity/filter/blend and unknown paint rejected"}
 
 
-def baseline_css(candidate):
-    start = candidate.index(PATCH_MARKER)
-    end = candidate.index(PATCH_FOLLOWING, start)
-    baseline = candidate[:start] + candidate[end:]
+def baseline_css(_candidate):
+    # Later independent CSS changes must not alter the complete historical control.
+    result = subprocess.run(
+        ["git", "--no-replace-objects", "show", BASELINE_COMMIT + ":App/public_frontend/snow-adv.css"],
+        cwd=PUBLIC.parents[1], capture_output=True, check=True, timeout=20,
+    )
+    baseline = result.stdout.replace(b"\r\n", b"\n").decode("utf-8")
     if hashlib.sha256(baseline.encode()).hexdigest() != BASELINE_LF_SHA256:
         raise AssertionError("complete_0d6_css_baseline_required")
     return baseline

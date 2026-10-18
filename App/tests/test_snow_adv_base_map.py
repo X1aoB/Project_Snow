@@ -206,15 +206,28 @@ class MapBrowserFixture:
 
     def open_page(self, page, *, wait_until="networkidle"):
         page.goto(self.base_url, wait_until=wait_until)
-        if page.locator("#snow-lock").is_visible():
+        # Config and IndexedDB finish after DOMContentLoaded. Wait for the real
+        # opening handshake instead of treating an as-yet absent lock as done.
+        # Desktop Snow and flag-off both reach the existing notice directly.
+        page.wait_for_function("""() => Boolean(document.querySelector('#snow-lock') ||
+          document.querySelector('#experience-notice-dialog')?.open)""")
+        unlocked = page.locator("#snow-lock").count() == 1
+        if unlocked:
+            page.locator("#snow-lock").wait_for(state="visible")
             page.locator("#snow-lock").focus()
             page.keyboard.press("Enter")
         page.locator("#snow-boot").wait_for(state="detached")
         page.locator("#snow-lock").wait_for(state="detached")
+        page.locator("#experience-notice-dialog[open]").wait_for(state="visible")
         page.locator("#accept-experience-notice").click()
+        page.locator("#experience-notice-dialog").wait_for(state="hidden")
         page.locator("#go-in-person-label", has_text="观景区").wait_for(state="visible")
-        if page.locator("#skip-onboarding").is_visible():
-            page.locator("#skip-onboarding").click()
+        page.locator("#onboarding-guide").wait_for(state="visible")
+        page.locator("#skip-onboarding").click()
+        page.locator("#onboarding-guide").wait_for(state="hidden")
+        self.evidence.append({"opening_handshake": {"lock_unlocked_by_enter": unlocked,
+                              "notice_accepted_and_closed": True, "guide_skipped_and_hidden": True},
+                              "viewport": page.viewport_size})
         self.close_contacts(page)
         return page
 

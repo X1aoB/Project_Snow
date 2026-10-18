@@ -742,7 +742,7 @@ html[data-ui="snow-adv"] .empty-conversation .snow-empty-greeting .snow-empty-av
   width: 72px;
   height: 72px;
   border-radius: 50%;
-  color: var(--char-deep);
+  color: var(--ink-700);
   background: var(--char-soft);
   box-shadow: 0 0 0 3px var(--snow-0), 0 0 0 5px color-mix(in srgb, var(--char) 46%, var(--snow-0));
   font-family: var(--font-story);
