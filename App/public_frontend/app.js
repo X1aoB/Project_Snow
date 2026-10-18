@@ -1,7 +1,7 @@
 import { loadStageRelease, writeDraftsDatabase, MAX_VISIBLE_MESSAGES, historyWindow, reconcileMarkup, focusWithin, createHttpClient, pruneHistoryDatabase, mergeHistoryDatabase, clearHistoryDatabase, createSafeStorage, compareMessageCursor, beforeMessageCursor, buildIdentity, portableCopy, validateHistoryBackup, PRESENTATION_TIMING, remainingNaturalWait, segmentWait, COMMUNICATOR_TIMING, communicatorDelayPlan, CommittedReply, MotionScope, anonymousServerTimings } from "/modules/runtime.js";
 import { DIALOGUE_PROTOCOL, SCENE_PROTOCOL, dialogueRecordKey, decodeSidecar, mergeDialogueReceipts, relevantDialogueReceipts, fitDialogueContext, isPureRendezvousJoin, sceneVisualKey } from "/dialogue-context.js";
 import { createSnowIcon } from "/modules/snow-icons.js";
-import { mountSnowWorld, activeSnowLoops } from "/modules/snow-world.js";
+import { mountSnowWorld, activeSnowLoops, resolveTime as snowResolveTime, subscribeSnowTime } from "/modules/snow-world.js";
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
@@ -12,13 +12,21 @@ const tabPreferences = createSafeStorage(() => window.sessionStorage);
 // data-snow-booting 继续标记「上次见过雪境皮肤」的返回用户（兼容既有检查），不再把整页设为不可见。
 const SNOW_LAST_SEEN_KEY = "project-snow-public:snow-adv:last-seen";
 try {
-  if (localPreferences.getItem(SNOW_LAST_SEEN_KEY) === "1") document.documentElement.dataset.snowBooting = "1";
+  if (localPreferences.getItem(SNOW_LAST_SEEN_KEY) === "1") {
+    document.documentElement.dataset.snowBooting = "1";
+    // P8：深色时段的返回用户，首帧品牌底色直接用深色，避免先白后深。
+    const tone = localPreferences.getItem("project-snow-public:tone");
+    const time = snowResolveTime();
+    if (tone === "dark" || (tone !== "light" && time === "night")) document.documentElement.dataset.toneHint = "dark";
+    else if (tone !== "light" && time === "dusk") document.documentElement.dataset.toneHint = "dusk";
+  }
 } catch { /* 存储不可用则按首访处理 */ }
 window.setTimeout(() => snowClearFirstFlashHold(), 2500);
 function snowClearFirstFlashHold() {
   document.documentElement.style.visibility = "";
   delete document.documentElement.dataset.snowBooting;
   delete document.documentElement.dataset.snowHold;
+  delete document.documentElement.dataset.toneHint;
 }
 const apiRoot = "/public/v1";
 const publicHttp = createHttpClient(apiRoot);
@@ -611,7 +619,8 @@ if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
         veilArmed: state.snowVeilArmed,
         activeLoops: activeSnowLoops() }),
       snowRenderSceneWith: (sceneState) => { state.scene = sceneState; renderScene(); },
-      snowSetBeenInPerson: (value) => { state.snowBeenInPerson = Boolean(value); } }),
+      snowSetBeenInPerson: (value) => { state.snowBeenInPerson = Boolean(value); },
+      firstScreenSettled: () => firstScreenSettled }),
     configurable: false,
     writable: false,
   });
@@ -758,6 +767,57 @@ function syncInterfaceSkin() {
   applySnowAdvIcons(enabled);
   syncSnowWorld();
   syncStageQuickMenuMount();
+  syncSnowComposerHeight(enabled);
+  syncInterfaceTone(enabled);
+}
+// P8：界面深色状态。设置里三档：跟随舞台时段（默认，黄昏与夜晚变深）/ 雪白 / 深色。
+// 「跟随」与雪景订阅同一个时段时钟（判定相同），跨时段时同一拍切换。
+const SNOW_TONE_KEY = "project-snow-public:tone";
+let snowToneUnsubscribe = null;
+function snowTonePreference() {
+  const value = localPreferences.getItem(SNOW_TONE_KEY);
+  return value === "light" || value === "dark" ? value : "auto";
+}
+function syncInterfaceTone(enabled) {
+  const root = document.documentElement;
+  if ($("tone-preference-setting")) $("tone-preference-setting").hidden = !enabled;
+  if ($("tone-preference")) $("tone-preference").value = snowTonePreference();
+  if (!enabled) {
+    snowToneUnsubscribe?.();
+    snowToneUnsubscribe = null;
+    delete root.dataset.tone;
+    delete root.dataset.toneTime;
+    return;
+  }
+  const apply = (time) => {
+    const preference = snowTonePreference();
+    const dark = preference === "dark" || (preference === "auto" && (time === "dusk" || time === "night"));
+    root.dataset.tone = dark ? "dark" : "light";
+    // 黄昏用暮色（同一套深色规则换偏紫暖色变量）；固定「深色」始终是夜色。
+    if (dark && preference === "auto" && time === "dusk") root.dataset.toneTime = "dusk";
+    else delete root.dataset.toneTime;
+  };
+  apply(snowResolveTime());
+  if (!snowToneUnsubscribe) snowToneUnsubscribe = subscribeSnowTime(apply);
+}
+// P8：面对面舞台延伸到输入区下方。输入区高度会随动作框、请求状态行和窗口宽度变化，
+// 用 ResizeObserver 写入 #chat-app 的 --snow-composer-h，样式据此给舞台加一行、上移立绘。
+let snowComposerObserver = null;
+function syncSnowComposerHeight(enabled) {
+  const app = $("chat-app");
+  const composer = $("composer");
+  if (!app || !composer) return;
+  if (!enabled || typeof ResizeObserver !== "function") {
+    snowComposerObserver?.disconnect();
+    snowComposerObserver = null;
+    app.style.removeProperty("--snow-composer-h");
+    return;
+  }
+  if (snowComposerObserver) return;
+  snowComposerObserver = new ResizeObserver(() => {
+    app.style.setProperty("--snow-composer-h", `${Math.round(composer.getBoundingClientRect().height)}px`);
+  });
+  snowComposerObserver.observe(composer);
 }
 // 雪境 ADV 世界层 (P2)：开关开启且处于面对面界面时，在 #scene-stage 内挂载程序化
 // 分层雪景与 Canvas 远近雪；关闭或离开面对面时销毁。立绘仍留在原 DOM 位置。
@@ -4531,6 +4591,37 @@ function preloadStagePresentation(presentation, signal) {
     }, (error) => finish(reject, error));
   });
 }
+// P8: first-screen budget. Work registered here before the first screen has settled
+// (page load event plus one idle period, capped) runs afterwards; the returned
+// function runs it immediately instead (e.g. when the stage itself is the first screen).
+const firstScreenWaiters = new Set();
+let firstScreenSettled = false;
+function deferUntilFirstScreenSettled(run, signal) {
+  let done = false;
+  const go = () => {
+    if (done) return;
+    done = true;
+    firstScreenWaiters.delete(go);
+    if (!signal?.aborted) run();
+  };
+  if (firstScreenSettled) { go(); return go; }
+  firstScreenWaiters.add(go);
+  signal?.addEventListener("abort", () => { done = true; firstScreenWaiters.delete(go); }, { once: true });
+  return go;
+}
+function settleFirstScreen() {
+  const finish = () => {
+    if (firstScreenSettled) return;
+    firstScreenSettled = true;
+    for (const go of [...firstScreenWaiters]) go();
+  };
+  const idle = () => (typeof window.requestIdleCallback === "function"
+    ? window.requestIdleCallback(finish, { timeout: 1500 })
+    : window.setTimeout(finish, 300));
+  if (document.readyState === "complete") idle();
+  else window.addEventListener("load", idle, { once: true });
+  window.setTimeout(finish, 6000);
+}
 async function warmCharacterStage(character, expressionState = "neutral", performanceId = "", signal) {
   if (!character || (!expressionManifestUrlForCharacter(character) && !stageReleaseCharacterForExpressions(character))) return false;
   try {
@@ -5150,7 +5241,15 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   state.stageWarmController = controller;
   // Start artwork alongside local history and presence resolution, while the
   // user is still in the contact/transition UI rather than after opening the stage.
-  void warmCharacterStage(characterById(characterId), "neutral", "", controller.signal);
+  // P8: during the first screen the communicator is what the visitor sees, so the
+  // (large) neutral layers wait until the page has loaded and gone idle; an
+  // in-person thread flushes the warm immediately below because its stage is the first screen.
+  const warmNeutral = () => { void warmCharacterStage(characterById(characterId), "neutral", "", controller.signal); };
+  // Data-saver or 2G/3G visitors who stay in the communicator never download the
+  // layers; entering face-to-face still loads them through the foreground path.
+  const connection = navigator.connection;
+  const constrainedNetwork = Boolean(connection?.saveData || /(^|-)(2g|3g)$/.test(connection?.effectiveType || ""));
+  const flushNeutralWarm = deferUntilFirstScreenSettled(() => { if (!constrainedNetwork) warmNeutral(); }, controller.signal);
   const previousId = state.selected;
   const previousThread = currentThread();
   const switchingFromStage = Boolean(previousId && previousId !== characterId
@@ -5160,6 +5259,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   if (previousId && previousId !== characterId) cancelStageArt();
   try {
     const thread = await dbGetThread(characterId);
+    if (thread.channel === "in_person") { flushNeutralWarm(); if (constrainedNetwork) warmNeutral(); }
     if (dialogueV2Enabled()) await loadDialogueRecord(characterId);
     if (sequence !== state.selectionSequence) return;
     const previousReply = [...thread.messages].reverse().find(message => message.role === "assistant" && message.communicationChannel === "in_person");
@@ -7674,6 +7774,12 @@ $("stop-waiting").onclick = () => {
   request.controller.abort();
 };
 $("fast-forward-reply").onclick = finishReceivedPresentation;
+if ($("tone-preference")) $("tone-preference").onchange = () => {
+  const value = $("tone-preference").value;
+  localPreferences.setItem(SNOW_TONE_KEY, value === "light" || value === "dark" ? value : "auto");
+  syncInterfaceTone(featureEnabled("ui_snow_adv"));
+};
+
 $("motion-preference").onchange = () => {
   localPreferences.setItem("project-snow-public:motion", $("motion-preference").value);
   syncMotionState();
@@ -8196,6 +8302,7 @@ async function boot() {
   renderOnboarding();
   if (!state.storageAvailable) showBanner("浏览器未开放本地存储，本次聊天不会保存；仍可继续使用。 ");
   startAnnouncements();
+  settleFirstScreen();
   void checkBuildUpdate();
   window.setInterval(() => { void checkBuildUpdate(); }, 300000);
 }

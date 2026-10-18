@@ -560,6 +560,10 @@ html[data-motion-level="off"] *, html[data-motion-level="off"] *::before, html[d
 /* 首帧保持：index.html 静态带 data-snow-hold，配置解析前只显示品牌底色与小吉终端图标，
    不露出尚未就绪（也未换肤）的界面；app.js 在配置解析或失败时移除（配置迟迟不来最多保持 2.5 秒）。
    脚本完全没运行时，4 秒后由动画兜底显示界面，绝不长时间空白。 */
-html[data-snow-hold] body { background: url("/shared/brand/xiaoji-icon-192.png") 50% 45% / 72px 72px no-repeat, linear-gradient(180deg, #ffffff, #eef4f8 60%, #bcd5e5); }
+html[data-snow-hold] body { background: linear-gradient(180deg, #ffffff, #eef4f8 60%, #bcd5e5); }
+html[data-snow-hold][data-tone-hint="dark"] body { background: linear-gradient(180deg, #121c2e, #17233a 60%, #2c4466); }
+html[data-snow-hold][data-tone-hint="dusk"] body { background: linear-gradient(180deg, #2a2035, #3a2c48 60%, #6b5070); }
+html[data-snow-hold] body::before { content: ""; position: fixed; left: 50%; top: 45%; width: 72px; height: 72px; margin: -36px 0 0 -36px; border-radius: 50%; background: url("/shared/brand/xiaoji-icon-192.png") -3.3px -2.2px / 78.5px 78.5px no-repeat; animation: snow-hold-release-icon 1ms linear 4s forwards; }
+@keyframes snow-hold-release-icon { to { visibility: hidden; } }
 html[data-snow-hold] :is(.app-shell, #snow-statistics-notice) { visibility: hidden; animation: snow-hold-release 1ms linear 4s forwards; }
 @keyframes snow-hold-release { to { visibility: visible; } }

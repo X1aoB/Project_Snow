@@ -1,12 +1,4 @@
-/*
- * 雪境 ADV design system (P1).
- *
- * Every rule is scoped to html[data-ui="snow-adv"], which app.js sets only when
- * the server reports features.ui_snow_adv === true.  With the flag off this
- * file matches nothing, so the existing interface renders exactly as before.
- * Fonts live in /snow-adv-fonts.css and are linked lazily by app.js.
- * Motion is unchanged in P1; animation work belongs to later phases.
- */
+/* 雪境 ADV design system (P1). */
 
 html[data-ui="snow-adv"] {
   /* Snow and ice */
@@ -29,7 +21,7 @@ html[data-ui="snow-adv"] {
   --warm-500: #e58a6a;
   --warm-600: #c96a4c;
 
-  /* Current character colour; [data-snow-character] below overrides it. */
+  /* Current character colour */
   --char: var(--ice-500);
   --char-deep: color-mix(in oklab, var(--char) 76%, var(--ink-900));
   --char-soft: color-mix(in oklab, var(--char) 14%, var(--snow-0));
@@ -37,7 +29,7 @@ html[data-ui="snow-adv"] {
   --font-ui: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Source Han Sans SC", system-ui, sans-serif;
   --font-story: "LXGW WenKai Screen", "KaiTi", "STKaiti", "PingFang SC", "Microsoft YaHei", serif;
 
-  /* Type scale; nothing in the interface goes below 12px. */
+  /* Type scale */
   --fs-12: 0.75rem;
   --fs-13: 0.8125rem;
   --fs-14: 0.875rem;
@@ -55,11 +47,11 @@ html[data-ui="snow-adv"] {
   --shadow-lift: 0 10px 28px rgba(32, 62, 92, 0.14);
   --frost-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 249, 252, 0.95));
 
-  /* Easing tokens for later phases (P1 does not change motion). */
+  /* Easing tokens for later phases */
   --ease-snow: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-settle: cubic-bezier(0.34, 1.32, 0.5, 1);
 
-  /* Re-map the shared design variables so every var()-based rule follows. */
+  /* Re-map the shared design variables */
   --snow-bg: var(--snow-50);
   --snow-panel: var(--snow-0);
   --snow-panel-strong: var(--snow-0);
@@ -78,9 +70,7 @@ html[data-ui="snow-adv"] {
   font-family: var(--font-ui);
 }
 
-/* 22 character theme colours (draft palette from the P0 mockups).
-   --char-deep/--char-soft must be re-derived where --char changes: a custom
-   property that references another is resolved on the element declaring it. */
+/* 22 character theme colours */
 html[data-ui="snow-adv"] [data-snow-character] {
   --char-deep: color-mix(in oklab, var(--char) 76%, var(--ink-900));
   --char-soft: color-mix(in oklab, var(--char) 14%, var(--snow-0));
@@ -119,7 +109,7 @@ html[data-ui="snow-adv"] :focus-visible {
   outline-offset: 2px;
 }
 
-/* Minimum 12px: every rule that app.css sets below .75rem. */
+/* Minimum 12px */
 html[data-ui="snow-adv"] :is(
   .content-action, .content-sticker small, .message-usage, .rendezvous-card small, .stop-waiting,
   .action-composer label, .composer-foot, .selected-sticker-copy strong, .selected-sticker-copy small,
@@ -134,7 +124,7 @@ html[data-ui="snow-adv"] :is(
   font-size: var(--fs-12);
 }
 
-/* Story typography: dialogue, nameplate and scene titles use LXGW WenKai. */
+/* Story typography */
 html[data-ui="snow-adv"] :is(.stage-speech, .stage-narration, .stage-speaker-line strong, .transition-card strong, #stage-location) {
   font-family: var(--font-story);
 }
@@ -156,7 +146,7 @@ html[data-ui="snow-adv"] .snow-icon {
 html[data-ui="snow-adv"] .contact-search .snow-icon { width: 18px; height: 18px; }
 html[data-ui="snow-adv"] .composer-tool-icon .snow-icon { width: 18px; height: 18px; }
 
-/* Brand: keep the original 小吉终端 icon, drop the legacy gradient tile. */
+/* Brand */
 html[data-ui="snow-adv"] .brand-mark {
   border: 0;
   border-radius: 50%;
@@ -248,7 +238,7 @@ html[data-ui="snow-adv"] .toast {
   background: rgba(255, 255, 255, 0.97);
 }
 
-/* Character colour, applied where a nameplate already exists. */
+/* Character colour */
 html[data-ui="snow-adv"] .stage-speaker-line strong {
   color: var(--snow-0);
   background: var(--char-deep);
@@ -258,16 +248,14 @@ html[data-ui="snow-adv"] .active-character h1 { color: var(--ink-900); }
 html[data-ui="snow-adv"] .active-character .portrait { border-color: color-mix(in oklab, var(--char) 55%, transparent); }
 
 
-/* ---------------------------------------------------------------- P2 程序化分层雪景
-   仅在开关开启时：隐藏旧的 SVG 背景与 CSS 雪，改用 #scene-stage 内的世界层。
-   每条选择器都限定在 html[data-ui="snow-adv"] 下（测试强制）。 */
+/* P2 程序化分层雪景 */
 html[data-ui="snow-adv"] #scene-backdrop { display: none; }
 html[data-ui="snow-adv"] .scene-stage .scene-decoration-back { display: none; }
 html[data-ui="snow-adv"] .scene-stage .scene-decoration-front { display: none; }
 html[data-ui="snow-adv"] .scene-stage .snow-atmosphere { display: none; }
 html[data-ui="snow-adv"] .scene-stage::after { opacity: 0.5; }
 
-/* 世界层：far(0) → snow-far(1) → room(2) → [立绘 z-index:3] → snow-near(4) */
+/* 世界层：far(0) → snow-far(1) → room(2) */
 html[data-ui="snow-adv"] .scene-stage .snow-layer {
   position: absolute;
   inset: 0;
@@ -289,15 +277,9 @@ html[data-ui="snow-adv"] .scene-stage .snow-layer-room[hidden] { display: none; 
 
 
 
-/* ================================================================ P3 面对面主屏
-   仅在 html[data-ui="snow-adv"] 下、面对面界面：把面对面界面升级为 galgame 主屏。
-   每条选择器都限定在 html[data-ui="snow-adv"] 下（测试强制）。开关关闭时本段全部
-   匹配不到；▼ 推进标记与快捷菜单由 app.js 仅在开关开启时建到对白框里，关闭时移除，
-   因此关闭态不新增任何可见元素。 */
+/* P3 面对面主屏 */
 
-/* 1) 全屏舞台：面对面时把永久 304px 的角色栏改成覆盖式抽屉，舞台占满视口宽度。
-   app.js 进入面对面时默认加 sidebar-collapsed（抽屉关闭 = 舞台全宽），
-   #open-stage-contacts 仍用既有 toggleContacts 开合它，不改旧 UI 的侧栏偏好语义。 */
+/* 1) 全屏舞台 */
 @media (min-width: 821px) {
   html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] { grid-template-columns: minmax(0, 1fr); }
   html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .contact-panel {
@@ -338,7 +320,7 @@ html[data-ui="snow-adv"] .stage-dialogue {
 }
 html[data-ui="snow-adv"] .stage-speaker-line { border-bottom-color: color-mix(in srgb, var(--ice-300) 52%, transparent); }
 
-/* 名牌：角色色，左上，背景 var(--char-deep)（角色色由 P1 的 [data-snow-character] 提供）。 */
+/* 名牌：角色色，左上，背景 var(--char-deep) */
 html[data-ui="snow-adv"] .stage-speaker-line strong {
   background: var(--char-deep);
   letter-spacing: 0.04em;
@@ -367,8 +349,7 @@ html[data-ui="snow-adv"] .stage-narration {
   background: rgba(248, 252, 254, 0.92);
 }
 
-/* 3) ▼ 推进标记：对白框右下，回复显示完且空闲时出现；打字/揭示/等待时隐藏。
-   仅在动态档位 auto 轻轻上下浮动；light/off 静止。aria-hidden（由 JS 设置）。 */
+/* 3) ▼ 推进标记 */
 html[data-ui="snow-adv"] .stage-advance {
   position: absolute;
   right: 16px;
@@ -425,10 +406,7 @@ html[data-ui="snow-adv"] .stage-quick-menu .snow-icon { width: 16px; height: 16p
 /* 既有 ▼ 与快捷菜单同处右下：把 ▼ 抬到菜单上方一点，避免重叠。 */
 html[data-ui="snow-adv"] .stage-dialogue:has(.stage-quick-menu) .stage-advance { bottom: 44px; }
 
-/* 6) 立绘按身体中轴居中：--actor-anchor-x 为中轴在图里的横向位置（0~1），
-   由 app.js 从当前 #stage-character-art 测出并缓存；按它把立绘对齐到舞台中线，
-   而不是按图片外框。换表情沿用缓存值，不会左右跳动。底边仍藏在对白框后。
-   旧定位用 left: var(--stage-character-focus-x) + translate -50%，这里改为按中轴平移。 */
+/* 6) 立绘按身体中轴居中 */
 html[data-ui="snow-adv"] .stage-character-art[data-actor-anchor] {
   left: 50%;
   translate: calc(-100% * var(--actor-anchor-x, 0.5)) 0;
@@ -438,7 +416,7 @@ html[data-ui="snow-adv"] .stage-character-art-outgoing[data-actor-anchor] {
   translate: calc(-100% * var(--actor-anchor-x, 0.5)) 0;
 }
 
-/* 7) 移动端（≤ 860px）：同一对白框；快捷菜单收成仅图标（保留无障碍名）；不与输入重叠；不低于 12px。 */
+/* 7) 移动端 */
 @media (max-width: 860px) {
   html[data-ui="snow-adv"] .stage-quick-menu { gap: 2px; right: 10px; }
   html[data-ui="snow-adv"] .stage-quick-menu button { min-width: 36px; min-height: 36px; padding: 0; justify-content: center; }
@@ -456,20 +434,13 @@ html[data-ui="snow-adv"] .stage-character-art-outgoing[data-actor-anchor] {
   html[data-ui="snow-adv"] .stage-dialogue:has(.stage-quick-menu) .stage-advance { bottom: 48px; right: 12px; }
 }
 
-/* ▼ bob, referenced only by the scoped .stage-advance rule above (motion level auto). */
+/* ▼ bob keyframes (only the scoped .stage-advance rule uses them) */
 @keyframes snow-advance-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
 
 
-/* ================================================================ P4 演出与转场
-   仅在 html[data-ui="snow-adv"] 下、面对面界面：让立绘有呼吸、入场与带缓冲的动作，
-   并把场景/模式转场遮罩重做成样稿的白雪转场。全部只动 transform / opacity，
-   档位（auto / light / off）由 app.js 维护的 [data-motion-level] 驱动，页面隐藏
-   由 [data-page-hidden] 驱动。每条选择器都限定在 html[data-ui="snow-adv"] 下（测试强制）。
-   换表情时外层旧图由 app.js 保持 opacity 1，这里不做交叉淡出，避免半透明空档。 */
+/* P4 演出与转场 */
 
-/* 1) 呼吸：极轻微的空闲缩放（1 → 1.008），绕身体中轴底部（--actor-anchor-x）进行，
-   不与 P3 的 translate 中轴定位冲突（它用 translate，这里用 transform）。
-   只在 auto 档位；页面隐藏时暂停；减少动态关闭。 */
+/* 1) 呼吸 */
 html[data-ui="snow-adv"][data-motion-level="auto"]:not([data-page-hidden="true"]) .stage-character-art[data-actor-anchor] {
   transform-origin: calc(100% * var(--actor-anchor-x, 0.5)) 100%;
   animation: snow-actor-breath 5.6s ease-in-out infinite;
@@ -481,9 +452,7 @@ html[data-ui="snow-adv"][data-motion-level="off"] .stage-character-art { animati
   html[data-ui="snow-adv"] .stage-character-art { animation: none; }
 }
 
-/* 2) 白雪转场遮罩：把既有的「脚印加载卡」转场层重做成磨砂白雪淡入 + 居中标题卡。
-   复用同一批 DOM 元素、data-phase、aria-live 文案与时序钩子，仅改表现。
-   既有脚印/圆点装饰在开关开启时隐藏。标题（地点名）用霞鹜文楷故事字体。 */
+/* 2) 白雪转场遮罩 */
 html[data-ui="snow-adv"] .scene-transition-layer,
 html[data-ui="snow-adv"] .presence-arrival-loading,
 html[data-ui="snow-adv"] .mode-transition-layer {
@@ -569,7 +538,7 @@ html[data-ui="snow-adv"] .mode-transition-layer .transition-card span {
   color: var(--ink-600);
 }
 
-/* 3) P4 新增的仅装饰节点（kicker 小字），由 app.js 仅在开关开启时建、aria-hidden。 */
+/* 3) P4 新增的仅装饰节点 */
 html[data-ui="snow-adv"] .snow-veil-kicker {
   font-family: var(--font-ui);
   font-size: var(--fs-13);
@@ -579,13 +548,11 @@ html[data-ui="snow-adv"] .snow-veil-kicker {
 }
 html[data-ui="snow-adv"][data-motion-level="off"] .snow-veil-kicker { transition: none; animation: none; }
 
-/* 立绘呼吸关键帧：只被上面 auto 档位的 .stage-character-art 规则引用。 */
+/* 立绘呼吸关键帧 */
 @keyframes snow-actor-breath { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.008); } }
 
 
-/* ---- P4 后续：独立白雪转场覆盖层（生产 motion_v2/scene_actions_v2 开启时呈现地点转场） ----
-   由 app.js 仅在开关开启时建、aria-hidden、pointer-events:none；opacity 由 JS 动画驱动，
-   idle 态为 0（不可见、不挡交互）。地点仍由既有 aria-live 播报一次，本层不参与无障碍。 */
+/* P4 后续 */
 html[data-ui="snow-adv"] .snow-scene-veil {
   position: absolute;
   inset: 0;
@@ -641,7 +608,7 @@ html[data-ui="snow-adv"] .snow-scene-veil-sub {
   letter-spacing: 0.1em;
   color: var(--ink-600);
 }
-/* off / 减少动态：遮罩完全不出现（JS 已不触发；这里兜底确保无任何过渡/动画时长）。 */
+/* off / 减少动态 */
 html[data-ui="snow-adv"][data-motion-level="off"] .snow-scene-veil,
 html[data-ui="snow-adv"][data-motion-level="off"] .snow-scene-veil-card { transition: none; animation: none; }
 @media (prefers-reduced-motion: reduce) {
@@ -656,16 +623,9 @@ html[data-ui="snow-adv"][data-motion-level="off"] .snow-scene-veil-card { transi
 }
 
 
-/* ================================================================ P5 通讯器与其余界面
-   仅在 html[data-ui="snow-adv"] 下：把面对面舞台以外的所有界面重做成雪境皮肤——文字
-   通讯（联系人卡片、磨砂设备感、角色色气泡、空会话问候卡）、顶栏、输入区、各弹窗与
-   抽屉、新手引导、提示与系统横幅，以及隐私页。沿用 P1 令牌与色板，仅改表现：动画只动
-   transform / opacity，档位由 [data-motion-level] 驱动。每条选择器都限定在
-   html[data-ui="snow-adv"] 下（测试强制）。开关关闭时本段全部匹配不到，旧界面逐字节不变。
-   per-row 的角色色由 renderCharacters() 写的 data-snow-character 提供（见 P1 的
-   [data-snow-character] 规则派生 --char/--char-deep/--char-soft）。 */
+/* P5 通讯器与其余界面 */
 
-/* ---- 1) 文字通讯：联系人卡片 ---------------------------------------------- */
+/* 1) 文字通讯：联系人卡片 */
 /* 设备感：聊天面板磨砂雪白，联系人栏半透明。 */
 html[data-ui="snow-adv"] .chat-panel { background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(244, 249, 252, 0.72)); }
 html[data-ui="snow-adv"] .contact-service { color: var(--ink-600); }
@@ -702,7 +662,7 @@ html[data-ui="snow-adv"] .pin-character { color: var(--ink-400); background: tra
 html[data-ui="snow-adv"] .pin-character:hover { color: var(--ice-700); background: var(--snow-100); }
 html[data-ui="snow-adv"] .pin-character[aria-pressed="true"] { color: var(--warm-500); background: color-mix(in oklab, var(--warm-500) 14%, var(--snow-0)); }
 
-/* ---- 2) 文字通讯：消息气泡 ------------------------------------------------ */
+/* 2) 文字通讯：消息气泡 */
 /* 助手气泡：白色磨砂、角色色细描边；用户气泡：冰蓝。 */
 html[data-ui="snow-adv"] .message-avatar .portrait { border-radius: 50%; }
 html[data-ui="snow-adv"] :is(.content-message, .content-speech) {
@@ -749,8 +709,7 @@ html[data-ui="snow-adv"] .typing-indicator-bubble {
 }
 html[data-ui="snow-adv"] .typing-dot { background: var(--char); }
 
-/* 气泡 pop-in：auto 轻微上浮 + 淡入（~220ms），light 仅淡入，off 无。
-   作用在新消息行上（JS 在 .message 节点加 is-snow-pop，见 app.js）。 */
+/* 气泡 pop-in */
 html[data-ui="snow-adv"][data-motion-level="auto"] .message.is-snow-pop {
   animation: snow-bubble-pop 220ms var(--ease-settle) both;
 }
@@ -762,8 +721,8 @@ html[data-ui="snow-adv"][data-motion-level="off"] .message.is-snow-pop { animati
   html[data-ui="snow-adv"] .message.is-snow-pop { animation: none; }
 }
 
-/* ---- 3) 文字通讯：空会话问候卡 ------------------------------------------- */
-/* 友好的角色色问候卡，取代纯灰文字（文案不变，由 app.js 包进 .snow-empty-greeting）。 */
+/* 3) 文字通讯：空会话问候卡 */
+/* 友好的角色色问候卡，取代纯灰文字 */
 html[data-ui="snow-adv"] .empty-conversation { color: var(--ink-600); }
 html[data-ui="snow-adv"] .empty-conversation .snow-empty-greeting {
   display: grid;
@@ -805,7 +764,7 @@ html[data-ui="snow-adv"] .starter-prompts button {
 }
 html[data-ui="snow-adv"] .starter-prompts button:hover { border-color: var(--ice-300); background: var(--snow-100); }
 
-/* ---- 4) 顶栏：文字通讯头部 ------------------------------------------------ */
+/* 4) 顶栏：文字通讯头部 */
 html[data-ui="snow-adv"] .active-character h1 { color: var(--ink-900); }
 html[data-ui="snow-adv"] .active-character p { color: var(--ink-600); }
 html[data-ui="snow-adv"] .active-character .portrait { border-radius: 50%; border-color: color-mix(in srgb, var(--char) 50%, transparent); }
@@ -849,7 +808,7 @@ html[data-ui="snow-adv"] .rendezvous-card {
 html[data-ui="snow-adv"] .rendezvous-card strong { color: var(--char-deep); }
 html[data-ui="snow-adv"] .rendezvous-card small { color: var(--ink-600); }
 
-/* ---- 4b) 顶栏：面对面 HUD ------------------------------------------------- */
+/* 4b) 顶栏：面对面 HUD */
 /* HUD 工具按钮、地点随新色板；≥44px 触控目标由既有规则保证，这里不缩小。 */
 html[data-ui="snow-adv"] .scene-hud {
   border-bottom-color: var(--snow-200);
@@ -862,7 +821,7 @@ html[data-ui="snow-adv"] .scene-character-button strong { color: var(--ink-900);
 html[data-ui="snow-adv"] .scene-character-button small { color: var(--ink-600); font-size: var(--fs-12); }
 html[data-ui="snow-adv"] .sidebar-toggle-icon { color: var(--ink-600); }
 
-/* ---- 5) 输入区（文字通讯）------------------------------------------------- */
+/* 5) 输入区（文字通讯） */
 html[data-ui="snow-adv"] .composer-row textarea {
   border-color: var(--snow-200);
   border-radius: 999px;
@@ -891,8 +850,7 @@ html[data-ui="snow-adv"] .request-status { color: var(--ink-600); }
 html[data-ui="snow-adv"] .request-recovery { border-color: var(--ice-300); color: var(--ice-700); background: var(--snow-100); }
 html[data-ui="snow-adv"] .stop-waiting { color: var(--warm-600); background: color-mix(in oklab, var(--warm-500) 14%, var(--snow-0)); }
 
-/* 修复移动端 placeholder 换行被截断：文字通讯输入框 placeholder 单行省略。
-   不改文案、不改行为；仅限 ::placeholder 展示。 */
+/* 修复移动端 placeholder 换行被截断 */
 html[data-ui="snow-adv"] #message-input::placeholder {
   white-space: nowrap;
   overflow: hidden;
@@ -904,7 +862,7 @@ html[data-ui="snow-adv"] #message-input::-webkit-input-placeholder {
   text-overflow: ellipsis;
 }
 
-/* ---- 6) 弹窗、抽屉、引导、提示、系统横幅 ---------------------------------- */
+/* 6) 弹窗、抽屉、引导、提示、系统横幅 */
 /* 弹窗标题/说明/表单文案与分段标题。 */
 html[data-ui="snow-adv"] .modal h2 { color: var(--ink-900); }
 html[data-ui="snow-adv"] .modal p,
@@ -1000,8 +958,8 @@ html[data-ui="snow-adv"] .system-banner {
 }
 html[data-ui="snow-adv"] .system-banner .secondary-button { background: var(--snow-0); }
 
-/* ---- 7) 隐私页（flag 开启时才皮肤化）------------------------------------- */
-/* 隐私页也挂 html[data-ui="snow-adv"]（由 privacy.js 读 /config 设置），复用 P1 令牌。 */
+/* 7) 隐私页（flag 开启时才皮肤化） */
+/* 隐私页也挂 html[data-ui="snow-adv"] */
 html[data-ui="snow-adv"] .privacy-page {
   color: var(--ink-900);
   background: linear-gradient(180deg, var(--snow-0) 0%, var(--snow-50) 46%, var(--snow-100) 100%);
@@ -1022,24 +980,23 @@ html[data-ui="snow-adv"] .privacy-page a { color: var(--ice-700); }
 html[data-ui="snow-adv"] .privacy-page .panel-kicker { color: var(--ink-600); }
 html[data-ui="snow-adv"] .attribution-list article { border-radius: var(--radius-m); background: var(--snow-50); }
 html[data-ui="snow-adv"] .attribution-list article span { color: var(--ink-600); font-size: var(--fs-12); }
-/* 字体与图标署名行：仅在 flag 开启时显示（privacy.js 开启时移除 hidden）。 */
+/* 字体与图标署名行 */
 html[data-ui="snow-adv"] .snow-adv-attribution { color: var(--ink-600); font-size: var(--fs-12); }
 html[data-ui="snow-adv"] .snow-adv-attribution a { color: var(--ice-700); }
 
-/* ---- 8) ≥12px 兜底：P5 新增的可见小字节点 -------------------------------- */
+/* 8) ≥12px 兜底：P5 新增的可见小字节点 */
 html[data-ui="snow-adv"] :is(
   .snow-empty-greeting p, .snow-adv-attribution, .movement-options [role="radio"] small
 ) { font-size: var(--fs-12); }
 
-/* ---- 关键帧（只被上面开关开启的规则引用）--------------------------------- */
+/* 关键帧（只被上面开关开启的规则引用） */
 @keyframes snow-bubble-pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes snow-bubble-fade { from { opacity: 0; } to { opacity: 1; } }
 
 
-/* ---- 9) 移动端（≤560px）：修复 HUD 名字截断与输入占位 ---------------------- */
+/* 9) 移动端（≤560px）：修复 HUD 名字截断与输入占位 */
 @media (max-width: 560px) {
-  /* HUD 角色名原本被 .scene-character-button max-width:150px + strong 省略号挤成
-     「凯…」。开关开启时让按钮用可用宽度、名字正常显示（真正放不下才省略）。 */
+  /* HUD 角色名原本被 .scene-character-button */
   html[data-ui="snow-adv"] .scene-character-button { max-width: none; min-width: 0; }
   html[data-ui="snow-adv"] .scene-character-button > span:nth-child(2) { min-width: 0; }
   html[data-ui="snow-adv"] .scene-character-button strong {
@@ -1047,20 +1004,13 @@ html[data-ui="snow-adv"] :is(
     text-overflow: clip;
     white-space: nowrap;
   }
-  /* 面对面输入占位同样单行省略，避免「说些什么，也可只填写动作……」换行被裁切。
-     placeholder 规则在上方已对 #message-input 生效，这里只保证单行高度不被撑高。 */
+  /* 面对面输入占位同样单行省略，避免「说些什么 */
   html[data-ui="snow-adv"] #message-input { min-height: 44px; }
 }
 
-/* ============================================================= P6a 开场与通讯器世界层
- * 开机层（桌面「终端开机」）、锁屏层（手机「终端锁屏」）与通讯器背后的世界层。
- * 节点全部由 app.js 仅在开关开启时建出，关闭态不存在；每条规则仍限定在
- * html[data-ui="snow-adv"] 下。只用 transform/opacity 动画；减少动态与 off 档无动画。
- * ============================================================= */
+/* P6a 开场与通讯器世界层 */
 
-/* 通讯器背后的世界层：桌面开关开启时，app.js 在 body 级建 #snow-backdrop（内含
- * #snow-backdrop-stage，世界层挂在其中），fixed 铺满视口、aria-hidden、不拦截指针、
- * z-index 低于 #chat-app，作为文字通讯界面背后的雪境背景。 */
+/* 通讯器背后的世界层 */
 html[data-ui="snow-adv"] .snow-backdrop {
   position: fixed;
   inset: 0;
@@ -1070,13 +1020,12 @@ html[data-ui="snow-adv"] .snow-backdrop {
   background: linear-gradient(180deg, var(--snow-50), color-mix(in oklab, var(--ice-300) 22%, var(--snow-0)));
 }
 html[data-ui="snow-adv"] .snow-backdrop-stage { position: absolute; inset: 0; }
-/* 背后世界的分层/画布铺满容器（舞台世界的 P2 定位是相对 #scene-stage，这里补足绝对定位）。 */
+/* 背后世界的分层/画布铺满容器 */
 html[data-ui="snow-adv"] .snow-backdrop-stage > .snow-layer { position: absolute; inset: 0; width: 100%; height: 100%; }
 html[data-ui="snow-adv"] .snow-backdrop-stage > .snow-layer > svg { display: block; width: 100%; height: 100%; }
 html[data-ui="snow-adv"] .snow-backdrop-stage > canvas.snow-layer { display: block; }
 
-/* 桌面开关开启时，#chat-app 浮在背后世界之上；文字通讯的各面做成磨砂设备感，
- * 让雪景清晰透过来而文字对比度仍 ≥ 4.5:1（ink 文本色不变、底色足够但不盖死雪景）。 */
+/* 桌面开关开启时，#chat-app 浮在背后世界之上 */
 html[data-ui="snow-adv"] #chat-app[data-snow-world] { position: relative; z-index: 1; background: transparent; }
 /* 首次入室时让透明舞台透出正在推进的外景；白雪遮罩仍位于舞台最上层。 */
 html[data-ui="snow-adv"] #chat-app[data-snow-pushing="1"] .in-person-surface,
@@ -1088,17 +1037,16 @@ html[data-ui="snow-adv"] #chat-app[data-snow-pushing="1"] .stage-narration { vis
 html[data-ui="snow-adv"] #chat-app[data-snow-world] .contact-panel,
 html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface .chat-header,
 html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface #current-rendezvous,
-html[data-ui="snow-adv"] #chat-app[data-snow-world] .chat-panel > #composer {
+html[data-ui="snow-adv"] #chat-app[data-snow-world]:not([data-channel="in_person"]) .chat-panel > #composer {
   background: color-mix(in oklab, var(--snow-0) 72%, transparent);
   backdrop-filter: saturate(1.1) blur(12px);
 }
-/* 文字通讯主面与消息区更通透，让背后雪世界清晰可见；助手/用户气泡自身仍有不透明底色保证可读。 */
+/* 文字通讯主面与消息区更通透，让背后雪世界清晰可见 */
 html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface,
 html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface #timeline,
 html[data-ui="snow-adv"] #chat-app[data-snow-world] .chat-panel { background: transparent; }
 html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface {
-  /* 62% snow + blur keeps the world visible as a frosted pane; timestamps and
-     sender lines sit directly on it, so they need >= 4.5:1 even over night scenes. */
+  /* 62% snow + blur: frosted pane over the world */
   background: color-mix(in oklab, var(--snow-0) 62%, transparent);
   backdrop-filter: saturate(1.05) blur(8px);
 }
@@ -1203,15 +1151,11 @@ html[data-ui="snow-adv"] .snow-lock[data-tier="auto"] .snow-lock-hint { animatio
 }
 
 
-/* 通讯器背后世界已改为独立的 body 级 #snow-backdrop 容器（见上），无需把 #scene-stage
- * 提为视口背景；#in-person-surface 在文字模式保持原生 hidden 行为。 */
+/* 通讯器背后世界已改为独立的 body 级 #snow-backdrop */
 
-/* ============================================================= P7 上线后修整
- * 依据线上实拍的修整：开机退场与入场、通讯器背后世界、面对面舞台与 HUD、输入工具、
- * 须知与公告弹窗、手机锁屏。仍只在 html[data-ui="snow-adv"] 下生效；只动 transform/opacity。
- * ============================================================= */
+/* P7 上线后修整 */
 
-/* HUD 下方留给立绘与提示的净空（舞台延伸到 HUD 之下后，立绘仍按 HUD 以下的高度定尺寸）。 */
+/* HUD 下方留给立绘与提示的净空 */
 html[data-ui="snow-adv"] .app-shell { --snow-hud-clear: 84px; }
 @media (max-width: 1050px) { html[data-ui="snow-adv"] .app-shell { --snow-hud-clear: 118px; } }
 @media (max-width: 560px) { html[data-ui="snow-adv"] .app-shell { --snow-hud-clear: 100px; } }
@@ -1223,7 +1167,7 @@ html[data-ui="snow-adv"] .snow-boot[data-phase="out"] .snow-boot-mark { opacity:
 html[data-ui="snow-adv"] .snow-boot[data-tier="light"][data-phase="out"] { transition: opacity 200ms ease; }
 html[data-ui="snow-adv"] .snow-boot[data-tier="light"][data-phase="out"] .snow-boot-mark { transform: none; }
 html[data-ui="snow-adv"] .snow-boot[data-tier="off"] .snow-boot-mark { transition: none; }
-/* 入场只在完整动效档：侧栏从左滑入，顶栏、消息区、输入区依次上浮。开机层淡开时它们正好露出。 */
+/* 入场只在完整动效档 */
 html[data-ui="snow-adv"][data-motion-level="auto"] #chat-app[data-snow-entering] .contact-panel { animation: snow-enter-side 420ms var(--ease-settle) 110ms both; }
 html[data-ui="snow-adv"][data-motion-level="auto"] #chat-app[data-snow-entering] #text-surface .chat-header { animation: snow-enter-rise 380ms var(--ease-settle) 170ms both; }
 html[data-ui="snow-adv"][data-motion-level="auto"] #chat-app[data-snow-entering] #timeline { animation: snow-enter-rise 420ms var(--ease-settle) 230ms both; }
@@ -1243,12 +1187,12 @@ html[data-ui="snow-adv"] #chat-app[data-snow-world] .contact-panel {
   backdrop-filter: blur(18px) saturate(1.1);
 }
 html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface .chat-header,
-html[data-ui="snow-adv"] #chat-app[data-snow-world] .chat-panel > #composer {
+html[data-ui="snow-adv"] #chat-app[data-snow-world]:not([data-channel="in_person"]) .chat-panel > #composer {
   background: color-mix(in oklab, var(--snow-0) 82%, transparent);
   -webkit-backdrop-filter: blur(14px) saturate(1.1);
   backdrop-filter: blur(14px) saturate(1.1);
 }
-/* 消息区不再整体磨砂（原来 62% 白 + 模糊把雪景洗成灰影）：上下轻薄白雾，中间透出雪景。 */
+/* 消息区不再整体磨砂 */
 html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface {
   background: linear-gradient(180deg,
     color-mix(in oklab, var(--snow-0) 38%, transparent) 0%,
@@ -1280,7 +1224,7 @@ html[data-ui="snow-adv"] #chat-app[data-snow-world] #text-surface :is(.message-t
 html[data-ui="snow-adv"] .empty-conversation { align-content: center; gap: 16px; }
 html[data-ui="snow-adv"] .empty-conversation .starter-prompts { margin-top: 0; }
 
-/* ---- B1 旁白进对白框（app.js 在开关开启时把 #stage-narration 挂进对白框，关闭时放回舞台） ---- */
+/* B1 旁白进对白框 */
 html[data-ui="snow-adv"] .stage-dialogue-copy:has(> .stage-narration) { grid-template-rows: auto auto minmax(0, 1fr); }
 html[data-ui="snow-adv"] .stage-dialogue .stage-narration {
   position: static;
@@ -1303,9 +1247,9 @@ html[data-ui="snow-adv"] .stage-dialogue .stage-narration {
 }
 html[data-ui="snow-adv"] .stage-dialogue .stage-narration:empty { display: none; }
 
-/* ---- B2/B3 面对面 HUD：舞台延伸到顶栏之下，顶栏只剩浮在雪景上的胶囊 ---- */
+/* B2/B3 面对面 HUD：舞台延伸到顶栏之下，顶栏只剩浮在雪景上的胶囊 */
 html[data-ui="snow-adv"] .in-person-surface:not(.ui-hidden) .scene-stage { grid-row: 1 / 4; }
-/* 舞台占了第 1 行后，HUD 必须显式放回第 1 行（否则自动排到舞台之后，掉到对白框下面）。 */
+/* 舞台占了第 1 行后，HUD 必须显式放回第 1 行 */
 html[data-ui="snow-adv"] .in-person-surface .scene-hud { grid-row: 1; grid-column: 1; align-self: start; }
 html[data-ui="snow-adv"] .in-person-surface.ui-hidden { --snow-hud-clear: 0px; }
 html[data-ui="snow-adv"] .in-person-surface .scene-hud {
@@ -1328,7 +1272,7 @@ html[data-ui="snow-adv"] .in-person-surface .scene-location > span { padding: 6p
 html[data-ui="snow-adv"] .in-person-surface :is(.stage-character-art, .stage-character-art-outgoing) {
   height: calc((100% - var(--snow-hud-clear)) * 0.96 * var(--stage-character-scale, 1));
 }
-/* 快捷菜单已有「回看」「隐藏」，HUD 不再重复放同样的两个按钮（H 键和菜单项照常可用）。 */
+/* 快捷菜单已有「回看」「隐藏」，HUD 不再重复放同样的两个按钮 */
 html[data-ui="snow-adv"] .in-person-surface:has(#stage-quick-menu) :is(#open-transcript, #toggle-stage-ui) { display: none; }
 @media (max-width: 560px) {
   html[data-ui="snow-adv"] .in-person-surface .scene-character-button { border-color: color-mix(in srgb, var(--ice-300) 55%, transparent); }
@@ -1336,12 +1280,12 @@ html[data-ui="snow-adv"] .in-person-surface:has(#stage-quick-menu) :is(#open-tra
   html[data-ui="snow-adv"] .in-person-surface .scene-location > span { display: inline-grid; max-width: 100%; padding: 4px 14px; }
 }
 
-/* ---- B4 面对面里的系统提示：HUD 下方的小提示条，不再整宽压住舞台；转场时让开 ---- */
+/* B4 面对面里的系统提示：HUD 下方的小提示条，不再整宽压住舞台；转场时让开 */
 html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] #system-banner {
   position: absolute;
   z-index: 30;
   top: calc(var(--snow-hud-clear) + 6px);
-  /* 用 margin 居中，不用 translate：既有的 snow-panel-enter 入场动画会接管 translate/opacity。 */
+  /* 用 margin 居中，不用 translate */
   right: 0;
   left: 0;
   width: fit-content;
@@ -1361,7 +1305,7 @@ html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] #system-banner {
 html[data-ui="snow-adv"] .app-shell[data-channel="in_person"][data-snow-pushing="1"] #system-banner,
 html[data-ui="snow-adv"] .app-shell[data-channel="in_person"]:has(.snow-scene-veil:not([data-phase="idle"])) #system-banner { visibility: hidden; }
 
-/* ---- C1 输入工具：表情包 / 动作 / 一起去 统一成同一种浅色胶囊，只有发送是主按钮 ---- */
+/* C1 输入工具：表情包 / 动作 / 一起去 统一成同一种浅色胶囊，只有发送是主按钮 */
 html[data-ui="snow-adv"] .composer-tools .composer-tool-button {
   min-height: 40px;
   padding-inline: 12px;
@@ -1389,7 +1333,7 @@ html[data-ui="snow-adv"] .announcements-modal > :is(header, .announcement-tabs, 
 html[data-ui="snow-adv"] .announcements-modal > .announcement-panel { flex: 1 1 auto; min-height: 0; overflow: auto; }
 html[data-ui="snow-adv"] .announcements-modal > .announcements-footer { border-top: 1px solid var(--snow-200); background: var(--snow-0); }
 
-/* ---- D1 手机锁屏：和界面一样保持雪白（只有舞台背景跟随时间），远处是柔和的雪丘 ---- */
+/* D1 手机锁屏：和界面一样保持雪白（只有舞台背景跟随时间），远处是柔和的雪丘 */
 html[data-ui="snow-adv"] .snow-lock {
   isolation: isolate;
   overflow: hidden;
@@ -1440,3 +1384,180 @@ html[data-ui="snow-adv"] .snow-note-card.is-primary { border-color: color-mix(in
 html[data-ui="snow-adv"] .snow-note-card .snow-note-glyph { color: var(--ice-700); background: var(--snow-100); }
 html[data-ui="snow-adv"] .snow-note-card .snow-note-meta span,
 html[data-ui="snow-adv"] .snow-note-card time { color: var(--ink-600); opacity: 1; }
+
+/* P8 舞台延伸、深色状态与尘白元素 */
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .chat-panel > .in-person-surface { grid-row: 1 / 3; grid-column: 1; }
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .chat-panel > .composer { grid-row: 2; grid-column: 1; position: relative; z-index: 12; }
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .in-person-surface:not(.ui-hidden) {
+  grid-template-rows: auto minmax(0, 1fr) var(--stage-dialogue-height) var(--snow-composer-h, 0px);
+}
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .in-person-surface:not(.ui-hidden) .scene-stage { grid-row: 1 / 5; }
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .in-person-surface:not(.ui-hidden) :is(.stage-character-art, .stage-character-art-outgoing) {
+  bottom: var(--snow-composer-h, 0px);
+  height: calc((100% - var(--snow-hud-clear) - var(--snow-composer-h, 0px)) * 0.96 * var(--stage-character-scale, 1));
+}
+
+/* P8 深色状态 */
+html[data-ui="snow-adv"][data-tone="dark"] {
+  color-scheme: dark;
+  --snow-0: #142033;
+  --snow-50: #17243a;
+  --snow-100: #1c2b44;
+  --snow-200: #2d4060;
+  --ice-300: #3b5678;
+  --ice-400: #6e9cc2;
+  --ice-500: #7db3da;
+  --ice-700: #a9d4f2;
+  --ink-900: #edf3f9;
+  --ink-700: #d0dce8;
+  --ink-600: #b0c0d0;
+  --ink-400: #8799ab;
+  --tn-deep: 13 22 37;
+  --tn-base: 17 28 46;
+  --tn-surface: 22 34 54;
+  --tn-raised: 30 45 70;
+  --tn-high: 45 64 96;
+  --tn-accent: 59 86 120;
+  --tn-line: 125 179 218;
+  --tn-glint: 169 212 242;
+  --tn-shadow: 2 8 18;
+  --shadow-frost: 0 18px 48px rgb(var(--tn-shadow) / 0.5), 0 2px 6px rgb(var(--tn-shadow) / 0.3);
+  --shadow-lift: 0 10px 28px rgb(var(--tn-shadow) / 0.45);
+  --frost-bg: linear-gradient(180deg, rgb(var(--tn-surface) / 0.92), rgb(var(--tn-base) / 0.95));
+}
+/* 黄昏（跟随时段时） */
+html[data-ui="snow-adv"][data-tone="dark"][data-tone-time="dusk"] {
+  --snow-0: #2e2439;
+  --snow-50: #352a42;
+  --snow-100: #3e314c;
+  --snow-200: #5b4868;
+  --ice-300: #6e5a7e;
+  --ice-400: #b99ac4;
+  --ice-500: #c9a9d2;
+  --ice-700: #efd2e4;
+  --ink-900: #f8eff5;
+  --ink-700: #e6d6e2;
+  --ink-600: #cdbacb;
+  --ink-400: #a692a8;
+  --tn-deep: 40 29 50;
+  --tn-base: 50 37 62;
+  --tn-surface: 62 47 76;
+  --tn-raised: 78 60 94;
+  --tn-high: 98 77 116;
+  --tn-accent: 126 98 144;
+  --tn-line: 230 182 208;
+  --tn-glint: 248 214 230;
+  --tn-shadow: 26 12 30;
+}
+html[data-ui="snow-adv"][data-tone="dark"] body { background: rgb(var(--tn-deep)); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.contact-panel, .chat-header, .composer, .toast, .new-replies) { background: rgb(var(--tn-base) / 0.94); }
+html[data-ui="snow-adv"][data-tone="dark"] .chat-panel { background: linear-gradient(180deg, rgb(var(--tn-base) / 0.6), rgb(var(--tn-deep) / 0.72)); }
+html[data-ui="snow-adv"][data-tone="dark"] .character:hover { background: rgb(var(--tn-raised) / 0.9); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.content-message, .content-speech, .content-sticker) { background: rgb(var(--tn-surface) / 0.94); }
+html[data-ui="snow-adv"][data-tone="dark"] .content-sticker span { background: rgb(var(--tn-raised) / 0.8); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.starter-prompts button, .scene-invitation-chip, .joint-movement-notice, .scene-invitation-anchor .scene-invitation-details) { background: rgb(var(--tn-surface) / 0.88); }
+/* 面对面：顶栏小胶囊、对白框、旁白、快捷菜单、输入区 */
+html[data-ui="snow-adv"][data-tone="dark"] .in-person-surface .scene-hud { background: linear-gradient(180deg, rgb(var(--tn-shadow) / 0.55), rgb(var(--tn-shadow) / 0)); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.scene-character-button, .scene-tool-button:not(.primary), .scene-hud),
+html[data-ui="snow-adv"][data-tone="dark"] .in-person-surface :is(.scene-character-button, .scene-location > span) {
+  border-color: rgb(var(--tn-line) / 0.28);
+  background: rgb(var(--tn-base) / 0.78);
+}
+html[data-ui="snow-adv"][data-tone="dark"] .in-person-surface .scene-hud { background: linear-gradient(180deg, rgb(var(--tn-shadow) / 0.55), rgb(var(--tn-shadow) / 0)); border-color: transparent; }
+html[data-ui="snow-adv"][data-tone="dark"] .stage-dialogue {
+  border-color: rgb(var(--tn-line) / 0.3);
+  background: linear-gradient(180deg, rgb(var(--tn-surface) / 0.9), rgb(var(--tn-deep) / 0.94));
+  box-shadow: 0 -16px 44px rgb(var(--tn-shadow) / 0.45), inset 0 1px rgb(var(--tn-glint) / 0.12);
+}
+html[data-ui="snow-adv"][data-tone="dark"] .stage-narration { background: rgb(var(--tn-surface) / 0.88); }
+html[data-ui="snow-adv"][data-tone="dark"] .stage-dialogue .stage-narration { background: transparent; }
+html[data-ui="snow-adv"][data-tone="dark"] .stage-speaker-line span { color: var(--ink-600); }
+html[data-ui="snow-adv"][data-tone="dark"] .stage-quick-menu button { border-color: rgb(var(--tn-line) / 0.24); background: rgb(var(--tn-raised) / 0.72); }
+html[data-ui="snow-adv"][data-tone="dark"] .app-shell[data-channel="in_person"] .composer-row {
+  border-color: rgb(var(--tn-line) / 0.3);
+  background: linear-gradient(180deg, rgb(var(--tn-deep) / 0.95), rgb(var(--tn-deep) / 0.97));
+  box-shadow: 0 14px 30px rgb(var(--tn-shadow) / 0.4);
+}
+html[data-ui="snow-adv"][data-tone="dark"] .app-shell[data-channel="in_person"] .action-composer { border-color: rgb(var(--tn-line) / 0.3); background: rgb(var(--tn-base) / 0.94); }
+html[data-ui="snow-adv"][data-tone="dark"] .action-composer textarea { background: rgb(var(--tn-surface) / 0.72); }
+html[data-ui="snow-adv"][data-tone="dark"] .app-shell[data-channel="in_person"] #system-banner { background: rgb(var(--tn-base) / 0.9); }
+/* 通讯器背后的雾：夜晚改成深色薄雾，小字阴影改深色 */
+html[data-ui="snow-adv"][data-tone="dark"] #chat-app[data-snow-world]:not([data-channel="in_person"]) .chat-panel > #composer,
+html[data-ui="snow-adv"][data-tone="dark"] #chat-app[data-snow-world] #text-surface .chat-header { background: rgb(var(--tn-base) / 0.82); }
+/* 手机通讯器不挂雪境背景，消息区原本是写死的雪白渐变 */
+html[data-ui="snow-adv"][data-tone="dark"] #chat-app:not([data-snow-world]) .text-surface { background: linear-gradient(180deg, rgb(var(--tn-surface)), rgb(var(--tn-base))); }
+/* 转场白雪在夜里改为深色雪幕，标题卡文字随变量变浅 */
+html[data-ui="snow-adv"][data-tone="dark"] :is(.snow-scene-veil, .scene-transition-layer, .presence-arrival-loading, .mode-transition-layer) {
+  background: radial-gradient(72% 62% at 50% 48%, rgb(var(--tn-raised) / 0.98), rgb(var(--tn-base) / 0.97) 70%, rgb(var(--tn-deep) / 0.98));
+}
+/* 锁屏通知、空通知提示 */
+html[data-ui="snow-adv"][data-tone="dark"] .snow-note-card,
+html[data-ui="snow-adv"][data-tone="dark"] .snow-lock-notes:empty::before { background: rgb(var(--tn-surface) / 0.8); }
+html[data-ui="snow-adv"][data-tone="dark"] .floating-feedback { border-color: rgb(var(--tn-line) / 0.3); color: var(--ink-700); background: rgb(var(--tn-surface) / 0.88); }
+html[data-ui="snow-adv"][data-tone="dark"] .source-links a { border-color: rgb(var(--tn-line) / 0.26); color: var(--ice-700); background: rgb(var(--tn-raised) / 0.72); }
+/* 设置、须知、公告里写死浅色的小表面（app.css 原值） */
+html[data-ui="snow-adv"][data-tone="dark"] :is(.setting-toggle, .notice-choice, .announcement-tabs) { border-color: rgb(var(--tn-line) / 0.22); background: rgb(var(--tn-surface) / 0.72); }
+html[data-ui="snow-adv"][data-tone="dark"] .announcements-modal .announcements-header { background: linear-gradient(125deg, rgb(var(--tn-raised)), rgb(var(--tn-surface)) 72%); }
+html[data-ui="snow-adv"][data-tone="dark"] .announcement-tabs button[aria-selected="true"] { background: rgb(var(--tn-accent) / 0.55); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.form-hint, .subscription-status[data-status="connected"]) { color: #a8d8bb; background: rgba(46, 92, 68, 0.32); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.danger-button, .message.failed .message-body) { border-color: rgba(224, 122, 138, 0.42); color: #f2b3bf; background: rgba(96, 34, 48, 0.3); }
+html[data-ui="snow-adv"][data-tone="dark"] .portrait.portrait-text { background: linear-gradient(145deg, rgb(var(--tn-high)), rgb(var(--tn-raised))); color: var(--ink-700); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.in-person-surface, .scene-stage) { background-color: rgb(var(--tn-surface)); }
+html[data-ui="snow-adv"][data-tone="dark"] .scene-menu-popover { border-color: rgb(var(--tn-line) / 0.26); background: rgb(var(--tn-surface) / 0.96); }
+/* 冰蓝/角色色填充上的文字原本用 --snow-0（白），变量翻转后要固定为白字。 */
+html[data-ui="snow-adv"][data-tone="dark"] :is(.presence-switch, .primary-button, .send-button, .scene-tool-button.primary, .stage-speaker-line strong, .announcement-tab-badge),
+html[data-ui="snow-adv"][data-tone="dark"] .message.user :is(.content-message, .content-speech) { color: #ffffff; }
+
+
+/* P8 尘白元素（轻量）：基地区域编号、对白框切角与角色色细线；图标圆形裁切 */
+/* 小吉终端图标原图是带白边的方形底，蓝色圆形主体中心 */
+html[data-ui="snow-adv"] :is(.snow-boot-mark img, .snow-lock-bar img) {
+  border-radius: 0;
+  clip-path: circle(45.8% at 50% 48.7%);
+  scale: 1.09;
+}
+/* 地点胶囊上方的区域编号（纯装饰，读屏不朗读）。 */
+html[data-ui="snow-adv"] .in-person-surface .scene-location > span::before {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--ice-600);
+  font: 600 12px/1.2 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  letter-spacing: 0.16em;
+  content: "EXT" / "";
+}
+html[data-ui="snow-adv"] .in-person-surface[data-scene="observation"] .scene-location > span::before { content: "B-01" / ""; }
+html[data-ui="snow-adv"] .in-person-surface[data-scene="archive"] .scene-location > span::before { content: "B-02" / ""; }
+html[data-ui="snow-adv"] .in-person-surface[data-scene="quarters"] .scene-location > span::before { content: "B-03" / ""; }
+html[data-ui="snow-adv"] .in-person-surface[data-scene="lounge"] .scene-location > span::before { content: "B-04" / ""; }
+html[data-ui="snow-adv"] .in-person-surface[data-scene="canteen"] .scene-location > span::before { content: "B-05" / ""; }
+html[data-ui="snow-adv"] .in-person-surface[data-scene="training"] .scene-location > span::before { content: "B-06" / ""; }
+html[data-ui="snow-adv"] .in-person-surface[data-scene="medical"] .scene-location > span::before { content: "B-07" / ""; }
+html[data-ui="snow-adv"] .in-person-surface[data-scene="corridor"] .scene-location > span::before { content: "B-08" / ""; }
+/* 对白框：右上切角 */
+html[data-ui="snow-adv"] .stage-dialogue {
+  --snow-dialogue-cut: 20px;
+  clip-path: polygon(0 0, calc(100% - var(--snow-dialogue-cut)) 0, 100% var(--snow-dialogue-cut), 100% 100%, 0 100%);
+}
+html[data-ui="snow-adv"] .stage-dialogue::before {
+  position: absolute;
+  top: 0;
+  left: 28px;
+  width: min(220px, 34%);
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: linear-gradient(90deg, var(--char-deep, var(--ice-500)), color-mix(in srgb, var(--char-deep, var(--ice-500)) 0%, transparent));
+  content: "";
+  pointer-events: none;
+}
+html[data-ui="snow-adv"] .stage-dialogue::after {
+  position: absolute;
+  top: 0;
+  left: calc(100% - var(--snow-dialogue-cut));
+  width: calc(var(--snow-dialogue-cut) * 1.4142);
+  height: 2px;
+  background: color-mix(in srgb, var(--ice-400) 80%, transparent);
+  transform: rotate(45deg);
+  transform-origin: 0 0;
+  content: "";
+  pointer-events: none;
+}
