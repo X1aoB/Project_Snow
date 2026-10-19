@@ -166,7 +166,7 @@ const state = {
 };
 
 const featureListeners = new Map(), featureMemoryWrites = new Map();
-let featureModulePromise, featurePreferenceWrite = Promise.resolve(), featurePreferenceEpoch = 0;
+let featureModulePromise, featurePreferenceWrite = Promise.resolve(), featurePreferenceEpoch = 0, snowFeatureLogic;
 const featureModule = () => featureModulePromise ||= import("/modules/snow-feature-logic.js");
 function featureEmit(type, detail) {
   for (const listener of featureListeners.get(type) || []) {
@@ -183,17 +183,33 @@ function featureBusyFor(characterId) {
     || state.summaryInFlight.has(characterId) || state.sceneActionByCharacter.has(characterId)
     || state.arrivalRequestByCharacter.has(characterId) || state.modeTransitionPending || state.presenceResolvePending || state.arrivalPending);
 }
+async function withFeatureWrite(characterId, operation) {
+  if (!state.writerOwned || featureBusyFor(characterId) || featureMemoryWrites.has(characterId)) return { ok: false, reason: "busy" };
+  const write = Promise.resolve().then(operation);
+  featureMemoryWrites.set(characterId, write);
+  updateComposerAvailability();
+  try { return await write; }
+  finally { featureMemoryWrites.delete(characterId); updateComposerAvailability(); }
+}
 function featureSnapshot() {
+  const decoded = decodeStatePackage(state.worldPackage || ""), pending = decoded.pending_rendezvous ?? decoded.world?.pending_rendezvous;
   return { ...structuredClone({ selected: state.selected, characters: state.characters, scene: state.scene,
     channel: currentThread()?.channel || "text", worldPackage: state.worldPackage, localDayKey: localDayKey(),
     movementCatalog: movementCatalog(), modelReady: configured(), writerOwned: state.writerOwned, historyEpoch: state.historyEpoch,
-    tone: document.documentElement.dataset.tone, toneTime: document.documentElement.dataset.toneTime }),
+    tone: document.documentElement.dataset.tone, toneTime: document.documentElement.dataset.toneTime,
+    rendezvous: { authoritative: Object.hasOwn(decoded, "pending_rendezvous") || Object.hasOwn(decoded.world || {}, "pending_rendezvous"),
+      dayKey: localDayKey(), items: Object.entries(pending || {}).map(([character_id, value]) => ({ ...value, character_id })) } }),
     busy: globalRequestBusy(), busyFor: featureBusyFor };
 }
 async function installFeatures() {
   const logic = (await featureModule()).createFeatureLogic({
     snapshot: featureSnapshot, on: featureOn,
-    preferences: () => structuredClone(state.featurePreferences), savePreferences: saveUiPreferences,
+    emit: featureEmit, localPreferences, tabPreferences, revealPlan: typewriterRevealPlan,
+    announce: text => { $("stage-announcer").textContent = text; },
+    loadState: key => storeGet("app_state", key).then(value => structuredClone(value)), saveState: saveFeatureState,
+    readStates: async () => structuredClone((await storeAll("app_state")).filter(record => record.key.startsWith("stage_read_v1:"))),
+    usageReceipts: async () => structuredClone((await storeAll("app_state")).filter(record => record.key.startsWith("proactive_usage_v1:"))),
+    preferences: () => structuredClone(state.featurePreferences), savePreferences: patch => saveUiPreferences(patch, true),
     loadDialogue: async characterId => structuredClone(await loadDialogueRecord(characterId)),
     saveDialogue: async (characterId, record) => {
       if (!state.writerOwned) throw new Error("history_busy");
@@ -203,20 +219,55 @@ async function installFeatures() {
     getMessage: async messageId => structuredClone(await storeGet("messages", messageId)),
     messages: async characterId => structuredClone(await loadMessagePage(characterId, { limit: Number.MAX_SAFE_INTEGER })),
     allMessages: async () => structuredClone((await storeAll("messages")).map(normalizeMessage)),
-    withMemoryWrite: async (characterId, operation) => {
-      if (!state.writerOwned || featureBusyFor(characterId) || featureMemoryWrites.has(characterId)) return { ok: false, reason: "busy" };
-      const write = Promise.resolve().then(operation);
-      featureMemoryWrites.set(characterId, write);
-      updateComposerAvailability();
-      try { return await write; }
-      finally { featureMemoryWrites.delete(characterId); updateComposerAvailability(); }
-    },
+    withMemoryWrite: withFeatureWrite,
   });
+  snowFeatureLogic = logic;
+  featureOn("reminder-due", snowRefreshLockNotes);
+  featureOn("reminders-changed", snowRefreshLockNotes);
   await logic.ready;
+  const { installFeatureRuntime } = await import("/modules/snow-feature-runtime.js");
+  await installFeatureRuntime(logic, { snapshot: featureSnapshot, on: featureOn, emit: featureEmit,
+    request: (path, options) => dialogueHttp.request(path, options), savePreferences: patch => saveUiPreferences(patch, true),
+    preferences: () => structuredClone(state.featurePreferences), loadState: key => storeGet("app_state", key), saveState: saveFeatureState,
+    readRequests: async () => structuredClone((await storeAll("app_state")).filter(record => record.key.startsWith("proactive_request_v1:"))),
+    withRequest: withFeatureWrite,
+    contextCurrent: value => value.provider === state.provider && value.model === state.model && value.credential === state.credential
+      && value.reasoning_effort === subscriptionReasoningPayload().reasoning_effort && value.enabled === state.config?.proactive_messages?.enabled,
+    context: async characterId => { const thread = await dbGetThread(characterId); await loadDialogueRecord(characterId);
+      return { ...state.config?.proactive_messages, writerOwned: state.writerOwned, ready: configured(), historyEpoch: state.historyEpoch,
+        provider: state.provider, model: state.model, ...subscriptionReasoningPayload(), credential: state.credential,
+        character_id: characterId, segment_id: thread.conversationSegmentId, state_package: state.worldPackage,
+        session_context_package: dialoguePackage(thread) }; }, commit: saveProactiveMessage });
   const { installSnowFeatures } = await import("/modules/snow-features.js");
-  installSnowFeatures({ version: 1, icon: createSnowIcon, avatarOf: character => structuredClone(characterAvatar(character)), snapshot: featureSnapshot, logic,
-    stage: { speechNode: () => $("stage-speech") }, on: featureOn,
+  await installSnowFeatures({ version: 1, icon: createSnowIcon, avatarOf: character => structuredClone(characterAvatar(character)), snapshot: featureSnapshot, logic,
+    stage: { speechNode: () => $("stage-speech"), setPager: pager => logic.reading.setPager(pager) }, on: featureOn,
     open: { presence: visitFromMap, transcript: openFeatureTranscript, settings: openSettings, info: () => openDrawer("info-panel") } });
+}
+async function saveFeatureState(key, record) {
+  const epoch = state.historyEpoch, db = await openDB();
+  if (!db || !state.storageAvailable || !state.writerOwned || epoch !== state.historyEpoch) throw new Error("history_busy");
+  const value = { ...structuredClone(record), key };
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction("app_state", "readwrite"); tx.objectStore("app_state").put(value);
+    tx.oncomplete = resolve; tx.onerror = tx.onabort = () => reject(tx.error || new Error("history_storage_required"));
+  });
+  if (epoch !== state.historyEpoch || !state.writerOwned) throw new Error("history_busy");
+  state.memoryStores.app_state.set(key, value);
+}
+async function saveProactiveMessage(result, record) {
+  const epoch = state.historyEpoch, thread = await dbGetThread(result.character_id);
+  if (!state.writerOwned || epoch !== state.historyEpoch || thread.historyEpoch !== epoch
+      || thread.conversationSegmentId !== record.envelope.segment_id) throw new Error("history_busy");
+  if (!thread.messages.some(message => message.requestId === result.request_id && message.source === "proactive_reminder")) {
+    thread.messages.push(normalizeMessage({ id: result.message_id, characterId: result.character_id, role: "assistant",
+      requestId: result.request_id, source: "proactive_reminder", status: "sent", contentBlocks: result.content_blocks,
+      communicationChannel: "text", conversationSegmentId: record.envelope.segment_id, createdAt: record.createdAt,
+      usage: { ...result.usage, model: record.envelope.model } }));
+    thread.messageCount = Math.max(thread.messageCount, thread.messages.length);
+  }
+  await dbPutThread(thread, { appState: [record, record.usageReceipt] });
+  if (!state.storageAvailable) throw new Error("history_storage_required");
+  if (epoch === state.historyEpoch && state.selected === thread.characterId) renderAll();
 }
 async function openFeatureTranscript({ messageId } = {}) {
   if (messageId) {
@@ -1079,7 +1130,7 @@ function syncStageQuickMenu() {
   const inPerson = !$("in-person-surface").hidden;
   if (advance) advance.classList.toggle("is-ready", Boolean(inPerson && hasAssistant && !revealing && !waiting && !queue));
   const skip = $("stage-quick-menu")?.querySelector('[data-stage-quick="skip"]');
-  if (skip) skip.disabled = !(revealing || queue || (state.streamingPresentationByCharacter.get(state.selected)?.receivedCount > state.streamingPresentationByCharacter.get(state.selected)?.visibleCount));
+  if (skip) skip.disabled = !(revealing || snowFeatureLogic?.reading.active() || queue || (state.streamingPresentationByCharacter.get(state.selected)?.receivedCount > state.streamingPresentationByCharacter.get(state.selected)?.visibleCount));
 }
 function syncStageQuickMenuMount() {
   if (featureEnabled("ui_snow_adv")) buildStageQuickMenu();
@@ -1331,6 +1382,10 @@ function maybeStartSnowBoot() {
 function snowLockNotes() {
   // 通知卡仅由既有状态构造：当前待赴约定、未读公告。
   const notes = [];
+  for (const reminder of snowFeatureLogic?.reminders.active() || []) {
+    if (reminder.status === "fired") notes.push({ kind: "reminder", characterId: reminder.characterId,
+      title: `约定提醒 · ${reminder.locationName || "约定地点"}`, detail: "点开确认是否赴约" });
+  }
   try {
     // 当前待赴约定：复用既有签名约定判定；点开走「去见她/赴约」确认流程，绝不自动赴约。
     const pending = sceneActionsV2Enabled() ? signedPendingRendezvous().value : null;
@@ -1464,7 +1519,7 @@ async function snowAfterUnlock(note) {
   await snowRunDeferredOpenings();
   if (!note) return;
   // 通知卡复用既有处理，绝不自动赴约 / 自动发消息。
-  if (note.kind === "rendezvous") { if (note.characterId && note.characterId !== state.selected) await selectCharacter(note.characterId); await openPresenceDialog(); }
+  if (["rendezvous", "reminder"].includes(note.kind)) { if (note.characterId && note.characterId !== state.selected) await selectCharacter(note.characterId); await openPresenceDialog(); }
   else if (note.kind === "notice") { openAnnouncements(); }
 }
 function maybeStartSnowLock() {
@@ -1535,7 +1590,8 @@ function recordReplyPaint(requestId, node) {
     const message = stage ? stageMessage() : null;
     if (stage && !message) return;
     const firstSpeech = stage ? visibleBlocksFor(message).find(block => block.type === "speech" && plain(block.text).trim()) : null;
-    const effective = !stage || Boolean(firstSpeech && node.textContent.startsWith(plain(firstSpeech.text).trim()));
+    const effective = !stage || Boolean(firstSpeech && (snowFeatureLogic?.reading.owns(speechTypewriterKey(message))
+      ? node.textContent.trim() : node.textContent.startsWith(plain(firstSpeech.text).trim())));
     let changed = false;
     if (!timing.firstPaintAt) {
       timing.firstPaintAt = performance.now();
@@ -1586,13 +1642,14 @@ function syncFastForward() {
   if (!button) return;
   const queue = presentationFor();
   const streaming = state.streamingPresentationByCharacter.get(state.selected);
-  const revealing = !$("in-person-surface").hidden && state.typewriter.fullText && latestInPersonMessage("assistant");
+  const revealing = !$("in-person-surface").hidden && (state.typewriter.fullText || snowAdvActive() && snowFeatureLogic?.reading.active()) && latestInPersonMessage("assistant");
   button.hidden = !featureEnabled("chat_latency_v2") || !(queue || revealing || state.completedPresentationByCharacter.has(state.selected) || streaming?.receivedCount > streaming?.visibleCount);
   const row = button.closest(".request-status-row");
   if (!button.hidden && row) row.hidden = false;
   syncStageQuickMenu();
 }
 function finishReceivedPresentation() {
+  if (!document.hidden && snowAdvActive() && !$("in-person-surface").hidden && snowFeatureLogic?.reading.skip()) { syncFastForward(); return; }
   flushCommunicatorPresentation();
   const currentTiming = replyTiming(typingStateFor()?.requestId);
   if (currentTiming) currentTiming.skip = true;
@@ -2340,7 +2397,7 @@ function dialoguePackage(thread) {
   const context = decodeSidecar(token);
   return context.segment_id === thread.conversationSegmentId && context.character_id === thread.characterId ? token : "";
 }
-async function commitDialogueResult(thread, result, owns = () => true) {
+async function commitDialogueResult(thread, result, owns = () => true, requestId = result.requestId || result.request_id) {
   if (!owns() || !state.writerOwned || thread.historyEpoch !== state.historyEpoch) return false;
   const token = plain(result.sessionContextPackage || result.session_context_package);
   const context = decodeSidecar(token);
@@ -2361,6 +2418,9 @@ async function commitDialogueResult(thread, result, owns = () => true) {
   await dbPutThread(thread, { appState });
   if (!owns() || thread.historyEpoch !== state.historyEpoch || !state.writerOwned) return false;
   state.dialogueByCharacter.set(thread.characterId, record);
+  featureEmit("rendezvous-settled", { requestId,
+    status: result.movementStatus?.status || result.movement_status?.status || result.scene_action?.status || "completed",
+    rendezvous: signedPendingRendezvous(thread.characterId).value });
   return true;
 }
 async function retireRejectedDialogueContext(error, thread, envelope, owns) {
@@ -2499,9 +2559,10 @@ async function saveConversationPreferences() {
     dayContinuityPreference: state.dayContinuityPreference,
   });
 }
-async function saveUiPreferences(patch = {}) {
+async function saveUiPreferences(patch = {}, durable = false) {
   const epoch = state.historyEpoch, generation = featurePreferenceEpoch;
-  const record = { ...state.featurePreferences, ...structuredClone(patch),
+  const previous = state.featurePreferences, changes = structuredClone(patch);
+  const ordinary = {
     key: "ui_preferences",
     pinnedCharacters: [...state.pinnedCharacters],
     favoriteStickerIds: [...state.favoriteStickerIds],
@@ -2510,12 +2571,24 @@ async function saveUiPreferences(patch = {}) {
     rendezvousDismissals: [...state.rendezvousDismissals].slice(-120),
     historyRetentionDays: state.historyRetentionDays,
   };
+  const record = { ...previous, ...changes, ...ordinary };
   state.featurePreferences = record;
-  const write = featurePreferenceWrite.catch(() => {}).then(() => {
-    if (epoch === state.historyEpoch && generation === featurePreferenceEpoch && state.writerOwned) return storePut("app_state", record);
+  const write = featurePreferenceWrite.catch(() => {}).then(async () => {
+    const stored = await storeGet("app_state", "ui_preferences");
+    if (epoch !== state.historyEpoch || generation !== featurePreferenceEpoch || !state.writerOwned) {
+      if (durable) throw new Error("history_busy");
+      return;
+    }
+    const value = { ...stored, ...changes, ...ordinary };
+    await (durable ? saveFeatureState("ui_preferences", value) : storePut("app_state", value));
+    if (state.featurePreferences === record && epoch === state.historyEpoch) state.featurePreferences = value;
   });
   featurePreferenceWrite = write;
-  await write;
+  try { await write; }
+  catch (error) {
+    if (state.featurePreferences === record && epoch === state.historyEpoch && generation === featurePreferenceEpoch) state.featurePreferences = previous;
+    throw error;
+  }
 }
 
 async function pruneExpiredMessages() {
@@ -2612,10 +2685,12 @@ function restoreDraft() {
 
 function sessionKey() { return "project-snow-public:byok"; }
 function saveCredential() {
+  snowFeatureLogic?.proactive?.invalidate();
   if (!state.credential || !state.credentialExpiresAt) return;
   tabPreferences.setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, ...(state.provider === SUBSCRIPTION_PROVIDER ? { reasoningEffort: state.reasoningEffort } : {}), expiresAt: state.credentialExpiresAt }));
 }
 function clearCredential() {
+  snowFeatureLogic?.proactive?.invalidate();
   tabPreferences.removeItem(sessionKey());
   state.credential = "";
   state.credentialExpiresAt = 0;
@@ -3747,7 +3822,7 @@ async function presentAssistantTurn(characterId, requestId, message, { visibleCo
   try {
     if (inPerson) {
       const completeSpeech = inPersonSurfaceText(blocks, "speech");
-      if (characterId === state.selected && completeSpeech) {
+      if (characterId === state.selected && completeSpeech && !(snowAdvActive() && snowFeatureLogic?.reading.owns(speechTypewriterKey(message)))) {
         await waitForTypewriterCompletion(
           speechTypewriterKey(message),
           completeSpeech,
@@ -5746,6 +5821,7 @@ function typewriterCompleted(key, value) {
   );
 }
 function waitForTypewriterCompletion(key, text, signal) {
+  if (snowFeatureLogic?.reading.owns(key)) return snowFeatureLogic.reading.wait(key, signal);
   const value = plain(text);
   if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
   if (typewriterCompleted(key, value)) return Promise.resolve(true);
@@ -5923,6 +5999,7 @@ function renderStageSpeech(assistantMessage) {
   const speechNode = $("stage-speech");
   const hasConfirmedBody = assistantMessage?.requestId === pending?.requestId && assistantMessage?.committedBlocks?.length;
   if (!hasConfirmedBody && pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment"].includes(pending.phase)) {
+    snowFeatureLogic?.reading.cancel();
     window.clearTimeout(state.typewriter.timer);
     state.typewriter.timer = 0;
     if (pending.phase !== "segment") {
@@ -5959,7 +6036,15 @@ function renderStageSpeech(assistantMessage) {
   // Confirmed replies take priority over decorative arrival/scene transitions…
   if (liveReply && (completeSpeech || action)
       && (snowPushContext || state.snowVeilAnimation || state.snowVeilTimers.length)) cancelSnowScenePresentation();
-  renderTypewriter(speech, speechKey, !featureEnabled("chat_latency_v2") || Boolean(liveReply));
+  if (snowAdvActive() && snowFeatureLogic?.reading.enabled()) {
+    window.clearTimeout(state.typewriter.timer);
+    state.typewriter = { key: speechKey, timer: 0, fullText: "", displayedText: "" };
+  }
+  const paged = snowAdvActive() && assistantMessage?.status === "sent" && completeSpeech
+    && snowFeatureLogic?.reading.present({ message: assistantMessage, text: completeSpeech, key: speechKey,
+      animate: !quietPresentation() && (!featureEnabled("chat_latency_v2") || Boolean(liveReply)),
+      onFirstPaint: () => recordReplyPaint(assistantMessage.requestId, speechNode) });
+  if (!paged) renderTypewriter(speech, speechKey, !featureEnabled("chat_latency_v2") || Boolean(liveReply));
   if (assistantMessage?.partial) {
     $("stage-presence-status").hidden = false;
     $("stage-presence-status").textContent = "回复未完成，已保留收到的内容。";
@@ -6774,7 +6859,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     state.retrySnapshots.delete(userMessage.id);
     userMessage.requestSnapshot = null;
     if (dialogueV2) {
-      result.sceneAccepted = await commitDialogueResult(thread, result, ownsRequest);
+      result.sceneAccepted = await commitDialogueResult(thread, result, ownsRequest, requestId);
       if (!result.sceneAccepted) await dbPutThread(thread);
     }
     else await dbPutThread(thread);
@@ -7150,7 +7235,7 @@ async function performSceneAction(action, characterId = state.selected, signal =
       }
       thread.messageCount = Math.max(thread.messageCount, thread.messages.length);
     }
-    if (await commitDialogueResult(thread, result, owns)) {
+    if (await commitDialogueResult(thread, result, owns, envelope.request_id)) {
       state.sceneByCharacter.set(characterId, result.scene_state || {});
       if (characterId === state.selected) { state.scene = result.scene_state; renderScene(); }
     } else throw new Error("session_context_conflict");
@@ -8146,6 +8231,8 @@ async function clearAllHistory() {
   if (!window.confirm("确定清空全部 小吉终端 本地历史与世界状态吗？")) return;
   cancelBackgroundSummaries();
   state.historyEpoch += 1;
+  featurePreferenceEpoch += 1;
+  state.featurePreferences = {};
   const db = await openDB();
   if (db) await clearHistoryDatabase(db, !navigator.locks?.request
     ? { key: "writer_lease", owner: state.writerId, expiresAt: Date.now() + 15000 } : undefined);
@@ -8155,7 +8242,6 @@ async function clearAllHistory() {
   state.drafts.clear(); state.pinnedCharacters.clear(); state.favoriteStickerIds.clear();
   state.favoriteStickers.clear(); state.recentStickerIds = []; state.rendezvousDismissals.clear();
   if (state.selected) { await dbGetThread(state.selected); restoreDraft(); await resolvePresence(); }
-  state.featurePreferences = {};
   featureEmit("history-changed");
   broadcastHistoryChange();
   renderAll(); openSettings("history"); toast("全部本地历史已清空");
@@ -8171,7 +8257,7 @@ async function exportHistory() {
     threads: await storeAll("threads"), messages: (await storeAll("messages")).map(message => ({ ...message,
       ...(message.requestSnapshot?.envelope && message.status !== "sent" ? { errorCode: "request_result_unavailable", status: "failed" } : {}),
       requestSnapshot: message.requestSnapshot?.envelope ? null : message.requestSnapshot })),
-    appState: (await storeAll("app_state")).filter((entry) => ["drafts", "preferences", "ui_preferences"].includes(entry.key)),
+    appState: (await featureModule()).portableFeatureState(await storeAll("app_state"), localPreferences),
   });
   const url = URL.createObjectURL(new Blob([JSON.stringify(backup)], { type: "application/json" }));
   const anchor = document.createElement("a");
@@ -8194,6 +8280,9 @@ async function importHistory(backup) {
         mergeUiPreferences: features.mergeFeaturePreferences,
         mergeMessage: (old, incoming) => ({ ...old, extraUsage: features.mergeExtraUsage(old.extraUsage, incoming.extraUsage) }),
       });
+    const readingPreferences = backup.appState.find(entry => entry.key === "ui_preferences")?.readingPreferences;
+    if (snowFeatureLogic) await snowFeatureLogic.reading.importPreferences(readingPreferences);
+    else features.importReadingPreferences(localPreferences, readingPreferences);
     await refreshStoredHistory();
     broadcastHistoryChange();
   });

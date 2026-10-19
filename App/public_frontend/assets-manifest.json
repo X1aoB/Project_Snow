@@ -48,8 +48,30 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/modules/snow-reading-logic.js",
+      "public_url": "/modules/snow-reading-logic.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-reminder-logic.js",
+      "public_url": "/modules/snow-reminder-logic.js",
+      "required_html": false
+    },
+    {
       "source": "public_frontend/modules/snow-feature-logic.js",
       "public_url": "/modules/snow-feature-logic.js",
+      "dependencies": ["/modules/snow-reading-logic.js", "/modules/snow-reminder-logic.js"],
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-proactive-client.js",
+      "public_url": "/modules/snow-proactive-client.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-feature-runtime.js",
+      "public_url": "/modules/snow-feature-runtime.js",
+      "dependencies": ["/modules/snow-proactive-client.js"],
       "required_html": false
     },
     {
@@ -83,6 +105,7 @@
         "/modules/snow-world.js",
         "/modules/snow-base-map.js",
         "/modules/snow-feature-logic.js",
+        "/modules/snow-feature-runtime.js",
         "/modules/snow-features.js",
         "/snow-adv-fonts.css",
         "/assets/avatars/longyan-neutral-96.webp",

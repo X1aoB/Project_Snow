@@ -45,6 +45,7 @@ HARNESS = r"""async () => {
       replaceRecords:value=>{records=clone(value);},
       emitHistory(){for(const listener of listeners.get('history-changed')||[])listener();},
       emit(message){for(const listener of listeners.get('message-saved')||[])listener(clone(message));},
+      emitUsage(receipt){for(const listener of listeners.get('usage-saved')||[])listener(clone(receipt));},
       install(){h.logic=featureModule.createFeatureLogic(adapter);return h.logic;}};
     return h;
   };
@@ -60,8 +61,8 @@ class FeatureModuleHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         if self.path == "/":
             body, kind = b"<!doctype html><title>synthetic feature logic</title>", "text/html"
-        elif self.path == "/modules/snow-feature-logic.js":
-            body, kind = (PUBLIC / "modules" / "snow-feature-logic.js").read_bytes(), "text/javascript"
+        elif self.path in {"/modules/snow-feature-logic.js", "/modules/snow-reading-logic.js", "/modules/snow-reminder-logic.js"}:
+            body, kind = (PUBLIC / self.path.lstrip("/")).read_bytes(), "text/javascript"
         else:
             self.send_error(404)
             return
@@ -540,3 +541,80 @@ class SnowFeatureLogicTests(TestCase):
           return {current:await logic.favorites.toggle(ref),has:logic.favorites.has(ref),writes:h.controls.writes.length};
         }""")
         self.assertEqual(result, {"current": True, "has": True, "writes": 0})
+
+    def test_message_copy_discards_reads_after_history_replacement_or_disposal(self):
+        result = self.page.evaluate("""async()=>{
+          const results=[];
+          for(const mode of ['epoch','history','dispose','normal']){
+            const h=harness({messages:[message('line')]}),logic=h.install();await logic.ready;
+            let release;h.adapter.getMessage=()=>new Promise(resolve=>release=()=>resolve(message('line')));
+            const pending=logic.messages.get('line');
+            if(mode==='epoch')h.state.historyEpoch++;
+            if(mode==='history')h.emitHistory();
+            if(mode==='dispose')logic.dispose();
+            release();const value=await pending;
+            if(value)value.contentBlocks[0].text='changed copy';
+            results.push({mode,id:value?.id||null,original:h.record('none')||null});
+          }
+          return results;
+        }""")
+        self.assertEqual(result, [{"mode": mode, "id": "line" if mode == "normal" else None, "original": None}
+                                  for mode in ("epoch", "history", "dispose", "normal")])
+
+    def test_proactive_failed_unknown_receipts_count_without_messages_and_completed_receipt_deduplicates(self):
+        result = self.page.evaluate("""async()=>{
+          const receipt=(id,usage,status='completed',extra={})=>({requestId:id,characterId:'synthetic-a',createdAt:Date.parse('2026-10-19T12:00:00+08:00'),
+            source:'proactive_reminder',model:'synthetic-model',usage,status,...extra});
+          const rows=[receipt('complete',{provider_calls:1,total_tokens:10}),receipt('failed',{provider_calls:1},'failed'),
+            receipt('unknown',{provider_calls:1,total_tokens:3},'unknown'),receipt('not-called',{provider_calls:0,total_tokens:999},'failed'),
+            receipt('yesterday',{provider_calls:1,total_tokens:100},'completed',{createdAt:Date.parse('2026-10-18T12:00:00+08:00')})];
+          const h=harness({messages:[message('complete',{source:'proactive_reminder',requestId:'complete',usage:{provider_calls:1,total_tokens:5}})],
+            preferences:{proactiveUsage:[rows[0],rows[1]]}});h.adapter.usageReceipts=async()=>rows;
+          const logic=h.install();await logic.ready;const before=logic.usage.today(),round=logic.usage.round('complete');
+          h.emitUsage(receipt('complete',{}));return {before,after:logic.usage.today(),round};
+        }""")
+        self.assertEqual(result, {"before": {"calls": 3, "tokens": 13, "partial": True}, "after": {"calls": 3, "tokens": 13, "partial": True},
+                                  "round": {"calls": 1, "tokens": 10, "partial": False,
+                                            "parts": [{"kind": "proactive", "calls": 1, "tokens": 10, "model": "synthetic-model"}]}})
+
+    def test_live_usage_wins_stale_initial_read_and_history_replacement_discards_stale_receipts(self):
+        result = self.page.evaluate("""async()=>{
+          const value=(id,tokens)=>({requestId:id,characterId:'synthetic-a',createdAt:Date.parse('2026-10-19T12:00:00+08:00'),
+            usage:{provider_calls:1,total_tokens:tokens},status:'unknown'}),h=harness();let release;
+          h.adapter.usageReceipts=()=>new Promise(resolve=>release=()=>resolve([value('a',5)]));const logic=h.install();
+          await Promise.resolve();await Promise.resolve();h.emitUsage(value('a',9));release();await logic.ready;const before=logic.usage.today();
+          let oldRelease;h.adapter.usageReceipts=()=>new Promise(resolve=>oldRelease=()=>resolve([value('stale',100)]));const old=logic.refresh();
+          await Promise.resolve();await Promise.resolve();h.adapter.usageReceipts=async()=>[];h.emitHistory();await logic.refresh();oldRelease();await old;
+          return {before,after:logic.usage.today()};
+        }""")
+        self.assertEqual(result, {"before": {"calls": 1, "tokens": 9, "partial": False}, "after": {"calls": 0, "tokens": 0, "partial": False}})
+
+    def test_completed_proactive_arrival_after_midnight_uses_original_receipt_day(self):
+        result = self.page.evaluate("""async()=>{
+          const createdAt=Date.parse('2026-10-18T23:59:00+08:00'),row={requestId:'late',characterId:'synthetic-a',createdAt,
+            usage:{provider_calls:1,total_tokens:8},status:'completed'};
+          const h=harness({messages:[message('late',{requestId:'late',source:'proactive_reminder'})]});h.adapter.usageReceipts=async()=>[row];
+          const logic=h.install();await logic.ready;const today=logic.usage.today();h.state.localDayKey='2026-10-18';return {today,originalDay:logic.usage.today()};
+        }""")
+        self.assertEqual(result, {"today": {"calls": 0, "tokens": 0, "partial": False}, "originalDay": {"calls": 1, "tokens": 10, "partial": False}})
+
+    def test_proactive_portable_ledger_whitelists_cost_fields_without_request_envelope_or_read_marks(self):
+        result = self.page.evaluate("""()=>{
+          const base={requestId:'paid',characterId:'synthetic-a',createdAt:Date.parse('2026-10-19T12:00:00+08:00'),source:'ignored',
+            model:'synthetic-model',usage:{provider_calls:1,total_tokens:6,prompt_tokens:2,completion_tokens:4,credential:'synthetic-secret'},modelCalled:true,status:'failed'};
+          const records=[{key:'drafts',values:{a:'合成草稿'}},{key:'preferences',autoSummaryEnabled:true},
+            {key:'ui_preferences',unknown:{keep:true},proactiveUsage:[{...base,usage:{provider_calls:1,total_tokens:3}}]},
+            {...base,key:'proactive_usage_v1:paid',envelope:{credential:'synthetic-secret',body:'不得导出'},proof:'private'},
+            {key:'proactive_request_v1:paid',envelope:{credential:'synthetic-secret'}},{key:'stage_read_v1:synthetic-a',messages:[]},
+            {key:'proactive_consent_v1',receipt:'private'}];
+          const portable=featureModule.portableFeatureState(records),ui=portable.find(item=>item.key==='ui_preferences');
+          const merged=featureModule.mergeFeaturePreferences(ui,{proactiveUsage:[{...base,requestId:'imported'},base]});
+          return {keys:portable.map(item=>item.key),row:ui.proactiveUsage[0],count:ui.proactiveUsage.length,unknown:ui.unknown,
+            ids:merged.proactiveUsage.map(item=>item.requestId).sort(),secret:JSON.stringify(portable).includes('synthetic-secret'),
+            originalEnvelope:records[3].envelope.body};
+        }""")
+        self.assertEqual(result, {"keys": ["drafts", "preferences", "ui_preferences"], "row": {
+            "requestId": "paid", "characterId": "synthetic-a", "createdAt": 1792382400000, "source": "proactive_reminder", "model": "synthetic-model",
+            "usage": {"provider_calls": 1, "input_tokens": None, "output_tokens": None, "prompt_tokens": 2, "completion_tokens": 4, "total_tokens": 6},
+            "modelCalled": True, "status": "failed"}, "count": 1, "unknown": {"keep": True}, "ids": ["imported", "paid"], "secret": False,
+            "originalEnvelope": "不得导出"})

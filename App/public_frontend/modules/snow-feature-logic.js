@@ -1,4 +1,7 @@
 // Local feature data only. The adapter owns persistence and request admission.
+import { createReadingLogic, normalizeReadingPreferences, importReadingPreferences } from "/modules/snow-reading-logic.js";
+import { createReminderLogic, normalizeRendezvousReminders, mergeRendezvousReminders } from "/modules/snow-reminder-logic.js";
+export { importReadingPreferences };
 const copy = value => structuredClone(value);
 const object = value => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 const string = value => typeof value === "string" ? value : "";
@@ -52,18 +55,62 @@ export function normalizeExtraUsage(values) {
 export function mergeExtraUsage(previous, incoming) {
   return normalizeExtraUsage([...list(previous), ...list(incoming)]);
 }
+export function normalizeProactiveUsage(values) {
+  const entries = new Map();
+  for (const raw of list(values)) {
+    const item = object(raw), requestId = string(item.requestId || item.request_id), characterId = messageCharacter(item);
+    const createdAt = stamp(item.createdAt ?? item.created_at);
+    if (!requestId || requestId.length > 256 || !characterId || characterId.length > 256 || !createdAt || !Number.isFinite(new Date(createdAt).getTime())) continue;
+    const previous = entries.get(requestId), merged = mergeUsageReceipt(previous?.usage, item.usage), usage = {};
+    for (const key of ["provider_calls", "input_tokens", "output_tokens", "prompt_tokens", "completion_tokens", "total_tokens"]) {
+      const observed = [merged[key], previous?.usage?.[key]].filter(value => Number.isSafeInteger(value) && value >= 0);
+      usage[key] = observed.length ? Math.max(...observed) : null;
+    }
+    const modelCalled = item.modelCalled === true || previous?.modelCalled === true ? true : item.modelCalled === false ? false : null;
+    entries.set(requestId, { requestId, characterId, createdAt: previous ? Math.min(previous.createdAt, createdAt) : createdAt,
+      source: "proactive_reminder", model: string(item.model).slice(0, 256) || previous?.model || "", usage, modelCalled,
+      status: previous?.status === "completed" || item.status === "completed" ? "completed"
+        : ["pending", "failed", "unknown"].includes(item.status) ? item.status : "unknown" });
+  }
+  return [...entries.values()];
+}
+export function portableFeatureState(appStates, localPreferences) {
+  const values = list(appStates), result = values.filter(item => ["drafts", "preferences", "ui_preferences"].includes(item?.key)).map(copy);
+  let current = result.find(item => item.key === "ui_preferences");
+  const proactiveUsage = normalizeProactiveUsage([
+    ...list(current?.proactiveUsage), ...values.filter(item => string(item?.key).startsWith("proactive_usage_v1:"))]);
+  let readingPreferences = current && Object.hasOwn(current, "readingPreferences") ? normalizeReadingPreferences(current.readingPreferences) : null;
+  if (localPreferences) try { readingPreferences = normalizeReadingPreferences(JSON.parse(localPreferences.getItem("project-snow-public:reading:v1") || "{}")); } catch {}
+  if (proactiveUsage.length || current?.proactiveUsage) {
+    if (current) current.proactiveUsage = proactiveUsage;
+    else { current = { key: "ui_preferences", proactiveUsage }; result.push(current); }
+  }
+  if (readingPreferences) {
+    if (current) current.readingPreferences = readingPreferences;
+    else result.push({ key: "ui_preferences", readingPreferences });
+  }
+  return result;
+}
 export function normalizeFeaturePreferences(value = {}) {
   const preferences = object(value), usage = object(preferences.usagePreferences);
   return { ...copy(preferences), favoriteLines: favoriteLines(preferences.favoriteLines),
     deletedMemoryIds: identifiers(preferences.deletedMemoryIds, 500),
-    usagePreferences: { ...copy(usage), showUsage: usage.showUsage !== false } };
+    usagePreferences: { ...copy(usage), showUsage: usage.showUsage !== false },
+    rendezvousReminders: normalizeRendezvousReminders(preferences.rendezvousReminders),
+    proactiveUsage: normalizeProactiveUsage(preferences.proactiveUsage),
+    ...(Object.hasOwn(preferences, "readingPreferences") ? { readingPreferences: normalizeReadingPreferences(preferences.readingPreferences) } : {}),
+    reminderPreferences: { ...copy(object(preferences.reminderPreferences)), enabled: preferences.reminderPreferences?.enabled !== false } };
 }
-export function mergeFeaturePreferences(current = {}, incoming = {}) {
+export function mergeFeaturePreferences(current = {}, incoming = {}, options = {}) {
   const existing = normalizeFeaturePreferences(current), imported = normalizeFeaturePreferences(incoming);
   return normalizeFeaturePreferences({ ...imported, ...existing,
     favoriteLines: [...imported.favoriteLines, ...existing.favoriteLines],
     deletedMemoryIds: [...imported.deletedMemoryIds, ...existing.deletedMemoryIds],
-    usagePreferences: { ...object(incoming.usagePreferences), ...object(current.usagePreferences) } });
+    usagePreferences: { ...object(incoming.usagePreferences), ...object(current.usagePreferences) },
+    rendezvousReminders: mergeRendezvousReminders(existing.rendezvousReminders, imported.rendezvousReminders, options),
+    proactiveUsage: normalizeProactiveUsage([...imported.proactiveUsage, ...existing.proactiveUsage]),
+    ...(Object.hasOwn(incoming, "readingPreferences") ? { readingPreferences: normalizeReadingPreferences(incoming.readingPreferences) } : {}),
+    reminderPreferences: { ...object(incoming.reminderPreferences), ...object(current.reminderPreferences) } });
 }
 export function filterDeletedMemories(receipts, deletedIds = []) {
   const deleted = new Set(identifiers(deletedIds, 500));
@@ -126,7 +173,7 @@ export function createFeatureLogic(adapter) {
   for (const name of ["snapshot", "preferences", "savePreferences", "loadDialogue", "saveDialogue", "getMessage", "messages", "allMessages", "on"]) {
     if (typeof adapter?.[name] !== "function") throw new TypeError(`feature_adapter_${name}_required`);
   }
-  const undo = new Map(), messages = new Map(), groups = new Map(), activeReads = new Map();
+  const undo = new Map(), messages = new Map(), groups = new Map(), activeReads = new Map(), receipts = new Map(), activeUsageReads = new Map();
   let generation = 0, undoVersion = 0;
   let pending = Promise.resolve(), disposed = false;
   const serial = operation => {
@@ -174,25 +221,44 @@ export function createFeatureLogic(adapter) {
     if (message?.id) for (const changed of activeReads.values()) changed.add(message.id);
     cache(message);
   });
+  const cacheUsage = value => {
+    const receipt = normalizeProactiveUsage([value])[0];
+    if (!receipt) return;
+    const key = requestKey(receipt), previous = receipts.get(key);
+    receipts.set(key, normalizeProactiveUsage([previous, receipt])[0]);
+  };
+  const unsubscribeUsage = adapter.on("usage-saved", receipt => {
+    if (disposed) return;
+    const key = requestKey(object(receipt));
+    for (const changed of activeUsageReads.values()) changed.add(key);
+    cacheUsage(receipt);
+  });
   function refresh() {
     if (disposed) return Promise.resolve();
-    const current = ++generation, changed = new Set();
+    const current = ++generation, epoch = adapter.snapshot().historyEpoch, changed = new Set(), changedUsage = new Set();
     undoVersion += 1;
     undo.clear();
     messages.clear();
     groups.clear();
+    receipts.clear();
     activeReads.set(current, changed);
-    return Promise.resolve().then(() => adapter.allMessages()).then(values => {
-      if (disposed || current !== generation) return;
+    activeUsageReads.set(current, changedUsage);
+    return Promise.all([Promise.resolve().then(() => adapter.allMessages()), Promise.resolve().then(() => adapter.usageReceipts?.() || [])]).then(([values, usage]) => {
+      if (disposed || current !== generation || epoch !== adapter.snapshot().historyEpoch) return;
       const saved = [...messages.values()].filter(message => changed.has(message.id));
       messages.clear();
       groups.clear();
       for (const message of list(values)) if (!changed.has(message.id)) cache(message);
       for (const message of saved) cache(message);
-    }).finally(() => activeReads.delete(current));
+      const savedUsage = [...receipts].filter(([key]) => changedUsage.has(key)).map(([, value]) => value);
+      receipts.clear();
+      for (const value of normalizeProactiveUsage([...preferences().proactiveUsage, ...list(usage)])) if (!changedUsage.has(requestKey(value))) cacheUsage(value);
+      for (const value of savedUsage) cacheUsage(value);
+    }).finally(() => { activeReads.delete(current); activeUsageReads.delete(current); });
   }
   const unsubscribeHistory = adapter.on("history-changed", () => { void refresh().catch(() => {}); });
-  const ready = refresh();
+  const reading = createReadingLogic(adapter), reminders = createReminderLogic(adapter);
+  const ready = Promise.all([refresh(), reading.ready, reminders.ready]);
 
   async function memoryList(characterId) {
     const token = historyToken(), record = object(await adapter.loadDialogue(characterId));
@@ -253,8 +319,10 @@ export function createFeatureLogic(adapter) {
     // Replays may have different local ids; an empty replay cannot erase an observed receipt.
     // IndexedDB primary-key ordering puts arrival receipts before scene placeholders.
     const reply = replies.filter(item => item.source === "presence_arrival").at(-1) || replies.at(-1), parts = [];
-    if (reply) parts.push(usagePart(replies.reduce((usage, item) => mergeUsageReceipt(usage, item.usage), {}),
-      reply.source === "presence_arrival" ? "arrival" : "reply", string(reply.model)));
+    if (reply) parts.push(usagePart(replies.reduce((usage, item) => mergeUsageReceipt(usage, item.usage),
+      reply.source === "proactive_reminder" ? receipts.get(requestKey(reply))?.usage || {} : {}),
+      reply.source === "presence_arrival" ? "arrival" : reply.source === "proactive_reminder" ? "proactive" : "reply",
+      string(reply.model) || (reply.source === "proactive_reminder" ? string(receipts.get(requestKey(reply))?.model) : "")));
     const extras = normalizeExtraUsage(group.flatMap(item => list(item.extraUsage || item.extra_usage)));
     for (const extra of extras) parts.push(usagePart(extra, "summary"));
     return parts;
@@ -264,9 +332,14 @@ export function createFeatureLogic(adapter) {
     return message ? groupParts([...groups.get(requestKey(message)).values()]) : [];
   }
   return {
-    ready, refresh,
+    ready, refresh, reading, reminders,
     // Read-only copy for the UI (favorite anchors need contentBlocks); null when missing.
-    messages: { async get(messageId) { return string(messageId) ? copy(await adapter.getMessage(messageId)) || null : null; } },
+    messages: { async get(messageId) {
+      const token = historyToken();
+      if (!string(messageId) || !currentHistory(token)) return null;
+      const message = await adapter.getMessage(messageId);
+      return currentHistory(token) ? copy(message) || null : null;
+    } },
     memories: {
       list: memoryList,
       count: async characterId => (await memoryList(characterId)).length,
@@ -337,13 +410,20 @@ export function createFeatureLogic(adapter) {
     usage: {
       round(messageId) { const parts = roundParts(messageId); return { ...sumParts(parts), parts: copy(parts) }; },
       today() {
-        const today = string(adapter.snapshot().localDayKey) || dayKey(Date.now()), extras = [], parts = [];
+        const today = string(adapter.snapshot().localDayKey) || dayKey(Date.now()), extras = [], parts = [], observed = new Set();
         for (const values of groups.values()) {
           const group = [...values.values()];
-          if (roundDay(group) !== today) continue;
+          const proactive = group.find(message => message.source === "proactive_reminder"), receipt = proactive && receipts.get(requestKey(proactive));
+          if ((receipt ? dayKey(receipt.createdAt) : roundDay(group)) !== today) continue;
           const round = groupParts(group);
+          if (round.some(part => part.kind === "proactive")) observed.add(requestKey(group[0]));
           parts.push(...round.filter(part => part.kind !== "summary"));
           extras.push(...group.flatMap(item => list(item.extraUsage || item.extra_usage)));
+        }
+        for (const [key, receipt] of receipts) {
+          const created = stamp(receipt.createdAt ?? receipt.created_at);
+          if (observed.has(key) || !created || !Number.isFinite(new Date(created).getTime()) || dayKey(created) !== today) continue;
+          parts.push(usagePart(receipt.usage, "proactive", string(receipt.model)));
         }
         parts.push(...normalizeExtraUsage(extras).map(extra => usagePart(extra, "summary")));
         return sumParts(parts);
@@ -360,9 +440,10 @@ export function createFeatureLogic(adapter) {
     },
     dispose() {
       disposed = true;
+      reading.dispose(); reminders.dispose();
       undoVersion += 1;
-      undo.clear(); messages.clear(); groups.clear(); activeReads.clear();
-      for (const unsubscribe of [unsubscribeSaved, unsubscribeHistory]) if (typeof unsubscribe === "function") unsubscribe();
+      undo.clear(); messages.clear(); groups.clear(); receipts.clear(); activeReads.clear(); activeUsageReads.clear();
+      for (const unsubscribe of [unsubscribeSaved, unsubscribeHistory, unsubscribeUsage]) if (typeof unsubscribe === "function") unsubscribe();
     },
   };
 }

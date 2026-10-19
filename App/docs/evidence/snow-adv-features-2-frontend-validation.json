@@ -1,0 +1,71 @@
+{
+  "schema": "project-snow-features-2-frontend-validation-1",
+  "recorded_at": "2026-10-19T13:40:35.510211+00:00",
+  "technical_qa_only": true,
+  "human_release_approval": false,
+  "real_paid_model_calls": 0,
+  "synthetic_fixtures_only": true,
+  "no_deployment_performed": true,
+  "browser": "local Chrome via Playwright",
+  "runs": [
+    {
+      "report": ".tmp/features-2-validation/final-feature-browser-junit.xml",
+      "tests": 89,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "time_seconds": 78.88
+    },
+    {
+      "report": ".tmp/features-2-validation/final-bundle-browser-junit.xml",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "time_seconds": 28.25
+    },
+    {
+      "report": ".tmp/features-2-validation/final-static-service-junit.xml",
+      "tests": 102,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 3,
+      "time_seconds": 27.311
+    },
+    {
+      "group": "existing-full-frontend-browser-regression",
+      "evidence": "local pytest console completion (exec session 84237)",
+      "pytest_passed": 261,
+      "subtests_passed": 180,
+      "failures": 0,
+      "errors": 0,
+      "time_seconds": 1171.06
+    }
+  ],
+  "lf_sha256": {
+    ".github/workflows/ci.yml": "6f6ae1161d67237ba38cdcceb1578c67964807a65bf94d79ac132b47cb552da2",
+    "App/public_frontend/app.js": "0eddf2de02e0afd5c481ef4ec23269d12ac19672b1dcbd8a64fb1010c29d956a",
+    "App/public_frontend/assets-manifest.json": "5211ce56c8d5e72cb640442dab3bc7345d05adaccae4ab9f463181f685d4fba6",
+    "App/scripts/measure_snow_adv_first_screen.py": "c1eebc44f90a700170ecb90af2ea93084847f4eb28307e48c6ced21e14f2681c",
+    "App/public_frontend/modules/snow-feature-logic.js": "c8f09f55f2cd331f854b8d6f11da450f7c33e9adc7ec2acc5e60dfd19ebb7eff",
+    "App/public_frontend/modules/snow-reading-logic.js": "cae3ffb688503fde879d2bf843ca58a6d22173d1e0d3d49dce6bda25779e8dec",
+    "App/public_frontend/modules/snow-reminder-logic.js": "2af674027b44375d17307e4912863530c1627b6fe6ad795b18b8ed6e25f6f573",
+    "App/public_frontend/modules/snow-feature-runtime.js": "72c5aae06d87264bada0e82541fc54aeca958538ffa57f56079c6e95a57445e0",
+    "App/public_frontend/modules/snow-proactive-client.js": "eba0ac237cbe0e138721c831d11c441794f38e4ea185e6adae21308abdc709fe",
+    "App/tests/test_snow_feature_logic.py": "1bcb9e1db163b7da0514942cbe83f2913e6b741915e9d7514c1c5b3934643a80",
+    "App/tests/test_snow_reading_reminder_logic.py": "f46f395a28e5815deaf7edbb2cb8ce82070ee6db00eb42ece6112e4c8ddea0d0",
+    "App/tests/test_snow_adv_feature_host.py": "f802e60eec2a563b816f45821ae5a67d53e9088118a94ba7ebd4a683c79cb04a",
+    "App/tests/test_snow_feature_integration.py": "03b5cdf9549cab40f05be88638e356f82ccc3efa395bcd81b3327d0c5b4d8188",
+    "App/tests/test_snow_proactive_client.py": "9d31325ef0e8e311624ef3de348605c35bd5c19e027ede5ec3bba9849842c064"
+  },
+  "coverage": [
+    "real fingerprinted JS/CSS with canonical fallback forbidden",
+    "flag-off zero feature assets",
+    "exact invitation UUID settlement and durable reminder firing",
+    "reading reflow, pause conditions, nonblocking manual pages and UTF-16 read anchors",
+    "A-to-B-to-A model session invalidation without paid POST",
+    "explicit immutable request recovery and failed/unknown safe usage backup",
+    "reading preferences export/import and clear-history preservation",
+    "complete bundle old/new/old IndexedDB v4 compatibility"
+  ]
+}
