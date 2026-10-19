@@ -1,0 +1,292 @@
+/* 雪境 · 新功能界面（按需加载，不占首屏）。只在 html[data-ui="snow-adv"] 下生效。
+   只用现有设计变量；--ice-700 / --snow-0 / --ink-900 在深色与暮色会翻转，不拿来做固定配色。
+   设计说明见 App/docs/snow-adv-ui-notes.md。 */
+
+/* ---------- 共用：胶囊、分段选择、小按钮 ---------- */
+html[data-ui="snow-adv"] .snow-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--snow-200);
+  border-radius: 999px;
+  color: var(--ink-700);
+  background: var(--snow-0);
+  font: 600 var(--fs-12) / 1 var(--font-ui);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+html[data-ui="snow-adv"] .snow-chip .snow-icon { width: 14px; height: 14px; flex: none; }
+html[data-ui="snow-adv"] .snow-chip[aria-pressed="true"],
+html[data-ui="snow-adv"] .snow-seg button[aria-checked="true"] {
+  border-color: color-mix(in srgb, var(--ice-500) 70%, transparent);
+  color: var(--ice-700);
+  background: color-mix(in srgb, var(--ice-500) 18%, var(--snow-0));
+}
+html[data-ui="snow-adv"] .snow-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--snow-200);
+  border-radius: 999px;
+  background: var(--snow-50);
+}
+html[data-ui="snow-adv"] .snow-seg button {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-600);
+  background: transparent;
+  font: 600 var(--fs-13) / 1 var(--font-ui);
+}
+html[data-ui="snow-adv"] .snow-seg button:hover:not([aria-checked="true"]) { color: var(--ink-900); background: var(--snow-100); }
+html[data-ui="snow-adv"] .snow-small { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 14px; font-size: var(--fs-13); }
+html[data-ui="snow-adv"] .snow-small .snow-icon { width: 15px; height: 15px; }
+html[data-ui="snow-adv"] .snow-round {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--ink-600);
+  background: transparent;
+}
+html[data-ui="snow-adv"] .snow-round:hover:not(:disabled) { border-color: var(--snow-200); color: var(--ink-900); background: var(--snow-100); }
+html[data-ui="snow-adv"] .snow-round:disabled { opacity: 0.5; cursor: default; }
+html[data-ui="snow-adv"] .snow-round .snow-icon { width: 16px; height: 16px; }
+html[data-ui="snow-adv"] .snow-fav[aria-pressed="true"] { color: var(--char-deep); }
+html[data-ui="snow-adv"] .snow-fav[aria-pressed="true"] .snow-icon { fill: currentColor; }
+html[data-ui="snow-adv"] .snow-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--char);
+  border-radius: 50%;
+  color: var(--ink-700);
+  background: var(--snow-50);
+  font: 600 var(--fs-14) / 1 var(--font-story);
+}
+html[data-ui="snow-adv"] .snow-hint { margin: 0; color: var(--ink-600); font-size: var(--fs-12); line-height: 1.6; }
+html[data-ui="snow-adv"] .snow-empty { margin: 24px 8px; color: var(--ink-600); font-size: var(--fs-13); line-height: 1.7; text-align: center; }
+
+/* ---------- 本轮用量 ---------- */
+html[data-ui="snow-adv"] .stage-speaker-line:has(.snow-line-tools) { display: flex; align-items: center; gap: 10px; }
+/* 按钮 30px 比名牌高几像素：负外边距让这一行保持原高度，对白框给正文的行数不变（可点范围仍是 30px）。 */
+html[data-ui="snow-adv"] .snow-line-tools { display: inline-flex; align-items: center; gap: 6px; margin: -3px 0 -3px auto; }
+html[data-ui="snow-adv"] .snow-usage-chip { color: var(--ink-600); background: color-mix(in srgb, var(--snow-100) 72%, transparent); cursor: pointer; }
+html[data-ui="snow-adv"] .snow-usage-chip:hover { border-color: var(--ice-300); color: var(--ink-900); }
+html[data-ui="snow-adv"] .snow-usage-chip .snow-usage-short { display: none; }
+html[data-ui="snow-adv"] .snow-message-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 0;
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  color: var(--ink-600);
+  background: none;
+  font: var(--fs-12) / 1.4 var(--font-ui);
+  cursor: pointer;
+}
+html[data-ui="snow-adv"] .snow-message-usage:hover { color: var(--ink-900); text-decoration: underline; text-underline-offset: 3px; }
+html[data-ui="snow-adv"] .snow-message-usage .snow-icon { width: 13px; height: 13px; }
+html[data-ui="snow-adv"] .snow-message-usage .snow-usage-short { display: none; }
+/* 旧界面每条回复下方原有的「模型 · tokens · 次数」小字：新用量挂上之后由名字行末尾的本轮用量代替，避免同一信息出现两次。
+   只在已挂新用量的消息里隐藏，新模块没加载时旧小字照常显示。 */
+html[data-ui="snow-adv"] #timeline article.message:has(.snow-message-usage) .message-usage { display: none; }
+html[data-ui="snow-adv"] .snow-pop {
+  position: fixed;
+  z-index: 70;
+  width: min(330px, calc(100vw - 24px));
+  padding: 14px 16px 12px;
+  border: 1px solid var(--snow-200);
+  border-radius: var(--radius-m);
+  color: var(--ink-900);
+  background: var(--frost-bg);
+  box-shadow: var(--shadow-frost);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  font: var(--fs-13) / 1.5 var(--font-ui);
+  outline: none;
+}
+html[data-ui="snow-adv"] .snow-pop h3 { margin: 0 0 6px; color: var(--ink-900); font-size: var(--fs-14); }
+html[data-ui="snow-adv"] .snow-usage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--snow-200);
+  color: var(--ink-700);
+}
+html[data-ui="snow-adv"] .snow-usage-row small { display: block; color: var(--ink-600); font-size: var(--fs-12); }
+html[data-ui="snow-adv"] .snow-usage-row > span:not(:first-child) { color: var(--ink-900); font-variant-numeric: tabular-nums; text-align: right; }
+html[data-ui="snow-adv"] .snow-usage-row.is-total { border-bottom: 0; color: var(--ink-900); font-weight: 600; }
+html[data-ui="snow-adv"] .snow-usage-today { margin: 6px 0 0; padding-top: 8px; border-top: 1px solid var(--snow-200); color: var(--ink-700); font-size: var(--fs-12); }
+
+/* ---------- 回看：搜索、收藏 ---------- */
+html[data-ui="snow-adv"] .transcript-panel:has(> .snow-backlog-tools) { grid-template-rows: auto auto minmax(0, 1fr); }
+html[data-ui="snow-adv"] .snow-backlog-tools { display: grid; align-content: start; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--snow-200); }
+html[data-ui="snow-adv"] .snow-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 6px 0 12px;
+  border: 1px solid var(--snow-200);
+  border-radius: 999px;
+  color: var(--ink-600);
+  background: var(--snow-50);
+}
+html[data-ui="snow-adv"] .snow-search:focus-within { border-color: var(--ice-500); }
+html[data-ui="snow-adv"] .snow-search .snow-icon { width: 16px; height: 16px; flex: none; }
+html[data-ui="snow-adv"] .snow-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  border: 0;
+  outline: 0;
+  color: var(--ink-900);
+  background: transparent;
+  font: var(--fs-14) / 1.4 var(--font-ui);
+}
+html[data-ui="snow-adv"] .snow-search input::-webkit-search-cancel-button { display: none; }
+html[data-ui="snow-adv"] .snow-backlog-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+html[data-ui="snow-adv"] .snow-search-summary { color: var(--ink-600); font-size: var(--fs-12); text-align: right; }
+html[data-ui="snow-adv"] .snow-transcript-list { display: grid; gap: 10px; }
+html[data-ui="snow-adv"] .snow-hit-text { white-space: pre-wrap; }
+html[data-ui="snow-adv"] .transcript-entry:has(> .snow-entry-fav) { position: relative; }
+/* 星标放右下角：标题行（名字 · 渠道 · 日期时间）保持一整行；只给最后一段正文让出右侧位置。 */
+html[data-ui="snow-adv"] .transcript-entry:has(> .snow-entry-fav) { min-height: 76px; }
+html[data-ui="snow-adv"] .transcript-entry:has(> .snow-entry-fav) > :nth-last-child(2):not(strong) { padding-right: 34px; }
+html[data-ui="snow-adv"] .snow-entry-fav { position: absolute; right: 6px; bottom: 6px; }
+html[data-ui="snow-adv"] .snow-entry-fav:not([aria-pressed="true"]) { color: var(--ink-600); }
+html[data-ui="snow-adv"] mark.snow-mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  color: inherit;
+  background: color-mix(in srgb, var(--warm-300) 72%, transparent);
+}
+html[data-ui="snow-adv"][data-tone="dark"] mark.snow-mark { color: var(--ink-900); background: color-mix(in srgb, var(--warm-600) 42%, transparent); }
+html[data-ui="snow-adv"] .snow-fav-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--snow-200);
+  border-left: 3px solid var(--char);
+  border-radius: var(--radius-m);
+  background: var(--snow-50);
+}
+html[data-ui="snow-adv"] .snow-fav-card blockquote { margin: 0; color: var(--ink-900); font: var(--fs-16) / 1.7 var(--font-story); }
+html[data-ui="snow-adv"] .snow-fav-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--ink-600); font-size: var(--fs-12); }
+html[data-ui="snow-adv"] .snow-fav-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+
+/* ---------- 弹窗：图片卡、记忆档案（共用 .modal 外壳，它本身没有内边距） ---------- */
+html[data-ui="snow-adv"] .snow-feature-modal[open] { display: flex; flex-direction: column; gap: 14px; padding: 22px 24px 20px; overflow: hidden; }
+html[data-ui="snow-adv"] .snow-feature-modal > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex: none; padding: 0; border: 0; }
+html[data-ui="snow-adv"] .snow-feature-modal > header p { margin: 6px 0 0; color: var(--ink-600); font-size: var(--fs-13); line-height: 1.6; }
+html[data-ui="snow-adv"] .snow-card-modal { width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); }
+html[data-ui="snow-adv"] .snow-card-preview {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 14px;
+  border-radius: var(--radius-m);
+  background: var(--snow-100);
+}
+html[data-ui="snow-adv"] .snow-card-preview img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: min(52dvh, 500px);
+  aspect-ratio: 4 / 5;
+  border-radius: 12px;
+  box-shadow: var(--shadow-lift);
+}
+html[data-ui="snow-adv"] .snow-modal-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+html[data-ui="snow-adv"] .snow-modal-row > span { color: var(--ink-700); font-size: var(--fs-13); }
+html[data-ui="snow-adv"] .snow-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  padding-top: 12px;
+  border-top: 1px solid var(--snow-200);
+  color: var(--ink-600);
+  font-size: var(--fs-12);
+}
+html[data-ui="snow-adv"] .snow-modal-foot .modal-actions { margin: 0; padding: 0; border: 0; }
+html[data-ui="snow-adv"] .snow-memory-modal { width: min(640px, calc(100vw - 24px)); max-height: min(calc(100dvh - 24px), 780px); }
+html[data-ui="snow-adv"] .snow-memory-filters { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
+html[data-ui="snow-adv"] .snow-memory-filters .snow-chip { min-height: 32px; cursor: pointer; }
+html[data-ui="snow-adv"] .snow-memory-list { display: grid; align-content: start; gap: 8px; min-height: 0; overflow: auto; padding-right: 2px; }
+html[data-ui="snow-adv"] .snow-memory-day { margin: 8px 0 0; color: var(--ink-600); font: 600 var(--fs-12) / 1.4 var(--font-ui); letter-spacing: 0.08em; }
+html[data-ui="snow-adv"] .snow-memory-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  padding: 12px 12px 12px 14px;
+  border: 1px solid var(--snow-200);
+  border-radius: var(--radius-m);
+  background: var(--snow-50);
+}
+html[data-ui="snow-adv"] .snow-memory-text { margin: 0; color: var(--ink-900); font: var(--fs-16) / 1.6 var(--font-story); overflow-wrap: anywhere; }
+html[data-ui="snow-adv"] .snow-memory-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; color: var(--ink-600); font-size: var(--fs-12); }
+html[data-ui="snow-adv"] .snow-kind {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--char) 45%, transparent);
+  border-radius: 999px;
+  /* 角色色本身对浅底常不足 4.5:1：和墨色对半混合，浅色下变深、深色下变浅。 */
+  color: color-mix(in oklab, var(--char) 50%, var(--ink-900));
+  background: color-mix(in srgb, var(--char) 10%, transparent);
+  font-weight: 600;
+}
+html[data-ui="snow-adv"] .snow-memory-item.is-confirming { border-color: color-mix(in srgb, var(--warm-500) 60%, var(--snow-200)); }
+html[data-ui="snow-adv"] .snow-memory-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--snow-200);
+  color: var(--ink-700);
+  font-size: var(--fs-13);
+}
+html[data-ui="snow-adv"] .snow-memory-confirm span { margin-right: auto; }
+html[data-ui="snow-adv"] .snow-memory-removed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px 8px 14px;
+  border: 1px dashed var(--snow-200);
+  border-radius: var(--radius-m);
+  color: var(--ink-600);
+  font-size: var(--fs-13);
+}
+/* 角色与场景面板里的入口 */
+html[data-ui="snow-adv"] .snow-info-entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+html[data-ui="snow-adv"] .snow-info-entry p { margin: 4px 0 0; }
+
+/* ---------- 手机 ---------- */
+@media (max-width: 860px) {
+  html[data-ui="snow-adv"] .snow-usage-chip .snow-usage-long { display: none; }
+  html[data-ui="snow-adv"] .snow-usage-chip .snow-usage-short { display: inline; }
+  html[data-ui="snow-adv"] .snow-line-tools { gap: 2px; }
+  html[data-ui="snow-adv"] .snow-feature-modal[open] { padding: 18px 16px 16px; }
+  html[data-ui="snow-adv"] .snow-seg button { padding: 0 10px; }
+}

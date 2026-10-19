@@ -48,6 +48,32 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/modules/snow-feature-logic.js",
+      "public_url": "/modules/snow-feature-logic.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-feature-icons.js",
+      "public_url": "/modules/snow-feature-icons.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-features.css",
+      "public_url": "/modules/snow-features.css",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-feature-card.js",
+      "public_url": "/modules/snow-feature-card.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-features.js",
+      "public_url": "/modules/snow-features.js",
+      "dependencies": ["/modules/snow-feature-icons.js", "/modules/snow-features.css", "/modules/snow-feature-card.js"],
+      "required_html": false
+    },
+    {
       "source": "public_frontend/app.js",
       "public_url": "/app.js",
       "dependencies": [
@@ -56,6 +82,8 @@
         "/modules/snow-icons.js",
         "/modules/snow-world.js",
         "/modules/snow-base-map.js",
+        "/modules/snow-feature-logic.js",
+        "/modules/snow-features.js",
         "/snow-adv-fonts.css",
         "/assets/avatars/longyan-neutral-96.webp",
         "/assets/avatars/longyan-neutral-200.webp"

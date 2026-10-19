@@ -265,6 +265,8 @@ export function createFeatureLogic(adapter) {
   }
   return {
     ready, refresh,
+    // Read-only copy for the UI (favorite anchors need contentBlocks); null when missing.
+    messages: { async get(messageId) { return string(messageId) ? copy(await adapter.getMessage(messageId)) || null : null; } },
     memories: {
       list: memoryList,
       count: async characterId => (await memoryList(characterId)).length,
