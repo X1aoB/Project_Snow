@@ -8318,7 +8318,7 @@ async function boot() {
   deferUntilFirstScreenSettled(() => {
     if (snowAdvActive()) void import("/modules/snow-base-map.js").then(module => module.installBaseMap({
       snapshot: () => ({ characters: state.characters, worldPackage: state.worldPackage, selected: state.selected, busy: globalRequestBusy() }),
-      visit: visitFromMap, icon: createSnowIcon,
+      visit: visitFromMap, icon: createSnowIcon, sceneKey: sceneVisualKey,
     })).catch(() => {});
   });
   void checkBuildUpdate();

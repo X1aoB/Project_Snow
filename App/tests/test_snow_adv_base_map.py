@@ -67,6 +67,23 @@ def world():
                 for index, row in enumerate(ROSTER)}}
 
 
+# Wording the schedules and invitations actually use, one per roster entry; the last entry has no presence.
+PLACEMENTS = [("观景区", "observation"), ("资料阅览区", "archive"), ("医务室附近", "medical"), ("基地走廊", "corridor"),
+              ("个人房间", "quarters"), ("她的房间", "quarters"), ("基地休息区", "lounge"), ("基地公共区", "lounge"),
+              ("餐厅", "canteen"), ("基地食堂", "canteen"), ("训练区", "training"), ("基地温泉", "hot_spring"),
+              ("基地游戏厅", "arcade"), ("基地酒吧", "bar"), ("基地疗愈中心", "healing"), ("基地海滩", "beach"),
+              ("商业街", "outside"), ("购物中心", "outside"), ("公园", "outside"), ("宿舍", "quarters"), ("我的房间", "quarters")]
+
+
+def spread_world():
+    """Every plan zone occupied once or more, with the analyst in the training area."""
+    state = world()
+    state["analyst_location"] = "训练区"
+    state["presence"] = {row["character_id"]: {"location": where, "activity": f"合成活动{index}"}
+                         for index, (row, (where, _)) in enumerate(zip(ROSTER, PLACEMENTS))}
+    return state
+
+
 class MapHandler(dialogue.DialogueHandler):
     """Reuse the existing dialogue protocol, adding only synthetic roster data."""
 
@@ -295,6 +312,38 @@ class MapBrowserFixture:
         }""")
 
     @staticmethod
+    def plan_label_contrast(page):
+        return page.evaluate("""() => {
+          const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
+          const paint=canvas.getContext('2d',{willReadFrequently:true});
+          const rgba=color=>{paint.clearRect(0,0,1,1);paint.fillStyle='rgba(0,0,0,0)';paint.fillStyle=color;paint.fillRect(0,0,1,1);
+            const a=[...paint.getImageData(0,0,1,1).data];return [a[0],a[1],a[2],a[3]/255];};
+          const over=(f,b)=>{const a=f[3]+b[3]*(1-f[3]);
+            return a?[0,1,2].map(i=>(f[i]*f[3]+b[i]*b[3]*(1-f[3]))/a).concat(a):[0,0,0,0];};
+          const luminance=rgb=>rgb.slice(0,3).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;})
+            .reduce((sum,v,i)=>sum+v*[.2126,.7152,.0722][i],0);
+          const field=rgba(getComputedStyle(document.querySelector('.snow-map-art .field')).fill);
+          const rows=[];
+          for (const zone of document.querySelectorAll('.snow-map-zone')) {
+            const fill=getComputedStyle(document.querySelector(`.snow-map-art [data-zone="${zone.dataset.zone}"]`)).fill;
+            const parsed=rgba(fill);
+            if (!parsed[3] && !/^(none|transparent|rgba\\(0, 0, 0, 0\\))$/.test(fill)) {
+              rows.push({role:`plan-${zone.dataset.zone}-unparsed-fill`, background:fill, fontSize:0, contrast:0});
+              continue;
+            }
+            const background=over(parsed,over(field,[255,255,255,1]));
+            for (const role of ['.snow-map-code','.snow-map-name']) {
+              const node=zone.querySelector(role), css=getComputedStyle(node);
+              const f=luminance(over(rgba(css.color),background)), b=luminance(background);
+              rows.push({role:`plan-${zone.dataset.zone}${zone.dataset.active==='true'?'-active':''}${role}`,
+                color:css.color, background:fill, fontSize:parseFloat(css.fontSize),
+                contrast:(Math.max(f,b)+.05)/(Math.min(f,b)+.05)});
+            }
+          }
+          return rows;
+        }""")
+
+    @staticmethod
     def baseline_source(name):
         result = subprocess.run(["git", "--no-replace-objects", "show", BASELINE + ":App/public_frontend/" + name],
                                 cwd=APP.parent, capture_output=True, timeout=20, check=True)
@@ -361,6 +410,13 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
         known = page.locator(".snow-base-map-location").all_inner_texts()
         self.assertTrue(all(line.startswith("位置：") for line in known), known)
         self.assertEqual(page.locator("#snow-base-map img").count(), 0)
+        # 11 in each of two rooms: capacity 8 leaves 7 pins plus a "+4" chip per room.
+        self.assertEqual(page.locator("#snow-base-map-plan").get_attribute("data-presence"), "known")
+        self.assertEqual(page.locator(".snow-map-pin").count(), 14)
+        self.assertEqual(page.locator(".snow-map-more").all_inner_texts(), ["+4", "+4"])
+        self.assertEqual(page.locator('.snow-map-zone[data-occupied="true"]').evaluate_all(
+            "zones => zones.map(zone => [zone.dataset.zone, zone.querySelector('.snow-map-count').textContent])"),
+            [["observation", "11"], ["archive", "11"]])
         for state in ({}, {"presence": world()["presence"]},
                       {**world(), "schedule_date": "2000-01-01"},
                       {**world(), "expires_at": "2000-01-01T00:00:00Z"},
@@ -372,8 +428,13 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
                 self.assertEqual(page.locator('.snow-base-map-card[data-presence="stale"]').count(), 22)
                 lines = page.locator(".snow-base-map-location").all_inner_texts()
                 self.assertTrue(all(line.startswith("上次位置：") for line in lines), lines)
+                self.assertEqual(page.locator("#snow-base-map-plan").get_attribute("data-presence"), "stale")
+                self.assertEqual(set(page.locator(".snow-map-pin").evaluate_all(
+                    "pins => pins.map(pin => getComputedStyle(pin).borderTopStyle)")), {"dashed"})
             else:
                 self.assertEqual(page.locator('.snow-base-map-card[data-presence="missing"]').count(), 22)
+                self.assertEqual(page.locator("#snow-base-map-plan").get_attribute("data-presence"), "missing")
+                self.assertEqual(page.locator(".snow-map-pin,.snow-map-zone[data-occupied='true']").count(), 0)
         state = world()
         state["presence"].pop(ROSTER[-1]["character_id"])
         state["presence"][dialogue.CHARACTER]["location"] = '<img src="/unexpected" onerror="alert(1)">'
@@ -501,41 +562,130 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
             for tone in ("light", "dark", "auto"):
                 with self.subTest(width=width, tone=tone):
                     page = self.open_page(self.new_page(width=width, height=height, tone=tone))
+                    if tone == "dark":
+                        # Light and dusk cover two crowded rooms with "+N"; dark covers every zone plus the analyst marker.
+                        page.locator("#open-snow-base-map").wait_for(state="attached")
+                        page.evaluate("value => window.__baseMapFixture.setWorld(value)", dialogue.token(spread_world()))
                     self.open_map(page)
                     self.paint_settled(page)
                     page.keyboard.press("Tab")
                     self.assertTrue(page.evaluate("() => document.querySelector('#snow-base-map').contains(document.activeElement)"))
                     measured = page.locator("#snow-base-map").evaluate("""dialog => {
-                      const r=dialog.getBoundingClientRect(), list=dialog.querySelector('#snow-base-map-list');
-                      const cards=[...dialog.querySelectorAll('.snow-base-map-card')], lr=list.getBoundingClientRect();
+                      const box=node=>node.getBoundingClientRect(), r=box(dialog), list=dialog.querySelector('#snow-base-map-list');
+                      const scroller=dialog.querySelector('.snow-map-scroller'), plan=dialog.querySelector('#snow-base-map-plan');
+                      const pr=box(plan), sr=box(scroller), lr=box(list);
+                      const zones=[...dialog.querySelectorAll('.snow-map-zone')];
+                      const outside=zones.flatMap(zone=>{const z=box(zone);
+                        return [...zone.querySelectorAll('.snow-map-pin,.snow-map-more,.snow-map-you,.snow-map-label,.snow-map-count')]
+                          .filter(n=>{const b=box(n);return b.left<z.left-1||b.top<z.top-1||b.right>z.right+1||b.bottom>z.bottom+1;})
+                          .map(n=>zone.dataset.zone+':'+n.className);});
+                      const tallies=zones.map(zone=>{const shown=zone.querySelectorAll('.snow-map-pin').length;
+                        const more=Number((zone.querySelector('.snow-map-more')?.textContent||'+0').slice(1));
+                        return [zone.dataset.zone, shown+more, Number(zone.querySelector('.snow-map-count')?.textContent||0)];});
                       return {fontSizes:[...dialog.querySelectorAll('h2,h3,p,button')].map(n=>parseFloat(getComputedStyle(n).fontSize)),
                         horizontalOverflow:dialog.scrollWidth>dialog.clientWidth || list.scrollWidth>list.clientWidth,
                         inside:r.left>=0 && r.top>=0 && r.right<=innerWidth && r.bottom<=innerHeight,
-                        allCardsInListViewport:cards.every(n=>{const b=n.getBoundingClientRect();
-                          return b.top>=lr.top && b.bottom<=lr.bottom && b.left>=lr.left && b.right<=lr.right;}),
-                        columns:getComputedStyle(list).gridTemplateColumns.split(' ').length,
+                        zones:zones.length, aspect:pr.width/pr.height, outside, tallies,
+                        zonesInPlan:zones.every(zone=>{const z=box(zone);return z.left>=pr.left-1&&z.top>=pr.top-1&&z.right<=pr.right+1&&z.bottom<=pr.bottom+1;}),
+                        listBeside:lr.left>=sr.right, listBelow:lr.top>=sr.bottom,
+                        pannable:scroller.scrollWidth>scroller.clientWidth, planHeight:pr.height,
                         animations:dialog.getAnimations({subtree:true}).length,
                         motion:document.documentElement.dataset.motionLevel,
                         loops:window.__projectSnowTest.snowProbe().activeLoops}; }""")
                     self.assertGreaterEqual(min(measured["fontSizes"]), 12)
                     self.assertFalse(measured["horizontalOverflow"])
                     self.assertTrue(measured["inside"])
-                    self.assertEqual(measured["columns"], 5 if width == 1440 else 2)
+                    self.assertEqual(measured["zones"], 14)
+                    self.assertAlmostEqual(measured["aspect"], 1000 / 640, delta=0.02)
+                    self.assertTrue(measured["zonesInPlan"])
+                    self.assertEqual(measured["outside"], [])
+                    self.assertTrue(all(shown == count for _, shown, count in measured["tallies"]), measured["tallies"])
                     if width == 1440:
-                        self.assertTrue(measured["allCardsInListViewport"])
+                        # Side by side; the whole plan is visible without panning.
+                        self.assertTrue(measured["listBeside"])
+                        self.assertFalse(measured["pannable"])
+                        page.locator('[data-map-zone="archive"]').click()
+                        self.assertEqual(page.locator('.snow-map-group[data-active="true"]').get_attribute("data-zone"), "archive")
+                        self.assertEqual(page.locator('.snow-map-art [data-zone="archive"]').get_attribute("data-active"), "true")
+                        self.assertIn("B-02 资料室", page.locator("#snow-base-map-status").inner_text())
+                        self.assertTrue(page.evaluate("""() => {const g=document.querySelector('.snow-map-group[data-zone="archive"] h3').getBoundingClientRect(),
+                          list=document.querySelector('#snow-base-map-list').getBoundingClientRect();
+                          return g.top>=list.top-1 && g.bottom<=list.bottom;}"""))
                     else:
-                        last = page.locator('.snow-base-map-card').last
+                        # The plan keeps its proportions and pans sideways; the list sits below it.
+                        self.assertTrue(measured["listBelow"])
+                        self.assertTrue(measured["pannable"])
+                        self.assertGreaterEqual(measured["planHeight"], 300)
+                        last = page.locator('.snow-map-group:not([data-zone="unknown"]) .snow-base-map-card').last
                         last.focus()
                         page.keyboard.press("Enter")
                         self.assertEqual(last.get_attribute("aria-pressed"), "true")
                         self.assertTrue(page.evaluate("""() => {const n=document.activeElement.getBoundingClientRect(),
                           list=document.querySelector('#snow-base-map-list').getBoundingClientRect();
                           return n.top>=list.top && n.bottom<=list.bottom;}"""))
+                        # The selected character's room is scrolled into the visible part of the plan.
+                        self.assertTrue(page.evaluate("""() => {const zone=document.querySelector('.snow-map-zone[data-active="true"]');
+                          const s=document.querySelector('.snow-map-scroller').getBoundingClientRect(), z=zone.getBoundingClientRect();
+                          const middle=(z.left+z.right)/2;return middle>=s.left && middle<=s.right;}"""))
                     self.assertEqual(measured["animations"], 0)
                     self.assertEqual(measured["motion"], "off")
                     self.assertEqual(measured["loops"], 0)
                     self.evidence.append({"width": width, "tone": tone, **measured})
                     page.close()
+
+    def test_floor_plan_places_locations_like_stage_scenes_and_marks_the_analyst(self):
+        placements = PLACEMENTS
+        rooms = {"observation", "archive", "medical", "corridor", "quarters", "lounge", "canteen", "training"}
+        state = spread_world()
+        page = self.open_page(self.new_page())
+        page.locator("#open-snow-base-map").wait_for(state="attached")
+        page.evaluate("value => window.__baseMapFixture.setWorld(value)", dialogue.token(state))
+        self.paint_settled(page)
+        start = len(self.http)
+        self.open_map(page)
+        scene_keys = page.evaluate("""async places => {const {sceneVisualKey}=await import('/dialogue-context.js');
+          return places.map(place => sceneVisualKey(place));}""", [where for where, _ in placements])
+        for (where, zone), scene in zip(placements, scene_keys):
+            with self.subTest(location=where):
+                # Rooms follow the stage scene mapping; annexes and the outside are scenes the stage draws as generic.
+                # The stage has no scene for "她的房间/我的房间", so the plan files them under 宿舍 by name.
+                generic = zone not in rooms or where in {"她的房间", "我的房间"}
+                self.assertEqual(scene, "generic" if generic else zone)
+        for row, (where, zone) in zip(ROSTER, placements):
+            cid = row["character_id"]
+            with self.subTest(location=where, zone=zone):
+                self.assertEqual(page.locator(f'.snow-map-group[data-zone="{zone}"] [data-base-map-select="{cid}"]').count(), 1)
+                self.assertEqual(page.locator(f'.snow-map-zone[data-zone="{zone}"] [data-map-pin="{cid}"]').count(), 1)
+        missing = ROSTER[-1]["character_id"]
+        self.assertEqual(page.locator(f'.snow-map-group[data-zone="unknown"] [data-base-map-select="{missing}"]').count(), 1)
+        self.assertEqual(page.locator(f'[data-map-pin="{missing}"]').count(), 0)
+        self.assertIn("1 位还没有位置记录", page.locator(".snow-map-legend").inner_text())
+        self.assertEqual(page.locator(".snow-map-you").count(), 1)
+        self.assertEqual(page.locator('.snow-map-zone[data-zone="training"] .snow-map-you').count(), 1)
+        self.assertTrue(page.locator('[data-map-zone="training"]').get_attribute("aria-label").endswith("你在这里"))
+        self.assertEqual(page.locator('.snow-map-zone[data-occupied="true"]').count(), 14)
+        rings = page.locator(".snow-map-pin").evaluate_all("""pins => pins.map(pin => {
+          const probe=document.createElement('i');probe.style.color='var(--char)';pin.append(probe);
+          const char=getComputedStyle(probe).color;probe.remove();
+          return [getComputedStyle(pin).borderTopColor===char, pin.dataset.snowCharacter===pin.dataset.mapPin];})""")
+        self.assertEqual(len(rings), 21)
+        self.assertTrue(all(all(ring) for ring in rings), rings)
+        # A location that only repeats its area name is not printed twice; other wording stays readable.
+        place = {where: page.locator(f'[data-base-map-select="{row["character_id"]}"] .snow-base-map-location')
+                 for row, (where, _) in zip(ROSTER, placements)}
+        self.assertFalse(place["基地休息区"].is_visible())
+        for where in ("个人房间", "医务室附近", "商业街"):
+            self.assertTrue(place[where].is_visible(), where)
+        lounge = ROSTER[placements.index(("基地休息区", "lounge"))]
+        page.locator(f'[data-map-pin="{lounge["character_id"]}"]').click()
+        self.assertEqual(page.locator(f'[data-base-map-select="{lounge["character_id"]}"]').get_attribute("aria-pressed"), "true")
+        self.assertEqual(page.locator('.snow-map-art [data-zone="lounge"]').get_attribute("data-active"), "true")
+        self.assertTrue(page.locator("#snow-base-map-status").inner_text().startswith(lounge["display_name"]))
+        self.assertFalse(page.locator("#snow-base-map-visit").is_disabled())
+        self.assertEqual([r for r in self.http[start:] if not r[1].startswith("/dialogue-context.js")], [])
+        self.assertEqual(self.joins(), [])
+        self.evidence.append({"placements": len(placements), "analyst_zone": "training", "scene_mapping_agrees": True,
+                              "http_during_open": 0, "model_calls": 0})
 
     def test_actual_three_tones_entry_states_and_map_text_have_contrast(self):
         for width, height in ((1440, 900), (390, 844)):
@@ -598,6 +748,13 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
                         for role in ("name", "initial", "location", "activity"):
                             selector = f'.snow-base-map-card[aria-pressed="{selected}"] .snow-base-map-{role}'
                             rows.append({"role": f"card-{selected}-{role}", **self.text_contrast(page, selector)})
+                    for selector in (".snow-map-group-title", ".snow-map-group-title .snow-map-code",
+                                     ".snow-map-legend .snow-map-key", ".snow-map-key-note", ".snow-map-more", ".snow-map-count"):
+                        rows.append({"role": selector, **self.text_contrast(page, selector)})
+                    # Plan labels sit on SVG room fills, not on a DOM ancestor background; measure against the fill.
+                    page.locator('[data-map-zone="archive"]').click()
+                    self.paint_settled(page)
+                    rows.extend(self.plan_label_contrast(page))
                     self.evidence.append({"width": width, "requested_tone": tone, "actual_tone": actual, "contrast": rows})
                     for row in rows:
                         self.assertGreaterEqual(row["fontSize"], 12, row)
