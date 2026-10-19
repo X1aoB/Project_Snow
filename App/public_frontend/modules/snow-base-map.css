@@ -1,0 +1,366 @@
+/* Loaded only by the Snow ADV map module; no rules affect the original UI.
+   Shell, backdrop, header, close and primary buttons come from the shared
+   .modal / .icon-button / .primary-button skins so all three tones match the other dialogs.
+   The plan is drawn with tone tokens, so dusk and dark recolour it without a second palette. */
+html[data-ui="snow-adv"] #open-snow-base-map {
+  grid-column: 1 / -1;
+  gap: 6px;
+  justify-self: stretch;
+  color: var(--ink-700);
+}
+html[data-ui="snow-adv"] #open-snow-base-map:hover:not(:disabled),
+html[data-ui="snow-adv"] #open-snow-base-map:focus-visible {
+  border-color: var(--ice-400);
+  background: var(--snow-100);
+  color: var(--ink-700);
+}
+html[data-ui="snow-adv"] #open-snow-base-map:focus-visible { outline: 2px solid var(--ice-700); outline-offset: 2px; }
+html[data-ui="snow-adv"] .snow-base-map {
+  box-sizing: border-box;
+  width: min(1180px, calc(100vw - 28px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+  font-size: var(--fs-14);
+  line-height: 1.6;
+}
+html[data-ui="snow-adv"] .snow-base-map[open] { display: flex; flex-direction: column; }
+html[data-ui="snow-adv"][data-motion-level="off"] .snow-base-map::backdrop { animation: none !important; }
+html[data-ui="snow-adv"][data-motion-level="off"] .snow-base-map * { transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-ui="snow-adv"] .snow-base-map::backdrop { animation: none !important; }
+  html[data-ui="snow-adv"] .snow-base-map * { transition: none !important; }
+}
+html[data-ui="snow-adv"] .snow-base-map :is(h2, h3, p, figure) { margin: 0; }
+html[data-ui="snow-adv"] .snow-base-map :is(button, section, div, figure) { box-sizing: border-box; }
+html[data-ui="snow-adv"] .snow-base-map button:focus-visible { outline: 2px solid var(--ice-700); outline-offset: 2px; }
+html[data-ui="snow-adv"] .snow-base-map-header { flex: none; align-items: flex-start; }
+html[data-ui="snow-adv"] .snow-base-map-header h2 { margin-top: 2px; }
+html[data-ui="snow-adv"] #snow-base-map-summary { margin-top: 4px; color: var(--ink-600); font-size: var(--fs-13); }
+html[data-ui="snow-adv"] .snow-base-map-close { flex: none; }
+html[data-ui="snow-adv"] .snow-base-map .snow-icon { display: block; width: 20px; height: 20px; }
+
+/* Body: plan on the left, people grouped by area on the right. */
+html[data-ui="snow-adv"] .snow-base-map-body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  min-height: 0;
+  padding: 14px 18px;
+  overflow: hidden;
+}
+html[data-ui="snow-adv"] .snow-map-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-self: center;
+  width: min(100%, calc((100dvh - 260px) * 1.5625));
+  min-width: 0;
+}
+html[data-ui="snow-adv"] .snow-map-scroller {
+  overflow: hidden;
+  border: 1px solid var(--snow-200);
+  border-radius: var(--radius-m);
+}
+html[data-ui="snow-adv"] .snow-map-plan { position: relative; width: 100%; aspect-ratio: 1000 / 640; --pin: 36px; }
+html[data-ui="snow-adv"] .snow-map-zone[data-kind="annex"] { --pin: 30px; }
+html[data-ui="snow-adv"] .snow-map-art { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+html[data-ui="snow-adv"] .snow-map-zones { position: absolute; inset: 0; }
+
+/* Drawing */
+html[data-ui="snow-adv"] .snow-map-art .field { fill: var(--snow-100); }
+html[data-ui="snow-adv"] .snow-map-art .grid { fill: none; stroke: var(--snow-200); stroke-width: 1; }
+html[data-ui="snow-adv"] .snow-map-art .road { fill: none; stroke: var(--snow-200); stroke-width: 28; }
+html[data-ui="snow-adv"] .snow-map-art :is(.road-line, .link) { fill: none; stroke: var(--ice-300); stroke-width: 2; stroke-dasharray: 8 8; }
+html[data-ui="snow-adv"] .snow-map-art .floor { fill: var(--snow-0); }
+html[data-ui="snow-adv"] .snow-map-art .wall { fill: none; stroke: var(--ice-500); stroke-width: 5; stroke-linejoin: round; }
+html[data-ui="snow-adv"] .snow-map-art .wall-inner { fill: none; stroke: var(--ice-300); stroke-width: 1.5; }
+html[data-ui="snow-adv"] .snow-map-art .room {
+  fill: var(--snow-50);
+  stroke: var(--ice-300);
+  stroke-width: 1.5;
+  transition: fill 160ms var(--ease-snow), stroke 160ms var(--ease-snow);
+}
+html[data-ui="snow-adv"] .snow-map-art .room[data-occupied="true"] { fill: color-mix(in oklab, var(--ice-300) 24%, var(--snow-50)); }
+html[data-ui="snow-adv"] .snow-map-art :is(.room, .zone-outside)[data-hover="true"] { stroke: var(--ice-500); }
+html[data-ui="snow-adv"] .snow-map-art .room[data-active="true"] {
+  fill: color-mix(in oklab, var(--ice-400) 30%, var(--snow-0));
+  stroke: var(--ice-600);
+  stroke-width: 2.5;
+}
+html[data-ui="snow-adv"] .snow-map-art .zone-outside { fill: transparent; stroke: var(--ice-300); stroke-width: 1.5; stroke-dasharray: 8 6; }
+html[data-ui="snow-adv"] .snow-map-art .zone-outside[data-active="true"] { fill: color-mix(in oklab, var(--ice-400) 18%, transparent); stroke: var(--ice-600); }
+html[data-ui="snow-adv"] .snow-map-art .door { fill: var(--snow-0); }
+html[data-ui="snow-adv"] .snow-map-art .glyph {
+  fill: none;
+  stroke: var(--ink-400);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.4;
+}
+html[data-ui="snow-adv"] .snow-map-art .window { fill: none; stroke: var(--ice-500); stroke-width: 3; stroke-dasharray: 14 5; }
+html[data-ui="snow-adv"] .snow-map-art .beacon { fill: var(--warm-500); }
+html[data-ui="snow-adv"] .snow-map-art .beacon-halo { fill: var(--warm-300); opacity: 0.5; }
+html[data-ui="snow-adv"] .snow-map-art .compass { fill: var(--ice-600); }
+html[data-ui="snow-adv"] .snow-map-art .compass-ring { fill: none; stroke: var(--ice-300); stroke-width: 1.5; }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .field { fill: rgb(var(--tn-deep)); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .grid { stroke: rgb(var(--tn-line) / 0.1); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .road { stroke: rgb(var(--tn-surface)); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .floor { fill: rgb(var(--tn-base)); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .wall { stroke: rgb(var(--tn-line) / 0.6); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .wall-inner { stroke: rgb(var(--tn-line) / 0.25); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .room { fill: rgb(var(--tn-surface)); stroke: rgb(var(--tn-line) / 0.3); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .room[data-occupied="true"] { fill: rgb(var(--tn-raised)); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .room[data-active="true"] { fill: rgb(var(--tn-high)); stroke: var(--ice-500); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .zone-outside { stroke: rgb(var(--tn-line) / 0.35); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .zone-outside[data-active="true"] { fill: rgb(var(--tn-high) / 0.6); stroke: var(--ice-500); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .door { fill: rgb(var(--tn-base)); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .glyph { stroke: rgb(var(--tn-line)); opacity: 0.3; }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-map-art .compass { fill: var(--ice-500); }
+
+/* Areas: the whole room is the hit target; pins sit above it. */
+html[data-ui="snow-adv"] .snow-map-zone { position: absolute; pointer-events: none; }
+html[data-ui="snow-adv"] .snow-base-map .snow-map-zone-button {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-900);
+  font: inherit;
+  font-size: var(--fs-13);
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+}
+html[data-ui="snow-adv"] .snow-map-label { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+html[data-ui="snow-adv"] .snow-map-code { color: var(--ice-700); font-size: var(--fs-12); font-weight: 700; letter-spacing: 0.06em; }
+html[data-ui="snow-adv"] .snow-map-name { overflow: hidden; color: var(--ink-900); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+html[data-ui="snow-adv"] .snow-map-zone[data-occupied="false"] .snow-map-name { color: var(--ink-600); font-weight: 500; }
+html[data-ui="snow-adv"] .snow-map-count {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #3a7ca5;
+  color: #fff;
+  font-size: var(--fs-12);
+  font-weight: 700;
+  line-height: 1;
+}
+html[data-ui="snow-adv"] .snow-map-zone:is([data-kind="row"]) .snow-map-zone-button { align-items: center; padding: 4px 10px; }
+html[data-ui="snow-adv"] .snow-map-zone:is([data-kind="row"]) .snow-map-label { flex-direction: row; align-items: baseline; gap: 6px; }
+html[data-ui="snow-adv"] .snow-map-zone[data-kind="row"] .snow-map-count { margin-left: auto; }
+html[data-ui="snow-adv"] .snow-map-pins {
+  position: absolute;
+  inset: 48px 8px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  justify-content: center;
+  gap: 5px;
+  pointer-events: none;
+}
+html[data-ui="snow-adv"] .snow-map-zone[data-kind="annex"] .snow-map-pins { inset: auto 8px 7px auto; justify-content: flex-end; }
+html[data-ui="snow-adv"] .snow-map-zone[data-kind="row"] .snow-map-pins { inset: 0 44px 0 112px; flex-wrap: nowrap; justify-content: flex-start; overflow: hidden; }
+html[data-ui="snow-adv"] .snow-base-map .snow-map-pin {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--pin);
+  height: var(--pin);
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid var(--char);
+  border-radius: 50%;
+  background: var(--snow-0);
+  box-shadow: 0 2px 6px rgb(20 40 60 / 0.22);
+  color: var(--ink-700);
+  font: 600 var(--fs-13) / 1 var(--font-ui);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 160ms var(--ease-snow), box-shadow 160ms var(--ease-snow);
+}
+html[data-ui="snow-adv"] .snow-base-map :is(.snow-map-pin, .snow-base-map-initial) img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+html[data-ui="snow-adv"] .snow-base-map .snow-map-pin:hover:not(:disabled) { transform: translateY(-2px); }
+html[data-ui="snow-adv"] .snow-base-map .snow-map-pin[data-presence="stale"] { border-style: dashed; opacity: 0.8; }
+html[data-ui="snow-adv"] .snow-base-map .snow-map-pin[data-selected="true"] {
+  z-index: 1;
+  box-shadow: 0 0 0 2px var(--snow-0), 0 0 0 4px var(--char), 0 6px 14px rgb(20 40 60 / 0.28);
+  transform: translateY(-2px) scale(1.08);
+}
+html[data-ui="snow-adv"] .snow-map-you {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--pin);
+  height: var(--pin);
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 4px;
+  background: #b4502f;
+  box-shadow: 0 2px 6px rgb(20 40 60 / 0.25);
+  color: #fff;
+  font-size: var(--fs-12);
+  font-weight: 700;
+}
+html[data-ui="snow-adv"] .snow-map-more {
+  display: grid;
+  flex: none;
+  place-items: center;
+  min-width: var(--pin);
+  max-width: calc(var(--pin) * 2 + 5px);
+  height: var(--pin);
+  padding: 0 6px;
+  overflow: hidden;
+  border: 1px solid var(--ice-300);
+  border-radius: 999px;
+  background: var(--snow-0);
+  color: var(--ink-700);
+  font-size: var(--fs-12);
+  font-weight: 700;
+}
+html[data-ui="snow-adv"] .snow-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  color: var(--ink-600);
+  font-size: var(--fs-12);
+  line-height: 18px;
+}
+html[data-ui="snow-adv"] .snow-map-key { display: inline-flex; align-items: center; gap: 6px; }
+html[data-ui="snow-adv"] .snow-map-key-dot { width: 12px; height: 12px; border: 2px solid var(--ice-600); border-radius: 50%; background: var(--snow-0); }
+html[data-ui="snow-adv"] .snow-map-plan[data-presence="stale"] ~ * .snow-map-key-dot,
+html[data-ui="snow-adv"] .snow-map-figure:has(.snow-map-plan[data-presence="stale"]) .snow-map-key-dot { border-style: dashed; }
+html[data-ui="snow-adv"] .snow-map-key-you { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50% 50% 50% 3px; background: #b4502f; color: #fff; font-size: 10px; font-weight: 700; }
+html[data-ui="snow-adv"] .snow-map-key-note { margin-left: auto; }
+
+/* People by area */
+html[data-ui="snow-adv"] .snow-base-map-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* The plan sets the row height; the list fills it and scrolls instead of stretching the dialog. */
+  height: 0;
+  min-height: 100%;
+  padding: 2px 4px 2px 2px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+html[data-ui="snow-adv"] .snow-map-group { display: flex; flex-direction: column; gap: 6px; }
+html[data-ui="snow-adv"] .snow-map-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 8px;
+  border-left: 3px solid transparent;
+  color: var(--ink-900);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 22px;
+}
+html[data-ui="snow-adv"] .snow-map-group-title .snow-map-count { margin-left: auto; }
+html[data-ui="snow-adv"] .snow-map-group[data-active="true"] .snow-map-group-title { border-left-color: var(--ice-600); }
+html[data-ui="snow-adv"] .snow-map-group-list { display: grid; gap: 6px; }
+html[data-ui="snow-adv"] .snow-base-map-item { min-width: 0; }
+/* Cards carry data-snow-character, so --char resolves to that character's theme colour. */
+html[data-ui="snow-adv"] .snow-base-map .snow-base-map-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--snow-200);
+  border-radius: var(--radius-s);
+  background: var(--snow-50);
+  color: var(--ink-700);
+  font: inherit;
+  font-size: var(--fs-12);
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms var(--ease-snow), background-color 160ms var(--ease-snow);
+}
+html[data-ui="snow-adv"] .snow-base-map .snow-base-map-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--char) 60%, var(--snow-200)); }
+html[data-ui="snow-adv"] .snow-base-map .snow-base-map-card[data-selected="true"] {
+  border-color: var(--char);
+  background: color-mix(in oklab, var(--char) 10%, var(--snow-0));
+  box-shadow: inset 0 0 0 1px var(--char);
+}
+html[data-ui="snow-adv"] .snow-base-map .snow-base-map-card:disabled { cursor: default; }
+html[data-ui="snow-adv"] .snow-base-map-identity { display: flex; align-items: center; gap: 8px; min-width: 0; }
+html[data-ui="snow-adv"] .snow-base-map-name { overflow: hidden; color: var(--ink-900); text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-14); line-height: 24px; }
+html[data-ui="snow-adv"] .snow-base-map-initial {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border: 2px solid var(--char);
+  border-radius: 50%;
+  background: var(--snow-0);
+  color: var(--ink-700);
+  font-size: var(--fs-13);
+}
+html[data-ui="snow-adv"] :is(.snow-base-map-location, .snow-base-map-activity) { padding-left: 36px; }
+html[data-ui="snow-adv"] .snow-base-map-card[data-place-same="true"] .snow-base-map-location { display: none; }
+html[data-ui="snow-adv"] .snow-base-map-location { display: block; max-width: 100%; overflow: hidden; color: var(--ink-900); text-overflow: ellipsis; white-space: nowrap; }
+html[data-ui="snow-adv"] .snow-base-map-activity { display: -webkit-box; overflow: hidden; color: var(--ink-600); overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+html[data-ui="snow-adv"] .snow-base-map-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--snow-200);
+}
+html[data-ui="snow-adv"] #snow-base-map-status { max-height: 72px; overflow: auto; color: var(--ink-600); overflow-wrap: anywhere; }
+html[data-ui="snow-adv"] .snow-base-map-visit { flex: none; }
+
+/* Narrow screens: the plan scrolls sideways like a real map; the area list sits below it. */
+@media (max-width: 760px) {
+  html[data-ui="snow-adv"] .snow-base-map-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; }
+  html[data-ui="snow-adv"] .snow-map-figure { flex: none; width: 100%; }
+  html[data-ui="snow-adv"] .snow-map-scroller { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }
+  html[data-ui="snow-adv"] .snow-map-plan { width: 540px; --pin: 24px; }
+  html[data-ui="snow-adv"] .snow-base-map .snow-map-zone-button { padding: 5px 7px; font-size: var(--fs-12); }
+  html[data-ui="snow-adv"] .snow-map-code { letter-spacing: 0.04em; }
+  html[data-ui="snow-adv"] .snow-map-count { min-width: 20px; height: 20px; }
+  html[data-ui="snow-adv"] .snow-map-pins { inset: 38px 6px 6px; gap: 4px; }
+  html[data-ui="snow-adv"] .snow-map-zone[data-kind="annex"] .snow-map-pins { inset: auto 6px 5px auto; }
+  html[data-ui="snow-adv"] .snow-map-zone[data-kind="annex"] { --pin: 20px; }
+  html[data-ui="snow-adv"] .snow-map-zone[data-kind="row"] { --pin: 22px; }
+  html[data-ui="snow-adv"] .snow-map-zone[data-kind="row"] .snow-map-pins { inset: 0 36px 0 88px; }
+  html[data-ui="snow-adv"] .snow-base-map-list { flex: 1 1 auto; height: auto; min-height: 120px; }
+  html[data-ui="snow-adv"] .snow-map-key-note { flex-basis: 100%; margin-left: 0; }
+}
+@media (max-width: 600px) {
+  html[data-ui="snow-adv"] .snow-base-map { max-height: calc(100dvh - 20px); }
+  html[data-ui="snow-adv"] .snow-base-map-actions { align-items: flex-start; padding: 12px 14px; }
+}

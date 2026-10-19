@@ -321,7 +321,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
-        if path == "/dialogue-context.js" or (path.startswith("/modules/") and path.endswith(".js")) or (path.startswith("/statistics/") and path.endswith((".mjs", ".css"))):
+        if path == "/dialogue-context.js" or (path.startswith("/modules/") and path.endswith((".js", ".css"))) or (path.startswith("/statistics/") and path.endswith((".mjs", ".css"))):
             candidate = (PUBLIC_ROOT / path.lstrip("/")).resolve()
             if candidate.is_relative_to(PUBLIC_ROOT.resolve()) and candidate.is_file():
                 assets[path] = candidate.relative_to(PUBLIC_ROOT.resolve()).as_posix()

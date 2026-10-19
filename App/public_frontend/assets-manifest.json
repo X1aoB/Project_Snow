@@ -37,6 +37,17 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/modules/snow-base-map.css",
+      "public_url": "/modules/snow-base-map.css",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-base-map.js",
+      "public_url": "/modules/snow-base-map.js",
+      "dependencies": ["/modules/snow-base-map.css"],
+      "required_html": false
+    },
+    {
       "source": "public_frontend/app.js",
       "public_url": "/app.js",
       "dependencies": [
@@ -44,6 +55,7 @@
         "/dialogue-context.js",
         "/modules/snow-icons.js",
         "/modules/snow-world.js",
+        "/modules/snow-base-map.js",
         "/snow-adv-fonts.css",
         "/assets/avatars/longyan-neutral-96.webp",
         "/assets/avatars/longyan-neutral-200.webp"
