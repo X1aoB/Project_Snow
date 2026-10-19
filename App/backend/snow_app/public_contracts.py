@@ -433,3 +433,31 @@ class SceneActionRequest(StrictModel):
     local_day_key: str = Field(default="", max_length=32)
     rendezvous_id: str = Field(default="", max_length=160)
     memory_candidates: list[SessionMemoryCandidate] = Field(default_factory=list, max_length=12)
+
+
+class ProactiveConsentRequest(StrictModel):
+    provider: str = Field(min_length=1, max_length=24)
+    model: str = Field(min_length=1, max_length=200)
+    reasoning_effort: ReasoningEffort | None = None
+    credential: str = Field(min_length=20, max_length=8192)
+    model_session_id: UUID
+    notice_version: Literal["proactive-cost-1"]
+    accepted_cost_notice: bool = Field(strict=True)
+
+
+class ProactiveMessageRequest(StrictModel):
+    request_id: UUID
+    character_id: str = Field(min_length=12, max_length=32)
+    rendezvous_id: str = Field(min_length=8, max_length=160)
+    segment_id: UUID
+    state_package: str = Field(min_length=1, max_length=32768)
+    session_context_package: str = Field(min_length=1, max_length=8192)
+    provider: str = Field(min_length=1, max_length=24)
+    model: str = Field(min_length=1, max_length=200)
+    reasoning_effort: ReasoningEffort | None = None
+    model_session_id: UUID
+    notice_version: Literal["proactive-cost-1"]
+    # Authentication can expire while the exact original business request is
+    # recovered. Neither bearer token is part of that immutable body hash.
+    credential: str = Field(default="", max_length=8192)
+    consent_token: str = Field(default="", max_length=2048)

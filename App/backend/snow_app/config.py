@@ -195,6 +195,7 @@ class PublicSettings:
     dialogue_domains_v2: bool = False
     scene_actions_v2: bool = False
     session_memory_v2: bool = False
+    proactive_messages_enabled: bool = False
     # 雪境 ADV interface skin; presentation only, default off.
     ui_snow_adv: bool = False
     @classmethod
@@ -308,6 +309,7 @@ class PublicSettings:
             dialogue_domains_v2=os.getenv("PUBLIC_DIALOGUE_DOMAINS_V2", "false").casefold() == "true",
             scene_actions_v2=os.getenv("PUBLIC_SCENE_ACTIONS_V2", "false").casefold() == "true",
             session_memory_v2=os.getenv("PUBLIC_SESSION_MEMORY_V2", "false").casefold() == "true",
+            proactive_messages_enabled=os.getenv("PUBLIC_PROACTIVE_MESSAGES_ENABLED", "false").casefold() == "true",
             ui_snow_adv=os.getenv("PUBLIC_UI_SNOW_ADV", "false").casefold() == "true",
         )
 
