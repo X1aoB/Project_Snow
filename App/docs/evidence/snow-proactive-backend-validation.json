@@ -1,6 +1,6 @@
 {
   "schema": "project-snow-proactive-backend-validation-1",
-  "recorded_at": "2026-10-19T13:33:06.082669+00:00",
+  "recorded_at": "2026-10-19T13:49:18.200007+00:00",
   "technical_qa_only": true,
   "human_release_approval": false,
   "real_paid_model_calls": 0,
@@ -85,6 +85,35 @@
         "time": 3.749
       },
       "duration_seconds": 3.749
+    },
+    {
+      "group": "dialogue-v2-protocol-fixture-plus-proactive-regression",
+      "pytest_passed": 52,
+      "subtests_passed": 12,
+      "xml": ".tmp/proactive-protocol-fixture-regression.xml",
+      "junit_metrics": {
+        "tests": 64,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time": 7.196
+      },
+      "duration_seconds": 7.196
+    },
+    {
+      "group": "exact-ci-api-tier-after-synthetic-world-fixture-correction",
+      "pytest_passed": 333,
+      "subtests_passed": 447,
+      "pytest_skipped": 3,
+      "xml": ".tmp/proactive-ci-api-fixture-regression.xml",
+      "junit_metrics": {
+        "tests": 783,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 3,
+        "time": 76.132
+      },
+      "duration_seconds": 76.132
     }
   ],
   "postgres_contracts_verified": [
@@ -108,7 +137,8 @@
     "App/tests/test_proactive_message.py": "ad837d8ca6347560c802436b37a3c457f21485eebf3100a6c507067e03c82fff",
     "App/tests/test_proactive_message_postgres.py": "221da3a97021e235b8724feba5b66d1a82c3578d02928dbf3e0cef026086600a",
     "App/tests/test_postgres_integration.py": "0363f8a2f17d11e6f4925e108a726e1061728459c6604739108e6a03e5c7acdc",
-    "App/docs/snow-proactive-message-proposal.md": "695fe0af693efeb5d3a7f374f90949b0eb81a52ca64a9248ad497088ea231bdc"
+    "App/docs/snow-proactive-message-proposal.md": "695fe0af693efeb5d3a7f374f90949b0eb81a52ca64a9248ad497088ea231bdc",
+    "App/tests/test_dialogue_v2_protocol.py": "e94e131c175038908f5b812691ba7a460283b04e1b19c400671f1a950fc73dbe"
   },
   "regression_scope": {
     "historical_runs_retained": true,
@@ -120,5 +150,18 @@
     ],
     "setup_failure_report": ".tmp/proactive-context-usage-postgres-setup-failure.xml",
     "setup_failure_explanation": "Initial targeted PostgreSQL run used a nonexistent local role; all six cases stopped at connection setup. Corrected to the role initialized for this isolated test instance and all six passed."
+  },
+  "protocol_fixture_correction": {
+    "production_code_changed": false,
+    "cause": "Synthetic DialogueV2RouteTests service signed only a revision field and omitted subject_binding; the newly added authority projection correctly rejected this incomplete generated world.",
+    "correction": "Generate complete StatePayload public-state-2 fixtures with the actual anonymous subject, Hong Kong schedule date and expiry. Keep production authority checks unchanged.",
+    "negative_contracts": [
+      "foreign-subject chat result cannot publish reply or sidecar or create rendezvous authority",
+      "foreign-subject scene result cannot commit a result or create rendezvous authority"
+    ],
+    "initial_local_failure_report": ".tmp/proactive-protocol-initial-failure.xml",
+    "initial_local_failure_count": 4,
+    "ci_api_command_matches_workflow": true,
+    "local_api_skips": "Three PostgreSQL-only acceptance tests are skipped in the API tier without TEST_POSTGRES_URL; PostgreSQL contracts run separately in CI."
   }
 }

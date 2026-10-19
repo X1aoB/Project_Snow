@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -23,7 +24,7 @@ from sqlalchemy import text
 from backend.snow_app.config import Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from backend.snow_app.public_contracts import (
-    ChatRequest, DialogueV2ChatRequest, PendingRendezvous, SceneActionRequest, SceneOverlay, SessionMemory,
+    ChatRequest, DialogueV2ChatRequest, PendingRendezvous, SceneActionRequest, SceneOverlay, SessionMemory, StatePayload,
 )
 from backend.snow_app.public_main import (
     _anonymous_cookie_name, _dialogue_v2_request_body, _model_request_body, _request_hash, create_app,
@@ -271,17 +272,24 @@ class DialogueV2RouteTests(TestCase):
         return {"session_context_package": sign_session_context(self.settings, context),
                 "session_memories": [], "scene_action": {"status": "not_requested"}}
 
+    def world_package(self, subject, revision):
+        now = datetime.now(UTC)
+        world = StatePayload(data_version=self.settings.data_version, revision=revision,
+            subject_binding=subject, schedule_date=now.astimezone(ZoneInfo("Asia/Hong_Kong")).date().isoformat(),
+            generated_at=now.isoformat(), expires_at=(now + timedelta(hours=12)).isoformat())
+        return sign_state(self.settings, world.model_dump(mode="json"))
+
     async def generate(self, envelope, subject, provider, api_key, *, gate_reserved=False):
         self.calls += 1
         return {"request_id": str(envelope.chat.request_id), "character_id": self.character,
                 "answer": "synthetic reply", "content_blocks": [{"type": "message", "text": "synthetic reply"}],
-                "communication_channel": "text", "state_package": sign_state(self.settings, {"revision": 1}),
+                "communication_channel": "text", "state_package": self.world_package(subject, 1),
                 "diagnostics": {"timings_ms": {"provider_http_calls": 1}}, **self.metadata(subject)}
 
     def scene(self, envelope, subject):
         self.actions += 1
         return {"request_id": str(envelope.request_id), "character_id": self.character,
-                "state_package": sign_state(self.settings, {"revision": self.actions}),
+                "state_package": self.world_package(subject, self.actions),
                 **self.metadata(subject), "scene_action": {"status": "applied", "action": envelope.action}}
 
     def post(self, body, *, recovery=False):
@@ -385,6 +393,38 @@ class DialogueV2RouteTests(TestCase):
         self.assertIn('"idempotent_replay":true', replay.text)
         self.assertEqual(self.calls, 1)
         self.service.validate_chat.assert_called_once()
+        saved = self.store.request_result(body["chat"]["request_id"], self.subject)
+        world = StatePayload.model_validate(verify_state(self.settings, saved["state_package"]))
+        self.assertEqual(world.subject_binding, self.subject)
+        self.assertEqual(world.schedule_date, datetime.now(ZoneInfo("Asia/Hong_Kong")).date().isoformat())
+
+    def test_foreign_subject_generated_world_is_rejected_before_publication(self):
+        async def generate_foreign(*args, **kwargs):
+            result = await self.generate(*args, **kwargs)
+            return {**result, "state_package": self.world_package("synthetic-foreign-subject", 1)}
+
+        self.service.chat = generate_foreign
+        result = self.post(self.envelope())
+        self.assertIn("event: error", result.text)
+        self.assertNotIn("synthetic reply", result.text)
+        self.assertNotIn("session_context_package", result.text)
+        with self.store.engine.connect() as connection:
+            self.assertEqual(connection.execute(text("SELECT count(*) FROM public_rendezvous_authority")).scalar_one(), 0)
+
+    def test_foreign_subject_scene_world_is_rejected_without_committing(self):
+        def scene_foreign(*args, **kwargs):
+            result = self.scene(*args, **kwargs)
+            return {**result, "state_package": self.world_package("synthetic-foreign-subject", 1)}
+
+        self.service.scene_action = scene_foreign
+        body = {"protocol": "public-scene-action-v2", "request_id": str(uuid4()),
+                "character_id": self.character, "action": "join_character", "segment_id": str(self.segment)}
+        result = self.client.post("/public/v2/scene/action", headers=self.headers, json=body)
+        self.assertEqual(result.status_code, 401)
+        self.assertNotIn("session_context_package", result.text)
+        self.assertIsNone(self.store.request_result("scene-action:" + body["request_id"], self.subject))
+        with self.store.engine.connect() as connection:
+            self.assertEqual(connection.execute(text("SELECT count(*) FROM public_rendezvous_authority")).scalar_one(), 0)
 
     def test_recovery_missing_expired_conflict_never_claims_or_generates(self):
         body = self.envelope()
