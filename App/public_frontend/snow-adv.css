@@ -1510,6 +1510,9 @@ html[data-ui="snow-adv"][data-tone="dark"] :is(.danger-button, .message.failed .
 html[data-ui="snow-adv"][data-tone="dark"] .portrait.portrait-text { background: linear-gradient(145deg, rgb(var(--tn-high)), rgb(var(--tn-raised))); color: var(--ink-700); }
 html[data-ui="snow-adv"][data-tone="dark"] :is(.in-person-surface, .scene-stage) { background-color: rgb(var(--tn-surface)); }
 html[data-ui="snow-adv"][data-tone="dark"] .scene-menu-popover { border-color: rgb(var(--tn-line) / 0.26); background: rgb(var(--tn-surface) / 0.96); }
+html[data-ui="snow-adv"][data-tone="dark"] .scene-menu-popover :is(button, a) { color: var(--ink-700); }
+html[data-ui="snow-adv"][data-tone="dark"] .scene-menu-popover :is(button, a):hover { background: rgb(var(--tn-raised)); }
+html[data-ui="snow-adv"][data-tone="dark"] .scene-menu-popover button:disabled { color: var(--ink-400); background: transparent; }
 /* 冰蓝/角色色填充上的文字原本用 --snow-0（白），变量翻转后要固定为白字。 */
 html[data-ui="snow-adv"][data-tone="dark"] :is(.presence-switch, .primary-button, .send-button, .scene-tool-button.primary, .stage-speaker-line strong, .announcement-tab-badge),
 html[data-ui="snow-adv"][data-tone="dark"] .message.user :is(.content-message, .content-speech) { color: #ffffff; }
