@@ -705,6 +705,44 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
         self.evidence.append({"placements": len(placements), "analyst_zone": "training", "scene_mapping_agrees": True,
                               "http_during_open": 0, "model_calls": 0})
 
+    def test_map_avatars_match_the_communicator_including_overrides(self):
+        # 胧嫣 has an approved local face crop (CHARACTER_AVATAR_OVERRIDES in app.js). The plan and the
+        # roster must show that picture, exactly like the communicator, not the roster's own avatar.
+        from PIL import Image
+        longyan, override = "447ed3c401c9", "/assets/avatars/longyan-neutral-96.webp"
+        rows = roster()
+        rows[2].update(character_id=longyan, display_name="胧嫣")
+        for row in rows:
+            cid = row["character_id"]
+            row["avatar"] = {"thumbnail_src": f"/media/fixture/avatars/{cid}-96.webp", "src": f"/media/fixture/avatars/{cid}-200.webp",
+                             "portrait_focus_x": 50, "portrait_focus_y": 30, "portrait_scale": 1}
+        pixel = io.BytesIO()
+        Image.new("RGB", (4, 4), (120, 160, 200)).save(pixel, format="PNG")
+        page = self.new_page()
+        page.route(self.base_url + "/public/v1/characters",
+                   lambda route: route.fulfill(json={"count": len(rows), "characters": rows}))
+        page.route("**/*-96.webp", lambda route: route.fulfill(content_type="image/png", body=pixel.getvalue()))
+        page.route("**/*-200.webp", lambda route: route.fulfill(content_type="image/png", body=pixel.getvalue()))
+        self.open_page(page)
+        state = world()
+        state["presence"][longyan] = {"location": "基地休息区", "activity": "合成休息"}
+        page.locator("#open-snow-base-map").wait_for(state="attached")
+        page.evaluate("value => window.__baseMapFixture.setWorld(value)", dialogue.token(state))
+        self.open_map(page)
+        communicator = page.locator("#character-list button.character").evaluate_all(
+            "rows => Object.fromEntries(rows.map(row => [row.dataset.character, row.querySelector('img')?.getAttribute('src')]))")
+        listed = page.locator("#snow-base-map [data-base-map-select]").evaluate_all(
+            "rows => Object.fromEntries(rows.map(row => [row.dataset.baseMapSelect, row.querySelector('img')?.getAttribute('src')]))")
+        pinned = page.locator("#snow-base-map [data-map-pin]").evaluate_all(
+            "pins => Object.fromEntries(pins.map(pin => [pin.dataset.mapPin, pin.querySelector('img')?.getAttribute('src')]))")
+        self.assertEqual(communicator[longyan], override)
+        self.assertEqual(listed[longyan], override)
+        self.assertEqual(pinned[longyan], override)
+        self.assertEqual(len(listed), 22)
+        self.assertEqual(listed, {cid: communicator[cid] for cid in listed})
+        self.assertTrue(pinned and all(src == communicator[cid] for cid, src in pinned.items()), pinned)
+        self.assertNotIn(("GET", f"/media/fixture/avatars/{longyan}-96.webp"), self.http)
+
     def test_actual_three_tones_entry_states_and_map_text_have_contrast(self):
         for width, height in ((1440, 900), (390, 844)):
             for tone in ("light", "dark", "auto"):

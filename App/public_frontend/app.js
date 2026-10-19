@@ -3298,8 +3298,9 @@ async function ensureContinuityDecision(thread) {
   await dbPutThread(thread);
   return true;
 }
+function characterAvatar(character) { return CHARACTER_AVATAR_OVERRIDES[character?.character_id] || character?.avatar || null; }
 function avatarMarkup(character, { thumbnail = true, priority = false, className = "" } = {}) {
-  const avatar = CHARACTER_AVATAR_OVERRIDES[character?.character_id] || character?.avatar || null;
+  const avatar = characterAvatar(character);
   const src = avatar ? (thumbnail ? avatar.thumbnail_src : avatar.src) : "";
   const focus = avatar ? ` style="--portrait-focus-x:${Number(avatar.portrait_focus_x || 50)}%;--portrait-focus-y:${Number(avatar.portrait_focus_y || 50)}%;--portrait-scale:${Number(avatar.portrait_scale || 1)}"` : "";
   const image = src ? `<img src="${escapeHtml(src)}" alt="" loading="${priority ? "eager" : "lazy"}" decoding="async"${priority ? " fetchpriority=\"high\"" : ""} />` : "";
@@ -8184,7 +8185,7 @@ async function boot() {
   deferUntilFirstScreenSettled(() => {
     if (snowAdvActive()) void import("/modules/snow-base-map.js").then(module => module.installBaseMap({
       snapshot: () => ({ characters: state.characters, worldPackage: state.worldPackage, selected: state.selected, busy: globalRequestBusy() }),
-      visit: visitFromMap, icon: createSnowIcon, sceneKey: sceneVisualKey,
+      visit: visitFromMap, icon: createSnowIcon, sceneKey: sceneVisualKey, avatarOf: characterAvatar,
     })).catch(() => {});
   });
   void checkBuildUpdate();
