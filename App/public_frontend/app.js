@@ -68,6 +68,7 @@ const state = {
   favoriteStickers: new Map(),
   recentStickerIds: [],
   rendezvousDismissals: new Set(),
+  featurePreferences: {},
   selectedSticker: null,
   actionComposerOpen: false,
   invitationPopoverKey: "",
@@ -163,6 +164,81 @@ const state = {
   writerChannel: null,
   writerRenewTimer: 0,
 };
+
+const featureListeners = new Map(), featureMemoryWrites = new Map();
+let featureModulePromise, featurePreferenceWrite = Promise.resolve(), featurePreferenceEpoch = 0;
+const featureModule = () => featureModulePromise ||= import("/modules/snow-feature-logic.js");
+function featureEmit(type, detail) {
+  for (const listener of featureListeners.get(type) || []) {
+    try { listener(structuredClone(detail)); } catch {}
+  }
+}
+function featureOn(type, listener) {
+  if (!featureListeners.has(type)) featureListeners.set(type, new Set());
+  featureListeners.get(type).add(listener);
+  return () => featureListeners.get(type)?.delete(listener);
+}
+function featureBusyFor(characterId) {
+  return Boolean(state.chatRequestByCharacter.has(characterId) || typingStateFor(characterId)
+    || state.summaryInFlight.has(characterId) || state.sceneActionByCharacter.has(characterId)
+    || state.arrivalRequestByCharacter.has(characterId) || state.modeTransitionPending || state.presenceResolvePending || state.arrivalPending);
+}
+function featureSnapshot() {
+  return { ...structuredClone({ selected: state.selected, characters: state.characters, scene: state.scene,
+    channel: currentThread()?.channel || "text", worldPackage: state.worldPackage, localDayKey: localDayKey(),
+    movementCatalog: movementCatalog(), modelReady: configured(), writerOwned: state.writerOwned, historyEpoch: state.historyEpoch,
+    tone: document.documentElement.dataset.tone, toneTime: document.documentElement.dataset.toneTime }),
+    busy: globalRequestBusy(), busyFor: featureBusyFor };
+}
+async function installFeatures() {
+  const logic = (await featureModule()).createFeatureLogic({
+    snapshot: featureSnapshot, on: featureOn,
+    preferences: () => structuredClone(state.featurePreferences), savePreferences: saveUiPreferences,
+    loadDialogue: async characterId => structuredClone(await loadDialogueRecord(characterId)),
+    saveDialogue: async (characterId, record) => {
+      if (!state.writerOwned) throw new Error("history_busy");
+      await storePut("app_state", record);
+      state.dialogueByCharacter.set(characterId, structuredClone(record));
+    },
+    getMessage: async messageId => structuredClone(await storeGet("messages", messageId)),
+    messages: async characterId => structuredClone(await loadMessagePage(characterId, { limit: Number.MAX_SAFE_INTEGER })),
+    allMessages: async () => structuredClone((await storeAll("messages")).map(normalizeMessage)),
+    withMemoryWrite: async (characterId, operation) => {
+      if (!state.writerOwned || featureBusyFor(characterId) || featureMemoryWrites.has(characterId)) return { ok: false, reason: "busy" };
+      const write = Promise.resolve().then(operation);
+      featureMemoryWrites.set(characterId, write);
+      updateComposerAvailability();
+      try { return await write; }
+      finally { featureMemoryWrites.delete(characterId); updateComposerAvailability(); }
+    },
+  });
+  await logic.ready;
+  const { installSnowFeatures } = await import("/modules/snow-features.js");
+  installSnowFeatures({ version: 1, icon: createSnowIcon, avatarOf: character => structuredClone(characterAvatar(character)), snapshot: featureSnapshot, logic,
+    stage: { speechNode: () => $("stage-speech") }, on: featureOn,
+    open: { presence: visitFromMap, transcript: openFeatureTranscript, settings: openSettings, info: () => openDrawer("info-panel") } });
+}
+async function openFeatureTranscript({ messageId } = {}) {
+  if (messageId) {
+    const target = await storeGet("messages", messageId);
+    if (!target) return false;
+    if (target.characterId !== state.selected) await selectCharacter(target.characterId);
+    if (target.characterId !== state.selected) return false;
+    const thread = currentThread(), messages = await loadMessagePage(target.characterId, { limit: Number.MAX_SAFE_INTEGER });
+    thread.messages = [...new Map([...messages, ...thread.messages].map(message => [message.id, message])).values()].sort(compareMessageCursor);
+    const index = thread.messages.findIndex(message => message.id === messageId);
+    state.transcriptVisibleLimit = 60;
+    state.transcriptEndId = thread.messages[Math.min(index + 20, thread.messages.length - 1)]?.id || "";
+  }
+  openDrawer("transcript-panel");
+  const node = [...$("transcript-content").querySelectorAll("[data-message-id]")].find(node => node.dataset.messageId === messageId);
+  node?.scrollIntoView({ block: "center" });
+  return !messageId || Boolean(node);
+}
+function featureMemories(receipts) {
+  const deleted = new Set(state.featurePreferences.deletedMemoryIds || []);
+  return (receipts || []).filter(receipt => !deleted.has(receipt?.memory?.memory_id));
+}
 
 // A request may outlive the character currently visible in the UI.
 function TypingIndicatorState({ channel, characterId, requestId, phase = "typing" }) {
@@ -785,6 +861,7 @@ function syncInterfaceTone(enabled) {
     // 黄昏用暮色（同一套深色规则换偏紫暖色变量）；固定「深色」始终是夜色。
     if (dark && preference === "auto" && time === "dusk") root.dataset.toneTime = "dusk";
     else delete root.dataset.toneTime;
+    featureEmit("tone-changed", { tone: root.dataset.tone, toneTime: root.dataset.toneTime });
   };
   apply(snowResolveTime());
   if (!snowToneUnsubscribe) snowToneUnsubscribe = subscribeSnowTime(apply);
@@ -1465,7 +1542,8 @@ function recordReplyPaint(requestId, node) {
       timing.firstNaturalWaitMs = timing.naturalWaitMs;
       changed = true;
     }
-    if (effective) { timing.firstEffectiveAt = performance.now(); changed = true; }
+    if (effective) { timing.firstEffectiveAt = performance.now(); changed = true;
+      featureEmit("reply-presented", { characterId: timing.characterId, messageId: timing.messageId, requestId }); }
     if (changed && timing.completedAt) document.dispatchEvent(new CustomEvent("project-snow:reply-visible", { detail: anonymousTiming(timing) }));
   });
 }
@@ -2051,6 +2129,7 @@ function normalizeMessage(message) {
       })).filter(source => source.title || source.document_id) : [],
     conversationSegmentId: plain(message.conversationSegmentId || message.conversation_segment_id),
     usage: message.usage && typeof message.usage === "object" ? { ...message.usage } : null,
+    extraUsage: Array.isArray(message.extraUsage) ? structuredClone(message.extraUsage) : [],
     movementStatus: message.movementStatus && typeof message.movementStatus === "object"
       ? structuredClone(message.movementStatus)
       : message.movement_status && typeof message.movement_status === "object"
@@ -2158,6 +2237,7 @@ async function dbPutThread(thread, { appState = [] } = {}) {
   }
   if (epoch === state.historyEpoch) for (const { message, signature } of changes) state.persistedMessages.set(message.id, signature);
   thread.messageCount = metadata.messageCount;
+  if (epoch === state.historyEpoch) for (const { message } of changes) featureEmit("message-saved", message);
 }
 
 function surfaceHistory(surface = "timeline") {
@@ -2253,7 +2333,7 @@ async function loadDialogueRecord(characterId) {
 }
 function dialogueCandidates(characterId, text = "") {
   if (!featureEnabled("session_memory_v2")) return [];
-  return relevantDialogueReceipts(state.dialogueByCharacter.get(characterId)?.memories || [], text);
+  return relevantDialogueReceipts(featureMemories(state.dialogueByCharacter.get(characterId)?.memories), text);
 }
 function dialoguePackage(thread) {
   const token = state.dialogueByCharacter.get(thread.characterId)?.sessionContextPackage || "";
@@ -2275,7 +2355,7 @@ async function commitDialogueResult(thread, result, owns = () => true) {
   const accepted = world ? await saveWorldPackage(world, { persist: false }) : true;
   if (!accepted || !owns() || thread.historyEpoch !== state.historyEpoch || !state.writerOwned) return false;
   const record = { ...previous, key: dialogueRecordKey(thread.characterId), characterId: thread.characterId,
-    sessionContextPackage: token, memories: mergeDialogueReceipts(previous.memories, result.sessionMemories || result.session_memories || []) };
+    sessionContextPackage: token, memories: featureMemories(mergeDialogueReceipts(previous.memories, result.sessionMemories || result.session_memories || [])) };
   const appState = [record];
   if (world) { const order = statePackageOrder(world); appState.push({ key: "world", statePackage: world, revision: order.revision, scheduleDate: order.scheduleDate }); }
   await dbPutThread(thread, { appState });
@@ -2310,6 +2390,7 @@ function statePackageOrder(token) {
   return { scheduleDate, revision: Number(decoded.revision || decoded.world?.revision || 0) };
 }
 async function saveWorldPackage(token, { persist = true } = {}) {
+  const changed = () => featureEmit("world-changed", { worldPackage: state.worldPackage });
   if (!token) return false;
   const incoming = statePackageOrder(token);
   const current = statePackageOrder(state.worldPackage || "");
@@ -2317,6 +2398,7 @@ async function saveWorldPackage(token, { persist = true } = {}) {
   if (state.worldPackage && incoming.scheduleDate && current.scheduleDate && incoming.scheduleDate < current.scheduleDate) return false;
   if (state.worldPackage && incoming.scheduleDate && current.scheduleDate && incoming.scheduleDate > current.scheduleDate) {
     state.worldPackage = token;
+    changed();
     if (persist) await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
     return true;
   }
@@ -2324,6 +2406,7 @@ async function saveWorldPackage(token, { persist = true } = {}) {
     // A dated 0.9.2 package supersedes an undated legacy package.
     if (!incoming.scheduleDate) return false;
     state.worldPackage = token;
+    changed();
     if (persist) await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
     return true;
   }
@@ -2332,6 +2415,7 @@ async function saveWorldPackage(token, { persist = true } = {}) {
     return token === state.worldPackage;
   }
   state.worldPackage = token;
+  changed();
   if (persist) await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
   return true;
 }
@@ -2364,6 +2448,8 @@ async function migrateBrowserState() {
   state.autoSummaryEnabled = preferences?.autoSummaryEnabled !== false;
   state.dayContinuityPreference = preferences?.dayContinuityPreference === "continue_previous" ? "continue_previous" : "start_today";
   const uiPreferences = await storeGet("app_state", "ui_preferences");
+  featurePreferenceEpoch++;
+  state.featurePreferences = structuredClone(uiPreferences || {});
   state.pinnedCharacters = new Set(Array.isArray(uiPreferences?.pinnedCharacters) ? uiPreferences.pinnedCharacters.map(plain) : []);
   state.favoriteStickerIds = new Set(Array.isArray(uiPreferences?.favoriteStickerIds) ? uiPreferences.favoriteStickerIds.map(plain) : []);
   state.rendezvousDismissals = new Set(Array.isArray(uiPreferences?.rendezvousDismissals) ? uiPreferences.rendezvousDismissals.map(plain) : []);
@@ -2413,8 +2499,9 @@ async function saveConversationPreferences() {
     dayContinuityPreference: state.dayContinuityPreference,
   });
 }
-async function saveUiPreferences() {
-  await storePut("app_state", {
+async function saveUiPreferences(patch = {}) {
+  const epoch = state.historyEpoch, generation = featurePreferenceEpoch;
+  const record = { ...state.featurePreferences, ...structuredClone(patch),
     key: "ui_preferences",
     pinnedCharacters: [...state.pinnedCharacters],
     favoriteStickerIds: [...state.favoriteStickerIds],
@@ -2422,7 +2509,13 @@ async function saveUiPreferences() {
     recentStickerIds: state.recentStickerIds.slice(0, 24),
     rendezvousDismissals: [...state.rendezvousDismissals].slice(-120),
     historyRetentionDays: state.historyRetentionDays,
+  };
+  state.featurePreferences = record;
+  const write = featurePreferenceWrite.catch(() => {}).then(() => {
+    if (epoch === state.historyEpoch && generation === featurePreferenceEpoch && state.writerOwned) return storePut("app_state", record);
   });
+  featurePreferenceWrite = write;
+  await write;
 }
 
 async function pruneExpiredMessages() {
@@ -2467,6 +2560,7 @@ async function pruneExpiredMessages() {
     await storePut("app_state", cleaned);
     state.dialogueByCharacter.set(cleaned.characterId, cleaned);
   }
+  featureEmit("history-changed");
   if (state.selected) renderAll();
 }
 
@@ -3321,7 +3415,8 @@ function typingStateFor(characterId = state.selected) {
 }
 function globalRequestBusy() {
   return Boolean(
-    state.chatRequestByCharacter.size
+    featureMemoryWrites.size
+    || state.chatRequestByCharacter.size
     || [...state.typingByCharacter.values()].some(pending => !pending.networkDone)
     || state.arrivalPending
     || state.modeTransitionPending
@@ -5219,6 +5314,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
     if (sequence !== state.selectionSequence || controller.signal.aborted) return;
 
     state.selected = characterId;
+    featureEmit("selected-changed", { selected: characterId });
     state.timelineVisibleLimit = 60;
     state.timelineEndId = "";
     state.transcriptEndId = "";
@@ -6018,6 +6114,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   if (thread) {
     thread.channel = channel === "in_person" ? "in_person" : "text";
     if (persist) await dbPutThread(thread);
+    featureEmit("channel-changed", { characterId: thread.characterId, channel: thread.channel });
   }
   // A character switch may happen while the persistence write is pending.
   if (thread && thread.characterId !== state.selected) return;
@@ -6415,6 +6512,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   const dialogueV2 = retrySnapshot ? Boolean(retrySnapshot.envelope) : dialogueV2Enabled();
   if (dialogueV2 && !retrySnapshot) userMessage.id = `user:${requestId}`;
   if (dialogueV2) await loadDialogueRecord(characterId);
+  while (featureMemoryWrites.has(characterId)) await featureMemoryWrites.get(characterId);
   const buildRequestSnapshot = () => ({
     request_id: requestId,
     provider: state.provider,
@@ -6658,7 +6756,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       if (visibleFor < 1200) await abortableDelay(1200 - visibleFor, requestController.signal);
     }
     userMessage.status = "sent";
-    const completedReply = normalizeMessage({ id: provisionalReply?.id || (dialogueV2 ? `reply:${requestId}` : id()), characterId, role: "assistant", contentBlocks: result.contentBlocks, committedBlocks: committedReply?.snapshot || [], communicationChannel: dialogueV2 ? userMessage.communicationChannel : result.returnedChannel, expressionState: result.expressionState, stageMotion: result.stageMotion, performanceId: result.performanceId, createdAt: provisionalReply?.createdAt || Date.now(), requestId, conversationSegmentId: requestSegment, usage: { ...(result.usage || {}), model: result.usage?.model || state.model }, movementStatus: result.movementStatus });
+    const completedReply = normalizeMessage({ id: provisionalReply?.id || (dialogueV2 ? `reply:${requestId}` : id()), characterId, role: "assistant", contentBlocks: result.contentBlocks, committedBlocks: committedReply?.snapshot || [], communicationChannel: dialogueV2 ? userMessage.communicationChannel : result.returnedChannel, expressionState: result.expressionState, stageMotion: result.stageMotion, performanceId: result.performanceId, createdAt: provisionalReply?.createdAt || Date.now(), requestId, conversationSegmentId: requestSegment, usage: { ...(result.usage || {}), model: result.usage?.model || requestSnapshot.model }, movementStatus: result.movementStatus });
     const assistantMessage = provisionalReply || completedReply;
     completedReply.evidenceSources = normalizeMessage({ evidenceSources: result.evidenceSources }).evidenceSources;
     confirmedAssistant = assistantMessage;
@@ -6727,7 +6825,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
         confirmedAssistant = normalizeMessage({ id: provisionalReply?.id || (dialogueV2 ? `reply:${requestId}` : id()), characterId, role: "assistant", contentBlocks: terminalResult.contentBlocks,
           committedBlocks: committedReply?.snapshot || [], communicationChannel: dialogueV2 ? userMessage.communicationChannel : terminalResult.returnedChannel, requestId,
           expressionState: terminalResult.expressionState, stageMotion: terminalResult.stageMotion, performanceId: terminalResult.performanceId, movementStatus: terminalResult.movementStatus,
-          conversationSegmentId: requestSegment, createdAt: provisionalReply?.createdAt || Date.now(), usage: terminalResult.usage });
+          conversationSegmentId: requestSegment, createdAt: provisionalReply?.createdAt || Date.now(), usage: { ...terminalResult.usage, model: terminalResult.usage?.model || requestSnapshot.model } });
         if (provisionalReply) Object.assign(provisionalReply, confirmedAssistant);
         else { thread.messages.push(confirmedAssistant); thread.messageCount = Number(thread.messageCount || 0) + 1; }
         thread.turnCount += 1;
@@ -6938,6 +7036,7 @@ async function runAutoSummary(thread) {
   state.summaryControllers.set(thread.characterId, controller);
   updateComposerAvailability();
   const requestId = thread.summaryRequestId;
+  const checkpointId = thread.summaryCheckpointMessageId, summaryModel = state.model;
   const epoch = state.historyEpoch;
   try {
     const turns = thread.messages.filter((message) => message.conversationSegmentId === thread.conversationSegmentId && message.status === "sent").slice(-24).map((message) => ({
@@ -6951,6 +7050,9 @@ async function runAutoSummary(thread) {
     );
     const payload = await api("/chat/summarize", { method: "POST", signal: controller.signal, timeoutMs: 20000, body: JSON.stringify(requestPayload) });
     if (controller.signal.aborted || epoch !== state.historyEpoch || thread.summaryRequestId !== requestId) return;
+    const checkpoint = thread.messages.find(message => message.id === checkpointId);
+    if (checkpoint) checkpoint.extraUsage = [...(checkpoint.extraUsage || []).filter(part => (part.requestId || part.request_id) !== requestId),
+      { ...payload.usage, kind: "summary", requestId, provider_calls: 1, model: summaryModel }];
     thread.summary = payload.summary || thread.summary;
     thread.pendingTopics = Array.isArray(payload.pending_topics)
       ? payload.pending_topics.map(plain).filter(Boolean).slice(0, 12)
@@ -6984,7 +7086,9 @@ async function performSceneAction(action, characterId = state.selected, signal =
   const thread = await dbGetThread(characterId);
   const epoch = state.historyEpoch;
   const segment = thread.conversationSegmentId;
-  const record = await loadDialogueRecord(characterId);
+  await loadDialogueRecord(characterId);
+  while (featureMemoryWrites.has(characterId)) await featureMemoryWrites.get(characterId);
+  const record = state.dialogueByCharacter.get(characterId);
   const previous = record.sceneActionSnapshot;
   const envelope = previous?.envelope || {
     protocol: SCENE_PROTOCOL, request_id: id(), character_id: characterId, action,
@@ -7093,7 +7197,9 @@ async function recoverPresenceArrival(characterId = state.selected) {
 async function sendPresenceArrival(characterId, { recoveryOnly = false } = {}) {
   if (state.arrivalRequestByCharacter.has(characterId) || !state.writerOwned) return;
   const thread = await dbGetThread(characterId);
-  const record = await loadDialogueRecord(characterId);
+  await loadDialogueRecord(characterId);
+  while (featureMemoryWrites.has(characterId)) await featureMemoryWrites.get(characterId);
+  const record = state.dialogueByCharacter.get(characterId);
   const snapshot = record.arrivalSnapshot;
   const envelope = snapshot?.envelope;
   if (!envelope || envelope.segment_id !== thread.conversationSegmentId || envelope.character_id !== characterId) return;
@@ -7139,7 +7245,7 @@ async function sendPresenceArrival(characterId, { recoveryOnly = false } = {}) {
         expressionState: result.reaction.expression_state, stageMotion: result.reaction.stage_motion,
         performanceId: result.reaction.performance_id, createdAt: Date.now(), requestId,
         source: "presence_arrival", status: "sent", conversationSegmentId: envelope.segment_id,
-        usage: result.usage || result.reaction.usage || {} });
+        usage: { ...(result.usage || result.reaction.usage || {}), model: envelope.model } });
       thread.messages.push(message);
       thread.messageCount = Math.max(Number(thread.messageCount || 0), thread.messages.length);
     }
@@ -7318,7 +7424,7 @@ async function arriveInPerson() {
     if (ownsVisibleArrival()) state.scene = result.scene_state;
     if (thread) thread.channel = "in_person";
     if (thread && result.reaction) {
-      arrivalMessage = normalizeMessage({ id: result.reaction.message_id || id(), characterId, role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", expressionState: result.reaction.expression_state, stageMotion: result.reaction.stage_motion, performanceId: result.reaction.performance_id, createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId });
+      arrivalMessage = normalizeMessage({ id: result.reaction.message_id || id(), characterId, role: "assistant", contentBlocks: result.reaction.content_blocks, communicationChannel: "in_person", expressionState: result.reaction.expression_state, stageMotion: result.reaction.stage_motion, performanceId: result.reaction.performance_id, createdAt: Date.now(), requestId: result.arrival_id, source: "presence_arrival", conversationSegmentId: thread.conversationSegmentId, usage: { ...(result.reaction.usage || result.usage || {}), model: arrivalPayload.model } });
       thread.messages.push(arrivalMessage);
       thread.messageCount = Number(thread.messageCount || 0) + 1;
     }
@@ -7975,6 +8081,7 @@ async function refreshStoredHistory() {
   if (selected && selected !== state.selected) await selectCharacter(selected, { closeContacts: false });
   restoreDraft();
   renderAll();
+  featureEmit("history-changed");
 }
 function broadcastHistoryChange() {
   state.writerChannel?.postMessage({ type: "history-changed", sender: state.writerId });
@@ -8029,6 +8136,7 @@ async function deleteCharacterHistory() {
   for (const key of state.drafts.keys()) if (key.startsWith(`${characterId}:`)) state.drafts.delete(key);
   await persistDrafts();
   if (characterId === state.selected) { await dbGetThread(characterId); restoreDraft(); renderAll(); }
+  featureEmit("history-changed");
   broadcastHistoryChange();
   openSettings("history");
   toast("该角色本地历史已删除");
@@ -8047,6 +8155,8 @@ async function clearAllHistory() {
   state.drafts.clear(); state.pinnedCharacters.clear(); state.favoriteStickerIds.clear();
   state.favoriteStickers.clear(); state.recentStickerIds = []; state.rendezvousDismissals.clear();
   if (state.selected) { await dbGetThread(state.selected); restoreDraft(); await resolvePresence(); }
+  state.featurePreferences = {};
+  featureEmit("history-changed");
   broadcastHistoryChange();
   renderAll(); openSettings("history"); toast("全部本地历史已清空");
 }
@@ -8072,15 +8182,23 @@ async function exportHistory() {
 }
 async function importHistory(backup) {
   if (!state.writerOwned || globalRequestBusy()) throw new Error("history_busy");
-  cancelBackgroundSummaries();
-  await saveDraftNow();
-  const db = await openDB();
-  if (!db) throw new Error("history_storage_required");
-  await mergeHistoryDatabase(db, { ...backup, messages: backup.messages.map(message => ({ ...message,
-    ...((message.requestSnapshot?.envelope || plain(message.id).startsWith("user:")) && message.status !== "sent" ? { errorCode: "request_result_unavailable", status: "failed" } : {}),
-    requestSnapshot: message.requestSnapshot?.envelope ? null : message.requestSnapshot })) }, normalizeMessage);
-  await refreshStoredHistory();
-  broadcastHistoryChange();
+  const write = featurePreferenceWrite.catch(() => {}).then(async () => {
+    cancelBackgroundSummaries();
+    await saveDraftNow();
+    const db = await openDB();
+    if (!db) throw new Error("history_storage_required");
+    const features = await featureModule();
+    await mergeHistoryDatabase(db, { ...backup, messages: backup.messages.map(message => ({ ...message,
+      ...((message.requestSnapshot?.envelope || plain(message.id).startsWith("user:")) && message.status !== "sent" ? { errorCode: "request_result_unavailable", status: "failed" } : {}),
+      requestSnapshot: message.requestSnapshot?.envelope ? null : message.requestSnapshot })) }, normalizeMessage, {
+        mergeUiPreferences: features.mergeFeaturePreferences,
+        mergeMessage: (old, incoming) => ({ ...old, extraUsage: features.mergeExtraUsage(old.extraUsage, incoming.extraUsage) }),
+      });
+    await refreshStoredHistory();
+    broadcastHistoryChange();
+  });
+  featurePreferenceWrite = write;
+  await write;
 }
 $("export-history").onclick = () => { void exportHistory().catch(() => showBanner("无法导出备份，请重试。")); };
 $("import-history").onclick = () => $("history-import-file").click();
@@ -8183,6 +8301,7 @@ async function boot() {
   startAnnouncements();
   settleFirstScreen();
   deferUntilFirstScreenSettled(() => {
+    if (snowAdvActive()) void installFeatures().catch(() => {});
     if (snowAdvActive()) void import("/modules/snow-base-map.js").then(module => module.installBaseMap({
       snapshot: () => ({ characters: state.characters, worldPackage: state.worldPackage, selected: state.selected, busy: globalRequestBusy() }),
       visit: visitFromMap, icon: createSnowIcon, sceneKey: sceneVisualKey, avatarOf: characterAvatar,

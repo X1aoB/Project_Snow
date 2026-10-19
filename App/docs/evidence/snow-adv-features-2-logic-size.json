@@ -1,0 +1,174 @@
+{
+  "method": "LF; gzip -9 independently per file; dynamic imports excluded",
+  "baseline_ref": "a1354cca08fc1ea170c923107e93b4d6359c210b",
+  "logic_parent_ref": "4a40116f79287ebe8912c867678920573d4b5687",
+  "product_predecessor_ref": "fff998beddb413406ae477317fd80e23013ca0e3",
+  "baseline": {
+    "file_count": 11,
+    "files": [
+      {
+        "path": "App/frontend/shared/immersive.css",
+        "lf_bytes": 6302,
+        "lf_sha256": "2ffef03fb8efc184de1e4ef16657d551bb5bbaa76b761edd8d7407948091bc50",
+        "gzip_bytes": 2216
+      },
+      {
+        "path": "App/public_frontend/app.css",
+        "lf_bytes": 59185,
+        "lf_sha256": "99802a2b965ec4bdebc4aa02276731a1898df41653b026bd231389df37fd986e",
+        "gzip_bytes": 12058
+      },
+      {
+        "path": "App/public_frontend/app.js",
+        "lf_bytes": 363943,
+        "lf_sha256": "b3176210c61afbbd875cbad24881a9cc1481217ce33b000e26a3a088e03fd2da",
+        "gzip_bytes": 90356
+      },
+      {
+        "path": "App/public_frontend/dialogue-context.js",
+        "lf_bytes": 3611,
+        "lf_sha256": "adad80875744a3366af21fc878d2dab06d127316d70de6ec76db611deaf0b2dd",
+        "gzip_bytes": 1825
+      },
+      {
+        "path": "App/public_frontend/index.html",
+        "lf_bytes": 38226,
+        "lf_sha256": "a47e326074869f976cfd21f4616ef5ef7b9c3e5121b3b846e1ba489234f32a4c",
+        "gzip_bytes": 10294
+      },
+      {
+        "path": "App/public_frontend/modules/runtime.js",
+        "lf_bytes": 22714,
+        "lf_sha256": "6087bc10e45abedfa14eac81f88e219d422f21acc6354e188039b4ad77a1fe74",
+        "gzip_bytes": 6581
+      },
+      {
+        "path": "App/public_frontend/statistics/analytics.mjs",
+        "lf_bytes": 9830,
+        "lf_sha256": "616494a9f548d51eef2f08c163e8ac0ac44ad632ede87294a87dd4d97e9e430c",
+        "gzip_bytes": 3135
+      },
+      {
+        "path": "App/public_frontend/statistics/bootstrap.mjs",
+        "lf_bytes": 9313,
+        "lf_sha256": "3f16db86444e49e3ba14a1f2e2dce1a91df008b46b5699c786f5445e1ed432e1",
+        "gzip_bytes": 3407
+      },
+      {
+        "path": "App/public_frontend/statistics/config.mjs",
+        "lf_bytes": 674,
+        "lf_sha256": "1c593bc202cb3b02038f704c34db340dd878e5bec340487907e7956b56cad161",
+        "gzip_bytes": 454
+      },
+      {
+        "path": "App/public_frontend/statistics/notice.css",
+        "lf_bytes": 1883,
+        "lf_sha256": "65b1155fc0549d694fd616f1363c87fc29fce80fd4fd6bfeaaf87cb3c08abde9",
+        "gzip_bytes": 733
+      },
+      {
+        "path": "App/public_frontend/statistics/start.mjs",
+        "lf_bytes": 113,
+        "lf_sha256": "94617bff6cc09c766cc3590c37fad7bb79506357889a7107727c1f353f37aada",
+        "gzip_bytes": 95
+      }
+    ],
+    "gzip_sum_bytes": 131154
+  },
+  "candidate": {
+    "file_count": 14,
+    "files": [
+      {
+        "path": "App/frontend/shared/immersive.css",
+        "lf_bytes": 6302,
+        "lf_sha256": "2ffef03fb8efc184de1e4ef16657d551bb5bbaa76b761edd8d7407948091bc50",
+        "gzip_bytes": 2216
+      },
+      {
+        "path": "App/public_frontend/app.css",
+        "lf_bytes": 62377,
+        "lf_sha256": "8b30f12a8a7c8eeec80aae299904c98a2543ac7e47e4d80c0412bd8cec5a9357",
+        "gzip_bytes": 13056
+      },
+      {
+        "path": "App/public_frontend/app.js",
+        "lf_bytes": 442510,
+        "lf_sha256": "80a331390b7a1f34861d75eb45b87fcd3282f6fe9ab7d85b2de540456455721a",
+        "gzip_bytes": 111691
+      },
+      {
+        "path": "App/public_frontend/dialogue-context.js",
+        "lf_bytes": 3611,
+        "lf_sha256": "adad80875744a3366af21fc878d2dab06d127316d70de6ec76db611deaf0b2dd",
+        "gzip_bytes": 1825
+      },
+      {
+        "path": "App/public_frontend/index.html",
+        "lf_bytes": 39045,
+        "lf_sha256": "ca322714c59469eabf23f3028c0b0bfc6f066a632a84f475f34029fedfc138c1",
+        "gzip_bytes": 10477
+      },
+      {
+        "path": "App/public_frontend/modules/runtime.js",
+        "lf_bytes": 25491,
+        "lf_sha256": "9b1f874e334ecdf3202b2a597400e3b74b455e7c829e6f2ce5a3a318933f62f0",
+        "gzip_bytes": 7397
+      },
+      {
+        "path": "App/public_frontend/modules/snow-icons.js",
+        "lf_bytes": 5084,
+        "lf_sha256": "eb8f9c148d47c88fdc169d9152f43b78d5c16ec7f0147560d3bd0c6e439eb346",
+        "gzip_bytes": 2028
+      },
+      {
+        "path": "App/public_frontend/modules/snow-world.js",
+        "lf_bytes": 47053,
+        "lf_sha256": "db2c5f9b36ec3b0c91942604e7de1f33b90c308a6e49ada9ddc450fe58d16847",
+        "gzip_bytes": 15454
+      },
+      {
+        "path": "App/public_frontend/snow-adv.css",
+        "lf_bytes": 79708,
+        "lf_sha256": "503719603f6c218d1d788a16d19036f95d24f75c8a6bec4fc2fe9bbd8b5467a4",
+        "gzip_bytes": 16660
+      },
+      {
+        "path": "App/public_frontend/statistics/analytics.mjs",
+        "lf_bytes": 9830,
+        "lf_sha256": "616494a9f548d51eef2f08c163e8ac0ac44ad632ede87294a87dd4d97e9e430c",
+        "gzip_bytes": 3135
+      },
+      {
+        "path": "App/public_frontend/statistics/bootstrap.mjs",
+        "lf_bytes": 9313,
+        "lf_sha256": "3f16db86444e49e3ba14a1f2e2dce1a91df008b46b5699c786f5445e1ed432e1",
+        "gzip_bytes": 3407
+      },
+      {
+        "path": "App/public_frontend/statistics/config.mjs",
+        "lf_bytes": 674,
+        "lf_sha256": "1c593bc202cb3b02038f704c34db340dd878e5bec340487907e7956b56cad161",
+        "gzip_bytes": 454
+      },
+      {
+        "path": "App/public_frontend/statistics/notice.css",
+        "lf_bytes": 1883,
+        "lf_sha256": "65b1155fc0549d694fd616f1363c87fc29fce80fd4fd6bfeaaf87cb3c08abde9",
+        "gzip_bytes": 733
+      },
+      {
+        "path": "App/public_frontend/statistics/start.mjs",
+        "lf_bytes": 113,
+        "lf_sha256": "94617bff6cc09c766cc3590c37fad7bb79506357889a7107727c1f353f37aada",
+        "gzip_bytes": 95
+      }
+    ],
+    "gzip_sum_bytes": 188628
+  },
+  "increase_bytes": 57474,
+  "budget_bytes": 61440,
+  "remaining_bytes": 3966,
+  "app_hook_increase_bytes": 2047,
+  "app_hook_budget_bytes": 2048,
+  "passed": true
+}

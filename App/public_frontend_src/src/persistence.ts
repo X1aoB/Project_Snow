@@ -50,14 +50,29 @@ export interface ImportRecords {
   appState: StoredRecord[];
 }
 
+export interface HistoryMergeOptions {
+  mergeUiPreferences?: (current: StoredRecord, incoming: StoredRecord) => StoredRecord;
+  mergeMessage?: (current: StoredRecord, incoming: StoredRecord) => StoredRecord;
+}
+
 /** Merge all stores in one transaction; an abort leaves every old record intact. */
 export async function mergeHistoryDatabase(
   db: IDBDatabase,
   backup: ImportRecords,
   normalizeMessage: (record: StoredRecord) => StoredRecord,
+  options: HistoryMergeOptions = {},
 ): Promise<void> {
   const tx = db.transaction(["threads", "messages", "app_state"], "readwrite");
   const done = transactionDone(tx);
+  let mergeError: unknown;
+  const merge = (callback: NonNullable<HistoryMergeOptions["mergeMessage"]>, current: StoredRecord, incoming: StoredRecord) => {
+    try {
+      const result = callback(structuredClone(current), structuredClone(incoming));
+      if (!result || typeof result !== "object" || Array.isArray(result) || typeof result.then === "function") throw new Error("backup_merge_invalid");
+      return result;
+    }
+    catch (error) { mergeError = error; tx.abort(); return null; }
+  };
   try {
     const threads = tx.objectStore("threads");
     const messages = tx.objectStore("messages");
@@ -75,12 +90,22 @@ export async function mergeHistoryDatabase(
       message.requestSnapshot = null;
       if (message.status === "pending") { message.status = "failed"; message.errorCode = "stream_disconnected"; }
       const existing = messages.get(String(message.id));
-      existing.onsuccess = () => { if (!existing.result) messages.put(message); };
+      existing.onsuccess = () => {
+        if (!existing.result) messages.put(message);
+        else if (options.mergeMessage) {
+          const merged = merge(options.mergeMessage, existing.result, message);
+          if (merged) messages.put({ ...merged, id: existing.result.id });
+        }
+      };
     }
     for (const entry of backup.appState) {
       const existing = appState.get(String(entry.key));
       existing.onsuccess = () => {
         if (entry.key === "drafts") appState.put({ key: "drafts", values: { ...(entry.values as object || {}), ...(existing.result?.values || {}) } });
+        else if (entry.key === "ui_preferences" && existing.result && options.mergeUiPreferences) {
+          const merged = merge(options.mergeUiPreferences, existing.result, entry);
+          if (merged) appState.put({ ...merged, key: "ui_preferences" });
+        }
         else if (!existing.result) appState.put(entry);
       };
     }
@@ -89,7 +114,7 @@ export async function mergeHistoryDatabase(
     await done.catch(() => undefined);
     throw error;
   }
-  await done;
+  try { await done; } catch (error) { throw mergeError ?? error; }
 }
 
 export async function clearHistoryDatabase(db: IDBDatabase, writerLease?: StoredRecord): Promise<void> {
