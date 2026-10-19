@@ -6,10 +6,6 @@ import { mountSnowWorld, activeSnowLoops, resolveTime as snowResolveTime, subscr
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
 // 雪境 ADV P6a/P7：开关随 /public/v1/config 下发，皮肤只能在 config 解析后才切换。
-// P7：index.html 静态带 data-snow-hold，app.css 据此在 config 解析前只显示品牌底色（小吉终端图标），
-// 不露出未换肤的界面（线上首访实测旧界面会先露出 0.5–0.9 秒再被开机层盖住）。config 解析或
-// 失败时由 snowClearFirstFlashHold() 移除（配置迟迟不来最多保持 2.5 秒）；JS 根本没跑起来时 app.css 的 4 秒动画兜底自动显示。
-// data-snow-booting 继续标记「上次见过雪境皮肤」的返回用户（兼容既有检查），不再把整页设为不可见。
 const SNOW_LAST_SEEN_KEY = "project-snow-public:snow-adv:last-seen";
 try {
   if (localPreferences.getItem(SNOW_LAST_SEEN_KEY) === "1") {
@@ -40,7 +36,7 @@ const SUBSCRIPTION_EFFORT_LABELS = Object.freeze({ none: "无推理", minimal: "
 const SUBSCRIPTION_SESSION_KEY = "project-snow-public:subscription-pair";
 const SCENE_ASSET_URLS = Object.freeze(JSON.parse(document.querySelector('meta[name="snow-scene-assets"]')?.content || "{}"));
 const SCENE_KEYS = new Set(["generic", "quarters", "lounge", "training", "archive", "canteen", "observation", "medical", "corridor"]);
-// Reuse the approved neutral face crop without changing the original media attribution.
+// Reuse the approved neutral face crop without changing the original media…
 const CHARACTER_AVATAR_OVERRIDES = Object.freeze({
   "447ed3c401c9": Object.freeze({
     thumbnail_src: "/assets/avatars/longyan-neutral-96.webp",
@@ -168,9 +164,7 @@ const state = {
   writerRenewTimer: 0,
 };
 
-// A request may outlive the character currently visible in the UI.  Keeping
-// the owner fields together makes every render/cleanup decision explicit and
-// prevents a late response from borrowing another character's stage.
+// A request may outlive the character currently visible in the UI.
 function TypingIndicatorState({ channel, characterId, requestId, phase = "typing" }) {
   this.channel = channel === "in_person" ? "in_person" : "text";
   this.characterId = plain(characterId);
@@ -329,8 +323,7 @@ async function refreshAnnouncements() {
       window.clearTimeout(timeout);
       announcements.pending = null;
       announcements.lastFetch = Date.now();
-      // An unchanged background refresh must preserve keyboard focus and
-      // the reader's place inside the open announcement or birthday list.
+      // An unchanged background refresh must preserve keyboard focus and the reader's…
       if (announcementRenderSignature() !== announcements.renderSignature) renderAnnouncements();
       else { renderAnnouncementStatus(); renderAnnouncementBadges(); }
       maybeShowAnnouncements();
@@ -486,7 +479,6 @@ const STATE_PACKAGE_RECOVERY_CODES = new Set(["state_subject_mismatch", "state_i
 const MIA_CHARACTER_ID = "702f4375675b";
 const MIA_BUNDLED_EXPRESSION_MANIFEST = "/assets/expressions/mia/manifest.json";
 // The same approved bundled JSON in Git/LF and a Windows/CRLF checkout.
-// Advertised release manifests always use their one exact catalogue digest.
 const MIA_BUNDLED_EXPRESSION_MANIFEST_HASHES = Object.freeze([
   "89bb5eac7185dc24bb3af84d1f97200fdbe6037d4f7d97111866c8447d13c1aa",
   "2593b7b1f8a519b7eae7189fd1779099afc7a9e4f220d5f7dad1653d88c29023",
@@ -668,8 +660,7 @@ function abortableDelay(milliseconds, signal) {
 function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches || localPreferences.getItem("project-snow-public:motion") === "off"; }
 function featureEnabled(name) { return state.config?.features?.[name] === true; }
 function quietPresentation() { return reducedMotion() || document.hidden; }
-// 雪境 ADV 演出 (P4)：是否处于雪境皮肤。以 <html data-ui> 为唯一真源（syncInterfaceSkin
-// 设置、CSS 与动态档位都读它），这样测试只需切 data-ui 即可驱动，无需等 config。
+// 雪境 ADV 演出 (P4)：是否处于雪境皮肤。
 function snowAdvActive() { return document.documentElement.dataset.ui === "snow-adv"; }
 // P4 立绘/动作档位：auto=完整（位移+缩放+呼吸）、light=仅淡入淡出、off=无动画（含减少动态）。
 function stageMotionTier() {
@@ -713,10 +704,7 @@ function syncMotionState() {
   if ($("motion-preference-setting")) $("motion-preference-setting").hidden = !featureEnabled("motion_v2");
 }
 function replyTiming(requestId) { return state.replyTimingByRequest.get(requestId); }
-// 雪境 ADV skin (P1).  Off unless the server reports features.ui_snow_adv.
-// Turning it on only adds html[data-ui="snow-adv"], links the story font and
-// swaps the static Unicode control glyphs for SVG icons; turning it off
-// restores the original glyphs, so the legacy interface is untouched.
+// 雪境 ADV skin (P1).
 const SNOW_ADV_FONT_STYLESHEET = "/snow-adv-fonts.css";
 const SNOW_ADV_STATIC_ICONS = Object.freeze([
   [".contact-search > span[aria-hidden]", "search"],
@@ -772,8 +760,7 @@ function syncInterfaceSkin() {
   syncSnowComposerHeight(enabled);
   syncInterfaceTone(enabled);
 }
-// P8：界面深色状态。设置里三档：跟随舞台时段（默认，黄昏与夜晚变深）/ 雪白 / 深色。
-// 「跟随」与雪景订阅同一个时段时钟（判定相同），跨时段时同一拍切换。
+// P8：界面深色状态。
 const SNOW_TONE_KEY = "project-snow-public:tone";
 let snowToneUnsubscribe = null;
 function snowTonePreference() {
@@ -802,8 +789,7 @@ function syncInterfaceTone(enabled) {
   apply(snowResolveTime());
   if (!snowToneUnsubscribe) snowToneUnsubscribe = subscribeSnowTime(apply);
 }
-// P8：面对面舞台延伸到输入区下方。输入区高度会随动作框、请求状态行和窗口宽度变化，
-// 用 ResizeObserver 写入 #chat-app 的 --snow-composer-h，样式据此给舞台加一行、上移立绘。
+// P8：面对面舞台延伸到输入区下方。
 let snowComposerObserver = null;
 function syncSnowComposerHeight(enabled) {
   const app = $("chat-app");
@@ -821,12 +807,9 @@ function syncSnowComposerHeight(enabled) {
   });
   snowComposerObserver.observe(composer);
 }
-// 雪境 ADV 世界层 (P2)：开关开启且处于面对面界面时，在 #scene-stage 内挂载程序化
-// 分层雪景与 Canvas 远近雪；关闭或离开面对面时销毁。立绘仍留在原 DOM 位置。
+// 雪境 ADV 世界层 (P2)：开关开启且处于面对面界面时，在 #scene-stage 内挂载程序化分层雪景与 Canvas 远近雪；关闭或离开面对面时销毁。
 let snowWorld = null;
-// P6a：通讯器背后的世界——一个 body 级 fixed 的「舞台」容器，仅桌面开关开启时存在，
-// aria-hidden、pointer-events:none、z-index 低于 #chat-app；文字界面可见时作为雪境背景，
-// 面对面可见时暂停（只让一个世界在动）。手机与关闭开关时都不建。
+// P6a：通讯器背后的世界——一个 body 级 fixed 的「舞台」容器，仅桌面开关开启时存在， aria-hidden、pointer-events:non…
 let snowBackdrop = null;
 let snowBackdropStage = null;
 let snowPushContext = null;
@@ -838,8 +821,7 @@ function snowWorldScene() {
 function currentMotionLevel() {
   return document.documentElement.dataset.motionLevel || "auto";
 }
-// 背后世界应显示的场景：首次入室镜头推进播放前恒为 generic 外景（推进从外景推入）；
-// 推进播放后（snowPushPlayed）跟随当前室内地点。关闭推进（light/off）时入室即跟随室内。
+// 背后世界应显示的场景：首次入室镜头推进播放前恒为 generic 外景（推进从外景推入）；推进播放后（snowPushPlayed）跟随当前室内地点。
 function snowBackdropScene() {
   if (!state.snowBeenInPerson) return "generic";
   if (state.snowEntryConsumed || state.snowPushPlayed || stageMotionTier() !== "auto") return snowWorldScene();
@@ -893,17 +875,12 @@ function syncSnowBackdrop() {
   }
 }
 
-// ---------------------------------------------------------------- P3 面对面主屏
-// 全部只在 ui_snow_adv 开启时生效。▼ 推进标记与快捷菜单由 JS 在开关开启时建到对白
-// 框里、关闭时移除，所以关闭态不新增任何 DOM、图标或可见元素（旧界面逐字节不变）。
+// P3 面对面主屏全部只在 ui_snow_adv 开启时生效。
 
-// 到场提示去重：开关开启时，仅保留舞台通知（旁白 / 对白），抑制重复的横幅与状态行；
-// 屏幕阅读播报仍只发生一次（来自 #stage-narration / #stage-speech 的 aria-live）。
+// 到场提示去重：开关开启时，仅保留舞台通知（旁白 / 对白），抑制重复的横幅与状态行；屏幕阅读播报仍只发生一次（来自 #stage-narration / #st…
 function suppressArrivalDuplicateNotice() { return featureEnabled("ui_snow_adv"); }
 
 // 立绘中轴：在缩小的同源副本上取头到腰（高度 12%~55%）的不透明像素重心，返回 0~1。
-// 每个角色只测一次（按角色 id 缓存），换表情沿用缓存值，避免人物左右跳动。
-// 画布被污染、读不到像素或任何错误都退回 0.5。
 const stageActorAnchorCache = new Map();
 function applyStageActorAnchor(node) {
   if (!node || !featureEnabled("ui_snow_adv")) {
@@ -1034,7 +1011,6 @@ function syncStageQuickMenuMount() {
   syncSnowVeilMount();
 }
 // 雪境 ADV（P7）：旁白放进对白框，排在名牌与台词之间，不再作为单独的条压在立绘上。
-// 只移动既有 #stage-narration 节点（id、aria-live、文本写入方式都不变）；关闭开关时放回舞台。
 function syncStageNarrationMount() {
   const narration = $("stage-narration");
   const copy = document.querySelector("#stage-dialogue .stage-dialogue-copy");
@@ -1048,9 +1024,7 @@ function syncStageNarrationMount() {
     stage.insertBefore(narration, restore?.parentElement === stage ? restore : null);
   }
 }
-// 雪境 ADV (P4 后续)：白雪转场遮罩。生产环境 motion_v2/scene_actions_v2 开启时，旧的三个
-// 转场层根本不显示，所以用这个独立的、仅装饰的覆盖层来呈现地点转场。节点仅在开关开启时建、
-// aria-hidden、pointer-events:none；地点播报仍只走既有 aria-live（本层不参与无障碍播报）。
+// 雪境 ADV (P4 后续)：白雪转场遮罩。
 function buildSnowVeil() {
   const stage = $("scene-stage");
   if (!stage || stage.querySelector(".snow-scene-veil")) return;
@@ -1104,8 +1078,6 @@ function syncSnowVeilMount() {
   else removeSnowVeil();
 }
 // 决定是否在本次 renderScene 播放遮罩，并在遮罩掩护下切换 P2 世界场景（仅视觉延迟，不延迟逻辑）。
-// 触发：开关开启、面对面可见、已布防（排除首帧/历史恢复）、地点确实变化。
-// 不触发：初始加载/历史恢复、重开通讯器回到同一地点、地点未变、off/减少动态。
 function maybePlaySnowVeil(scene, visualKey) {
   const location = plain(scene?.character_location || "");
   const visible = snowAdvActive() && !$("in-person-surface").hidden;
@@ -1177,10 +1149,7 @@ function playSnowVeil(scene, location, tier, commitScene) {
   }, fadeIn + hold));
 }
 
-// ================================================================ P6a 开场与通讯器世界层
-// 全部仅在 ui_snow_adv 开启时生效，节点由 JS 在开关开启时建出、关闭态不存在，所以
-// flag-off 的 DOM 与行为逐字节不变。开机/锁屏二选一在页面加载时按屏幕判定一次
-// （与手机布局同一 860px 分界），中途改窗口大小不切换。减少动态/off 档无动画。
+// P6a 开场与通讯器世界层全部仅在 ui_snow_adv 开启时生效，节点由 JS 在开关开启时建出、关闭态不存在，所以 flag-off 的 DOM 与行为…
 const SNOW_BOOT_SEEN_KEY = "project-snow-public:snow-adv:boot-seen";   // 同一日历日跳过开机视觉
 const SNOW_LOCK_SEEN_KEY = "project-snow-public:snow-adv:lock-seen";  // 同一浏览器会话跳过锁屏
 const SNOW_TOD_LABELS = { dawn: "清晨", day: "白天", dusk: "黄昏", night: "夜晚" };
@@ -1192,8 +1161,7 @@ function snowOpeningState() {
   }
   return state.snowOpening;
 }
-// 开机层或锁屏层是否正占据屏幕——其间不得弹出体验须知、新手引导或任何对话框
-// （<dialog>.showModal() 走顶层，会盖在开机/锁屏之上），须在消隐/解锁后按正常顺序出现。
+// 开机层或锁屏层是否正占据屏幕——其间不得弹出体验须知、新手引导或任何对话框（<dialog>.showModal() 走顶层，会盖在开机/锁屏之上），须在消隐/…
 function snowOpeningActive() {
   return Boolean(document.getElementById("snow-boot") || document.getElementById("snow-lock"));
 }
@@ -1214,7 +1182,7 @@ function snowTimeOfDayLabel() {
   return SNOW_TOD_LABELS[key];
 }
 
-// ---- 开机层「终端开机」（桌面） ----
+// 开机层「终端开机」（桌面）
 function buildSnowBoot() {
   if ($("snow-boot") || document.body.querySelector(".snow-boot")) return;
   const boot = document.createElement("div");
@@ -1260,9 +1228,7 @@ function dismissSnowBoot(onRemoved) {
   if (tier === "off" || typeof boot.animate !== "function") { finish(); return; }
   boot.dataset.phase = "out";
   if (tier === "auto") {
-    // 完整动效：标志先收起（≈200ms），底色随后淡开（≈260ms），底下的通讯器各部分依次入场；
-    // 入场结束后再交还给体验须知等，避免弹窗压在正在入场的界面上。不额外等待网络。
-    // 淡开后的开机层已透明且不拦截点击，保留到入场结束才移除，使「开机层移除」始终等于「开场完成」。
+    // 完整动效：标志先收起（≈200ms），底色随后淡开（≈260ms），底下的通讯器各部分依次入场；入场结束后再交还给体验须知等，避免弹窗压在正在入场的界面上。
     const app = $("chat-app");
     app.dataset.snowEntering = "1";
     window.setTimeout(() => { delete app.dataset.snowEntering; finish(); }, 720);
@@ -1284,10 +1250,9 @@ function maybeStartSnowBoot() {
   return true;
 }
 
-// ---- 锁屏层「终端锁屏」（手机） ----
+// 锁屏层「终端锁屏」（手机）
 function snowLockNotes() {
-  // 通知卡仅由既有状态构造：当前待赴约定、未读公告。各源独立容错——某子系统
-  // 尚未就绪时该卡缺省，绝不阻断开场。
+  // 通知卡仅由既有状态构造：当前待赴约定、未读公告。
   const notes = [];
   try {
     // 当前待赴约定：复用既有签名约定判定；点开走「去见她/赴约」确认流程，绝不自动赴约。
@@ -1436,11 +1401,7 @@ function maybeStartSnowLock() {
   return true;
 }
 
-// ---- 通讯器背后的世界层（桌面） ----
-// 首次由「外面」进入某室内地点时的镜头推进 → 随后交给 P4 veil（显示目的地）。供 renderScene 调用。
-// 返回 true 表示本次已用推进接管场景切换（调用方不再播放自己的 veil / 立即 setScene）。
-// 推进作用于 body 级的「通讯器背后世界」(snowBackdrop)——它在人入室前显示 generic 外景，
-// 其 .push-target 是基地外亮灯入口；推进把外景推近入口 → 白光掩护里切到室内 → veil 显示目的地。
+// 通讯器背后的世界层（桌面） 首次由「外面」进入某室内地点时的镜头推进 → 随后交给 P4 veil（显示目的地）。
 function snowMaybePushIntoScene(scene, visualKey, commitScene) {
   const tier = stageMotionTier();
   const destination = plain(scene?.character_location || "") || visualKey;
@@ -1456,7 +1417,7 @@ function snowMaybePushIntoScene(scene, visualKey, commitScene) {
   const sequence = ++snowPresentationSequence;
   snowPushContext = { characterId: state.selected, location: destination, visualKey };
   $("chat-app").dataset.snowPushing = "1";
-  // 仅把舞台的视觉层暂时让开，逻辑/回复照常推进。外景与入口真实可见，且只运行外景雪花。
+  // 仅把舞台的视觉层暂时让开，逻辑/回复照常推进。
   if (snowWorld) snowWorld.setMotion(currentMotionLevel());
   snowBackdrop.setMotion(currentMotionLevel());
   void snowBackdrop.pushInto(visualKey, {
@@ -1472,7 +1433,7 @@ function snowMaybePushIntoScene(scene, visualKey, commitScene) {
   });
   return true;
 }
-// ================================================================ /P6a
+// /P6a
 
 function bodyIsVisible(node) {
   if (!node?.isConnected || node.closest("[hidden], [inert]") || document.hidden) return false;
@@ -1491,8 +1452,7 @@ function recordReplyPaint(requestId, node) {
     return message?.requestId === requestId && state.typewriter.key === speechTypewriterKey(message) ? message : null;
   };
   if (stage && !stageMessage()) return;
-  // First glyph paint measures rendering; a full confirmed speech block measures
-  // an effective reply. Decorative typewriting must not improve the latter.
+  // First glyph paint measures rendering; a full confirmed speech block measures an…
   requestAnimationFrame(() => {
     if (timing.firstEffectiveAt || !bodyIsVisible(node)) return;
     const message = stage ? stageMessage() : null;
@@ -1534,7 +1494,7 @@ async function waitForNaturalReply(requestId, signal) {
   const remaining = remainingNaturalWait(timing.sentAt, performance.now(), quietPresentation() || timing.skip);
   if (remaining) {
     const started = performance.now();
-    // Small slices allow a live reduced-motion change or fast-forward to finish promptly.
+    // Small slices allow a live reduced-motion change or fast-forward to finish…
     try {
       while (!quietPresentation() && !timing.skip && remainingNaturalWait(timing.sentAt, performance.now()) > 0) {
         await abortableDelay(Math.min(32, remainingNaturalWait(timing.sentAt, performance.now())), signal);
@@ -1978,8 +1938,7 @@ async function loadMessagePage(characterId, { before = Number.MAX_SAFE_INTEGER, 
     const index = db.transaction("messages", "readonly").objectStore("messages").index("by_character_created");
     const timestamp = typeof before === "number" ? before : before.createdAt;
     const upper = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, timestamp));
-    // Include a composite cursor's timestamp: the primary key breaks ties
-    // without changing the v4 database or requiring a destructive migration.
+    // Include a composite cursor's timestamp: the primary key breaks ties without…
     const range = IDBKeyRange.bound([characterId, 0], [characterId, upper], false, typeof before === "number" && timestamp < Number.MAX_SAFE_INTEGER);
     const request = index.openCursor(range, "prev");
     request.onsuccess = () => {
@@ -2106,8 +2065,7 @@ function normalizeThread(record, characterId) {
     characterId: message.characterId || message.character_id || characterId,
     conversationSegmentId: message.conversationSegmentId || message.conversation_segment_id || segmentId,
   }));
-  // Loaded history, including legacy embedded rows, is already established
-  // content even when its timestamp is recent or has been estimated.
+  // Loaded history, including legacy embedded rows, is already established content…
   normalizedMessages.forEach(markMessageEntrySeen);
   return {
     characterId,
@@ -2276,17 +2234,14 @@ function sceneActionsV2Enabled() {
 async function loadDialogueRecord(characterId) {
   if (!state.dialogueByCharacter.has(characterId)) {
     let stored = await storeGet("app_state", dialogueRecordKey(characterId));
-    // An older v4 client can delete a character without knowing the sidecar
-    // key. Do not revive experiences or a scene whose transcript was erased.
+    // An older v4 client can delete a character without knowing the sidecar key.
     if ((stored?.memories?.length || stored?.sessionContextPackage) && !(await messageCount(characterId))) {
       const snapshot = stored.sceneActionSnapshot;
       const metadata = snapshot ? await storeGet("threads", characterId) : null;
       const reconcilable = snapshot?.endpoint === "/public/v2/scene/action"
         && snapshot.envelope?.protocol === SCENE_PROTOCOL && snapshot.envelope.character_id === characterId
         && metadata?.conversationSegmentId === snapshot.envelope.segment_id;
-      // A newly created empty thread can have its first join in flight. Its
-      // real metadata distinguishes it from an older client's deletion; query
-      // that immutable UUID before deciding whether a scene was established.
+      // A newly created empty thread can have its first join in flight.
       if (!reconcilable) {
         stored = { ...stored, sessionContextPackage: "", memories: [], sceneActionSnapshot: null };
         if (state.writerOwned) await storePut("app_state", stored);
@@ -2358,10 +2313,7 @@ async function saveWorldPackage(token, { persist = true } = {}) {
   if (!token) return false;
   const incoming = statePackageOrder(token);
   const current = statePackageOrder(state.worldPackage || "");
-  // A slow response from a character the user has already left must not roll
-  // the shared world back over a newer signed package. A revision identifies
-  // exactly one signed payload; response order must not choose between two
-  // different tokens carrying the same revision.
+  // A slow response from a character the user has already left must not roll the…
   if (state.worldPackage && incoming.scheduleDate && current.scheduleDate && incoming.scheduleDate < current.scheduleDate) return false;
   if (state.worldPackage && incoming.scheduleDate && current.scheduleDate && incoming.scheduleDate > current.scheduleDate) {
     state.worldPackage = token;
@@ -2369,8 +2321,7 @@ async function saveWorldPackage(token, { persist = true } = {}) {
     return true;
   }
   if (state.worldPackage && incoming.scheduleDate !== current.scheduleDate) {
-    // A dated 0.9.2 package supersedes an undated legacy package. An undated
-    // late response must never replace a dated package from the current day.
+    // A dated 0.9.2 package supersedes an undated legacy package.
     if (!incoming.scheduleDate) return false;
     state.worldPackage = token;
     if (persist) await storePut("app_state", { key: "world", statePackage: token, revision: incoming.revision, scheduleDate: incoming.scheduleDate });
@@ -2398,10 +2349,7 @@ async function clearPersistedWorldPackage() {
     await storePut("app_state", cleaned);
   }
   await storeDelete("app_state", "world");
-  // v3 stored a signed world package inside each thread. The v4 migration
-  // intentionally stopped writing it, but old metadata can still survive an
-  // upgrade. Strip both spellings so a later boot cannot resurrect a token
-  // that was rejected for a different anonymous subject.
+  // v3 stored a signed world package inside each thread.
   const threadRecords = await storeAll("threads");
   await Promise.all(threadRecords.map(async (record) => {
     const cleaned = { ...record };
@@ -2531,8 +2479,7 @@ async function persistDrafts() {
   const values = Object.fromEntries(state.drafts);
   const revision = id();
   for (const key of ["drafts", "drafts_recovery_v1"]) state.memoryStores.app_state.set(key, { key, values: structuredClone(values), revision });
-  // Capture each revision now, then write in that same order. A slower earlier
-  // openDB must never commit an empty snapshot over a newer action draft.
+  // Capture each revision now, then write in that same order.
   const write = async () => {
     const db = await openDB();
     if (!db) return;
@@ -2545,7 +2492,6 @@ async function persistDrafts() {
 function captureComposerDraft() {
   if (!state.selected) return false;
   // Persistence can update the thread's channel before its visible composer.
-  // Keep edits with the character and channel that still own these controls.
   const ownerKey = state.composerDraftKey || draftKey();
   state.drafts.set(ownerKey, $("message-input").value);
   state.drafts.set(ownerKey.replace(/:message$/, ":action"), $("action-input").value);
@@ -2648,8 +2594,7 @@ async function tokenForModel(signal) {
     signal.addEventListener("abort", cancel, { once: true });
     timeout = window.setTimeout(() => settle(new Error("turnstile_timeout")), 120000);
     try {
-      // Native modal dialogs make body-level widgets inert and hide them behind
-      // the backdrop. Keep the interactive challenge inside the model form.
+      // Native modal dialogs make body-level widgets inert and hide them behind the…
       widget = turnstile.render(container, {
         sitekey, action: "byok-session", execution: "execute", appearance: "interaction-only",
         size: container.clientWidth < 300 ? "compact" : "normal",
@@ -2765,9 +2710,7 @@ async function showExperienceNoticeIfNeeded() {
       resolve();
     };
     $("accept-experience-notice").onclick = () => finish(true);
-    // There is deliberately no silent-dismiss path: an Escape key press must
-    // not leave boot waiting forever or allow the user to enter without the
-    // one-time product notice. Keep the dialog open until it is acknowledged.
+    // There is deliberately no silent-dismiss path: an Escape key press must not…
     dialog.addEventListener("cancel", (event) => event.preventDefault());
     dialog.showModal();
   });
@@ -3080,8 +3023,6 @@ async function loadConfig() {
   syncMotionState();
   syncInterfaceSkin();
   // P6a 首帧处理：config 解析后解除中性保持（见模块顶部的 data-snow-booting 守卫）。
-  // 并记录「上次见过雪境皮肤」的标记——仅当存在该标记时，下次才在 config 解析前保持中性，
-  // 避免首访用户为了防闪而被挡一帧；关闭时清除标记。
   try {
     if (featureEnabled("ui_snow_adv")) localPreferences.setItem(SNOW_LAST_SEEN_KEY, "1");
     else localPreferences.removeItem(SNOW_LAST_SEEN_KEY);
@@ -3338,8 +3279,7 @@ async function ensureContinuityDecision(thread) {
   if (thread.localDayKey && thread.localDayKey !== today) {
     thread.continuityDecision = state.dayContinuityPreference;
     if (thread.continuityDecision === "start_today") {
-      // Keep the local transcript and world state, but retire yesterday's
-      // model context, including any summary that has not finished yet.
+      // Keep the local transcript and world state, but retire yesterday's model…
       state.summaryControllers.get(thread.characterId)?.abort();
       state.summaryControllers.delete(thread.characterId);
       state.summaryInFlight.delete(thread.characterId);
@@ -3564,9 +3504,7 @@ async function preloadStickerBlock(block, timeoutMs = 900, signal = undefined) {
   });
   await Promise.race([loading, abortableDelay(timeoutMs, signal)]);
 }
-// A communicator queue owns only a visibility cursor. All confirmed content is
-// saved independently; neither ending a network request nor a visual cancellation
-// can discard received text or create another generation request.
+// A communicator queue owns only a visibility cursor.
 function flushCommunicatorPresentation(characterId = state.selected, { render = true } = {}) {
   const pending = typingStateFor(characterId);
   const timing = pending?.channel === "text" ? replyTiming(pending.requestId) : null;
@@ -3604,8 +3542,7 @@ function enqueueCommunicatorReply(characterId, requestId, message, { terminal = 
     if (timing) timing.skip = true;
     queue.visibleCount = queue.blocks.length;
   }
-  // Let the terminal handler finish its scene/status bookkeeping before a
-  // reduced-motion or already-flushed queue clears the request's typing owner.
+  // Let the terminal handler finish its scene/status bookkeeping before a…
   if (start) void Promise.resolve().then(() => driveCommunicatorReply(queue));
   syncFastForward();
   return queue;
@@ -3634,8 +3571,7 @@ async function driveCommunicatorReply(queue) {
       let plannedWait = 0;
       if (index > 0 || timing?.feedbackAllowed) updateTypingPhase(queue.characterId, queue.requestId, "segment");
       while (owns() && !queue.skip && !timing?.skip && !quietPresentation()) {
-        // Replan remaining whole bubbles when more confirmed blocks arrive. No
-        // final-block shortcut: compression applies proportionally to every wait.
+        // Replan remaining whole bubbles when more confirmed blocks arrive.
         if (plannedVersion !== queue.version) {
           plannedWait = communicatorDelayPlan(queue.blocks.slice(index).map(block => plain(block.text)),
             queue.requestId, index, elapsedBefore, spentBefore, queue.terminal)[0] || 0;
@@ -3825,10 +3761,7 @@ function renderRequestStatus() {
     };
     target.append(" ", refresh);
   }
-  // The face-to-face surface intentionally hides the text timeline. Keep the
-  // same retry action reachable from its status row when the last user turn
-  // failed, so the preserved action/speech draft is not the only recovery
-  // path. Text mode already renders this action beside the failed message.
+  // The face-to-face surface intentionally hides the text timeline.
   if (!pending && currentThread()?.channel === "in_person") {
     const failedMessage = [...(currentThread()?.messages || [])]
       .reverse()
@@ -3988,8 +3921,7 @@ function renderCharacters() {
       ...(LOCAL_PINYIN_TOKENS[character.character_id] || []),
     ].map(normalizedSearch).filter(Boolean),
   }));
-  // An exact pinyin/initial token is more intentional than a substring. For
-  // example, `kxy` selects 凯茜娅 without also matching 安卡希雅's `akxy`.
+  // An exact pinyin/initial token is more intentional than a substring.
   const exactMatches = new Set(
     query
       ? tokenRows.filter((row) => row.tokens.includes(query)).map((row) => row.character.character_id)
@@ -4012,7 +3944,6 @@ function renderCharacters() {
           : "尚未开始对话";
       const pinned = state.pinnedCharacters.has(character.character_id);
       // 雪境 ADV (P5)：每行带 data-snow-character，让联系人卡片用各自的角色色（--char）。
-      // 仅皮肤开启时写出，关闭态 DOM 与旧界面逐字节一致。
       const rowCharacter = snowAdvActive() ? ` data-snow-character="${escapeHtml(character.character_id)}"` : "";
       return `<div class="character-row" role="listitem"${rowCharacter}><button class="character" aria-current="${character.character_id === state.selected}" data-character="${escapeHtml(character.character_id)}">${avatarMarkup(character, { thumbnail: true, priority: character.character_id === state.selected })}<span><strong>${escapeHtml(character.display_name)}</strong><small>${escapeHtml(summary)}</small></span></button><button class="pin-character" type="button" data-pin-character="${escapeHtml(character.character_id)}" aria-pressed="${pinned}" aria-label="${pinned ? "取消置顶" : "置顶"}${escapeHtml(character.display_name)}">${pinned ? "★" : "☆"}</button></div>`;
     }).join("");
@@ -4041,11 +3972,9 @@ function finishOnboarding() {
 }
 function renderOnboarding() {
   if (localPreferences.getItem("project-snow-public:onboarding") === "complete") return;
-  // P6a：开机/锁屏层占屏时不显示新手引导，避免盖在开场层之上；消隐/解锁后由
-  // snowRunDeferredOpenings() 再次调用本函数按正常顺序显示。
+  // P6a：开机/锁屏层占屏时不显示新手引导，避免盖在开场层之上；消隐/解锁后由 snowRunDeferredOpenings() 再次调用本函数按正常顺序显示。
   if (snowOpeningActive()) { $("onboarding-guide").hidden = true; return; }
-  // P7：雪境界面下，体验须知、公告等模态弹窗打开时引导卡先让开（否则会在弹窗背后同时出现），
-  // 弹窗关闭时由下方的 close 监听重新调用本函数。
+  // P7：雪境界面下，体验须知、公告等模态弹窗打开时引导卡先让开（否则会在弹窗背后同时出现），弹窗关闭时由下方的 close 监听重新调用本函数。
   if (featureEnabled("ui_snow_adv") && document.querySelector("dialog[open]")) { $("onboarding-guide").hidden = true; return; }
   const step = Math.min(state.onboardingStep, ONBOARDING_STEPS.length - 1);
   const item = ONBOARDING_STEPS[step];
@@ -4212,8 +4141,7 @@ async function verifiedExpressionBytes(url, expectedHashes, maximum, signal) {
   }
 }
 function expressionImageDataUrl(bytes, mediaType, signal) {
-  // Production CSP permits data: images. Encode only already verified bytes;
-  // do not fetch the image again or retain another encoded-image cache.
+  // Production CSP permits data: images.
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     let settled = false;
@@ -4470,8 +4398,7 @@ const STAGE_PRESENTATION_RENDERERS = Object.freeze({
         layers[index] = await verifiedExpressionImage(layer.assetPath, layer.sha256, controller.signal);
       });
       try {
-        // Download and decode independent layers together, retaining manifest order
-        // for composition. Nothing is displayed until every source is verified.
+        // Download and decode independent layers together, retaining manifest order for…
         await Promise.all(loading);
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         const canvas = document.createElement("canvas");
@@ -4540,8 +4467,7 @@ function clearStagePresentationCache() {
 }
 function preloadStagePresentation(presentation, signal) {
   if (signal?.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
-  // Include every pixel/composition input, so a changed digest or layer position
-  // can never borrow a prepared surface from another presentation.
+  // Include every pixel/composition input, so a changed digest or layer position…
   const key = JSON.stringify([presentation?.renderStrategy, presentation?.stageAssetPath,
     presentation?.stageAssetSha256, presentation?.canvas, presentation?.layers]);
   const cache = state.stagePresentationCache;
@@ -4557,8 +4483,7 @@ function preloadStagePresentation(presentation, signal) {
       entry.value = value;
       const { src, image } = value.prepared;
       entry.bytes = src.length * 2 + (image?.naturalWidth || 0) * (image?.naturalHeight || 0) * 4;
-      // A transient layered failure must be retried later, not cached forever as
-      // a flattened fallback. The caller still owns that successful fallback.
+      // A transient layered failure must be retried later, not cached forever as a…
       if (value.prepared.renderStrategy !== presentation.renderStrategy) cache.delete(key);
       return value;
     }).catch((error) => {
@@ -4588,15 +4513,12 @@ function preloadStagePresentation(presentation, signal) {
     const abort = () => finish(reject, new DOMException("Aborted", "AbortError"));
     signal?.addEventListener("abort", abort, { once: true });
     entry.promise.then((value) => {
-      // The cache owns decoded images; disposing one visible consumer must not
-      // clear a surface being reused by a prewarm or another stage update.
+      // The cache owns decoded images; disposing one visible consumer must not clear a…
       finish(resolve, { renderer: value.renderer, prepared: { ...value.prepared, dispose: () => {} } });
     }, (error) => finish(reject, error));
   });
 }
-// P8: first-screen budget. Work registered here before the first screen has settled
-// (page load event plus one idle period, capped) runs afterwards; the returned
-// function runs it immediately instead (e.g. when the stage itself is the first screen).
+// P8: first-screen budget.
 const firstScreenWaiters = new Set();
 let firstScreenSettled = false;
 function deferUntilFirstScreenSettled(run, signal) {
@@ -4688,9 +4610,7 @@ function crossfadeStageCharacterArt(node, duration = 280) {
   node.parentNode.insertBefore(outgoing, node);
   node.style.opacity = "1";
   node.dataset.stageArtTransition = "incoming";
-  // 雪境 ADV (P4)：换表情不出现透明空档。外层（旧图）全程保持 opacity 1，
-  // 内层（新图，z-index 更高、叠在上面）从 0 淡入到 1，淡入完成后再移除旧图。
-  // 这样任意时刻可见画面都是不透明的，绝不会两层同时半透明。关闭开关时沿用旧的交叉淡出。
+  // 雪境 ADV (P4)：换表情不出现透明空档。
   const snowAdv = snowAdvActive();
   const options = {
     duration,
@@ -4720,9 +4640,7 @@ function crossfadeStageCharacterArt(node, duration = 280) {
   });
   return transition;
 }
-// 雪境 ADV (P4)：立绘入场。只在开关开启时生效，只动 transform/opacity，绝不阻塞逻辑
-// （纯视觉，调用方不 await）。auto=上浮+淡入(--ease-settle, ~420ms)；light=仅淡入；
-// off/减少动态/页面隐藏/无 WAAPI=不动画。transform 不与 P3 的 translate 中轴定位冲突。
+// 雪境 ADV (P4)：立绘入场。
 function playStageEnter(node) {
   if (!snowAdvActive() || !node || node.hidden || typeof node.animate !== "function") return false;
   const tier = stageMotionTier();
@@ -4741,7 +4659,7 @@ function playStageEnter(node) {
   animation.finished.catch(() => {}).finally(() => {
     if (state.stageEnterAnimation === animation) state.stageEnterAnimation = null;
     delete node.dataset.stageEnter;
-    // fill:both leaves the final frame latched; clear it so breathing/motion own transform again.
+    // fill:both leaves the final frame latched; clear it so breathing/motion own…
     try { animation.cancel(); } catch {}
   });
   return true;
@@ -4821,7 +4739,7 @@ async function updateStageCharacterArt(node, character, expressionState, perform
       }
     }
     if (!loadedState && manifest.fromStageRelease && characterId === MIA_CHARACTER_ID && !controller.signal.aborted) {
-      // The bundled approved neutral remains available if the optional release fails verification.
+      // The bundled approved neutral remains available if the optional release fails…
       try {
         const bundled = await fetchExpressionManifest(character, MIA_BUNDLED_EXPRESSION_MANIFEST, controller.signal);
         const presentation = bundled.expressions.neutral.presentation;
@@ -4851,8 +4769,7 @@ async function updateStageCharacterArt(node, character, expressionState, perform
       && Boolean(node.getAttribute("src"));
     const outgoingTransition = shouldCrossfade
       ? crossfadeStageCharacterArt(node, previousCharacterId === characterId ? 160 : 280) : null;
-    // 雪境 ADV (P4)：立绘首次为某场景/到场出现时（上一帧无图或已隐藏，且不是换表情交叉淡入），
-    // 以 --ease-settle 做 ~420ms 的柔和上浮(≈12px→0)+淡入(0→1)。light 仅淡入，off 不做。
+    // 雪境 ADV (P4)：立绘首次为某场景/到场出现时（上一帧无图或已隐藏，且不是换表情交叉淡入），以 --ease-settle 做 ~420ms 的柔和上浮…
     const firstAppearance = !outgoingTransition && (node.hidden || !node.getAttribute("src"));
     const previousSurface = state.stageArtSurface;
     loadedRenderer.commit(node, loadedPresentation, loadedSurface);
@@ -4903,7 +4820,6 @@ function cancelStageMotion(characterId = "") {
 }
 function stageMotionFrames(stageMotion) {
   // 雪境 ADV (P4)：带缓冲、小振幅、会 settle 的曲线，替代旧的 ±10px 生硬抖动。
-  // 动作名与触发完全不变；只在开关开启时走这一支。只动 transform。
   if (snowAdvActive()) {
     if (stageMotion === "lean_in") return {
       duration: 1700, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
@@ -5126,8 +5042,7 @@ async function runSceneTransition(operation, title = "正在前往……", owner
     const minimum = reducedMotion() ? 0 : 900;
     const elapsed = performance.now() - started;
     if (elapsed < minimum) await delay(minimum - elapsed);
-    // A newer selection may have taken ownership while the operation was
-    // awaiting the network. Never let an old transition hide or relabel it.
+    // A newer selection may have taken ownership while the operation was awaiting the…
     if (layer.dataset.owner !== String(owner)) return result;
     layer.dataset.phase = "entering";
     $("transition-detail").textContent = "场景已更新";
@@ -5242,14 +5157,9 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
   const controller = state.selectionController;
   state.stageWarmController?.abort();
   state.stageWarmController = controller;
-  // Start artwork alongside local history and presence resolution, while the
-  // user is still in the contact/transition UI rather than after opening the stage.
-  // P8: during the first screen the communicator is what the visitor sees, so the
-  // (large) neutral layers wait until the page has loaded and gone idle; an
-  // in-person thread flushes the warm immediately below because its stage is the first screen.
+  // Start artwork alongside local history and presence resolution, while the user…
   const warmNeutral = () => { void warmCharacterStage(characterById(characterId), "neutral", "", controller.signal); };
-  // Data-saver or 2G/3G visitors who stay in the communicator never download the
-  // layers; entering face-to-face still loads them through the foreground path.
+  // Data-saver or 2G/3G visitors who stay in the communicator never download the…
   const connection = navigator.connection;
   const constrainedNetwork = Boolean(connection?.saveData || /(^|-)(2g|3g)$/.test(connection?.effectiveType || ""));
   const flushNeutralWarm = deferUntilFirstScreenSettled(() => { if (!constrainedNetwork) warmNeutral(); }, controller.signal);
@@ -5587,8 +5497,7 @@ function renderCurrentRendezvous() {
   });
 }
 function alreadyCompletedJointInvitation(invitation, context) {
-  // Older signed contexts kept an accepted-now invitation after applying its
-  // movement. Only hide that exact event at its still-confirmed destination.
+  // Older signed contexts kept an accepted-now invitation after applying its…
   const overlay = context?.scene_overlay;
   const decoded = decodeSidecar(state.worldPackage || "");
   const world = decoded.world || decoded;
@@ -5631,8 +5540,7 @@ function closeImmersivePopovers({ restoreFocus = false } = {}) {
 }
 function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   renderCurrentRendezvous();
-  // Render the saved window when the communicator becomes visible. Rebuilding
-  // hidden history during a stage transition adds work and loses scroll geometry.
+  // Render the saved window when the communicator becomes visible.
   if (featureEnabled("motion_v2") && $("text-surface").hidden) return;
   const thread = currentThread();
   const allMessages = surfaceHistory();
@@ -5640,8 +5548,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   const messages = window.messages;
   const timeline = $("timeline");
   timeline.style.overflowAnchor = "none";
-  // Automatic anchoring is immediate. CSS smooth scrolling can otherwise
-  // leave every render reading an intermediate position from the last update.
+  // Automatic anchoring is immediate.
   timeline.style.scrollBehavior = "auto";
   const viewport = timelineScrollSnapshot?.characterId === state.selected ? timelineScrollSnapshot : null;
   const wasNearBottom = viewport ? viewport.nearBottom : timelineNearBottom();
@@ -5655,7 +5562,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   const newer = window.hasNewer ? '<button id="load-newer-messages" class="secondary-button load-older-messages" type="button">查看较新的 40 条</button>' : "";
   if (!messages.length) {
     const emptyCopy = "从一句问候开始吧。历史只保存在此浏览器。";
-    // 雪境 ADV (P5)：空会话用角色色问候卡取代纯灰文字；文案不变。关闭态保持原样。
+    // 雪境 ADV (P5)：空会话用角色色问候卡取代纯灰文字；文案不变。
     const emptyBody = snowAdvActive() && currentCharacter()
       ? `<div class="snow-empty-greeting">${avatarMarkup(currentCharacter(), { thumbnail: false, priority: true, className: "snow-empty-avatar" })}<p>${escapeHtml(emptyCopy)}</p></div>`
       : `<p>${escapeHtml(emptyCopy)}</p>`;
@@ -5666,8 +5573,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     observeTimelineViewport();
     return;
   }
-  // Resolve the device locale/timezone once per render, keeping live changes
-  // while avoiding a formatter allocation for every historical timestamp.
+  // Resolve the device locale/timezone once per render, keeping live changes while…
   const clockFormatter = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", hour12: false });
   reconcileMarkup(timeline, older + messages.map((message, index) => {
     const failed = message.status === "failed";
@@ -5695,8 +5601,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     const node = [...timeline.querySelectorAll("[data-message-id]")].find(item => item.dataset.messageId === message.id);
     if (!node) continue;
     if (snowAdvActive()) {
-      // 雪境 ADV (P5)：气泡 pop-in 由 CSS 关键帧按动态档位驱动（auto 上浮+淡入、
-      // light 仅淡入、off 无），只动 transform/opacity。加类即可，不再用 WAAPI。
+      // 雪境 ADV (P5)：气泡 pop-in 由 CSS 关键帧按动态档位驱动（auto 上浮+淡入、 light 仅淡入、off 无），只动 transform…
       node.classList.add("is-snow-pop");
     } else {
       void transientMotion.play(node, [{ opacity: .25, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 180, easing: "cubic-bezier(.22,.72,.24,1)" });
@@ -5709,8 +5614,7 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     timeline.scrollTop = timeline.scrollHeight;
     $("new-replies").hidden = !window.hasNewer;
   } else if (!preserveScroll) {
-    // Keep the same historical row at the same viewport position when reply
-    // bubbles, media or time labels are appended below the reader.
+    // Keep the same historical row at the same viewport position when reply bubbles…
     const anchor = [...timeline.querySelectorAll("[data-message-id]")].find(node => node.dataset.messageId === anchorId);
     timeline.scrollTop = previousTop;
     if (anchor && anchorOffset !== null) timeline.scrollTop += anchor.getBoundingClientRect().top - timeline.getBoundingClientRect().top - anchorOffset;
@@ -5901,8 +5805,7 @@ function renderStage() {
   const liveReply = pending?.phase === "presenting" && pending.channel === "in_person"
     && assistantMessage?.requestId === pending.requestId;
   if (!featureEnabled("chat_latency_v2") && liveReply && $("chat-app").dataset.channel === "in_person" && state.typewriter.key !== speechKey) {
-    // Repeated renders share one deadline. A stalled image can delay the first
-    // spoken text only briefly, and late completions cannot repaint a new scene.
+    // Repeated renders share one deadline.
     if (state.stageSpeechGate?.key !== speechKey) {
       state.stageSpeechGate = { key: speechKey, deadline: performance.now() + STAGE_SPEECH_SYNC_WAIT_MS };
     }
@@ -5956,9 +5859,7 @@ function renderStageSpeech(assistantMessage) {
   const livePresentation = presentationFor();
   const liveReply = assistantMessage && (livePresentation?.messageId === assistantMessage.id
     || pending?.channel === "in_person" && pending.requestId === assistantMessage.requestId);
-  // Confirmed replies take priority over decorative arrival/scene transitions,
-  // including recovered replies and legacy arrival reactions. Cancel before
-  // typewriting or measuring paint; renderScene may have just started a veil.
+  // Confirmed replies take priority over decorative arrival/scene transitions…
   if (liveReply && (completeSpeech || action)
       && (snowPushContext || state.snowVeilAnimation || state.snowVeilTimers.length)) cancelSnowScenePresentation();
   renderTypewriter(speech, speechKey, !featureEnabled("chat_latency_v2") || Boolean(liveReply));
@@ -6108,8 +6009,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   if (thread?.channel === "text" && channel !== "text") flushCommunicatorPresentation(thread.characterId, { render: false });
   const restoreCollapsedSidebarFocus = channel !== "in_person"
     && $("chat-app").classList.contains("sidebar-collapsed");
-  // Selection already saved the previous owner's composer. Its stale DOM
-  // must not overwrite the newly selected character's persisted draft.
+  // Selection already saved the previous owner's composer.
   if (persist && thread && thread.characterId === state.selected) await saveDraftNow();
   if (thread && thread.channel !== (channel === "in_person" ? "in_person" : "text")) {
     cancelPresentationQueue(thread.characterId);
@@ -6119,7 +6019,6 @@ async function setChannel(channel, persist = true, targetThread = null) {
     if (persist) await dbPutThread(thread);
   }
   // A character switch may happen while the persistence write is pending.
-  // Only the selected thread owns the visible surface and composer controls.
   if (thread && thread.characterId !== state.selected) return;
   if (state.composerDraftKey !== draftKey(state.selected, channel)) closeImmersivePopovers({ restoreFocus: false });
   if (channel !== "in_person") cancelSnowScenePresentation();
@@ -6135,9 +6034,7 @@ async function setChannel(channel, persist = true, targetThread = null) {
   $("text-surface").inert = channel === "in_person";
   $("in-person-surface").inert = channel !== "in_person";
   $("chat-app").dataset.channel = channel === "in_person" ? "in_person" : "text";
-  // 雪境 ADV P3：开关开启进入面对面时，角色栏改为覆盖式抽屉，默认关闭让舞台占满视口；
-  // 桌面端用既有 sidebar-collapsed 机制（#open-stage-contacts 仍用 toggleContacts 开合），
-  // 不持久化、不改旧 UI 的侧栏偏好语义。移动端（≤820px）沿用抽屉逻辑，无需处理。
+  // 雪境 ADV P3：开关开启进入面对面时，角色栏改为覆盖式抽屉，默认关闭让舞台占满视口；桌面端用既有 sidebar-collapsed 机制（#open-st…
   if (featureEnabled("ui_snow_adv") && channel === "in_person" && !window.matchMedia("(max-width: 820px)").matches
     && !$("chat-app").classList.contains("sidebar-collapsed")) {
     $("chat-app").classList.add("sidebar-collapsed");
@@ -6158,8 +6055,6 @@ async function setChannel(channel, persist = true, targetThread = null) {
   renderAll();
   animateSurface(channel, snapshot);
   // Arrival can confirm the already-visible channel after an IndexedDB write.
-  // Keep edits made during that wait; only a new character/channel restores a
-  // different draft into the composer.
   if (composerChanged) restoreDraft();
   updateComposerAvailability();
   if (restoreCollapsedSidebarFocus) window.setTimeout(() => $("open-contacts")?.focus(), 0);
@@ -6190,13 +6085,10 @@ function resizeMessageInput() {
   const minimum = Number.parseFloat(style.minHeight) || 0;
   const maximum = Number.parseFloat(style.maxHeight) || Infinity;
   const borders = Number.parseFloat(style.borderTopWidth) + Number.parseFloat(style.borderBottomWidth);
-  // While capped text still overflows, leave the live box alone so the browser
-  // can keep scrolling the caret as typing continues. Resetting its height here
-  // would undo that scroll. Deletion/widening that fits re-enters measurement.
+  // While capped text still overflows, leave the live box alone so the browser can…
   if (input.value && input.offsetHeight >= maximum && input.scrollHeight > input.clientHeight) return;
   const scrollTop = input.scrollTop;
-  // Measure from the intrinsic single row so deletion and wider layouts shrink
-  // again. Only the box changes; drafts, selection and manual scroll stay intact.
+  // Measure from the intrinsic single row so deletion and wider layouts shrink…
   input.style.height = "auto";
   input.style.overflowY = "hidden";
   // A long placeholder can wrap even when the composer has no draft.
@@ -6387,8 +6279,7 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
         return;
       }
       if (ownsTypingState(characterId, requestId)) {
-        // Apply the same signed-package ordering gate in memory first. Local
-        // disk failures cannot interrupt reading a server-confirmed done packet.
+        // Apply the same signed-package ordering gate in memory first.
         const accepted = await saveWorldPackage(payload.state_package, { persist: false });
         if (accepted) {
           pendingSceneState = payload.scene_state || pendingSceneState;
@@ -6444,8 +6335,7 @@ async function consumeChatStream(response, { characterId, requestId, fallbackCha
     }
     if (!completed && buffer.trim()) await handlePacket(buffer);
   } finally {
-    // A verified done packet completes the request. Waiting for a socket EOF
-    // can otherwise turn a saved reply into a timeout and offer a paid resend.
+    // A verified done packet completes the request.
     void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
@@ -6474,8 +6364,7 @@ function recoverableChatError(error) {
 
 function shouldReuseChatRequest(error) {
   const code = error instanceof Error ? error.message : plain(error);
-  // retryable=false prevents another generation; uncertain results still need
-  // their original UUID so a later reconciliation cannot charge a new request.
+  // retryable=false prevents another generation; uncertain results still need their…
   if (["public_database_unavailable", "subscription_result_unknown", "stream_commit_invalid", "stream_commit_conflict", "stream_commit_sequence", "upstream_invalid_response"].includes(code) || error instanceof SyntaxError) return true;
   if (error instanceof Error && error.retryable === false) return false;
   return error instanceof TypeError || [
@@ -6587,7 +6476,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   const storedSnapshot = envelope ? { endpoint: "/public/v2/chat/stream", envelope: structuredClone(envelope) } : requestSnapshot;
   const requestBody = JSON.stringify(envelope ? { ...envelope, chat: boundedRequest } : boundedRequest);
   const requestEndpoint = retrySnapshot?.endpoint || (dialogueV2 ? "/public/v2/chat/stream" : `${apiRoot}/chat/stream`);
-  // Optional, isolated analytics signal: identifiers only; never inspect requestBody.
+  // Optional, isolated analytics signal: identifiers only; never inspect…
   try {
     window.snowStatisticsRequest?.(requestId);
   } catch { /* Analytics must not affect chat submission. */ }
@@ -6630,8 +6519,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
   let provisionalReply = thread.messages.find(message => message.role === "assistant" && message.requestId === requestId && message.committedBlocks?.length) || null;
   for (const event of provisionalReply?.committedBlocks || []) committedReply?.accept(event);
   if (provisionalReply && committedReply?.blocks.length) {
-    // A manual recovery keeps its already delivered prefix on screen even if
-    // replay accepts only duplicate blocks before the terminal reply arrives.
+    // A manual recovery keeps its already delivered prefix on screen even if replay…
     state.streamingPresentationByCharacter.set(characterId, { requestId, receivedCount: committedReply.blocks.length,
       visibleCount: Math.min(provisionalReply.contentBlocks.length, committedReply.blocks.length) });
   }
@@ -6657,8 +6545,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     streaming.receivedCount = count;
     state.streamingPresentationByCharacter.set(characterId, streaming);
     if (communicatorPaced) {
-      // Receipt and storage never wait for the cosmetic delivery cursor. Saving
-      // the whole accepted prefix also makes reload/recovery immediately readable.
+      // Receipt and storage never wait for the cosmetic delivery cursor.
       materializeCommitted();
       const queue = enqueueCommunicatorReply(characterId, requestId, provisionalReply, { start: false });
       commitPersistence = commitPersistence.then(() => dbPutThread(thread));
@@ -6685,7 +6572,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       metrics.lastBodyPaintAt = performance.now();
       await dbPutThread(thread);
     });
-    // Transport reads continue while a short presentation pause or disk write finishes.
+    // Transport reads continue while a short presentation pause or disk write…
     void commitDisplay.catch(() => {});
   };
   const timing = { shownAt: 0 };
@@ -6719,8 +6606,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
           metrics.recovery = true;
           flushCommunicatorPresentation(characterId);
         }
-        // Transport recovery is actionable immediately, even while the normal
-        // typing indicator is still inside its natural onset window.
+        // Transport recovery is actionable immediately, even while the normal typing…
         updateTypingPhase(characterId, requestId, "recovering");
         setRequestStatus(characterId, `连接中断，正在恢复（${attempt}/3）……`, requestId);
         const retryAfterMs = Number(lastError?.retryAfterSeconds || 0) * 1000;
@@ -6751,8 +6637,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     }
     if (!result) throw lastError || new Error("stream_disconnected");
     terminalResult = result;
-    // A confirmed terminal reply is a completed business action. Cosmetic waiting
-    // can no longer cancel it or expose a retry with a fresh paid-request ID.
+    // A confirmed terminal reply is a completed business action.
     window.clearTimeout(requestTimeout);
     const activeRequest = state.chatRequestByCharacter.get(characterId);
     if (activeRequest?.requestId === requestId) activeRequest.completed = true;
@@ -6831,8 +6716,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
     await commitDisplay.catch(() => {});
     await userPersistence.catch(() => {});
     if (terminalResult) {
-      // UI or storage faults after a verified terminal reply cannot downgrade
-      // the completed business action or create a fresh paid-request retry.
+      // UI or storage faults after a verified terminal reply cannot downgrade the…
       userMessage.status = "sent";
       userMessage.errorCode = "";
       userMessage.errorStage = "";
@@ -6872,8 +6756,7 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
       state.retrySnapshots.delete(userMessage.id);
       userMessage.requestSnapshot = null;
     }
-    // Expose confirmed content before cancellation renders with the streaming
-    // cursor, so a previously visible prefix keeps its original DOM nodes.
+    // Expose confirmed content before cancellation renders with the streaming cursor…
     if (communicatorPaced && committedReply?.blocks.length) {
       const streaming = state.streamingPresentationByCharacter.get(characterId);
       if (streaming?.requestId === requestId) {
@@ -7022,9 +6905,7 @@ function remainingProviderCallBudget(usage) {
 }
 function scheduleAutoSummary(thread, chatUsage = null) {
   if (state.provider === SUBSCRIPTION_PROVIDER || !state.autoSummaryEnabled || !configured()) return;
-  // A summary is another provider operation belonging to the current user
-  // action. Never start it when validation/rewriting already consumed both
-  // calls, or when an older server omitted the auditable call count.
+  // A summary is another provider operation belonging to the current user action.
   if (remainingProviderCallBudget(chatUsage) < 1) return;
   const successful = successfulChatMessages(thread);
   if (successful.length < 12 || successful.length < thread.summarizedThroughTurnCount + 12) return;
@@ -7040,8 +6921,7 @@ function scheduleAutoSummary(thread, chatUsage = null) {
 function cancelBackgroundSummaries() {
   for (const controller of state.summaryControllers.values()) controller.abort();
   for (const thread of state.threads.values()) {
-    // A provider may have accepted an interrupted request. A later summary
-    // gets a new ID and checkpoint instead of replaying a possibly charged call.
+    // A provider may have accepted an interrupted request.
     if (thread.summaryRequestId) {
       thread.summaryRequestId = "";
       void dbPutThread(thread);
@@ -7084,8 +6964,7 @@ async function runAutoSummary(thread) {
     }
   } catch (error) {
     if (controller.signal.aborted || epoch !== state.historyEpoch) return;
-    // Only a future successful user turn may schedule another summary. Its
-    // turns/checkpoint differ, so it must never reuse this paid-request UUID.
+    // Only a future successful user turn may schedule another summary.
     if (thread.characterId === state.selected) setRequestStatus(thread.characterId, "对话已完成；连续性整理稍后重试。");
     thread.summaryRequestId = "";
     await dbPutThread(thread);
@@ -7146,8 +7025,7 @@ async function performSceneAction(action, characterId = state.selected, signal =
     if (result.scene_action?.status === "joined" && result.arrival_ticket && configured()
       && cleared.arrivalSnapshot?.envelope?.arrival_id !== envelope.request_id
       && !thread.messages.some(message => message.source === "presence_arrival" && message.requestId === envelope.request_id)) {
-      // Persist the immutable arrival with the confirmed join. Credentials are
-      // attached only at dispatch and never enter browser request snapshots.
+      // Persist the immutable arrival with the confirmed join.
       if (cleared.arrivalSnapshot) {
         cleared.arrivalRecoveryArchive = [...(cleared.arrivalRecoveryArchive || []), cleared.arrivalSnapshot];
       }
@@ -7184,8 +7062,7 @@ async function performSceneAction(action, characterId = state.selected, signal =
     }
     const retired = await retireRejectedDialogueContext(error, thread, envelope, owns);
     if (retired && action === "resolve" && !previous && scopeRecoveryAttempt < 2 && !signal?.aborted) {
-      // Scope rejection is confirmed before generation. Re-establish only the
-      // model-free scene read; the immutable chat request is never resubmitted.
+      // Scope rejection is confirmed before generation.
       return performSceneAction("resolve", characterId, signal, { scopeRecoveryAttempt: scopeRecoveryAttempt + 1 });
     }
     if (retired && characterId === state.selected) setRequestStatus(characterId, displayError(error), "", "refresh_scene");
@@ -7209,8 +7086,7 @@ function createPresenceArrivalSnapshot(result, join, thread) {
 async function recoverPresenceArrival(characterId = state.selected) {
   const snapshot = state.dialogueByCharacter.get(characterId)?.arrivalSnapshot;
   if (!snapshot || snapshot.status === "unavailable" || globalRequestBusy()) return;
-  // A durable undispatched snapshot proves that no HTTP attempt began. Resume
-  // that same entry once; any dispatched snapshot is strictly lookup-only.
+  // A durable undispatched snapshot proves that no HTTP attempt began.
   await sendPresenceArrival(characterId, { recoveryOnly: Boolean(snapshot.dispatched) });
 }
 async function sendPresenceArrival(characterId, { recoveryOnly = false } = {}) {
@@ -7343,8 +7219,7 @@ async function arriveSceneAction(userText = "") {
     if (state.selected !== characterId || thread.historyEpoch !== state.historyEpoch) return false;
     await setChannel(result.communication_channel === "in_person" ? "in_person" : "text", true, thread);
     renderScene();
-    // 雪境 ADV：舞台旁白「你已来到X。」已是到场通知（aria-live 播报一次），
-    // 开关开启时不再重复显示状态行与横幅，只清掉进行中的状态；关闭时保留旧的三处提示。
+    // 雪境 ADV：舞台旁白「你已来到X。
     if (!suppressArrivalDuplicateNotice()) {
       setRequestStatus(characterId, `已来到${result.scene_state?.character_location || "她身边"}，可以继续聊天。`);
       showBanner(`已来到${result.scene_state?.character_location || "她身边"}。`);
@@ -7447,15 +7322,11 @@ async function arriveInPerson() {
       thread.messageCount = Number(thread.messageCount || 0) + 1;
     }
     if (thread) await dbPutThread(thread);
-    // Populate the arrival turn before exposing the stage. Otherwise
-    // setChannel() can make the scene visible for one paint while the
-    // reaction is still being persisted, producing an empty dialogue box.
+    // Populate the arrival turn before exposing the stage.
     if (ownsVisibleArrival()) {
       updateTypingPhase(characterId, arrivalId, "presenting");
       await setChannel("in_person");
-      // 雪境 ADV：到场反应已显示在舞台对白框（旁白 + 对白，aria-live 播报一次），
-      // 开关开启且确有舞台反应时抑制重复的「她注意到了你的到来。」横幅；错误 / 未注意
-      // （无舞台反应）仍保留横幅，保证至少有一处可见通知。
+      // 雪境 ADV：到场反应已显示在舞台对白框（旁白 + 对白，aria-live 播报一次），开关开启且确有舞台反应时抑制重复的「她注意到了你的到来。
       const stageHasArrivalReaction = Boolean(arrivalMessage) && suppressArrivalDuplicateNotice();
       if (result.terminal_error) showBanner(arrivalReactionUnavailableMessage(result.terminal_error));
       else if (result.decision === "unnoticed") showBanner("你来到她身边，她暂时没有注意到。位置切换已经完成。");
@@ -7950,8 +7821,7 @@ document.querySelectorAll("[data-settings-tab]").forEach((button) => {
 document.querySelectorAll("[data-close-dialog]").forEach((button) => {
   if (!button.getAttribute("aria-label")) button.setAttribute("aria-label", "关闭对话框");
   button.onclick = () => {
-    // Persist before close(): its event is asynchronous and a quick reload
-    // must not lose the receipt or show the same announcement again.
+    // Persist before close(): its event is asynchronous and a quick reload must not…
     if (button.dataset.closeDialog === "announcements-dialog") acknowledgeAnnouncements();
     $(button.dataset.closeDialog).close();
   };
@@ -7998,8 +7868,7 @@ const messageInputResizeObserver = new ResizeObserver(([entry]) => {
   const width = entry.borderBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
   if (width === messageInputWidth) return;
   messageInputWidth = width;
-  // Height-only observations must not loop. Defer width-driven layout work;
-  // recording zero also makes showing a previously hidden composer remeasure.
+  // Height-only observations must not loop.
   if (width > 0) scheduleMessageInputResize();
 });
 messageInputResizeObserver.observe($("message-input"));
@@ -8283,15 +8152,12 @@ async function boot() {
   await pruneExpiredMessages();
   await loadConfig();
   // P6a：开关只在 config 解析后才已知，故开机/锁屏层只能此时才出现。
-  // 桌面 → 终端开机（真实加载步驱动，就绪即消隐，不加延迟）；手机 → 终端锁屏。
-  // 开场层永不阻断启动：任何构造异常都降级为「无开场层」。
   let snowBoot = false;
   let snowLock = false;
   try { snowBoot = maybeStartSnowBoot(); } catch { snowBoot = false; }
   try { snowLock = maybeStartSnowLock(); } catch { snowLock = false; }
   if (snowBoot) snowBootStep("读取本地记录");
-  // 体验须知与新手引导：桌面开机消隐后、手机解锁后按正常顺序出现（绝不盖在开场层之上）；
-  // 其余情况（flag 关 / 跳过开机锁屏）保持原有顺序——config 之后立即弹须知。
+  // 体验须知与新手引导：桌面开机消隐后、手机解锁后按正常顺序出现（绝不盖在开场层之上）；其余情况（flag 关 / 跳过开机锁屏）保持原有顺序——config 之后…
   if (!snowBoot && !snowLock) await showExperienceNoticeIfNeeded();
   await loadCharacters();
   if (snowBoot) { snowBootStep("就绪"); dismissSnowBoot(() => { void snowRunDeferredOpenings(); }); }
