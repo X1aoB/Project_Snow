@@ -1513,6 +1513,7 @@ html[data-ui="snow-adv"][data-tone="dark"] .scene-menu-popover { border-color: r
 /* 冰蓝/角色色填充上的文字原本用 --snow-0（白），变量翻转后要固定为白字。 */
 html[data-ui="snow-adv"][data-tone="dark"] :is(.presence-switch, .primary-button, .send-button, .scene-tool-button.primary, .stage-speaker-line strong, .announcement-tab-badge),
 html[data-ui="snow-adv"][data-tone="dark"] .message.user :is(.content-message, .content-speech) { color: #ffffff; }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.presence-switch, .primary-button, .send-button):hover:not(:disabled) { background: #2b5f80; }
 
 /* C8.1 daylight contrast */
 html[data-ui="snow-adv"][data-tone="dark"] body:has(.snow-backdrop .snow-layer-far:is([data-time="dawn"], [data-time="day"])) #chat-app[data-snow-world] #text-surface {

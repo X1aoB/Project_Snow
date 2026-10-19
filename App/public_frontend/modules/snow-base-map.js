@@ -76,7 +76,8 @@ export async function installBaseMap({ snapshot, visit, icon }) {
     entry.setAttribute("aria-haspopup", "dialog");
     entry.setAttribute("aria-controls", "snow-base-map");
     entry.prepend(icon("map-pin"));
-    const dialog = node("dialog", "snow-base-map");
+    // Reuse the shared modal / icon-button / primary-button skins so every tone matches the other dialogs.
+    const dialog = node("dialog", "modal snow-base-map");
     dialog.id = "snow-base-map";
     dialog.setAttribute("aria-labelledby", "snow-base-map-title");
     dialog.setAttribute("aria-describedby", "snow-base-map-summary");
@@ -86,8 +87,8 @@ export async function installBaseMap({ snapshot, visit, icon }) {
     title.id = "snow-base-map-title";
     const summary = node("p");
     summary.id = "snow-base-map-summary";
-    heading.append(title, summary);
-    const closeButton = node("button", "snow-base-map-close");
+    heading.append(node("span", "panel-kicker", "本机记录"), title, summary);
+    const closeButton = node("button", "icon-button snow-base-map-close");
     closeButton.id = "snow-base-map-close";
     closeButton.type = "button";
     closeButton.setAttribute("aria-label", "关闭基地地图");
@@ -102,7 +103,7 @@ export async function installBaseMap({ snapshot, visit, icon }) {
     status.tabIndex = 0;
     status.setAttribute("role", "status");
     status.setAttribute("aria-live", "polite");
-    const visitButton = node("button", "snow-base-map-visit", "去见她");
+    const visitButton = node("button", "primary-button snow-base-map-visit", "去见她");
     visitButton.id = "snow-base-map-visit";
     visitButton.type = "button";
     actions.append(status, visitButton);
@@ -140,7 +141,7 @@ export async function installBaseMap({ snapshot, visit, icon }) {
       for (const character of characters) {
         const item = object(Object.hasOwn(presence, character.id) ? presence[character.id] : null);
         const location = text(item.location, 120), activity = text(item.activity, 240);
-        const placeText = location ? `${current ? "本地位置" : "上次位置"}：${location}` : "位置尚未建立";
+        const placeText = location ? `${current ? "位置" : "上次位置"}：${location}` : "位置尚未建立";
         const activityText = activity ? `${current ? "活动" : "上次活动"}：${activity}` : "活动尚未建立";
         character.detail = `${placeText}；${activityText}`;
         const listItem = node("div", "snow-base-map-item");
@@ -148,6 +149,7 @@ export async function installBaseMap({ snapshot, visit, icon }) {
         const card = node("button", "snow-base-map-card snow-base-map-select");
         card.type = "button";
         card.dataset.characterId = character.id;
+        card.dataset.snowCharacter = character.id;
         card.dataset.presence = location ? (current ? "known" : "stale") : "missing";
         card.dataset.baseMapSelect = character.id;
         card.setAttribute("aria-label", `选择${character.name}。${character.detail}`);
@@ -162,6 +164,8 @@ export async function installBaseMap({ snapshot, visit, icon }) {
           selected = character.id;
           status.textContent = `${character.name} · ${character.detail}。前往前仍需确认。`;
           controls();
+          // A longer status grows the footer and shrinks the list; keep the chosen card in view.
+          card.scrollIntoView({ block: "nearest" });
         };
         card.append(identity, place, activityLine);
         listItem.append(card);

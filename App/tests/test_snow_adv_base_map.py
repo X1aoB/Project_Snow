@@ -358,6 +358,8 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
         self.assertEqual(self.http[start:], [])
         self.assertEqual(page.locator(".snow-base-map-card").count(), 22)
         self.assertEqual(page.locator('.snow-base-map-card[data-presence="known"]').count(), 22)
+        known = page.locator(".snow-base-map-location").all_inner_texts()
+        self.assertTrue(all(line.startswith("位置：") for line in known), known)
         self.assertEqual(page.locator("#snow-base-map img").count(), 0)
         for state in ({}, {"presence": world()["presence"]},
                       {**world(), "schedule_date": "2000-01-01"},
@@ -368,8 +370,8 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
             self.open_map(page)
             if state.get("presence") or state.get("world", {}).get("presence"):
                 self.assertEqual(page.locator('.snow-base-map-card[data-presence="stale"]').count(), 22)
-                self.assertIn("上次位置", page.locator("#snow-base-map-list").inner_text())
-                self.assertNotIn("本地位置", page.locator("#snow-base-map-list").inner_text())
+                lines = page.locator(".snow-base-map-location").all_inner_texts()
+                self.assertTrue(all(line.startswith("上次位置：") for line in lines), lines)
             else:
                 self.assertEqual(page.locator('.snow-base-map-card[data-presence="missing"]').count(), 22)
         state = world()
@@ -562,6 +564,33 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
                     self.assertTrue(entry.evaluate("node => node.matches(':focus-visible')"))
                     rows.append({"role": "entry-focus-visible", **self.text_contrast(page, "#open-snow-base-map")})
                     entry.click()
+                    self.paint_settled(page)
+                    skin = page.locator("#snow-base-map").evaluate("""dialog => {
+                      const css=(node, pseudo)=>getComputedStyle(node, pseudo||null);
+                      const visit=dialog.querySelector('#snow-base-map-visit'), close=dialog.querySelector('#snow-base-map-close');
+                      const other=document.querySelector('.icon-button:not(.snow-base-map-close)');
+                      const card=dialog.querySelector('.snow-base-map-card'), initial=card.querySelector('.snow-base-map-initial');
+                      const probe=document.createElement('i');probe.style.color='var(--char)';card.append(probe);
+                      const char=css(probe).color;probe.remove();
+                      return {modal:dialog.classList.contains('modal'), backdrop:css(dialog,'::backdrop').backgroundColor,
+                        visitBackground:css(visit).backgroundColor, visitColor:css(visit).color,
+                        visitRadius:css(visit).borderTopLeftRadius, closeRadius:css(close).borderTopLeftRadius,
+                        iconButtonRadius:css(other).borderTopLeftRadius, kicker:dialog.querySelector('header .panel-kicker')?.textContent,
+                        char, initialBorder:css(initial).borderTopColor, initialBorderWidth:css(initial).borderTopWidth,
+                        cardCharacter:card.dataset.snowCharacter===card.dataset.characterId}; }""")
+                    # Same skins as the other dialogs and primary buttons in every tone.
+                    self.assertEqual(skin["modal"], True)
+                    self.assertEqual(skin["backdrop"], "rgba(31, 45, 58, 0.24)")
+                    self.assertEqual((skin["visitBackground"], skin["visitColor"]), ("rgb(58, 124, 165)", "rgb(255, 255, 255)"))
+                    self.assertEqual(skin["visitRadius"], "999px")
+                    self.assertEqual(skin["closeRadius"], skin["iconButtonRadius"])
+                    self.assertEqual(skin["kicker"], "本机记录")
+                    self.assertEqual((skin["initialBorder"], skin["initialBorderWidth"], skin["cardCharacter"]), (skin["char"], "2px", True))
+                    self.evidence.append({"width": width, "requested_tone": tone, "skin": skin})
+                    page.locator("#snow-base-map-visit").hover()
+                    self.paint_settled(page)
+                    rows.append({"role": "visit-hover", **self.text_contrast(page, "#snow-base-map-visit")})
+                    page.mouse.move(0, 0)
                     self.paint_settled(page)
                     for selector in ("#snow-base-map-title", "#snow-base-map-summary", "#snow-base-map-status", "#snow-base-map-visit"):
                         rows.append({"role": selector, **self.text_contrast(page, selector)})
