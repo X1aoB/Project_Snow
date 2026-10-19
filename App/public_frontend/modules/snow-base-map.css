@@ -230,8 +230,10 @@ html[data-ui="snow-adv"] .snow-map-more {
   flex: none;
   place-items: center;
   min-width: var(--pin);
+  max-width: calc(var(--pin) * 2 + 5px);
   height: var(--pin);
   padding: 0 6px;
+  overflow: hidden;
   border: 1px solid var(--ice-300);
   border-radius: 999px;
   background: var(--snow-0);

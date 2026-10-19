@@ -339,9 +339,12 @@ export async function installBaseMap({ snapshot, visit, icon, sceneKey }) {
           pins.append(marker);
           slots -= 1;
         }
-        // Keep one slot for the "+N" chip when the area overflows; the selected character's pin is never folded into it.
+        // On overflow the "+N" chip takes the tail; it is wider than a pin and its text width depends on the
+        // system font, so rooms reserve two pin slots for it (annexes, with two slots, keep one pin).
+        // The selected character's pin is never folded into it.
+        const reserve = zone.capacity >= 4 ? 2 : 1;
         const ordered = [...people].sort((a, b) => Number(b.id === selected) - Number(a.id === selected));
-        const shown = people.length > slots ? ordered.slice(0, Math.max(slots - 1, 0)) : people;
+        const shown = people.length > slots ? ordered.slice(0, Math.max(slots - reserve, 0)) : people;
         for (const character of shown) {
           const pin = node("button", "snow-map-pin", Array.from(character.name)[0]);
           pin.type = "button";

@@ -84,6 +84,17 @@ def spread_world():
     return state
 
 
+# Wider than any shipped system font: the plan must not depend on the host's glyph widths (CI runs Linux fonts).
+WIDE_FONT_CSS = ("#snow-base-map, #snow-base-map * { font-family: Verdana, 'DejaVu Sans', sans-serif !important;"
+                 " letter-spacing: 0.08em !important; }")
+OUTSIDE_PROBE = """dialog => [...dialog.querySelectorAll('.snow-map-zone')].flatMap(zone => {
+  const z=zone.getBoundingClientRect();
+  return [...zone.querySelectorAll('.snow-map-pin,.snow-map-more,.snow-map-you,.snow-map-count')]
+    .filter(n=>{const b=n.getBoundingClientRect();return b.left<z.left-1||b.top<z.top-1||b.right>z.right+1||b.bottom>z.bottom+1;})
+    .map(n=>{const b=n.getBoundingClientRect();return `${zone.dataset.zone}:${n.className} bottom${Math.round(b.bottom-z.bottom)} right${Math.round(b.right-z.right)}`;});
+})"""
+
+
 class MapHandler(dialogue.DialogueHandler):
     """Reuse the existing dialogue protocol, adding only synthetic roster data."""
 
@@ -410,10 +421,10 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
         known = page.locator(".snow-base-map-location").all_inner_texts()
         self.assertTrue(all(line.startswith("位置：") for line in known), known)
         self.assertEqual(page.locator("#snow-base-map img").count(), 0)
-        # 11 in each of two rooms: capacity 8 leaves 7 pins plus a "+4" chip per room.
+        # 11 in each of two rooms: capacity 8 keeps two slots for the chip, so 6 pins plus "+5" per room.
         self.assertEqual(page.locator("#snow-base-map-plan").get_attribute("data-presence"), "known")
-        self.assertEqual(page.locator(".snow-map-pin").count(), 14)
-        self.assertEqual(page.locator(".snow-map-more").all_inner_texts(), ["+4", "+4"])
+        self.assertEqual(page.locator(".snow-map-pin").count(), 12)
+        self.assertEqual(page.locator(".snow-map-more").all_inner_texts(), ["+5", "+5"])
         self.assertEqual(page.locator('.snow-map-zone[data-occupied="true"]').evaluate_all(
             "zones => zones.map(zone => [zone.dataset.zone, zone.querySelector('.snow-map-count').textContent])"),
             [["observation", "11"], ["archive", "11"]])
@@ -578,7 +589,9 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
                       const outside=zones.flatMap(zone=>{const z=box(zone);
                         return [...zone.querySelectorAll('.snow-map-pin,.snow-map-more,.snow-map-you,.snow-map-label,.snow-map-count')]
                           .filter(n=>{const b=box(n);return b.left<z.left-1||b.top<z.top-1||b.right>z.right+1||b.bottom>z.bottom+1;})
-                          .map(n=>zone.dataset.zone+':'+n.className);});
+                          .map(n=>{const b=box(n);return `${zone.dataset.zone}:${n.className} text=${JSON.stringify(n.textContent)} `
+                            +`top${Math.round(b.top-z.top)} bottom${Math.round(b.bottom-z.bottom)} `
+                            +`left${Math.round(b.left-z.left)} right${Math.round(b.right-z.right)} w${Math.round(b.width)}`;});});
                       const tallies=zones.map(zone=>{const shown=zone.querySelectorAll('.snow-map-pin').length;
                         const more=Number((zone.querySelector('.snow-map-more')?.textContent||'+0').slice(1));
                         return [zone.dataset.zone, shown+more, Number(zone.querySelector('.snow-map-count')?.textContent||0)];});
@@ -630,6 +643,11 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
                     self.assertEqual(measured["animations"], 0)
                     self.assertEqual(measured["motion"], "off")
                     self.assertEqual(measured["loops"], 0)
+                    if tone == "light":
+                        # Labels may clip, but pins, "+N", the analyst marker and counts must stay in their room.
+                        page.add_style_tag(content=WIDE_FONT_CSS)
+                        self.paint_settled(page)
+                        self.assertEqual(page.locator("#snow-base-map").evaluate(OUTSIDE_PROBE), [])
                     self.evidence.append({"width": width, "tone": tone, **measured})
                     page.close()
 
