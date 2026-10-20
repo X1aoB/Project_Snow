@@ -20,7 +20,7 @@ from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from backend.snow_app.public_contracts import ChatRequest, HistoryTurn, SummarizeRequest
 from backend.snow_app.public_main import _anonymous_cookie_name, create_app
 from backend.snow_app.public_providers import PROVIDERS
-from backend.snow_app.public_security import sign_state, subject_hash, verify_state
+from backend.snow_app.public_security import issue_byok_credential, open_byok_credential, sign_state, subject_hash, verify_state
 from backend.snow_app.public_service import (
     GenerationBusy,
     PublicChatService,
@@ -235,11 +235,10 @@ class PublicAPITests(TestCase):
         self.assertEqual(payload["limits"]["input_characters"], 2000)
         self.assertEqual(payload["history_schema"], "indexeddb-v4")
         self.assertEqual(payload["sticker_version"], "2026.08.19.sticker.1")
-        self.assertEqual(payload["credential_policy"], {
-            "lifetime_hours": 12,
-            "storage": "sessionStorage",
-            "renewal": "none",
-        })
+        self.assertEqual(payload["credential_policy"]["lifetime_hours"], 12)
+        self.assertEqual(payload["credential_policy"]["storage"], "sessionStorage")
+        self.assertEqual(payload["credential_policy"]["renewal"], "none")
+        self.assertEqual(payload["credential_policy"]["retention"], {"enabled": False})
         self.assertEqual(payload["state_schedule"]["scope"], "subject_daily")
         self.assertEqual(payload["stage_release"], {"enabled": False, "manifest_url": None, "sha256": None})
         self.assertEqual(payload["privacy_policy"]["url"], "/privacy/")
@@ -906,10 +905,136 @@ class PublicAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()["credential"], self.client.cookies.get(_anonymous_cookie_name(self.settings))
 
+    def test_byok_retention_requires_switch_notice_and_returns_selected_term(self) -> None:
+        disabled = self.client.post(
+            "/public/v1/byok/session",
+            headers={"Origin": "http://testserver"},
+            json={
+                "provider": "openai", "api_key": "sk-retention-test",
+                "accepted_transit_notice": True, "accepted_cost_notice": True,
+                "accepted_local_history_notice": True, "retention": "24h",
+            },
+        )
+        self.assertEqual(disabled.status_code, 422)
+        self.assertEqual(disabled.json()["detail"]["code"], "credential_retention_unavailable")
+
+        enabled_app = create_app(replace(self.settings, byok_retention_enabled=True), self.internal_settings, self.store)
+        enabled_client = TestClient(enabled_app)
+        try:
+            self.assertEqual(enabled_client.get("/public/v1/config").json()["credential_policy"]["retention"], {
+                "enabled": True,
+                "notice_version": "credential-retention-1",
+                "options": ["2h", "24h", "3d", "7d"],
+                "storage": "localStorage",
+            })
+            missing_notice = enabled_client.post(
+                "/public/v1/byok/session", headers={"Origin": "http://testserver"},
+                json={
+                    "provider": "openai", "api_key": "sk-retention-test",
+                    "turnstile_token": "development-bypass",
+                    "accepted_transit_notice": True, "accepted_cost_notice": True,
+                    "accepted_local_history_notice": True, "retention": "24h",
+                },
+            )
+            self.assertEqual(missing_notice.status_code, 422)
+            self.assertEqual(missing_notice.json()["detail"]["code"], "credential_retention_notice_required")
+            accepted = enabled_client.post(
+                "/public/v1/byok/session", headers={"Origin": "http://testserver"},
+                json={
+                    "provider": "openai", "api_key": "sk-retention-test",
+                    "turnstile_token": "development-bypass",
+                    "accepted_transit_notice": True, "accepted_cost_notice": True,
+                    "accepted_local_history_notice": True, "retention": "24h",
+                    "retention_notice_version": "credential-retention-1",
+                    "accepted_retention_notice": True,
+                },
+            )
+            self.assertEqual(accepted.status_code, 200)
+            self.assertEqual(accepted.json()["retention"], "24h")
+            self.assertFalse(accepted.json()["stored"])
+        finally:
+            enabled_client.close()
+            enabled_app.state.chat_service.close()
+
+    def test_byok_retention_notice_requires_json_boolean_true(self) -> None:
+        enabled_app = create_app(replace(self.settings, byok_retention_enabled=True), self.internal_settings, self.store)
+        enabled_client = TestClient(enabled_app)
+        payload = {
+            "provider": "openai", "api_key": "sk-retention-test",
+            "turnstile_token": "development-bypass",
+            "accepted_transit_notice": True, "accepted_cost_notice": True,
+            "accepted_local_history_notice": True, "retention": "24h",
+            "retention_notice_version": "credential-retention-1",
+        }
+        try:
+            for value in (1, "true"):
+                with self.subTest(value=value):
+                    response = enabled_client.post(
+                        "/public/v1/byok/session",
+                        headers={"Origin": "http://testserver"},
+                        json={**payload, "accepted_retention_notice": value},
+                    )
+                    self.assertEqual(response.status_code, 422)
+        finally:
+            enabled_client.close()
+            enabled_app.state.chat_service.close()
+
+    def test_byok_retention_terms_are_issued_with_the_selected_contract(self) -> None:
+        enabled_settings = replace(self.settings, byok_retention_enabled=True)
+        enabled_app = create_app(enabled_settings, self.internal_settings, self.store)
+        enabled_client = TestClient(enabled_app)
+        try:
+            for retention, hours in (("2h", 2), ("24h", 24), ("3d", 72), ("7d", 168)):
+                with self.subTest(retention=retention):
+                    response = enabled_client.post(
+                        "/public/v1/byok/session",
+                        headers={"Origin": "http://testserver"},
+                        json={
+                            "provider": "openai", "api_key": "sk-retention-test",
+                            "turnstile_token": "development-bypass",
+                            "accepted_transit_notice": True, "accepted_cost_notice": True,
+                            "accepted_local_history_notice": True, "retention": retention,
+                            "retention_notice_version": "credential-retention-1",
+                            "accepted_retention_notice": True,
+                        },
+                    )
+                    self.assertEqual(response.status_code, 200, response.text)
+                    claims = open_byok_credential(
+                        enabled_settings,
+                        anonymous_id=enabled_client.cookies.get(_anonymous_cookie_name(enabled_settings)),
+                        token=response.json()["credential"], expected_provider="openai",
+                    )
+                    self.assertEqual(claims["v"], 2)
+                    self.assertEqual(claims["ret"], retention)
+                    self.assertEqual(claims["exp"], claims["iat"] + hours * 3600)
+        finally:
+            enabled_client.close()
+            enabled_app.state.chat_service.close()
+
     def test_byok_credential_is_bound_to_cookie(self) -> None:
         credential, _ = self._byok()
         another = TestClient(self.app)
         response = another.post(
+            "/public/v1/byok/models",
+            headers={"Origin": "http://testserver"},
+            json={"provider": "openai", "credential": credential, "request_id": str(uuid4())},
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_byok_revoke_invalidates_retention_credential_for_same_cookie(self) -> None:
+        self.client.get("/public/v1/config")
+        anonymous_id = self.client.cookies.get(_anonymous_cookie_name(self.settings))
+        credential, _ = issue_byok_credential(
+            self.settings,
+            anonymous_id=anonymous_id,
+            provider="openai",
+            api_key="sk-retention-test",
+            retention="24h",
+        )
+        revoked = self.client.post("/public/v1/byok/revoke", headers={"Origin": "http://testserver"}, json={})
+        self.assertEqual(revoked.status_code, 200)
+        self.assertTrue(revoked.json()["revoked"])
+        response = self.client.post(
             "/public/v1/byok/models",
             headers={"Origin": "http://testserver"},
             json={"provider": "openai", "credential": credential, "request_id": str(uuid4())},

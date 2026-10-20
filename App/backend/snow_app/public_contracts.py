@@ -6,7 +6,7 @@ import re
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
 
@@ -22,6 +22,9 @@ class ByokSessionRequest(StrictModel):
     accepted_transit_notice: bool
     accepted_cost_notice: bool
     accepted_local_history_notice: bool
+    retention: Literal["tab", "2h", "24h", "3d", "7d"] = "tab"
+    retention_notice_version: str = Field(default="", max_length=64)
+    accepted_retention_notice: StrictBool = False
 
 
 class ModelDiscoveryRequest(StrictModel):

@@ -23,6 +23,10 @@ class PublicSecurityError(ValueError):
     pass
 
 
+BYOK_RETENTION_HOURS = {"tab": 12, "2h": 2, "24h": 24, "3d": 72, "7d": 168}
+BYOK_RETENTION_NOTICE_VERSION = "credential-retention-1"
+
+
 def _b64encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
 
@@ -78,26 +82,50 @@ def issue_byok_credential(
     anonymous_id: str,
     provider: str,
     api_key: str,
-    lifetime: timedelta = timedelta(hours=12),
+    lifetime: timedelta | None = None,
+    retention: str = "tab",
 ) -> tuple[str, datetime]:
     if not settings.credential_key:
         raise PublicSecurityError("PUBLIC_CREDENTIAL_KEY is not configured")
-    if lifetime <= timedelta(0) or lifetime > timedelta(hours=12):
-        raise PublicSecurityError("BYOK credential lifetime must be within 12 hours")
-    expires_at = datetime.now(UTC) + lifetime
+    if retention not in BYOK_RETENTION_HOURS:
+        raise PublicSecurityError("BYOK credential retention is invalid")
+    if lifetime is None:
+        lifetime = timedelta(
+            hours=(settings.byok_lifetime_hours if retention == "tab" else BYOK_RETENTION_HOURS[retention])
+        )
+    if lifetime <= timedelta(0) or (retention == "tab" and lifetime > timedelta(hours=12)):
+        raise PublicSecurityError("BYOK credential lifetime is invalid")
+    if retention != "tab" and lifetime != timedelta(hours=BYOK_RETENTION_HOURS[retention]):
+        raise PublicSecurityError("BYOK credential lifetime does not match retention")
+    issued_at = datetime.now(UTC)
+    expires_at = issued_at + lifetime
+    version = 1 if retention == "tab" else 2
+    claims: dict[str, Any] = {
+        "v": version,
+        "sub": subject_hash(anonymous_id),
+        "provider": provider,
+        "api_key": api_key,
+        "exp": int(expires_at.timestamp()),
+    }
+    # Keep the tab-scoped envelope byte-compatible with public v1.  Only an
+    # explicitly retained credential receives issued-at/retention claims and
+    # the v2 AAD domain used by revocation checks.
+    if version == 2:
+        claims.update({
+            "iat": int(issued_at.timestamp()),
+            # Keep the public second-based claim for compatibility while
+            # retaining enough precision for revoke cutoffs.
+            "iat_ms": int(issued_at.timestamp() * 1000),
+            "ret": retention,
+        })
     payload = json.dumps(
-        {
-            "v": 1,
-            "sub": subject_hash(anonymous_id),
-            "provider": provider,
-            "api_key": api_key,
-            "exp": int(expires_at.timestamp()),
-        },
+        claims,
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode()
     nonce = secrets.token_bytes(12)
-    encrypted = AESGCM(settings.credential_key).encrypt(nonce, payload, b"project-snow-byok-v1")
+    aad = b"project-snow-byok-v2" if version == 2 else b"project-snow-byok-v1"
+    encrypted = AESGCM(settings.credential_key).encrypt(nonce, payload, aad)
     return _b64encode(nonce + encrypted), expires_at
 
 
@@ -107,19 +135,56 @@ def open_byok_credential(
     anonymous_id: str,
     token: str,
     expected_provider: str | None = None,
+    revoked_before: datetime | None = None,
 ) -> dict[str, Any]:
     if not settings.credential_key:
         raise PublicSecurityError("PUBLIC_CREDENTIAL_KEY is not configured")
     try:
         envelope = _b64decode(token)
-        payload = AESGCM(settings.credential_key).decrypt(
-            envelope[:12], envelope[12:], b"project-snow-byok-v1"
-        )
-        claims = json.loads(payload)
+        claims = None
+        for aad, version in ((b"project-snow-byok-v2", 2), (b"project-snow-byok-v1", 1)):
+            try:
+                payload = AESGCM(settings.credential_key).decrypt(envelope[:12], envelope[12:], aad)
+                candidate = json.loads(payload)
+                if int(candidate.get("v") or 0) == version:
+                    claims = candidate
+                    break
+            except Exception:
+                continue
+        if not isinstance(claims, dict):
+            raise ValueError("unsupported credential envelope")
     except Exception as exc:
         raise PublicSecurityError("BYOK credential is invalid") from exc
     if not hmac.compare_digest(str(claims.get("sub") or ""), subject_hash(anonymous_id)):
         raise PublicSecurityError("BYOK credential belongs to another anonymous session")
+    version = int(claims.get("v") or 0)
+    if version not in {1, 2}:
+        raise PublicSecurityError("BYOK credential version is invalid")
+    if version == 2 or "iat" in claims or "ret" in claims:
+        retention = str(claims.get("ret") or "")
+        issued_at = claims.get("iat")
+        expiry = claims.get("exp")
+        if (retention not in BYOK_RETENTION_HOURS
+                or (version == 2 and retention == "tab")
+                or (version == 1 and retention != "tab")
+                or type(issued_at) is not int or type(expiry) is not int):
+            raise PublicSecurityError("BYOK credential retention is invalid")
+        issued_at_ms = claims.get("iat_ms")
+        if version == 2 and type(issued_at_ms) is not int:
+            raise PublicSecurityError("BYOK credential issued time is invalid")
+        if issued_at_ms is not None and (
+            type(issued_at_ms) is not int
+            or issued_at_ms // 1000 != issued_at
+            or issued_at_ms > int(datetime.now(UTC).timestamp() * 1000) + 30_000
+        ):
+            raise PublicSecurityError("BYOK credential issued time is invalid")
+        if expiry != issued_at + BYOK_RETENTION_HOURS[retention] * 3600:
+            raise PublicSecurityError("BYOK credential lifetime is invalid")
+        if issued_at > int(datetime.now(UTC).timestamp()) + 30:
+            raise PublicSecurityError("BYOK credential issued time is invalid")
+        issued_at_cutoff = issued_at_ms if issued_at_ms is not None else issued_at * 1000
+        if revoked_before is not None and issued_at_cutoff <= int(revoked_before.timestamp() * 1000):
+            raise PublicSecurityError("BYOK credential has been revoked")
     if int(claims.get("exp") or 0) <= int(datetime.now(UTC).timestamp()):
         raise PublicSecurityError("BYOK credential has expired")
     provider = str(claims.get("provider") or "")

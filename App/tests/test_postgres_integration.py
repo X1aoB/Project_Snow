@@ -74,9 +74,50 @@ def test_empty_database_upgrade_and_repeated_upgrade(database):
         assert "public_proactive_attempt" in tables
         assert "public_proactive_day" in tables
         assert "public_rendezvous_authority" in tables
-        assert schema.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261019_0009"
+        assert schema.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20261020_0010"
     finally:
         schema.close()
+
+
+def test_credential_retention_migration_is_additive_and_old_new_old_safe(database):
+    migrate(database, "20261019_0009")
+    with database.connect() as connection:
+        assert "public_credential_revocation" not in inspect(connection).get_table_names()
+
+    # The pre-retention schema continues to serve ordinary request data while
+    # the new revocation table is introduced independently.
+    legacy_store = PublicStore("", engine=database)
+    assert legacy_store.claim_request("before-retention", "subject", "hash")[0] == "claimed"
+    legacy_store.complete_request("before-retention", {"answer": "legacy"})
+
+    migrate(database, "20261020_0010")
+    with database.connect() as connection:
+        assert "public_credential_revocation" in inspect(connection).get_table_names()
+        indexes = {index["name"] for index in inspect(connection).get_indexes("public_credential_revocation")}
+        assert "public_credential_revocation_expiry_idx" in indexes
+
+    store = PublicStore("", engine=database)
+    cutoff = datetime(2026, 10, 20, 12, 34, 56, 789000, tzinfo=UTC)
+    assert store.revoke_credentials("subject-retention", revoked_before=cutoff) == cutoff
+    assert store.credential_revoked_before("subject-retention") == cutoff
+    migrate(database, "20261020_0010")
+    with database.connect() as connection:
+        assert connection.execute(
+            text("SELECT count(*) FROM public_credential_revocation")
+        ).scalar_one() == 1
+        assert legacy_store.request_result("before-retention", "subject")["answer"] == "legacy"
+
+    migrate(database, "20261019_0009")
+    with database.connect() as connection:
+        assert "public_credential_revocation" not in inspect(connection).get_table_names()
+        assert legacy_store.request_result("before-retention", "subject")["answer"] == "legacy"
+
+    migrate(database, "head")
+    with database.connect() as connection:
+        assert "public_credential_revocation" in inspect(connection).get_table_names()
+        assert connection.execute(
+            text("SELECT count(*) FROM public_credential_revocation")
+        ).scalar_one() == 0
 
 
 def test_upgrade_preserves_feedback_and_old_cache_schema(database):
@@ -377,7 +418,7 @@ def test_failed_migration_rolls_back_ddl_and_revision_atomically(database, tmp_p
         assert "failed_migration_probe" not in inspect(connection).get_table_names()
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            == "20261019_0009"
+            == "20261020_0010"
         )
     assert PublicStore("", engine=database).claim_request("after-failure", "subject", "hash")[0] == "claimed"
 
