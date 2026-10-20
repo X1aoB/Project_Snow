@@ -5,7 +5,9 @@ import math
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -21,6 +23,9 @@ from backend.snow_app.data_loader import (
 from backend.snow_app.data_release import DataReleaseError, verify_data_release
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from scripts.build_data_release import PUBLIC_CONTENT_LICENSE, build_release
+
+GIB = 1024**3
+AMPLE_DISK = SimpleNamespace(total=100 * GIB, used=1 * GIB, free=99 * GIB)
 
 
 @pytest.mark.skipif(not os.getenv("TEST_NEO4J_URI"), reason="Explicit isolated Neo4j required")
@@ -182,7 +187,11 @@ def _build_fixture(root: Path, version: str = "2026.08.14.1") -> Path:
     )
     denylist = root / "denylist.json"
     denylist.write_text("{}", encoding="utf-8")
-    build_release(version, runtime, output_root, denylist, enforce_disk_guard=False)
+    # These tests check release contents, not the host. The 12 GiB free-space floor stays on even with
+    # enforce_disk_guard=False, and CI runners now mount /tmp with about 8 GiB, so report ample space here;
+    # the floor itself is covered by test_free_space_floor_applies_without_the_ratio_guard.
+    with patch("scripts.build_data_release.shutil.disk_usage", return_value=AMPLE_DISK):
+        build_release(version, runtime, output_root, denylist, enforce_disk_guard=False)
     return output_root / version
 
 
@@ -336,6 +345,16 @@ class DataReleaseTests(TestCase):
             )
             self.assertTrue(attribution["source_revision_id"])
             self.assertTrue(attribution["modifications"])
+
+    def test_free_space_floor_applies_without_the_ratio_guard(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            low = SimpleNamespace(total=100 * GIB, used=1 * GIB, free=11 * GIB)
+            with patch("scripts.build_data_release.shutil.disk_usage", return_value=low), \
+                    self.assertRaisesRegex(RuntimeError, "refusing data release"):
+                build_release("2026.08.14.1", root / "runtime", root / "releases", root / "denylist.json",
+                              enforce_disk_guard=False)
+            self.assertFalse((root / "releases").exists())
 
     def test_verifier_rejects_tampering(self) -> None:
         with TemporaryDirectory() as directory:
