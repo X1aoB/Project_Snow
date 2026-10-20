@@ -38,6 +38,8 @@ DIALOGUE_FLAGS = {
 # the candidate environment carries them, so older environments stay valid.
 INTERFACE_FLAGS = {
     "PUBLIC_UI_SNOW_ADV": "ui_snow_adv",
+    "PUBLIC_PROACTIVE_MESSAGES_ENABLED": "proactive_messages_enabled",
+    "PUBLIC_BYOK_RETENTION_ENABLED": "byok_retention_enabled",
 }
 HASH = re.compile(r"^[0-9a-f]{64}$")
 FRONTEND_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")

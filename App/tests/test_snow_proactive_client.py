@@ -25,7 +25,12 @@ HARNESS = r"""async () => {
       state_package:'synthetic-signed-world',session_context_package:'synthetic-signed-dialogue',...clone(initial.context||{})};
     let preferences=clone(initial.preferences||{});
     const records=new Map(Object.entries(clone(initial.records||{}))),requests=[],saves=[],commits=[],events=[],log=[];
+    const storageMaps={tab:new Map(Object.entries(clone(initial.stores?.tab||{}))),local:new Map(Object.entries(clone(initial.stores?.local||{})))},storageLog=[];
+    const storageApi=initial.storageApi||'load';
+    const makeStore=kind=>storageApi==='get'?{get:key=>{storageLog.push(['get',kind,key]);return clone(storageMaps[kind].get(key));},set:(key,value)=>{storageLog.push(['set',kind,key]);storageMaps[kind].set(key,clone(value));},delete:key=>{storageLog.push(['delete',kind,key]);return storageMaps[kind].delete(key);}}:
+      {load:key=>{storageLog.push(['load',kind,key]);return clone(storageMaps[kind].get(key));},save:(key,value)=>{storageLog.push(['save',kind,key]);storageMaps[kind].set(key,clone(value));},clear:key=>{storageLog.push(['clear',kind,key]);storageMaps[kind].delete(key);}};
     const controls={visible:true,active:[reminder],requestGate:null,requestStarted:null,requestError:false,saveError:'',
+      retention:Object.hasOwn(initial,'retention')?initial.retention:undefined,
       saveHook:null,contextHook:null,contextReads:0,withBusy:false,response:null,consentResponse:null};
     const success=body=>({request_id:body.request_id,character_id:body.character_id,source:'proactive_reminder',
       status:'completed',message_id:'proactive:'+body.request_id,content_blocks:[{type:'message',text:'合成的约定提醒'}],
@@ -39,8 +44,9 @@ HARNESS = r"""async () => {
       async withRequest(id,work){return controls.withBusy?{ok:false,reason:'busy'}:work();},
       async request(path,options){const body=JSON.parse(options.body);requests.push({path,body,headers:clone(options.headers||{}),
           persisted:clone([...records.values()])});log.push('request:'+path);controls.requestStarted?.resolve();
-        if(path==='/rendezvous/consent')return controls.consentResponse||{consent_token:'synthetic-consent-only',notice_version:'proactive-cost-1',
-          model_session_id:body.model_session_id,expires_at:new Date(Date.now()+3600000).toISOString()};
+        if(path==='/rendezvous/consent'){const response=controls.consentResponse||{};return {consent_token:'synthetic-consent-only',notice_version:'proactive-cost-1',
+          model_session_id:body.model_session_id,expires_at:new Date(Date.now()+3600000).toISOString(),...clone(response),
+          model_session_id:response.model_session_id||body.model_session_id};}
         if(path!=='/rendezvous/message')throw Error('unexpected_synthetic_endpoint');
         if(controls.requestGate)await controls.requestGate.promise;
         if(controls.requestError)throw Error('synthetic_connection_lost');
@@ -49,7 +55,16 @@ HARNESS = r"""async () => {
         log.push('commit');records.set(record.key,clone(record));if(receipt?.key)records.set(receipt.key,clone(receipt));
         if(record.usageReceipt?.key)records.set(record.usageReceipt.key,clone(record.usageReceipt));},
       emit(type,value){events.push([type,clone(value)]);}};
-    const h={state,context,reminder,controls,records,requests,saves,commits,events,log,adapter,
+    if(initial.storage){
+      if(initial.storage==='native'){
+        sessionStorage.removeItem('project-snow-public:proactive-consent:v1');localStorage.removeItem('project-snow-public:proactive-consent:v1');
+        adapter.retention=()=>controls.retention;adapter.storageForRetention=kind=>kind==='tab'?sessionStorage:localStorage;
+      }else{
+        const stores={tab:makeStore('tab'),local:makeStore('local')};
+        adapter.retention=()=>controls.retention;adapter.storageForRetention=kind=>stores[kind];
+      }
+    }
+    const h={state,context,reminder,controls,records,requests,saves,commits,events,log,adapter,storageMaps,storageLog,
       preferences:()=>clone(preferences),newClient(){h.client=createProactiveClient(adapter);return h.client;},
       messageRequests:()=>requests.filter(row=>row.path==='/rendezvous/message'),
       consentRequests:()=>requests.filter(row=>row.path==='/rendezvous/consent')};
@@ -274,3 +289,132 @@ class SnowProactiveClientTests(TestCase):
             self.assertEqual(row["receipts"][0]["usage"]["provider_calls"], row["usage"]["provider_calls"] if row["usage"] else None)
             self.assertNotIn("envelope", row["receipts"][0])
             self.assertNotIn("synthetic-signed-", str(row["receipts"]))
+
+    def test_retention_selects_tab_or_local_storage_and_restores_session_and_consent(self):
+        result = self.page.evaluate("""async()=>{
+          const tab=harness({storage:true,retention:'tab'}),tabEnabled=await tab.client.enable({acceptedCostNotice:true});
+          const tabStored=tab.storageMaps.tab.get('project-snow-public:proactive-consent:v1'),tabLocal=tab.storageMaps.local.size;
+          const tabSession=tabStored.model_session_id;tab.newClient();const tabRestored=await tab.client.refresh();
+          const local=harness({storage:true,retention:'24h'});await local.client.enable({acceptedCostNotice:true});
+          return {tabEnabled:tabEnabled.ok,tabStored,tabLocal,tabRestored,tabSession,
+            tabConsentRequests:tab.consentRequests().length,
+            tabRequestSession:tab.consentRequests()[0].body.model_session_id,
+            localTab:local.storageMaps.tab.size,localStored:local.storageMaps.local.get('project-snow-public:proactive-consent:v1')};
+        }""")
+        self.assertTrue(result["tabEnabled"])
+        self.assertEqual(result["tabLocal"], 0)
+        self.assertEqual(result["tabConsentRequests"], 1)
+        self.assertEqual(result["tabSession"], result["tabRequestSession"])
+        self.assertTrue(result["tabRestored"]["enabled"])
+        self.assertEqual(result["localTab"], 0)
+        self.assertIn("consent", result["localStored"])
+        self.assertNotIn("synthetic-credential-only", str(result))
+        self.assertNotIn("credential", result["tabStored"])
+
+    def test_retention_accepts_only_exact_values_and_defaults_invalid_values_to_tab(self):
+        result = self.page.evaluate("""async()=>{
+          const values=['tab','2h','24h','3d','7d',undefined,null,'TAB','local','session','forever',42];
+          const rows=[];
+          for(const retention of values){
+            const options={storage:true};if(retention!==undefined)options.retention=retention;
+            const h=harness(options);await h.client.refresh();
+            rows.push({retention,tab:h.storageMaps.tab.size,local:h.storageMaps.local.size});
+          }
+          return rows;
+        }""")
+        self.assertEqual([(row["tab"], row["local"]) for row in result],
+                         [(1, 0), (0, 1), (0, 1), (0, 1), (0, 1),
+                          (1, 0), (1, 0), (1, 0), (1, 0), (1, 0), (1, 0), (1, 0)])
+
+    def test_session_only_auth_restores_model_session_without_consent(self):
+        result = self.page.evaluate("""async()=>{
+          const h=harness({storage:true,retention:'tab'});await h.client.refresh();
+          const first=h.storageMaps.tab.get('project-snow-public:proactive-consent:v1'),firstSession=first.model_session_id;
+          h.newClient();await h.client.refresh();await h.client.enable({acceptedCostNotice:true});
+          return {first,firstSession,consent:h.consentRequests()[0]};
+        }""")
+        self.assertIsNone(result["first"]["consent"])
+        self.assertEqual(result["firstSession"], result["consent"]["body"]["model_session_id"])
+
+    def test_expiry_clears_persisted_consent_and_confirmation_is_bounded_to_twelve_hours(self):
+        result = self.page.evaluate("""async()=>{
+          const h=harness({storage:true,retention:'24h'});h.controls.consentResponse={consent_token:'synthetic-consent-only',
+            notice_version:'proactive-cost-1',model_session_id:'',expires_at:new Date(Date.now()+60).toISOString()};
+          const enabled=await h.client.enable({acceptedCostNotice:true});const stored=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');
+          await new Promise(resolve=>setTimeout(resolve,120));
+          const after=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');
+          const long=harness({storage:true,retention:'24h'});long.controls.consentResponse={consent_token:'long-lived',
+            notice_version:'proactive-cost-1',model_session_id:'',expires_at:new Date(Date.now()+48*60*60*1000).toISOString()};
+          await long.client.enable({acceptedCostNotice:true});const bounded=long.storageMaps.local.get('project-snow-public:proactive-consent:v1');
+          return {enabled,stored,after,bounded,remaining:Date.parse(bounded.consent.expires_at)-bounded.confirmed_at};
+        }""")
+        self.assertTrue(result["enabled"]["ok"])
+        self.assertIsNone(result["after"])
+        self.assertLessEqual(result["remaining"], 12 * 60 * 60 * 1000)
+        self.assertGreater(result["remaining"], 0)
+        self.assertNotIn("synthetic-credential-only", str(result))
+
+    def test_invalidate_clear_model_change_and_retention_change_remove_old_authorization(self):
+        result = self.page.evaluate("""async()=>{
+          const h=harness({storage:true,retention:'24h'});await h.client.enable({acceptedCostNotice:true});
+          const before=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');await h.client.clear();
+          const cleared=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');h.newClient();await h.client.refresh();
+          const fresh=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');
+          await h.client.enable({acceptedCostNotice:true});h.context.model='changed-model';await h.client.refresh();
+          const changed=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');
+          h.controls.retention='tab';await h.client.refresh();
+          return {before,cleared,fresh,changed,tab:h.storageMaps.tab.get('project-snow-public:proactive-consent:v1'),prefs:h.client.preferences()};
+        }""")
+        self.assertIn("consent", result["before"])
+        self.assertIsNone(result["cleared"])
+        self.assertIsNone(result["fresh"]["consent"])
+        self.assertIsNone(result["changed"]["consent"])
+        self.assertIsNone(result["tab"]["consent"])
+        self.assertFalse(result["prefs"]["enabled"])
+
+    def test_retention_policy_change_within_local_storage_clears_consent_and_rotates_session(self):
+        result = self.page.evaluate("""async()=>{
+          const key='project-snow-public:proactive-consent:v1';
+          const h=harness({storage:true,retention:'24h'});await h.client.enable({acceptedCostNotice:true});
+          const before=h.storageMaps.local.get(key),beforeSession=before.model_session_id;
+          h.controls.retention='7d';const changed=await h.client.refresh();
+          const after=h.storageMaps.local.get(key),afterSession=after.model_session_id;
+          h.newClient();const restored=await h.client.refresh();
+          return {before,after,beforeSession,afterSession,changed,restored,
+            persisted:h.storageMaps.local.get(key),ops:h.storageLog.map(row=>row[0])};
+        }""")
+        self.assertIn("consent", result["before"])
+        self.assertIsNone(result["after"]["consent"])
+        self.assertNotEqual(result["beforeSession"], result["afterSession"])
+        self.assertFalse(result["changed"]["enabled"])
+        self.assertFalse(result["restored"]["enabled"])
+        self.assertEqual(result["restored"]["model_session_id"], result["afterSession"])
+        self.assertIsNone(result["persisted"]["consent"])
+        self.assertIn("clear", result["ops"])
+
+    def test_native_storage_clear_removes_only_consent_key_and_missing_hook_keeps_memory_only(self):
+        result = self.page.evaluate("""async()=>{
+          const native=harness({storage:'native',retention:'tab'});sessionStorage.setItem('synthetic-keep','keep');
+          await native.client.enable({acceptedCostNotice:true});await native.client.invalidate();
+          const memory=harness();await memory.client.enable({acceptedCostNotice:true});const before=memory.client.preferences();
+          memory.newClient();const after=await memory.client.refresh();
+          return {nativeAuth:sessionStorage.getItem('project-snow-public:proactive-consent:v1'),keep:sessionStorage.getItem('synthetic-keep'),before,after};
+        }""")
+        self.assertIsNone(result["nativeAuth"])
+        self.assertEqual(result["keep"], "keep")
+        self.assertTrue(result["before"]["enabled"])
+        self.assertFalse(result["after"]["enabled"])
+
+    def test_get_set_delete_storage_adapter_restores_and_clears_authorization(self):
+        result = self.page.evaluate("""async()=>{
+          const h=harness({storage:true,storageApi:'get',retention:'24h'});
+          await h.client.enable({acceptedCostNotice:true});const stored=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');
+          h.newClient();const restored=await h.client.refresh();await h.client.clear();
+          return {stored,restored,remaining:h.storageMaps.local.size,ops:h.storageLog.map(row=>row[0])};
+        }""")
+        self.assertIn("consent", result["stored"])
+        self.assertTrue(result["restored"]["enabled"])
+        self.assertEqual(result["remaining"], 0)
+        self.assertIn("get", result["ops"])
+        self.assertIn("set", result["ops"])
+        self.assertIn("delete", result["ops"])

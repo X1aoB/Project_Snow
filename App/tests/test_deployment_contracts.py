@@ -906,6 +906,78 @@ grep '^PUBLIC_STATISTICS_ENABLED=' "$output_file"
             expected = "true" if flag == "true" else "false"
             self.assertEqual(result.stdout.strip(), f"PUBLIC_STATISTICS_ENABLED={expected}")
 
+    def test_feature_public_environment_flags_default_false_and_require_strict_booleans(self) -> None:
+        deploy = self.read("ops/deploy.sh")
+        start = deploy.index("build_candidate_public_env() {")
+        end = deploy.index('\n}\n\nif [ ! -r "$static_env" ]', start) + 2
+        build_function = deploy[start:end]
+        self.assertIn(
+            "PUBLIC_UI_SNOW_ADV|PUBLIC_PROACTIVE_MESSAGES_ENABLED|PUBLIC_BYOK_RETENTION_ENABLED|",
+            build_function,
+        )
+        self.assertIn(
+            "PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2|PUBLIC_UI_SNOW_ADV|\\\n            PUBLIC_PROACTIVE_MESSAGES_ENABLED|PUBLIC_BYOK_RETENTION_ENABLED",
+            build_function,
+        )
+        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=0.9.3", build_function)
+        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-20", build_function)
+
+        harness = r'''
+set -u
+test_root=$1
+flag=$2
+value=$3
+source_file="$test_root/public.env"
+output_file="$test_root/candidate.env"
+printf '%s\n' 'PUBLIC_ENABLED_PROVIDERS=openai' 'TURNSTILE_SITE_KEY=fixture-key' > "$source_file"
+if [ "$flag" != absent ]; then
+  printf '%s=%s\n' "$flag" "$value" >> "$source_file"
+fi
+candidate_app_version=1.0.0
+candidate_data_version=synthetic-data
+candidate_media_version=synthetic-media
+candidate_media_root=/synthetic-media
+candidate_sticker_version=synthetic-stickers
+candidate_sticker_root=/synthetic-stickers
+stat() {
+  case "$2" in
+    %u) printf '%s\n' 0 ;;
+    %a) printf '%s\n' 600 ;;
+    %h) printf '%s\n' 1 ;;
+    *) command stat "$@" ;;
+  esac
+}
+''' + build_function + r'''
+status=0
+build_candidate_public_env "$source_file" "$output_file" || status=$?
+printf 'status=%s\n' "$status"
+if [ "$status" -eq 0 ]; then
+  grep '^PUBLIC_\(PROACTIVE_MESSAGES_ENABLED\|BYOK_RETENTION_ENABLED\)=' "$output_file"
+fi
+'''
+        flags = ("PUBLIC_PROACTIVE_MESSAGES_ENABLED", "PUBLIC_BYOK_RETENTION_ENABLED")
+        for flag in flags:
+            with self.subTest(flag=flag, value="absent"), tempfile.TemporaryDirectory() as temporary_root:
+                result = self.run_posix_shell(harness, Path(temporary_root).as_posix(), "absent", "")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("status=0", result.stdout)
+            self.assertIn("PUBLIC_PROACTIVE_MESSAGES_ENABLED=false", result.stdout)
+            self.assertIn("PUBLIC_BYOK_RETENTION_ENABLED=false", result.stdout)
+        for flag in flags:
+            for value in ("true", "false"):
+                with self.subTest(flag=flag, value=value), tempfile.TemporaryDirectory() as temporary_root:
+                    result = self.run_posix_shell(harness, Path(temporary_root).as_posix(), flag, value)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("status=0", result.stdout)
+                self.assertIn(f"{flag}={value}", result.stdout)
+        for flag in flags:
+            for value in ("", "TRUE", "1", "yes", " true", '"true"'):
+                with self.subTest(flag=flag, value=value), tempfile.TemporaryDirectory() as temporary_root:
+                    result = self.run_posix_shell(harness, Path(temporary_root).as_posix(), flag, value)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotIn("status=0", result.stdout)
+                self.assertIn("Public interface flags must be true or false.", result.stderr)
+
     def test_compose_allows_a_colour_to_pin_verified_media(self) -> None:
         compose = self.read("compose.prod.yml")
         self.assertIn(
@@ -3023,8 +3095,8 @@ require_runner_controller_binding
         self.assertIn("Public environment contains a duplicate key.", script)
         self.assertIn("Public environment contains a disallowed key.", script)
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", script)
-        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=0.9.2", script)
-        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-08-20", script)
+        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=0.9.3", script)
+        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-20", script)
         self.assertIn("PUBLIC_TURNSTILE_HOSTNAME=snow.xiaob.dev", script)
         self.assertIn("PUBLIC_TURNSTILE_MAX_AGE_SECONDS=300", script)
         self.assertIn("PUBLIC_MAX_PROVIDER_CALLS_PER_ACTION=2", script)
@@ -3563,7 +3635,8 @@ seal_configuration_snapshot "$seal_root"
         self.assertIn('experience_notice_version || "0.9.2"', public_javascript)
         self.assertIn("PUBLIC_APP_VERSION=1.0.0", public_env)
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", public_env)
-        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=0.9.2", public_env)
+        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=0.9.3", public_env)
+        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-20", public_env)
         self.assertIn("PUBLIC_BYOK_LIFETIME_HOURS=12", public_env)
         self.assertIn("PUBLIC_MEDIA_VERSION=2026.10.18.character.webp92.2", public_env)
         self.assertIn("PUBLIC_STICKER_VERSION=2026.08.19.sticker.1", public_env)
