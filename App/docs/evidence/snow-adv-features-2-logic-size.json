@@ -128,9 +128,9 @@
       },
       {
         "path": "App/public_frontend/snow-adv.css",
-        "lf_bytes": 79922,
-        "lf_sha256": "a715ac3857a558fa9615065f7b45c9f80240c8e99981652c7b9958998948d769",
-        "gzip_bytes": 16695
+        "lf_bytes": 79948,
+        "lf_sha256": "a551c80a7a1afc065cb5bc96ab417262d31b7396393857695a97abd3dcf7d540",
+        "gzip_bytes": 16705
       },
       {
         "path": "App/public_frontend/statistics/analytics.mjs",
@@ -163,11 +163,11 @@
         "gzip_bytes": 95
       }
     ],
-    "gzip_sum_bytes": 191661
+    "gzip_sum_bytes": 191671
   },
-  "increase_bytes": 60507,
+  "increase_bytes": 60517,
   "budget_bytes": 61440,
-  "remaining_bytes": 933,
+  "remaining_bytes": 923,
   "app_hook_increase_bytes": 4919,
   "app_hook_budget_bytes": 6013,
   "passed": true,

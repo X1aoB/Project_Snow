@@ -226,8 +226,10 @@ html[data-ui="snow-adv"] .snow-modal-foot {
   border-top: 1px solid var(--snow-200);
   color: var(--ink-600);
   font-size: var(--fs-12);
+  flex-wrap: wrap;
 }
-html[data-ui="snow-adv"] .snow-modal-foot .modal-actions { margin: 0; padding: 0; border: 0; }
+/* 放不下时整组按钮换到提示下一行并靠右，不把两个按钮各挤成一行、把提示压成窄条。 */
+html[data-ui="snow-adv"] .snow-modal-foot .modal-actions { margin: 0 0 0 auto; padding: 0; border: 0; }
 html[data-ui="snow-adv"] .snow-memory-modal { width: min(640px, calc(100vw - 24px)); max-height: min(calc(100dvh - 24px), 780px); }
 html[data-ui="snow-adv"] .snow-memory-filters { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
 html[data-ui="snow-adv"] .snow-memory-filters .snow-chip { min-height: 32px; cursor: pointer; }
@@ -363,7 +365,8 @@ html[data-ui="snow-adv"] .snow-remind-pick {
   border-radius: var(--radius-m);
   background: var(--snow-50);
 }
-html[data-ui="snow-adv"] .movement-modal .snow-remind-pick { margin: 12px 0 0; }
+/* 邀请弹窗的正文（地点说明、只读预览）左右各留 18px，手机 14px；提醒区跟它们对齐，不贴弹窗边。 */
+html[data-ui="snow-adv"] .movement-modal .snow-remind-pick { margin: 12px 18px 0; }
 html[data-ui="snow-adv"] .snow-remind-pick[hidden] { display: none; }
 html[data-ui="snow-adv"] .snow-remind-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--ink-900); font-size: var(--fs-14); font-weight: 600; }
 html[data-ui="snow-adv"] .snow-remind-head .snow-icon { width: 16px; height: 16px; color: var(--ice-700); }
@@ -510,6 +513,18 @@ html[data-ui="snow-adv"] .snow-cost-notice ul { display: grid; gap: 6px; margin:
   html[data-ui="snow-adv"] .snow-auto-progress { left: 16px; right: 16px; }
   html[data-ui="snow-adv"] .snow-reminders { margin: 8px 10px 0; }
   html[data-ui="snow-adv"] .snow-reminder { grid-template-columns: auto minmax(0, 1fr) auto; padding: 10px 10px 10px 12px; }
+}
+/* 窄屏放不下一行四个提醒选项：改成等宽网格（四项两列、三项三列），不让最后一项单独掉到第二行把胶囊撑变形。 */
+@media (max-width: 560px) {
+  html[data-ui="snow-adv"] .movement-modal .snow-remind-pick { margin-inline: 14px; }
+  html[data-ui="snow-adv"] .snow-remind-pick .snow-seg {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    justify-self: stretch;
+    border-radius: 14px;
+  }
+  html[data-ui="snow-adv"] .snow-remind-pick .snow-seg:has(> button:nth-child(4)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html[data-ui="snow-adv"] .snow-remind-pick .snow-seg button { padding: 0 6px; border-radius: 10px; }
 }
 /* 手机对白框原本只放得下一两行台词：启用分页后加高约 60px，每页三四行（小B已批准）。
    分页器在时始终加高，避免台词长短不同时对白框跳动。 */
