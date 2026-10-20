@@ -507,6 +507,70 @@ class SnowAdvFeaturesUITests(TestCase):
         page.wait_for_function("value => document.documentElement.dataset.tone === value", arg="light" if value == "light" else "dark")
         page.wait_for_timeout(150)
 
+    def test_cost_dialog_footer_keeps_its_buttons_together_on_a_phone(self):
+        # Candidate shots at 390px showed the two buttons stacked and the hint squeezed into a narrow column.
+        for width, height in ((1440, 900), (390, 844), (360, 740)):
+            with self.subTest(width=width):
+                page = self.open(self.page(width=width, height=height, locale="zh-CN", proactive=True))
+                page.evaluate("() => document.getElementById('open-settings').click()")
+                page.locator('[data-settings-tab="conversation"]').click()
+                page.locator("#snow-proactive-enabled").click()
+                dialog = page.locator("#snow-proactive-dialog")
+                dialog.wait_for(state="visible")
+                foot = dialog.locator(".snow-modal-foot").evaluate("""foot => {
+                  const box = node => node.getBoundingClientRect(), d = box(foot.closest('dialog'));
+                  const buttons = [...foot.querySelectorAll('.modal-actions button')].map(box);
+                  const range = document.createRange(); range.selectNodeContents(foot.querySelector(':scope > span'));
+                  const lines = new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size;
+                  return {rows: new Set(buttons.map(rect => Math.round(rect.top))).size, hintLines: lines,
+                          inside: buttons.every(rect => rect.left >= d.left && rect.right <= d.right)};
+                }""")
+                self.assertEqual(foot, {"rows": 1, "hintLines": 1, "inside": True}, (width, foot))
+                page.close()
+        self.assertEqual(self.errors, [])
+
+    def test_invitation_reminder_lines_up_with_the_dialog_and_fits_a_phone(self):
+        # Candidate shots in Windows Chrome showed the reminder panel reaching the dialog edge, and at 390px the
+        # fourth option dropping alone onto a second row inside a stretched pill.
+        measure = """() => {
+          const pick = document.querySelector('#snow-movement-reminder');
+          pick.scrollIntoView({block: 'center'});
+          const box = node => node.getBoundingClientRect();
+          const p = box(pick), preview = box(document.querySelector('#movement-form .movement-preview'));
+          const seg = pick.querySelector('.snow-seg'), s = box(seg);
+          const buttons = [...seg.querySelectorAll('button')].map(button => ({rect: box(button), clipped: button.scrollWidth > button.clientWidth + 1}));
+          const rows = {};
+          for (const {rect} of buttons) rows[Math.round(rect.top)] = (rows[Math.round(rect.top)] || 0) + 1;
+          return {
+            left: p.left - preview.left, right: p.right - preview.right,
+            segInside: s.left >= p.left - 0.5 && s.right <= p.right + 0.5,
+            buttonsInside: buttons.every(({rect}) => rect.left >= s.left - 0.5 && rect.right <= s.right + 0.5 && rect.bottom <= s.bottom + 0.5),
+            clipped: buttons.filter(item => item.clipped).length,
+            rows: Object.values(rows),
+          };
+        }"""
+        for width, height in ((1440, 900), (390, 844), (360, 740)):
+            with self.subTest(width=width):
+                page = self.open(self.page(width=width, height=height, locale="zh-CN"))
+                page.evaluate("() => document.getElementById('open-movement-shortcuts').click()")
+                page.locator("#movement-dialog").wait_for(state="visible")
+                page.locator("#snow-movement-reminder").wait_for(state="visible")
+                for stress in (False, True):
+                    if stress:
+                        # Wider glyphs than this machine's fonts, like CI's Linux fonts or other Windows fallbacks.
+                        page.add_style_tag(content="#snow-movement-reminder .snow-seg button { letter-spacing: 0.08em; }")
+                    result = page.evaluate(measure)
+                    label = (width, stress, result)
+                    self.assertLessEqual(abs(result["left"]), 1, label)
+                    self.assertLessEqual(abs(result["right"]), 1, label)
+                    self.assertTrue(result["segInside"], label)
+                    self.assertTrue(result["buttonsInside"], label)
+                    self.assertEqual(result["clipped"], 0, label)
+                    # Options fill whole rows: four in one row, or two by two, never three plus one.
+                    self.assertEqual(len(set(result["rows"])), 1, label)
+                page.close()
+        self.assertEqual(self.errors, [])
+
     def test_invitation_reminder_binds_when_she_agrees_and_rings_without_a_model_call(self):
         hk = timezone(timedelta(hours=8))
         now = datetime.now(hk)
