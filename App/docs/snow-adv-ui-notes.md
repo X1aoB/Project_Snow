@@ -30,6 +30,21 @@
 - 设置「对话」。分类放在「记录」之后，「显示每轮用量」从「记录」移到这里。「角色主动来消息」依赖约定提醒；打开前先弹费用确认，选「暂不开启」不发任何请求。结果未确认的收费请求只提供「查询原请求」，走恢复查询，不会重新发送。
 - 测试。`tests/test_snow_adv_features_ui.py` 覆盖两种尺寸的分页（不压菜单、不出框、顺序完整、断点在标点、第二页起收起动作描写、第一次读不标「已读」）、重载后恢复的长台词按页显示并标「已读」、自动翻页与当前页收藏、提醒的绑定、到点卡位置、延后与关闭、设置与费用确认、三种色调对比度，以及关闭雪境时不加载这些模块。
 
+## 凭证保存时长
+设置「模型」页 API Key 下方的「凭证保存」。服务端 `/public/v1/config` 的 `credential_policy.retention` 为 `{"enabled": true, "notice_version": "credential-retention-1", "options": [...]}` 时才显示，只保留服务端列出的时长；否则字段隐藏，`/byok/session` 请求也不带新字段（旧版接口是严格模型，多余字段会被拒）。这项是核心功能，不依赖雪境开关。
+
+- 存储。默认「仅当前标签页」，凭证照旧写 sessionStorage。选本机保存并签发成功、且服务端回显同一个 `retention` 时，凭证写 localStorage（同一个键 `project-snow-public:byok`，多存 `retention`），并删掉 sessionStorage 里的那份；反过来也一样，同一时间只有一份。启动时先读 sessionStorage 再读 localStorage，过期就两处都删。订阅模式的凭证始终只在当前标签页。
+- 告示。改选本机保存时按需加载 `modules/credential-retention.js` 弹出告示，复用 `.modal`、`.notice-list`、`.notice-choice`，旧界面和雪境界面都能显示；勾选后才能确认，取消就退回上一次的选择。确认只对选中的时长有效（`state.retentionConsent`），签发时再校验一次，没确认就报 `credential_retention_notice_required`，不发请求。
+- 改变保存方式。服务器签发需要 Key 原文，浏览器里只有加密后的凭证，所以已有凭证时改了保存方式，要重新输入 API Key 再保存；字段下方会提示。获取模型列表和保存时，保存方式与当前凭证不同就重新签发。
+- 清除与作废。服务端 `POST /public/v1/byok/revoke` 不带参数，作废这个匿名身份在此刻之前签发的全部本机保存凭证（v2）；仅当前标签页的凭证（v1）没有签发时间，不受影响。所以：
+  - 「清除模型会话」两处都删；本机保存的凭证还会调用撤销。
+  - 换掉一张本机凭证（改保存方式、换厂商、到期重签）时，先在本地删掉旧凭证并调用撤销，再签发新的；顺序反过来会连新凭证一起作废。
+  - 网络错误、5xx、429 时在 localStorage 记待作废标记 `project-snow-public:byok-revoke`（所有标签页共用），下次打开页面或下次签发前重试；其他 4xx（例如回滚后的旧服务端没有这个接口）直接放弃。标记还在时不签发新的本机凭证，提示先稍后再试或改用「仅当前标签页」；仅当前标签页的凭证不受之后重试影响，可以照常签发。
+  - 提示如实区分「已作废」「下次重试」「到期失效」。其他标签页清除本机凭证时，通过 `storage` 事件同步停用。
+- 主动消息。运行时 adapter 传 `retention`（当前凭证的保存方式）和 `storageForRetention`（`tab` 用 sessionStorage，其余用 localStorage），主动消息客户端把费用确认存进同一种存储，换保存方式或清除凭证时一起失效。
+- 隐私页「API Key 与模型供应商」和设置页开头的说明同步改为「默认只保存在当前标签页」。
+- 测试。`tests/test_credential_retention_ui.py`。
+
 ## snow-adv.css
 
 ### `html[data-ui="snow-adv"] {`

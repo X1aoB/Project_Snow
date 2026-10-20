@@ -246,7 +246,7 @@
       <form method="dialog"><header><div><span class="panel-kicker">小吉终端</span><h2>体验设置</h2></div><button class="icon-button" type="button" data-close-dialog="settings-dialog">×</button></header><nav class="settings-tabs" role="tablist" aria-label="设置分类"><button type="button" class="active" data-settings-tab="models" role="tab" id="settings-tab-models" aria-controls="settings-panel-models" aria-selected="true" tabindex="0">模型</button><button type="button" data-settings-tab="history" role="tab" id="settings-tab-history" aria-controls="settings-panel-history" aria-selected="false" tabindex="-1">记录</button><button type="button" data-settings-tab="privacy" role="tab" id="settings-tab-privacy" aria-controls="settings-panel-privacy" aria-selected="false" tabindex="-1">隐私</button><button type="button" data-settings-tab="about" role="tab" id="settings-tab-about" aria-controls="settings-panel-about" aria-selected="false" tabindex="-1">关于</button></nav>
         <section class="settings-section" data-settings-panel="models" role="tabpanel" id="settings-panel-models" aria-labelledby="settings-tab-models">
           <div id="provider-doc-links" class="provider-doc-links" aria-label="模型厂商官方文档"></div>
-          <p>选择你已有的模型服务。模型凭证只保存在当前标签页；每位使用者连接自己的账号。</p>
+          <p>选择你已有的模型服务。模型凭证默认只保存在当前标签页；每位使用者连接自己的账号。</p>
           <div class="provider-form" aria-busy="false">
             <div class="model-connection-modes" role="group" aria-label="模型连接方式"><button id="model-mode-api" class="secondary-button" type="button" aria-pressed="true">API Key</button><button id="model-mode-subscription" class="secondary-button" type="button" aria-pressed="false">Codex 订阅</button></div>
             <div id="api-model-settings" class="api-model-settings">
@@ -255,6 +255,7 @@
             <p id="provider-empty" class="form-hint" hidden>当前暂未开放可用的模型厂商，请稍后再试。</p>
             <label>API Key<input id="api-key" type="password" autocomplete="off" spellcheck="false" /></label>
             <p id="credential-status" class="form-hint" hidden></p>
+            <label id="credential-retention-field" hidden><span>凭证保存</span><select id="credential-retention"><option value="tab">仅当前标签页（关闭即清除）</option><option value="2h">在本机保存 2 小时</option><option value="24h">在本机保存 24 小时</option><option value="3d">在本机保存 3 天</option><option value="7d">在本机保存 7 天</option></select><small id="credential-retention-hint" hidden>更改保存方式后，需要重新输入 API Key 再保存。</small></label>
             <div class="advanced-model-settings"><button id="toggle-advanced-model" class="secondary-button" type="button" aria-expanded="false">高级设置：手工填写模型 ID</button><div id="advanced-model-panel" hidden><label>模型 ID<input id="model-id" maxlength="200" placeholder="厂商未提供列表时填写" /></label></div></div>
             <div class="settings-actions"><button id="discover-models" class="secondary-button" type="button">获取模型列表</button><select id="discovered-models" hidden aria-label="已发现模型"></select></div>
             </div>

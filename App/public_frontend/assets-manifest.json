@@ -107,6 +107,11 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/modules/credential-retention.js",
+      "public_url": "/modules/credential-retention.js",
+      "required_html": false
+    },
+    {
       "source": "public_frontend/app.js",
       "public_url": "/app.js",
       "dependencies": [
@@ -118,6 +123,7 @@
         "/modules/snow-feature-logic.js",
         "/modules/snow-feature-runtime.js",
         "/modules/snow-features.js",
+        "/modules/credential-retention.js",
         "/snow-adv-fonts.css",
         "/assets/avatars/longyan-neutral-96.webp",
         "/assets/avatars/longyan-neutral-200.webp"
