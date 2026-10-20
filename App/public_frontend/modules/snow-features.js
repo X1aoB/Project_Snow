@@ -1,11 +1,15 @@
-// 雪境新功能界面（按需加载，不占首屏）：记忆档案、台词收藏与回看搜索、图片卡入口、本轮用量。
+// 雪境新功能界面（按需加载，不占首屏）：记忆档案、台词收藏与回看搜索、图片卡入口、本轮用量；
+// 第二批：长台词分页与自动翻页（snow-pager.js）、约定提醒与设置「对话」（snow-conversation-ui.js）。
 // 数据和写入都经 host.logic（modules/snow-feature-logic.js）；这里只负责界面。说明见 docs/snow-adv-ui-notes.md。
 import { createFeatureIcon, SNOW_FEATURE_ICON_NAMES } from "/modules/snow-feature-icons.js";
+import { installSnowPager } from "/modules/snow-pager.js";
+import { installConversationUi } from "/modules/snow-conversation-ui.js";
+import { buildReadingText } from "/modules/snow-reading-logic.js";
 
 const STYLE_URL = "/modules/snow-features.css";
 const CARD_URL = "/modules/snow-feature-card.js";
 const KIND_LABELS = Object.freeze({ shared_scene_event: "一起经历", user_statement: "你说过的", assistant_commitment: "她答应的" });
-const PART_LABELS = Object.freeze({ reply: "回复", arrival: "到场反应", summary: "连续性整理" });
+const PART_LABELS = Object.freeze({ reply: "回复", arrival: "到场反应", summary: "连续性整理", proactive: "主动消息" });
 const SENTENCE_END = /[。！？!?…]/u;
 const FAVORITE_LIMIT = 240;
 let installation = null;
@@ -85,6 +89,26 @@ function speechRef(message) {
   const range = favoriteRange(blocks[blockIndex].text);
   return range ? { messageId: message.id, blockIndex, start: range[0], end: range[1] } : null;
 }
+// 分页时星标收藏「当前这一页」：把分页器给的原文偏移换算回 contentBlocks 里的块和字符范围
+// （一页跨两块时取重叠最多的那一块，去掉首尾空白，太长时同样截到 240 字内最后一个句末标点）。
+export function pageRef(message, page) {
+  if (!page || page.count < 2 || !message || message.status !== "sent" || message.role !== "assistant") return null;
+  const blocks = Array.isArray(message.contentBlocks) ? message.contentBlocks : [];
+  const built = buildReadingText(blocks);
+  if (built.text !== page.text) return null;
+  let best = null;
+  for (const span of built.spans) {
+    const start = Math.max(page.start, span.textStart), end = Math.min(page.end, span.textEnd);
+    if (end > start && (!best || end - start > best.end - best.start)) best = { span, start, end };
+  }
+  if (!best) return null;
+  const raw = String(blocks[best.span.blockIndex]?.text || "");
+  let start = best.span.blockStart + best.start - best.span.textStart, end = best.span.blockStart + best.end - best.span.textStart;
+  while (start < end && /\s/u.test(raw[start])) start += 1;
+  while (end > start && /\s/u.test(raw[end - 1])) end -= 1;
+  const range = end > start ? favoriteRange(raw.slice(start, end)) : null;
+  return range ? { messageId: message.id, blockIndex: best.span.blockIndex, start, end: start + range[1], page: true } : null;
+}
 function highlight(text, ranges) {
   const fragment = document.createDocumentFragment();
   let cursor = 0;
@@ -131,9 +155,9 @@ function mount(host) {
     notify("此页面仅供浏览，另一个标签页正在保存对话。");
     return true;
   }
-  function setStar(button, pressed) {
+  function setStar(button, pressed, noun = "这句台词") {
     button.setAttribute("aria-pressed", String(pressed));
-    const label = pressed ? "取消收藏这句台词" : "收藏这句台词";
+    const label = pressed ? `取消收藏${noun}` : `收藏${noun}`;
     button.setAttribute("aria-label", label);
     button.title = label;
   }
@@ -143,7 +167,7 @@ function mount(host) {
     button.disabled = true;
     try {
       const now = await logic.favorites.toggle(ref);
-      setStar(button, now);
+      setStar(button, now, ref.page ? "这一页台词" : undefined);
       if (wanted && !now) notify("没能收藏：最多保存 200 条，或这句台词还没有保存完成。");
       else notify(now ? "已收藏，可在回看的「收藏」里找到" : "已取消收藏");
       syncFavoriteCount();
@@ -219,20 +243,27 @@ function mount(host) {
   stageUsage.id = "snow-stage-usage";
   setStar(stageStar, false);
   if (speakerLine) speakerLine.insertBefore(el("span", { class: "snow-line-tools" }, stageStar, stageUsage), speakerLine.querySelector(":scope > span"));
-  let stageRef = null, stageVersion = 0;
+  let stageRef = null, stageVersion = 0, pager = null;
   async function refreshStage() {
     const version = ++stageVersion;
     const id = $("stage-open-feedback")?.dataset.messageId || "";
     paintUsage(stageUsage, id);
     const current = await message(id);
     if (version !== stageVersion) return;
-    stageRef = speechRef(current);
+    // 台词分成几页时收藏正在看的这一页，只有一页时收藏整句（与回看里一致）。
+    stageRef = pageRef(current, pager?.currentPage()) || speechRef(current);
     stageStar.hidden = !stageRef;
-    if (stageRef) setStar(stageStar, logic.favorites.has(stageRef));
+    if (stageRef) setStar(stageStar, logic.favorites.has(stageRef), stageRef.page ? "这一页台词" : undefined);
   }
-  stageStar.addEventListener("click", () => toggleFavorite(stageRef, stageStar));
+  stageStar.addEventListener("click", event => { event.stopPropagation(); toggleFavorite(stageRef, stageStar); });
+  stageUsage.addEventListener("click", event => event.stopPropagation());
   const feedback = $("stage-open-feedback");
   if (feedback) new MutationObserver(() => refreshStage()).observe(feedback, { attributes: true, attributeFilter: ["data-message-id"] });
+  // 长台词分页：排版和绘制在 snow-pager.js，节奏与已读在 logic.reading。翻页后星标跟着换成这一页。
+  try { pager = installSnowPager(host, { icon, onPage: () => refreshStage() }); }
+  catch { pager = null; }
+  // 注册时宿主会把已在舞台上的台词交给分页器，那次 onPage 早于上面的赋值；这里按当前页再刷新一次星标。
+  if (pager) void refreshStage();
 
   // 通讯器：每条有用量的回复在名字那一行末尾加一段小字，点开同一个明细。
   // 挂在 .meta 里而不是 .message-body：时间线增量更新会比较 .message-body 的子元素个数。
@@ -243,6 +274,11 @@ function mount(host) {
       let button = meta.querySelector(":scope > .snow-message-usage");
       if (!button) { button = usageButton("snow-message-usage"); meta.append(button); }
       paintUsage(button, article.dataset.messageId);
+      // 约定提醒时她主动发来的消息：名字一行加一枚小标签，和普通回复区分开。
+      if (!meta.querySelector(":scope > .snow-proactive-tag")) message(article.dataset.messageId).then(item => {
+        if (item?.source !== "proactive_reminder" || !meta.isConnected || meta.querySelector(":scope > .snow-proactive-tag")) return;
+        meta.insertBefore(el("span", { class: "snow-proactive-tag", text: "约定提醒 · 主动发来" }), meta.querySelector(":scope > .snow-message-usage"));
+      });
     }
   }
 
@@ -477,12 +513,11 @@ function mount(host) {
     if (version === infoVersion && card.isConnected) card.querySelector(".snow-info-count").textContent = count ? `${count} 条 · 只保存在本浏览器` : "还没有共同的记忆";
   }
 
-  // ---------- 设置：「记录」里加「显示每轮用量」 ----------
-  const summaryToggle = $("auto-summary-enabled")?.closest(".setting-toggle");
+  // ---------- 设置：「对话」分类（第二批界面）；「显示每轮用量」从「记录」移到这里 ----------
   const usageInput = el("input", { type: "checkbox", id: "snow-usage-enabled" });
   const usageToday = el("small", { id: "snow-usage-today" });
-  if (summaryToggle) summaryToggle.after(el("label", { class: "setting-toggle", id: "snow-usage-setting" },
-    el("span", {}, el("strong", { text: "显示每轮用量" }), usageToday), usageInput));
+  const usageSetting = el("label", { class: "setting-toggle", id: "snow-usage-setting" },
+    el("span", {}, el("strong", { text: "显示每轮用量" }), usageToday), usageInput);
   function syncSettings() {
     usageInput.checked = showUsage();
     const today = usageCopy(logic.usage.today());
@@ -494,6 +529,11 @@ function mount(host) {
     syncSettings();
     refreshUsage();
   });
+  const conversation = logic.reading && logic.reminders
+    ? installConversationUi(host, { icon, el, notify, readOnly, nameOf, usageSetting, onUsagePreference: syncSettings })
+    : null;
+  // 第二批逻辑不在时（旧宿主），每轮用量仍放回「记录」。
+  if (!conversation) $("auto-summary-enabled")?.closest(".setting-toggle")?.after(usageSetting);
   const settings = $("settings-dialog");
   if (settings) new MutationObserver(() => { if (settings.open) syncSettings(); }).observe(settings, { attributes: true, attributeFilter: ["open"] });
 
@@ -519,8 +559,9 @@ function mount(host) {
     schedule();
   });
   host.on("channel-changed", () => { closePopover(false); schedule(); });
+  host.on("usage-saved", () => { refreshUsage(); syncSettings(); });
   syncFavoriteCount();
   refreshInfo();
   schedule();
-  return { openMemories, refresh: schedule };
+  return { openMemories, refresh: schedule, pager, conversation };
 }

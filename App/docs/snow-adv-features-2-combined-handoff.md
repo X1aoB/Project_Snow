@@ -54,6 +54,6 @@ IndexedDB 继续 v4，不新增 store。已读在 `stage_read_v1:<characterId>`�
 
 首轮远端 API/full-validation 同有 4 项旧协议测试失败：synthetic service 签名的世界包只有 revision，缺少主体绑定。已将夹具补为完整 public-state-2，另加其他主体的 chat/scene 结果仍被拒绝的两条断言；**生产校验零修改**。同 CI API 范围本地复测 **333 项及 447 个子测试通过**，3 项按环境条件跳过；协议与主动消息定向复测 **52 项及 12 个子测试通过**。初始失败及修正后证据分开保留，最终 CI 以 PR 最新签名 HEAD 为准。
 
-公告暂用 `2026-10-19-snow-memory-favorites`；第二批 UI 还未交付，不能提前宣称分页/提醒/主动消息设置已可用。Kiro 完成 UI 后，补入真实交付内容，去掉“模型调用次数不变”对主动消息的歧义，再按真实上线日期修改新公告 ID 与 published_at。候选阶段必须对**正式提交**运行 `check_release_announcement.py --base-sha <当时线上完整SHA> --candidate-sha <候选完整SHA>`。不要保留 20:30 的占位上线时间。
+公告已由 Kiro 改为两批合并的 `2026-10-20-snow-memory-reading`，只写已交付内容，并写明「角色主动来消息」默认关闭、开启后每条调用一次模型；`published_at` 暂填 2026-10-20 09:30（北京时间），若实际上线不在当天，须把 ID 日期和 `published_at` 改为真实上线时间。候选阶段必须对**正式提交**运行 `check_release_announcement.py --base-sha <当时线上完整SHA> --candidate-sha <候选完整SHA>`。
 
 接下来 Kiro 在同分支补第二批界面、测试和截图。检查三色调×1440/390、动效关闭、各文字≥4.5:1；关旗标旧界面逐像素不变。候选验收再检查真正指纹产物、手机字体/分页、主动费用确认与免费提醒。PR 合并前按主交接第 6 节停下等 Kiro UI 检查；不部署候选、不晋级。候选及专属回执仍只接受小B本人在本会话明确批准。

@@ -578,9 +578,11 @@ class SnowAdvStageTests(TestCase):
         page = self._page(1280, 820)
         self._open(page, True)
         self._reach_in_person(page)
+        # 按需加载的分页器会把「自动」放到最前；等它装好再读，结果不受加载时机影响。
+        page.locator('#stage-quick-menu [data-stage-quick="auto"]').wait_for(state="attached")
         names = page.evaluate("""() => [...document.querySelectorAll('#stage-quick-menu button')]
           .map(button => button.getAttribute('aria-label'))""")
-        self.assertEqual(names, ["跳过", "回看", "隐藏", "设置"])
+        self.assertEqual(names, ["自动", "跳过", "回看", "隐藏", "设置"])
         # 回看 opens the transcript drawer, reusing the existing handler.
         page.locator('#stage-quick-menu [data-stage-quick="backlog"]').click()
         page.locator("#transcript-panel.open").wait_for()
@@ -668,6 +670,7 @@ class SnowAdvStageTests(TestCase):
         page = self._page(390, 844)
         self._open(page, True)
         self._reach_in_person(page)
+        page.locator('#stage-quick-menu [data-stage-quick="auto"]').wait_for(state="attached")
         state = page.evaluate("""() => {
           const buttons = [...document.querySelectorAll('#stage-quick-menu button')];
           const input = document.getElementById('message-input').getBoundingClientRect();
@@ -685,7 +688,7 @@ class SnowAdvStageTests(TestCase):
             smallest,
           };
         }""")
-        self.assertEqual(state["names"], ["跳过", "回看", "隐藏", "设置"])
+        self.assertEqual(state["names"], ["自动", "跳过", "回看", "隐藏", "设置"])
         self.assertTrue(state["labelsHidden"])
         self.assertFalse(state["overlapsInput"])
         self.assertGreaterEqual(state["smallest"], 12)

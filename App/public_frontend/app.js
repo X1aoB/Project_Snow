@@ -240,7 +240,8 @@ async function installFeatures() {
         session_context_package: dialoguePackage(thread) }; }, commit: saveProactiveMessage });
   const { installSnowFeatures } = await import("/modules/snow-features.js");
   await installSnowFeatures({ version: 1, icon: createSnowIcon, avatarOf: character => structuredClone(characterAvatar(character)), snapshot: featureSnapshot, logic,
-    stage: { speechNode: () => $("stage-speech"), setPager: pager => logic.reading.setPager(pager) }, on: featureOn,
+    stage: { speechNode: () => $("stage-speech"), setPager: pager => { logic.reading.setPager(pager);
+      if (pager && $("chat-app").dataset.channel === "in_person") renderStageSpeech(latestInPersonMessage("assistant")); } }, on: featureOn,
     open: { presence: visitFromMap, transcript: openFeatureTranscript, settings: openSettings, info: () => openDrawer("info-panel") } });
 }
 async function saveFeatureState(key, record) {

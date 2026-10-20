@@ -92,9 +92,9 @@
       },
       {
         "path": "App/public_frontend/app.js",
-        "lf_bytes": 449975,
-        "lf_sha256": "0eddf2de02e0afd5c481ef4ec23269d12ac19672b1dcbd8a64fb1010c29d956a",
-        "gzip_bytes": 113493
+        "lf_bytes": 450101,
+        "lf_sha256": "ef3a234c827278640fdd29243386cf603ea170bf22d976bf6b5d6a91204dd897",
+        "gzip_bytes": 113531
       },
       {
         "path": "App/public_frontend/dialogue-context.js",
@@ -163,16 +163,16 @@
         "gzip_bytes": 95
       }
     ],
-    "gzip_sum_bytes": 190430
+    "gzip_sum_bytes": 190468
   },
-  "increase_bytes": 59276,
+  "increase_bytes": 59314,
   "budget_bytes": 61440,
-  "remaining_bytes": 2164,
-  "app_hook_increase_bytes": 3849,
+  "remaining_bytes": 2126,
+  "app_hook_increase_bytes": 3887,
   "app_hook_budget_bytes": 6013,
   "passed": true,
   "second_batch_parent_ref": "95005fe2efade3e9c3b916e8c47c73fced5b19e0",
   "first_batch_increase_bytes": 57474,
   "second_batch_hook_budget_bytes": 3966,
-  "second_batch_hook_increase_bytes": 1802
+  "second_batch_hook_increase_bytes": 1840
 }

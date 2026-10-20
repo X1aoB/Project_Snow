@@ -90,9 +90,20 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/modules/snow-pager.js",
+      "public_url": "/modules/snow-pager.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-conversation-ui.js",
+      "public_url": "/modules/snow-conversation-ui.js",
+      "required_html": false
+    },
+    {
       "source": "public_frontend/modules/snow-features.js",
       "public_url": "/modules/snow-features.js",
-      "dependencies": ["/modules/snow-feature-icons.js", "/modules/snow-features.css", "/modules/snow-feature-card.js"],
+      "dependencies": ["/modules/snow-feature-icons.js", "/modules/snow-features.css", "/modules/snow-feature-card.js",
+        "/modules/snow-pager.js", "/modules/snow-conversation-ui.js", "/modules/snow-reading-logic.js"],
       "required_html": false
     },
     {

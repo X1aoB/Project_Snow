@@ -10,6 +10,7 @@ import io
 import json
 import os
 import threading
+from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer
 from unittest import TestCase, skipUnless
 from urllib.parse import urlsplit
@@ -19,6 +20,14 @@ from tests import test_public_frontend_e2e as fixture
 
 FEATURES = {"ui_snow_adv": True, "chat_latency_v2": True, "motion_v2": True, "dialogue_domains_v2": True,
             "scene_actions_v2": True, "session_memory_v2": True, "verified_block_replay": True}
+# 第二批分页用的长台词：句号、逗号都有，足够在电脑上分 2 页以上、手机上分更多页。
+LONG_SPEECH = ("今天的雪下得很安静，基地外面的灯一盏一盏亮起来。我刚从资料室出来，顺路给你带了一杯热可可，还是你喜欢的那种不太甜的。"
+               "你看，观景区那边的玻璃上结了一层薄薄的霜，用手指划一下就能写字。上次你说想看极光，我查了一下，今晚的云层好像会散开一点。"
+               "如果你不累的话，我们晚点一起去看看吧？就算看不到也没关系，坐在那里聊聊天也很好。对了，食堂今天有南瓜汤，我先帮你留了一份。"
+               "其实我一直想跟你说，这些天有你在身边，感觉连值班的夜晚都没那么长了。"
+               "明天早上训练区要检修，我们可以晚一点起床，先去食堂吃早饭，再慢慢走去资料室整理那批旧档案。"
+               "要是路上又下雪，我就把伞撑过去一点，你别又把自己那一半让给我，上次你肩膀都湿透了。")
+LONG_ACTION = "她把围巾往上拉了拉，侧过头看你。"
 CONTRAST = """nodes => nodes.filter(node => node.getClientRects().length).map(node => {
   const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
   const paint=canvas.getContext('2d',{willReadFrequently:true});
@@ -58,7 +67,7 @@ class SnowAdvFeaturesUITests(TestCase):
         self.browser.close(); self.playwright.stop()
 
     # ---------- helpers ----------
-    def page(self, width=1280, height=820, tone="light", enabled=True, context=None, locale=None):
+    def page(self, width=1280, height=820, tone="light", enabled=True, context=None, locale=None, proactive=False):
         target = context or self.browser
         options = {"locale": locale} if locale else {}
         page = target.new_page(viewport={"width": width, "height": height}, reduced_motion="reduce", timezone_id="Asia/Hong_Kong",
@@ -76,6 +85,8 @@ class SnowAdvFeaturesUITests(TestCase):
             payload = route.fetch().json()
             payload["features"] = {**FEATURES, "ui_snow_adv": enabled}
             payload["capabilities"] = {"dialogue_protocol": "public-dialogue-v2", "scene_action_protocol": "public-scene-action-v2", "recovery_only": True}
+            if proactive:
+                payload["proactive_messages"] = {"enabled": True, "notice_version": "proactive-cost-1"}
             route.fulfill(json=payload)
         page.route("**/public/v1/config", config)
         return page
@@ -132,6 +143,68 @@ class SnowAdvFeaturesUITests(TestCase):
     def candidates(self):
         last = [r for r in dialogue.DialogueHandler.requests if r["path"].endswith("/chat/stream")][-1]["payload"]
         return [item["memory"]["memory_id"] for item in last.get("memory_candidates", [])]
+
+    def long_reply(self, page, speech=LONG_SPEECH, action=LONG_ACTION):
+        """Rewrite the fixture's one-line reply into an action + long speech (content is not signed)."""
+        old = json.dumps({"type": "speech", "text": "合成的有效回复。"}, ensure_ascii=False)
+        blocks = ([{"type": "action", "text": action}] if action else []) + [{"type": "speech", "text": speech}]
+        new = json.dumps(blocks, ensure_ascii=False)[1:-1]
+
+        def handler(route):
+            response = route.fetch()
+            headers = {key: value for key, value in response.headers.items() if key.lower() != "content-length"}
+            route.fulfill(status=response.status, headers=headers, body=response.text().replace(old, new))
+        page.route("**/public/v2/chat/stream", handler)
+
+    def send_long(self, page, text="合成长台词"):
+        page.locator("#message-input").fill(text)
+        page.locator("#send-message").click()
+        page.locator(".snow-page-meter:not(.is-single)").wait_for(state="attached")
+        page.wait_for_function(self.READY)
+
+    PAGE_STATE = """() => {
+      const speech = document.querySelector('#stage-speech'), page = speech.querySelector(':scope > .snow-page');
+      const text = page?.lastChild, box = speech.getBoundingClientRect();
+      const range = document.createRange(); if (text) range.selectNodeContents(text);
+      const lines = text ? [...range.getClientRects()].filter(rect => rect.width > 0.5) : [];
+      const blockers = ['#stage-quick-menu', '#stage-advance', '.snow-page-meter:not(.is-single)']
+        .map(selector => document.querySelector(selector)).filter(node => node && node.getClientRects().length)
+        .map(node => node.getBoundingClientRect());
+      const hit = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+      const narration = document.querySelector('#stage-narration');
+      const outside = lines.filter(line => line.bottom > box.bottom + 0.5 || line.top < box.top - 0.5 || line.right > box.right + 0.5);
+      return { text: text?.data || '', meter: document.querySelector('.snow-page-meter').textContent,
+        ready: !speech.classList.contains('is-revealing'), lines: lines.length,
+        covered: lines.filter(line => blockers.some(rect => hit(line, rect))).length, outside: outside.length,
+        where: outside.map(line => [Math.round(line.right - box.right), Math.round(line.bottom - box.bottom)]),
+        narration: Boolean(narration?.textContent && narration.getClientRects().length) };
+    }"""
+    READY = "() => { const s = document.querySelector('#stage-speech'); return s.classList.contains('snow-paged') && !s.classList.contains('is-revealing'); }"
+
+    def read_pages(self, page, keyboard_from=None):
+        """Turn every page by clicking the dialogue (or pressing Enter from page `keyboard_from`) and return each page's state."""
+        pages = [page.evaluate(self.PAGE_STATE)]
+        total = int(pages[0]["meter"].split("/")[1].split("·")[0])
+        for index in range(1, total):
+            previous = pages[-1]["meter"]
+            if keyboard_from is not None and index >= keyboard_from:
+                page.locator("#stage-dialogue").focus()
+                page.keyboard.press("Enter")
+            else:
+                page.locator("#stage-speech").click(position={"x": 24, "y": 18})
+            try:
+                page.wait_for_function("value => document.querySelector('.snow-page-meter').textContent !== value", arg=previous)
+            except Exception as error:
+                raise AssertionError({"index": index, "state": page.evaluate(self.PAGE_STATE),
+                                      "focus": page.evaluate("() => document.activeElement?.id || document.activeElement?.tagName")}) from error
+            page.wait_for_function(self.READY)
+            pages.append(page.evaluate(self.PAGE_STATE))
+        return pages
+
+    def idb_preferences(self, page):
+        return page.evaluate("""async () => new Promise(resolve => { const open = indexedDB.open('project-snow-public');
+          open.onsuccess = () => { const request = open.result.transaction('app_state').objectStore('app_state').get('ui_preferences');
+            request.onsuccess = () => resolve(request.result || {}); }; })""")
 
     # ---------- tests ----------
     def test_memory_archive_confirms_deletes_undoes_and_stops_offering_the_memory(self):
@@ -266,8 +339,10 @@ class SnowAdvFeaturesUITests(TestCase):
         page.unroute("**/public/v2/chat/stream")
         # Turning the setting off hides every usage line and survives a reload.
         page.evaluate("() => document.getElementById('stage-open-settings').click()")
-        page.locator('[data-settings-tab="history"]').click()
+        page.locator('[data-settings-tab="conversation"]').click()
         toggle = page.locator("#snow-usage-enabled")
+        # 第二批起「显示每轮用量」放在「对话」里，「记录」里不再重复。
+        self.assertEqual(page.locator("#settings-panel-history #snow-usage-setting").count(), 0)
         self.assertTrue(toggle.is_checked())
         self.assertIn("今天（本机统计）", page.locator("#snow-usage-today").inner_text())
         toggle.uncheck()
@@ -335,9 +410,282 @@ class SnowAdvFeaturesUITests(TestCase):
         self.assertAlmostEqual(with_tools, page.evaluate(measure), delta=0.5)
         self.assertEqual(self.errors, [])
 
+    # ---------- 第二批：分页、自动、提醒、设置「对话」 ----------
+    def test_long_line_pages_fit_beside_the_quick_menu_and_turn_in_order(self):
+        for width, height in ((1440, 900), (390, 844)):
+            with self.subTest(width=width):
+                page = self.open(self.page(width=width, height=height, locale="zh-CN"))
+                self.enter_stage(page)
+                self.long_reply(page)
+                self.send_long(page)
+                pages = self.read_pages(page, keyboard_from=2)
+                self.assertGreaterEqual(len(pages), 2, pages)
+                total = len(pages)
+                self.assertEqual([state["meter"].split(" · ")[0] for state in pages], [f"{index} / {total}" for index in range(1, total + 1)])
+                # Every page is fully shown, stays inside the speech box and never runs under the menu, ▼ or page count.
+                self.assertEqual([(state["covered"], state["outside"]) for state in pages], [(0, 0)] * total,
+                                 [(state["meter"], state["where"], state["text"][-12:]) for state in pages if state["covered"] or state["outside"]])
+                self.assertTrue(all(state["ready"] and state["lines"] >= 1 for state in pages), pages)
+                # The pages cover the whole line in order; only breaks between pages may drop whitespace.
+                self.assertEqual("".join(state["text"] for state in pages).replace("\n", ""), LONG_SPEECH)
+                # Pages break after punctuation where they can.
+                self.assertTrue(all(state["text"].rstrip()[-1] in "。！？，、；：…" for state in pages[:-1]), [state["text"][-6:] for state in pages])
+                # The action line shows with the first page and folds away on later pages.
+                self.assertEqual([state["narration"] for state in pages], [True] + [False] * (total - 1))
+                # The last page cannot be advanced past. Pages read for the first time are not labelled 已读,
+                # even once they have been shown in full; that label is for pages read before this showing.
+                page.locator("#stage-speech").click(position={"x": 24, "y": 18})
+                page.wait_for_timeout(200)
+                self.assertEqual(page.evaluate(self.PAGE_STATE)["meter"], f"{total} / {total}")
+                self.assertEqual([state["meter"] for state in pages], [f"{index} / {total}" for index in range(1, total + 1)])
+                if width == 390:
+                    # Approved: on phones the dialogue is about 60px taller while paging is available.
+                    taller, normal = page.evaluate("""() => { const surface = document.querySelector('#in-person-surface'), box = document.querySelector('#stage-dialogue');
+                      const a = box.getBoundingClientRect().height; surface.removeAttribute('data-snow-pager');
+                      const b = box.getBoundingClientRect().height; surface.setAttribute('data-snow-pager', '1'); return [a, b]; }""")
+                    self.assertTrue(50 <= taller - normal <= 70, (taller, normal))
+                page.close()
+        self.assertEqual(self.errors, [])
+
+    def test_restored_line_after_reload_is_paged_and_pages_read_before_say_so(self):
+        page = self.open(self.page(width=1440, height=900, locale="zh-CN"))
+        self.enter_stage(page)
+        self.long_reply(page)
+        self.send_long(page)
+        total = len(self.read_pages(page))
+        # The pager loads after the first stage render of a reload; once registered it takes over the line already on stage,
+        # so a long restored line is paged instead of running under the quick menu.
+        page.reload(wait_until="networkidle")
+        page.locator("#snow-backlog-tools").wait_for(state="attached")
+        page.locator('#chat-app[data-channel="in_person"]').wait_for(state="visible")
+        page.wait_for_function(self.READY)
+        state = page.evaluate(self.PAGE_STATE)
+        self.assertEqual(state["meter"], f"1 / {total} · 已读")
+        self.assertEqual((state["covered"], state["outside"]), (0, 0), state)
+        self.assertTrue(LONG_SPEECH.startswith(state["text"].strip()), state["text"])
+        self.assertEqual(page.locator("#snow-stage-favorite").get_attribute("aria-label"), "收藏这一页台词")
+        self.assertEqual(self.errors, [])
+
+    def test_auto_turns_pages_and_the_star_saves_the_page_being_read(self):
+        page = self.open(self.page(width=1440, height=900, locale="zh-CN"))
+        page.evaluate("() => localStorage.setItem('project-snow-public:reading:v1', JSON.stringify({autoDelay: 'short'}))")
+        page.reload(wait_until="networkidle")
+        page.locator("#snow-backlog-tools").wait_for(state="attached")
+        self.enter_stage(page)
+        self.long_reply(page)
+        self.send_long(page)
+        page.locator("#stage-speech").click(position={"x": 24, "y": 18})
+        page.wait_for_function("() => document.querySelector('.snow-page-meter').textContent.startsWith('2 /')")
+        page.wait_for_function(self.READY)
+        second = page.evaluate(self.PAGE_STATE)["text"].strip()
+        star = page.locator("#snow-stage-favorite")
+        self.assertEqual(star.get_attribute("aria-label"), "收藏这一页台词")
+        star.click()
+        page.wait_for_function("() => document.querySelector('#snow-stage-favorite').getAttribute('aria-pressed') === 'true'")
+        saved = self.idb_preferences(page)["favoriteLines"]
+        self.assertEqual([item["text"] for item in saved], [second])
+        # 「自动」排在快捷菜单最前；开启后按停留时间自动翻到下一页，新的一页星标是空的。
+        auto = page.locator('#stage-quick-menu [data-stage-quick="auto"]')
+        self.assertEqual(page.locator("#stage-quick-menu button").first.get_attribute("data-stage-quick"), "auto")
+        self.assertEqual(auto.get_attribute("aria-pressed"), "false")
+        auto.click()
+        self.assertEqual(auto.get_attribute("aria-pressed"), "true")
+        page.locator(".snow-auto-progress:not([hidden])").wait_for(state="attached")
+        page.wait_for_function("() => document.querySelector('.snow-page-meter').textContent.startsWith('3 /')", timeout=15000)
+        self.assertEqual(page.locator("#snow-stage-favorite").get_attribute("aria-pressed"), "false")
+        auto.click()
+        self.assertEqual(auto.get_attribute("aria-pressed"), "false")
+        self.assertTrue(page.locator(".snow-auto-progress").evaluate("node => node.hidden"))
+        self.assertEqual(self.errors, [])
+
+    def set_tone(self, page, value):
+        page.evaluate("""value => { const select = document.querySelector('#tone-preference'); select.value = value;
+          select.dispatchEvent(new Event('change', { bubbles: true })); }""", value)
+        page.wait_for_function("value => document.documentElement.dataset.tone === value", arg="light" if value == "light" else "dark")
+        page.wait_for_timeout(150)
+
+    def test_invitation_reminder_binds_when_she_agrees_and_rings_without_a_model_call(self):
+        hk = timezone(timedelta(hours=8))
+        now = datetime.now(hk)
+        # Reminders are same-day only; the signed fixture state follows the real clock, so the fake clock starts at real time.
+        if now.hour == 23 and now.minute >= 40:
+            self.skipTest("too close to Hong Kong midnight for a same-day reminder")
+        clock = lambda moment: moment.strftime("%H:%M")  # noqa: E731
+        page = self.page(width=1280, height=820, locale="zh-CN")
+        page.clock.install(time=now)
+        self.open(page)
+        page.evaluate("() => document.getElementById('open-movement-shortcuts').click()")
+        page.locator("#movement-dialog").wait_for(state="visible")
+        pick = page.locator("#snow-movement-reminder")
+        self.assertTrue(pick.is_visible())
+        self.assertEqual(pick.locator('[aria-checked="true"]').inner_text(), "不提醒")
+        option = page.locator("#movement-options [data-movement-id]").first
+        place = option.get_attribute("data-movement-name")
+        option.click()
+        pick.locator('[data-snow-remind="custom"]').click()
+        current = datetime.fromtimestamp(page.evaluate("() => Date.now()") / 1000, hk)
+        pick.locator('input[type="time"]').fill(clock(current))
+        self.assertIn("晚于现在", pick.locator(".snow-remind-error").inner_text())
+        target = clock(current + timedelta(minutes=3))
+        pick.locator('input[type="time"]').fill(target)
+        self.assertTrue(pick.locator(".snow-remind-error").is_hidden())
+        page.locator("#send-movement-invitation").click()
+        page.locator("#movement-dialog").wait_for(state="hidden")
+        # The reminder is planned with the invitation's own request id and binds once she is waiting.
+        button = page.locator("#current-rendezvous .snow-remind-button")
+        button.wait_for()
+        page.wait_for_function("text => document.querySelector('#current-rendezvous .snow-remind-button').textContent === text", arg=f"提醒 {target}")
+        chats = len([row for row in dialogue.DialogueHandler.requests if row["path"].endswith("/chat/stream")])
+        request_id = [row for row in dialogue.DialogueHandler.requests if row["path"].endswith("/chat/stream")][-1]["payload"]["chat"]["request_id"]
+        stored = self.idb_preferences(page)["rendezvousReminders"]
+        self.assertEqual([(row["pendingRequestId"], row["rendezvousId"]) for row in stored], [(request_id, f"{request_id}:waiting")])
+        # Due: a card at the top of the communicator, readable in every tone.
+        page.clock.fast_forward("04:00")
+        card = page.locator("#snow-reminder-cards .snow-reminder")
+        card.wait_for()
+        # Its own row between the rendezvous bar and the timeline (auto placement used to drop it under the timeline,
+        # beneath the floating feedback button), so nothing else sits on its buttons.
+        box = page.evaluate("""() => { const rect = id => document.getElementById(id).getBoundingClientRect();
+          const card = rect('snow-reminder-cards'), bar = rect('current-rendezvous'), timeline = rect('timeline');
+          const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+          const others = [...document.querySelectorAll('#floating-feedback, #open-global-feedback')]
+            .filter(node => node.getClientRects().length).map(node => node.getBoundingClientRect());
+          return { below: card.top >= bar.bottom - 0.5, above: card.bottom <= timeline.top + 0.5, clear: !others.some(other => hit(other, card)) }; }""")
+        self.assertEqual(box, {"below": True, "above": True, "clear": True})
+        self.assertEqual(card.locator("strong").inner_text(), f"约定提醒 · {place}")
+        self.assertIn(target, card.locator("p").inner_text())
+        self.assertEqual(button.inner_text(), "提醒已到")
+        for tone in ("light", "dark", "auto"):
+            self.set_tone(page, tone)
+            ratios = page.locator("#snow-reminder-cards :is(strong, p, button), #current-rendezvous .snow-remind-button").evaluate_all(CONTRAST)
+            self.assertEqual([item for item in ratios if item[1] < 4.5], [], (tone, ratios))
+        self.set_tone(page, "light")
+        # Snooze moves it ten minutes; close ends it.
+        card.locator("button", has_text="10 分钟后再提醒").click()
+        card.wait_for(state="detached")
+        snoozed = clock(datetime.fromtimestamp(page.evaluate("() => Date.now()") / 1000, hk) + timedelta(minutes=10))
+        page.wait_for_function("""texts => texts.includes(document.querySelector('#current-rendezvous .snow-remind-button').textContent)""",
+                               arg=[f"提醒 {snoozed}", f"提醒 {clock(datetime.strptime(snoozed, '%H:%M') - timedelta(minutes=1))}"])
+        page.clock.fast_forward("10:30")
+        card.wait_for()
+        card.locator('button[aria-label^="关闭"]').click()
+        card.wait_for(state="detached")
+        page.wait_for_function("() => document.querySelector('#current-rendezvous .snow-remind-button').textContent === '到点提醒'")
+        # Reminders never call the model.
+        self.assertEqual(len([row for row in dialogue.DialogueHandler.requests if row["path"].endswith("/chat/stream")]), chats)
+        self.assertEqual([path for path in self.requested if "/rendezvous/" in path], [])
+        self.assertEqual(self.errors, [])
+
+    def test_conversation_settings_store_preferences_and_paid_messages_need_cost_confirmation(self):
+        page = self.open(self.page(width=1280, height=820, locale="zh-CN", proactive=True))
+        consent, recoveries = [], []
+
+        def grant(route):
+            body = route.request.post_data_json
+            consent.append(body)
+            route.fulfill(json={"consent_token": "synthetic-consent-only", "notice_version": "proactive-cost-1",
+                                "model_session_id": body["model_session_id"],
+                                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()})
+
+        def recover(route):
+            body = route.request.post_data_json
+            recoveries.append((route.request.headers.get("x-snow-recovery-only"), body.get("credential"), body["request_id"]))
+            route.fulfill(json={"request_id": body["request_id"], "character_id": body["character_id"], "source": "proactive_reminder",
+                                "status": "failed", "model_called": True, "usage": {"provider_calls": 1, "total_tokens": None}})
+        page.route("**/public/v2/rendezvous/consent", grant)
+        page.route("**/public/v2/rendezvous/message", recover)
+        page.evaluate("() => document.getElementById('open-settings').click()")
+        page.locator('[data-settings-tab="conversation"]').click()
+        panel = page.locator("#settings-panel-conversation")
+        panel.wait_for(state="visible")
+        self.assertTrue(page.locator("#settings-panel-history").is_hidden())
+        self.assertEqual(page.locator("#settings-tab-conversation").get_attribute("aria-selected"), "true")
+        self.assertEqual(page.locator('[data-settings-tab="history"] + [data-settings-tab]').get_attribute("id"), "settings-tab-conversation")
+        self.assertEqual(panel.locator("#snow-usage-setting").count(), 1)
+        # Reading preferences are saved on this browser only.
+        panel.locator('[data-snow-speed="fast"]').click()
+        panel.locator('[data-snow-delay="long"]').click()
+        page.locator("#snow-fast-forward-read").uncheck()
+        page.wait_for_function("() => JSON.parse(localStorage.getItem('project-snow-public:reading:v1') || '{}').fastForwardRead === false")
+        self.assertEqual(page.evaluate("() => JSON.parse(localStorage.getItem('project-snow-public:reading:v1'))"),
+                         {"textSpeed": "fast", "autoDelay": "long", "fastForwardRead": False})
+        self.assertEqual(panel.locator('[data-snow-speed][aria-checked="true"]').inner_text(), "快")
+        # Paid messages depend on reminders.
+        page.locator("#snow-reminders-enabled").uncheck()
+        page.wait_for_function("() => document.querySelector('#snow-proactive-enabled').disabled")
+        self.assertIn("约定提醒", page.locator("#snow-proactive-note").inner_text())
+        self.assertFalse(self.idb_preferences(page)["reminderPreferences"]["enabled"])
+        page.locator("#snow-reminders-enabled").check()
+        page.wait_for_function("() => !document.querySelector('#snow-proactive-enabled').disabled")
+        # Switching on asks about the cost first; declining sends nothing.
+        toggle, dialog = page.locator("#snow-proactive-enabled"), page.locator("#snow-proactive-dialog")
+        toggle.click()
+        dialog.wait_for(state="visible")
+        self.assertFalse(toggle.is_checked())
+        self.assertIn("每条消息会调用一次你的模型", dialog.inner_text())
+        dialog.locator("button", has_text="暂不开启").click()
+        dialog.wait_for(state="hidden")
+        self.assertFalse(toggle.is_checked())
+        self.assertEqual(consent, [])
+        toggle.click()
+        dialog.locator("button", has_text="我知道会产生费用，开启").click()
+        dialog.wait_for(state="hidden")
+        page.wait_for_function("() => document.querySelector('#snow-proactive-enabled').checked")
+        self.assertEqual([(row["accepted_cost_notice"], row["notice_version"]) for row in consent], [(True, "proactive-cost-1")])
+        self.assertIn("已开启", page.locator("#snow-proactive-note").inner_text())
+        toggle.click()
+        page.wait_for_function("() => !document.querySelector('#snow-proactive-enabled').checked")
+        self.assertFalse(self.idb_preferences(page)["proactivePreferences"]["enabled"])
+        # A paid request whose outcome is unknown is only ever looked up, never re-sent.
+        page.evaluate("""async () => new Promise((resolve, reject) => { const open = indexedDB.open('project-snow-public');
+          open.onsuccess = () => { const db = open.result, threads = db.transaction('threads').objectStore('threads').getAll();
+            threads.onsuccess = () => {
+          const characterId = threads.result[0].characterId, requestId = crypto.randomUUID();
+          const record = { key: `proactive_request_v1:2026-10-19:${characterId}:rv-1`, status: 'unknown', dispatched: true, createdAt: Date.now(),
+            envelope: { request_id: requestId, character_id: characterId, rendezvous_id: 'rv-1', segment_id: 'segment', state_package: '',
+              session_context_package: '', provider: 'openai', model: 'synthetic-model', reasoning_effort: null, model_session_id: 'session',
+              notice_version: 'proactive-cost-1' } };
+          const tx = db.transaction('app_state', 'readwrite'); tx.objectStore('app_state').put(record);
+            tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); }; }; })""")
+        page.locator('[data-settings-tab="history"]').click()
+        page.locator('[data-settings-tab="conversation"]').click()
+        row = page.locator("#snow-proactive-requests .snow-request-row")
+        row.wait_for()
+        self.assertEqual(row.locator(".snow-request-status").inner_text(), "结果未确认")
+        row.locator("button", has_text="查询原请求").click()
+        page.wait_for_function("() => document.querySelector('#snow-proactive-requests .snow-request-status')?.textContent === '没有送达'")
+        self.assertEqual(len(recoveries), 1)
+        self.assertEqual(recoveries[0][:2], ("1", ""))
+        self.assertEqual(self.errors, [])
+
+    def test_second_batch_surfaces_are_readable_in_every_tone(self):
+        for tone in ("light", "dusk", "dark"):
+            with self.subTest(tone=tone):
+                page = self.open(self.page(width=1440, height=900, tone=tone, locale="zh-CN", proactive=True))
+                self.enter_stage(page)
+                self.long_reply(page)
+                self.send_long(page)
+                page.locator('#stage-quick-menu [data-stage-quick="auto"]').click()
+                ratios = page.locator('.snow-page-meter, #stage-quick-menu [data-stage-quick="auto"]').evaluate_all(CONTRAST)
+                page.locator('#stage-quick-menu [data-stage-quick="auto"]').click()
+                page.evaluate("() => document.getElementById('stage-open-settings').click()")
+                page.locator('[data-settings-tab="conversation"]').click()
+                page.locator("#settings-panel-conversation").wait_for(state="visible")
+                ratios += page.locator("#settings-panel-conversation :is(p, strong, small, .snow-seg button, .snow-cost-tag)").evaluate_all(CONTRAST)
+                page.locator("#snow-proactive-enabled").click()
+                page.locator("#snow-proactive-dialog").wait_for(state="visible")
+                ratios += page.locator("#snow-proactive-dialog :is(h2, li, .snow-cost-tag, .panel-kicker, .snow-modal-foot > span, button)").evaluate_all(CONTRAST)
+                low = [item for item in ratios if item[1] < 4.5]
+                self.assertGreater(len(ratios), 12)
+                self.assertEqual(low, [], low)
+                page.close()
+        self.assertEqual(self.errors, [])
+
     def test_flag_off_never_loads_the_feature_modules(self):
         page = self.open(self.page(enabled=False), enabled=False)
         page.wait_for_timeout(800)
-        self.assertEqual([path for path in self.requested if path.startswith("/modules/snow-feature") or path == "/modules/snow-features.js"], [])
-        self.assertEqual(page.locator("#snow-backlog-tools, #snow-memory-dialog, .snow-line-tools, #snow-usage-setting").count(), 0)
+        self.assertEqual([path for path in self.requested if path.startswith("/modules/snow-feature") or path in {
+            "/modules/snow-features.js", "/modules/snow-pager.js", "/modules/snow-conversation-ui.js"}], [])
+        self.assertEqual(page.locator("#snow-backlog-tools, #snow-memory-dialog, .snow-line-tools, #snow-usage-setting, "
+                                      "#settings-tab-conversation, .snow-page-meter, #snow-movement-reminder, [data-stage-quick=\"auto\"]").count(), 0)
         self.assertEqual(self.errors, [])
