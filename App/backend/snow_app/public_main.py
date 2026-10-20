@@ -57,6 +57,8 @@ from .public_providers import (
     provider_spec,
 )
 from .public_security import (
+    BYOK_RETENTION_HOURS,
+    BYOK_RETENTION_NOTICE_VERSION,
     PublicSecurityError,
     daily_ip_fingerprint,
     encrypt_qq,
@@ -143,6 +145,7 @@ _ERROR_STAGE_BY_CODE = {
     "generation_partial": "generation_validation",
     "provider_not_enabled": "provider",
     "provider_credential_rejected": "provider",
+    "credential_revoked": "provider",
     "provider_model_discovery_failed": "provider",
     "provider_network_error": "provider",
     "provider_timeout": "provider",
@@ -182,6 +185,7 @@ _NON_RETRYABLE_ERROR_CODES = frozenset(
         "generation_partial",
         "provider_not_enabled",
         "provider_credential_rejected",
+        "credential_revoked",
         "character_unavailable",
         "state_invalid",
         "state_subject_mismatch",
@@ -577,6 +581,8 @@ def _public_security_disposition(exc: PublicSecurityError) -> tuple[str, int]:
         return "session_context_conflict", 409
     if message.startswith("Session context"):
         return "session_context_invalid", 422
+    if message == "BYOK credential has been revoked":
+        return "credential_revoked", 401
     return "credential_invalid", 401
 
 
@@ -717,6 +723,18 @@ def create_app(
     app.state.chat_jobs = chat_jobs
     app.state.active_request_leases = active_request_leases
     app.state.active_subject_requests = active_subject_requests
+
+    async def open_request_credential(request: Request, token: str, expected_provider: str):
+        revoked_before = await async_store.call(
+            "credential_revoked_before", request.state.subject_hash
+        )
+        return open_byok_credential(
+            public_settings,
+            anonymous_id=request.state.anonymous_id,
+            token=token,
+            expected_provider=expected_provider,
+            revoked_before=revoked_before,
+        )
 
     async def claim_owned_request(request_id: str, subject: str, request_hash: str):
         result = await async_store.call("claim_request", request_id, subject, request_hash)
@@ -1093,6 +1111,12 @@ def create_app(
                 "lifetime_hours": public_settings.byok_lifetime_hours,
                 "storage": "sessionStorage",
                 "renewal": "none",
+                "retention": ({
+                    "enabled": True,
+                    "notice_version": BYOK_RETENTION_NOTICE_VERSION,
+                    "options": [value for value in BYOK_RETENTION_HOURS if value != "tab"],
+                    "storage": "localStorage",
+                } if public_settings.byok_retention_enabled else {"enabled": False}),
             },
             "movement_catalog": chat_service.movement_catalog(),
             # The generalized stage adapter stays off until an approved,
@@ -1212,6 +1236,12 @@ def create_app(
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
         if spec.provider_id == SUBSCRIPTION_PROVIDER:
             raise _error("subscription_pairing_required", 422)
+        if payload.retention != "tab":
+            if not public_settings.byok_retention_enabled:
+                raise _error("credential_retention_unavailable", 422)
+            if (payload.retention_notice_version != BYOK_RETENTION_NOTICE_VERSION
+                    or payload.accepted_retention_notice is not True):
+                raise _error("credential_retention_notice_required", 422)
         await async_store.call("consume_limits",
             request.state.subject_hash,
             [("byok_session_hour", "hour", 10), ("byok_session_day", "day", 30)],
@@ -1227,29 +1257,37 @@ def create_app(
             if not verified:
                 raise _error("turnstile_required", 403)
             await async_store.call("mark_verified", request.state.subject_hash, "byok")
+        credential_kwargs = {"retention": payload.retention}
+        if payload.retention == "tab":
+            # Preserve the pre-retention deployment knob for the legacy
+            # session-scoped envelope. Retained credentials use exact terms.
+            credential_kwargs["lifetime"] = timedelta(hours=public_settings.byok_lifetime_hours)
         credential, expires_at = issue_byok_credential(
             public_settings,
             anonymous_id=request.state.anonymous_id,
             provider=spec.provider_id,
             api_key=payload.api_key,
-            lifetime=timedelta(hours=public_settings.byok_lifetime_hours),
+            **credential_kwargs,
         )
         return {
             "provider": spec.provider_id,
             "credential": credential,
             "expires_at": expires_at.isoformat(),
             "stored": False,
+            "retention": payload.retention,
         }
+
+    @app.post("/public/v1/byok/revoke")
+    async def byok_revoke(request: Request) -> dict[str, Any]:
+        await async_store.call("consume_limits", request.state.subject_hash,
+            [("byok_revoke_hour", "hour", 10), ("byok_revoke_day", "day", 30)])
+        revoked_before = await async_store.call("revoke_credentials", request.state.subject_hash)
+        return {"revoked": True, "revoked_before": revoked_before.isoformat()}
 
     @app.post("/public/v1/byok/models")
     async def models(request: Request, payload: ModelDiscoveryRequest) -> dict[str, Any]:
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
-        claims = open_byok_credential(
-            public_settings,
-            anonymous_id=request.state.anonymous_id,
-            token=payload.credential,
-            expected_provider=spec.provider_id,
-        )
+        claims = await open_request_credential(request, payload.credential, spec.provider_id)
         await async_store.call("consume_limits", request.state.subject_hash, [("model_discovery_hour", "hour", 20)])
         try:
             discovered = await discover_models(
@@ -1314,12 +1352,7 @@ def create_app(
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported", 422)
-        claims = open_byok_credential(
-            public_settings,
-            anonymous_id=request.state.anonymous_id,
-            token=payload.credential,
-            expected_provider=spec.provider_id,
-        )
+        claims = await open_request_credential(request, payload.credential, spec.provider_id)
         cache_id = "presence-arrival:" + str(payload.arrival_id)
         request_body = _model_request_body(payload)
         subject = request.state.subject_hash
@@ -1464,8 +1497,7 @@ def create_app(
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported", 422)
-        claims = open_byok_credential(public_settings, anonymous_id=request.state.anonymous_id,
-                                     token=payload.credential, expected_provider=spec.provider_id)
+        claims = await open_request_credential(request, payload.credential, spec.provider_id)
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
         generation_started = False
@@ -1653,10 +1685,8 @@ def create_app(
         for original, canonical in zip(payload.content_blocks, canonical_blocks):
             if canonical.get("type") == "sticker":
                 original.caption = str(canonical.get("caption") or "")
-        claims = ({"api_key": ""} if recovery else open_byok_credential(
-            public_settings, anonymous_id=request.state.anonymous_id,
-            token=payload.credential, expected_provider=spec.provider_id,
-        ))
+        claims = ({"api_key": ""} if recovery else
+                  await open_request_credential(request, payload.credential, spec.provider_id))
         request_body = business_body if business_body is not None else _model_request_body(payload)
         request_id = str(payload.request_id)
         request.state.public_request_id = request_id
@@ -2292,12 +2322,7 @@ def create_app(
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported", 422)
-        claims = open_byok_credential(
-            public_settings,
-            anonymous_id=request.state.anonymous_id,
-            token=payload.credential,
-            expected_provider=spec.provider_id,
-        )
+        claims = await open_request_credential(request, payload.credential, spec.provider_id)
         cache_id = "chat-summary:" + str(payload.request_id)
         request_body = _model_request_body(payload)
         subject = request.state.subject_hash

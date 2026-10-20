@@ -50,6 +50,8 @@ const state = {
   config: null,
   credential: "",
   credentialExpiresAt: 0,
+  credentialRetention: "tab",
+  retentionConsent: "",
   provider: "",
   model: "",
   reasoningEffort: "",
@@ -230,7 +232,7 @@ async function installFeatures() {
     request: (path, options) => dialogueHttp.request(path, options), savePreferences: patch => saveUiPreferences(patch, true),
     preferences: () => structuredClone(state.featurePreferences), loadState: key => storeGet("app_state", key), saveState: saveFeatureState,
     readRequests: async () => structuredClone((await storeAll("app_state")).filter(record => record.key.startsWith("proactive_request_v1:"))),
-    withRequest: withFeatureWrite,
+    withRequest: withFeatureWrite, retention: () => state.credentialRetention, storageForRetention: kind => kind === "tab" ? tabPreferences : localPreferences,
     contextCurrent: value => value.provider === state.provider && value.model === state.model && value.credential === state.credential
       && value.reasoning_effort === subscriptionReasoningPayload().reasoning_effort && value.enabled === state.config?.proactive_messages?.enabled,
     context: async characterId => { const thread = await dbGetThread(characterId); await loadDialogueRecord(characterId);
@@ -540,6 +542,8 @@ const errorMessages = {
   request_cancelled: "已停止等待。模型供应商仍可能完成本次生成或产生费用。",
   stream_disconnected: "连接中断，未能恢复本次回复。你可以使用原消息重新发起请求。",
   experience_notice_required: "请先阅读并确认体验说明。",
+  credential_retention_unavailable: "服务器暂未开放在本机保存凭证。",
+  credential_retention_notice_required: "请先确认在本机保存凭证的说明。",
   sticker_unavailable: "这个表情暂时不可用，请换一个或稍后再试。",
   state_subject_mismatch: "本地场景凭证仍然无效，请重新发送本条消息。",
   state_invalid: "本地场景状态仍然无效，请重新发送本条消息。",
@@ -2685,16 +2689,32 @@ function restoreDraft() {
 }
 
 function sessionKey() { return "project-snow-public:byok"; }
+// 凭证保存时长：说明见 docs/snow-adv-ui-notes.md「凭证保存时长」。
+const retentionModule = () => import("/modules/credential-retention.js");
+function retentionPolicy() {
+  const policy = state.config?.credential_policy?.retention;
+  return policy?.enabled === true && policy.notice_version === "credential-retention-1" && Array.isArray(policy.options) ? policy : null;
+}
+function retentionChanged() { return Boolean(retentionPolicy()) && $("credential-retention").value !== state.credentialRetention; }
+function syncRetentionField() {
+  const policy = retentionPolicy();
+  $("credential-retention-field").hidden = !policy;
+  for (const option of [...$("credential-retention").options]) if (policy && option.value !== "tab" && !policy.options.includes(option.value)) option.remove();
+}
 function saveCredential() {
   snowFeatureLogic?.proactive?.invalidate();
   if (!state.credential || !state.credentialExpiresAt) return;
-  tabPreferences.setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, ...(state.provider === SUBSCRIPTION_PROVIDER ? { reasoningEffort: state.reasoningEffort } : {}), expiresAt: state.credentialExpiresAt }));
+  const kept = state.credentialRetention !== "tab" && state.provider !== SUBSCRIPTION_PROVIDER;
+  (kept ? localPreferences : tabPreferences).setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, ...(state.provider === SUBSCRIPTION_PROVIDER ? { reasoningEffort: state.reasoningEffort } : {}), expiresAt: state.credentialExpiresAt, ...(kept ? { retention: state.credentialRetention } : {}) }));
+  (kept ? tabPreferences : localPreferences).removeItem(sessionKey());
 }
 function clearCredential() {
   snowFeatureLogic?.proactive?.invalidate();
   tabPreferences.removeItem(sessionKey());
+  localPreferences.removeItem(sessionKey());
   state.credential = "";
   state.credentialExpiresAt = 0;
+  state.credentialRetention = "tab";
   state.model = "";
   state.reasoningEffort = "";
   refreshCredentialStatus();
@@ -2715,8 +2735,11 @@ function refreshCredentialStatus() {
       : expiration.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
     $("credential-status").textContent = state.provider === SUBSCRIPTION_PROVIDER
       ? `个人连接凭证有效至 ${expires}，仅保存在当前标签页。`
-      : `加密凭证有效至 ${expires}；获取模型列表和切换角色无需重新输入 Key。`;
+      : state.credentialRetention !== "tab"
+        ? `加密凭证已保存在本机，有效至 ${expires}；清除模型会话会立即作废。`
+        : `加密凭证有效至 ${expires}；获取模型列表和切换角色无需重新输入 Key。`;
   }
+  $("credential-retention-hint").hidden = !(active && retentionChanged());
 }
 
 async function waitForTurnstile(signal) {
@@ -3220,7 +3243,10 @@ async function loadConfig() {
   $("save-model").disabled = !state.config.providers.length;
   if (!state.config.providers.length) showError("setup-error", "当前暂未开放可用的模型厂商。");
   attachTurnstile();
-  const stored = tabPreferences.getItem(sessionKey());
+  syncRetentionField();
+  if (localPreferences.getItem("project-snow-public:byok-revoke")) void retentionModule().then((module) => module.revokeCredential(api, localPreferences));
+  const tabStored = tabPreferences.getItem(sessionKey());
+  const stored = tabStored || localPreferences.getItem(sessionKey());
   if (stored) {
     try {
       const saved = JSON.parse(stored);
@@ -3228,6 +3254,9 @@ async function loadConfig() {
       if (saved.expiresAt > Date.now() && available) {
         state.credential = saved.credential;
         state.credentialExpiresAt = saved.expiresAt;
+        state.credentialRetention = state.retentionConsent = !tabStored && ["2h", "24h", "3d", "7d"].includes(saved.retention) ? saved.retention : "tab";
+        const select = $("credential-retention");
+        if (select.querySelector(`option[value="${CSS.escape(state.credentialRetention)}"]`)) select.value = select.dataset.previous = state.credentialRetention;
         state.provider = saved.provider;
         state.model = saved.model || "";
         state.reasoningEffort = saved.provider === SUBSCRIPTION_PROVIDER ? plain(saved.reasoningEffort) || (saved.model === SUBSCRIPTION_MODEL ? SUBSCRIPTION_EFFORT : "") : "";
@@ -3362,10 +3391,16 @@ async function issueCredential(signal) {
   }
   const apiKey = $("api-key").value;
   if (!apiKey) throw new Error("请先输入 API Key。");
+  const policy = retentionPolicy(), retention = policy ? $("credential-retention").value : "";
+  if (retention && retention !== "tab" && state.retentionConsent !== retention) throw new Error("credential_retention_notice_required");
   if (!experienceNoticeAccepted()) {
     await showExperienceNoticeIfNeeded();
     if (!experienceNoticeAccepted()) throw new Error("experience_notice_required");
   }
+  signal.throwIfAborted();
+  const replacing = state.credentialRetention !== "tab";
+  if (replacing) clearCredential();
+  if (replacing || localPreferences.getItem("project-snow-public:byok-revoke")) await (await retentionModule()).revokeBeforeIssue(api, localPreferences, retention && retention !== "tab", replacing);
   signal.throwIfAborted();
   const token = await tokenForModel(signal);
   signal.throwIfAborted();
@@ -3381,12 +3416,15 @@ async function issueCredential(signal) {
       accepted_transit_notice: true,
       accepted_cost_notice: true,
       accepted_local_history_notice: true,
+      ...(retention ? { retention } : {}),
+      ...(retention && retention !== "tab" ? { retention_notice_version: policy.notice_version, accepted_retention_notice: true } : {}),
     }),
   });
   signal.throwIfAborted();
   state.credential = payload.credential;
   state.provider = provider;
   state.credentialExpiresAt = Date.parse(payload.expires_at);
+  state.credentialRetention = retention && retention !== "tab" && payload.retention === retention ? retention : "tab";
   $("api-key").value = "";
   saveCredential();
   refreshCredentialStatus();
@@ -3395,7 +3433,7 @@ async function discoverModels() {
   return runModelSetup("discover-models", async (signal) => {
     if (state.modelSetupMode === "subscription") throw new Error("subscription_model_unavailable");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
-    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential(signal);
+    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now() || retentionChanged()) await issueCredential(signal);
     const payload = await api("/byok/models", { method: "POST", signal, timeoutMs: 30000, body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
     signal.throwIfAborted();
     saveCredential();
@@ -3418,6 +3456,7 @@ async function saveModelSession() {
       state.reasoningEffort = state.subscription.draftEffort;
       state.credential = state.subscription.credential;
       state.credentialExpiresAt = state.subscription.expiresAt;
+      state.credentialRetention = "tab";
       saveCredential();
       refreshCredentialStatus();
       updateComposerAvailability();
@@ -3428,7 +3467,7 @@ async function saveModelSession() {
     const model = $("discovered-models").value.trim() || $("model-id").value.trim();
     if (!model) throw new Error("请填写或选择模型 ID。");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
-    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now()) await issueCredential(signal);
+    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now() || retentionChanged()) await issueCredential(signal);
     signal.throwIfAborted();
     state.provider = $("provider-select").value;
     state.model = model;
@@ -3437,7 +3476,7 @@ async function saveModelSession() {
     refreshCredentialStatus();
     updateComposerAvailability();
     $("settings-dialog").close();
-    toast("模型会话已保存到当前标签页");
+    toast(state.credentialRetention !== "tab" ? "模型会话已保存，凭证保存在本机" : "模型会话已保存到当前标签页");
   });
 }
 
@@ -7971,7 +8010,16 @@ $("copy-subscription-code").onclick = async () => {
   try { await navigator.clipboard.writeText(state.subscription.pairingCode); toast("配对码已复制，请只输入到你自己的连接器"); }
   catch { toast("无法自动复制，请选中配对码后手动复制"); }
 };
-$("clear-credential").onclick = () => { clearCredential(); $("api-key").focus(); toast("当前标签页的模型凭证已清除"); };
+$("clear-credential").onclick = async () => {
+  const kept = state.credentialRetention !== "tab";
+  clearCredential();
+  $("api-key").focus();
+  toast(kept ? await retentionModule().then((module) => module.revokeCredential(api, localPreferences), () => "本机凭证已删除") : "当前标签页的模型凭证已清除");
+};
+$("credential-retention").onchange = ({ currentTarget: select }) => void retentionModule().then((module) => module.chooseRetention(select, state, refreshCredentialStatus));
+window.addEventListener("storage", (event) => {
+  if (event.key === sessionKey() && !event.newValue && event.storageArea === localStorage && state.credentialRetention !== "tab") clearCredential();
+});
 $("discovered-models").onchange = () => { if (state.modelSetupMode !== "subscription" && $("discovered-models").value) { $("model-id").value = $("discovered-models").value; state.model = $("discovered-models").value; saveCredential(); } };
 $("toggle-advanced-model").onclick = () => {
   const panel = $("advanced-model-panel");

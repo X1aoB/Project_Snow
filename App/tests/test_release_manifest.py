@@ -48,7 +48,7 @@ class ReleaseManifestTests(TestCase):
             self.assertRegex(artifact["manifest_sha256"], r"^[0-9a-f]{64}$", kind)
             if kind != "data":
                 self.assertRegex(artifact["checksums_sha256"], r"^[0-9a-f]{64}$", kind)
-        self.assertEqual(manifest["migration_heads"], ["20261019_0009"])
+        self.assertEqual(manifest["migration_heads"], ["20261020_0010"])
         self.assertTrue(manifest["runtime_capabilities"]["request_blocks"])
         self.assertEqual(manifest["application"]["digest"], "sha256:" + "b" * 64)
         self.assertEqual(

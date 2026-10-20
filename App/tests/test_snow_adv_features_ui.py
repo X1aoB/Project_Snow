@@ -67,7 +67,7 @@ class SnowAdvFeaturesUITests(TestCase):
         self.browser.close(); self.playwright.stop()
 
     # ---------- helpers ----------
-    def page(self, width=1280, height=820, tone="light", enabled=True, context=None, locale=None, proactive=False):
+    def page(self, width=1280, height=820, tone="light", enabled=True, context=None, locale=None, proactive=False, retention=False):
         target = context or self.browser
         options = {"locale": locale} if locale else {}
         page = target.new_page(viewport={"width": width, "height": height}, reduced_motion="reduce", timezone_id="Asia/Hong_Kong",
@@ -87,6 +87,9 @@ class SnowAdvFeaturesUITests(TestCase):
             payload["capabilities"] = {"dialogue_protocol": "public-dialogue-v2", "scene_action_protocol": "public-scene-action-v2", "recovery_only": True}
             if proactive:
                 payload["proactive_messages"] = {"enabled": True, "notice_version": "proactive-cost-1"}
+            if retention:
+                payload["credential_policy"] = {**payload.get("credential_policy", {}), "retention": {
+                    "enabled": True, "notice_version": "credential-retention-1", "options": ["2h", "24h", "3d", "7d"], "storage": "localStorage"}}
             route.fulfill(json=payload)
         page.route("**/public/v1/config", config)
         return page
@@ -575,6 +578,80 @@ class SnowAdvFeaturesUITests(TestCase):
         self.assertEqual(len([row for row in dialogue.DialogueHandler.requests if row["path"].endswith("/chat/stream")]), chats)
         self.assertEqual([path for path in self.requested if "/rendezvous/" in path], [])
         self.assertEqual(self.errors, [])
+
+    def test_proactive_consent_follows_a_credential_kept_on_this_device(self):
+        # app.js hands the credential's retention and matching storage to the proactive client (handoff 13.3 item 6):
+        # a credential kept on this device keeps the cost confirmation for a new tab; clearing removes both.
+        context = self.browser.new_context(viewport={"width": 1280, "height": 820}, reduced_motion="reduce",
+                                           timezone_id="Asia/Hong_Kong", locale="zh-CN")
+        consent, sessions = [], []
+        auth = "project-snow-public:proactive-consent:v1"
+
+        def session(route):
+            body = route.request.post_data_json
+            sessions.append(body.get("retention", "tab"))
+            route.fulfill(json={"provider": body["provider"], "credential": f"synthetic-{body.get('retention', 'tab')}-{len(sessions)}",
+                                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat(),
+                                "stored": False, **({"retention": body["retention"]} if "retention" in body else {})})
+
+        def grant(route):
+            body = route.request.post_data_json
+            consent.append(body)
+            route.fulfill(json={"consent_token": "synthetic-consent-only", "notice_version": "proactive-cost-1",
+                                "model_session_id": body["model_session_id"],
+                                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()})
+        context.route("**/public/v1/byok/session", session)
+        context.route("**/public/v1/byok/revoke", lambda route: route.fulfill(json={"revoked": True}))
+        context.route("**/public/v2/rendezvous/consent", grant)
+        stores = f"() => [sessionStorage.getItem({json.dumps(auth)}), localStorage.getItem({json.dumps(auth)})]"
+
+        page = self.open(self.page(context=context, proactive=True, retention=True))
+        page.evaluate("() => document.getElementById('open-settings').click()")
+        page.locator('[data-settings-tab="models"]').click()
+        page.locator("#credential-retention").select_option("7d")
+        notice = page.locator(".credential-retention-modal[open]")
+        notice.locator('input[type="checkbox"]').check()
+        notice.locator("[data-retention-confirm]").click()
+        page.locator("#api-key").fill("sk-e2e-only-not-real")
+        if not page.locator("#model-id").is_visible():
+            page.locator("#toggle-advanced-model").click()
+        page.locator("#model-id").fill("gpt-e2e")
+        page.locator("#save-model").click()
+        page.locator("#settings-dialog").wait_for(state="hidden")
+        self.assertEqual(sessions, ["tab", "7d"])
+        page.evaluate("() => document.getElementById('open-settings').click()")
+        page.locator('[data-settings-tab="conversation"]').click()
+        page.wait_for_function("() => !document.querySelector('#snow-proactive-enabled').disabled")
+        page.locator("#snow-proactive-enabled").click()
+        page.locator("#snow-proactive-dialog button", has_text="我知道会产生费用，开启").click()
+        page.wait_for_function("() => document.querySelector('#snow-proactive-enabled').checked")
+        page.wait_for_function(f"() => localStorage.getItem({json.dumps(auth)}) !== null")
+        self.assertIsNone(page.evaluate(stores)[0])
+        self.assertEqual(len(consent), 1)
+        # Close the tab, as a user would, so the new tab becomes the writer that may send proactive messages.
+        page.close()
+
+        second = self.page(context=context, proactive=True, retention=True)
+        second.goto(self.base_url, wait_until="networkidle")
+        second.wait_for_function("() => Boolean(document.querySelector('#snow-lock')) || !document.querySelector('#snow-boot')")
+        if second.locator("#snow-lock").count():
+            second.locator("#snow-lock").focus(); second.keyboard.press("Enter")
+        second.locator("#snow-boot").wait_for(state="detached")
+        if second.locator("#skip-onboarding").is_visible():
+            second.locator("#skip-onboarding").click()
+        second.locator("#snow-backlog-tools").wait_for(state="attached")
+        second.evaluate("() => document.getElementById('open-settings').click()")
+        self.assertIn("加密凭证已保存在本机", second.locator("#credential-status").inner_text())
+        second.locator('[data-settings-tab="conversation"]').click()
+        second.wait_for_function("() => document.querySelector('#snow-proactive-enabled').checked")
+        self.assertIn("已开启", second.locator("#snow-proactive-note").inner_text())
+        self.assertEqual(len(consent), 1)
+
+        second.locator('[data-settings-tab="models"]').click()
+        second.locator("#clear-credential").click()
+        second.wait_for_function(f"() => sessionStorage.getItem({json.dumps(auth)}) === null && localStorage.getItem({json.dumps(auth)}) === null")
+        self.assertEqual(self.errors, [])
+        context.close()
 
     def test_conversation_settings_store_preferences_and_paid_messages_need_cost_confirmation(self):
         page = self.open(self.page(width=1280, height=820, locale="zh-CN", proactive=True))

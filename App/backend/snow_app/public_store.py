@@ -58,6 +58,14 @@ CREATE TABLE IF NOT EXISTS public_rate_limit (
 );
 CREATE INDEX IF NOT EXISTS public_rate_limit_expiry_idx ON public_rate_limit (expires_at);
 
+CREATE TABLE IF NOT EXISTS public_credential_revocation (
+    subject_hash VARCHAR(64) PRIMARY KEY,
+    revoked_before TIMESTAMP WITH TIME ZONE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+CREATE INDEX IF NOT EXISTS public_credential_revocation_expiry_idx
+    ON public_credential_revocation (expires_at);
+
 CREATE TABLE IF NOT EXISTS public_request_cache (
     request_id VARCHAR(128) PRIMARY KEY,
     subject_hash VARCHAR(64) NOT NULL,
@@ -258,6 +266,7 @@ class PublicStore(ProactiveStoreMixin):
                 connection.execute(text("SELECT request_id FROM public_request_blocks LIMIT 0"))
                 connection.execute(text("SELECT event_id FROM public_feedback_triage LIMIT 0"))
                 connection.execute(text("SELECT request_id FROM public_proactive_attempt LIMIT 0"))
+                connection.execute(text("SELECT subject_hash FROM public_credential_revocation LIMIT 0"))
                 return True
         except PublicStoreUnavailable:
             return False
@@ -309,6 +318,38 @@ class PublicStore(ProactiveStoreMixin):
                     raise RateLimitExceeded(scope, limit)
                 counts[scope] = int(count)
         return counts
+
+    def revoke_credentials(self, subject_hash: str, *, revoked_before: datetime | None = None) -> datetime:
+        """Invalidate credentials issued at or before a content-free cutoff."""
+
+        revoked_before = revoked_before or _utcnow()
+        expires_at = revoked_before + timedelta(days=8)
+        with self.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO public_credential_revocation "
+                    "(subject_hash, revoked_before, expires_at) VALUES (:subject, :cutoff, :expires) "
+                    "ON CONFLICT (subject_hash) DO UPDATE SET "
+                    "revoked_before = CASE WHEN public_credential_revocation.revoked_before < EXCLUDED.revoked_before "
+                    "THEN EXCLUDED.revoked_before ELSE public_credential_revocation.revoked_before END, "
+                    "expires_at = CASE WHEN public_credential_revocation.expires_at < EXCLUDED.expires_at "
+                    "THEN EXCLUDED.expires_at ELSE public_credential_revocation.expires_at END"
+                ),
+                {"subject": subject_hash, "cutoff": revoked_before, "expires": expires_at},
+            )
+        return revoked_before
+
+    def credential_revoked_before(self, subject_hash: str) -> datetime | None:
+        with self.begin() as connection:
+            value = connection.execute(
+                text("SELECT revoked_before FROM public_credential_revocation WHERE subject_hash = :subject AND expires_at > :now"),
+                {"subject": subject_hash, "now": _utcnow()},
+            ).scalar_one_or_none()
+        if isinstance(value, str):
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=UTC)
+        return value
 
     def claim_request(
         self, request_id: str, subject_hash: str, request_hash: str, *, owner_token: str | None = None
@@ -1239,6 +1280,7 @@ class PublicStore(ProactiveStoreMixin):
                 ("public_proactive_attempt", "expires_at"),
                 ("public_proactive_day", "expires_at"),
                 ("public_rendezvous_authority", "expires_at"),
+                ("public_credential_revocation", "expires_at"),
             ):
                 result = connection.execute(text(f"DELETE FROM {table} WHERE {column} <= :now"), {"now": now})
                 deleted[table] = max(0, int(result.rowcount or 0))

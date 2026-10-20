@@ -145,12 +145,13 @@ def install_proactive_routes(app, settings, async_store, chat_service, get_dialo
     service = ProactiveMessageService(settings, chat_service, get_dialogue_service, provider_http)
     app.state.proactive_message_service = service
 
-    def session(payload, request):
+    async def session(payload, request):
         spec = provider_spec(payload.provider, settings.enabled_providers)
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported")
         claims = open_byok_credential(settings, anonymous_id=request.state.anonymous_id,
-            token=payload.credential, expected_provider=spec.provider_id)
+            token=payload.credential, expected_provider=spec.provider_id,
+            revoked_before=await async_store.call("credential_revoked_before", request.state.subject_hash))
         effort = payload.reasoning_effort
         if spec.provider_id == SUBSCRIPTION_PROVIDER:
             effort = broker.preflight(str(claims["api_key"]), payload.model, payload.reasoning_effort)
@@ -168,7 +169,7 @@ def install_proactive_routes(app, settings, async_store, chat_service, get_dialo
             raise _error("proactive_messages_disabled", 503)
         if payload.accepted_cost_notice is not True:
             raise _error("proactive_cost_notice_required")
-        _spec, claims, effort = session(payload, request)
+        _spec, claims, effort = await session(payload, request)
         now = int(datetime.now(UTC).timestamp())
         expires = min(now + 12 * 3600, int(claims["exp"]))
         token = _sign(settings, {"schema_version": "public-proactive-consent-1",
@@ -223,7 +224,7 @@ def install_proactive_routes(app, settings, async_store, chat_service, get_dialo
         if not proactive_config(settings)["enabled"]:
             raise _error("proactive_messages_disabled", 503)
         try:
-            spec, claims, effort = session(payload, request)
+            spec, claims, effort = await session(payload, request)
             raw = _verify(settings, payload.consent_token, _CONSENT_DOMAIN, 2048)
             scope = consent_scope(payload, subject)
             if (raw.get("schema_version") != "public-proactive-consent-1"
@@ -245,7 +246,7 @@ def install_proactive_routes(app, settings, async_store, chat_service, get_dialo
             # Queueing can cross midnight or credential/consent expiry. Check
             # the exact same signed scope again immediately before admission.
             try:
-                spec, claims, effort = session(payload, request)
+                spec, claims, effort = await session(payload, request)
                 if raw["expires_at"] <= int(datetime.now(UTC).timestamp()) or raw.get("effective_effort") != effort:
                     raise PublicSecurityError("Proactive consent expired while queued")
                 pending = service.prepare(payload, subject)

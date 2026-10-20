@@ -392,7 +392,7 @@ export function installConversationUi(host, { icon, el, notify, readOnly, nameOf
         el("li", { text: "约定提醒到点时，她会先给你发一条文字消息。" }),
         el("li", { text: "每条消息会调用一次你的模型，产生费用；使用订阅连接时会消耗订阅额度。" }),
         el("li", { text: "每天最多 3 条，每个约定最多 1 条；只在页面开着时发送，不会离线补发。" }),
-        el("li", { text: "更换模型、重新连接或重新打开页面后，需要再确认一次。" }))),
+        el("li", { text: "确认最长 12 小时有效。更换模型、重新连接或清除模型会话后需要再确认；凭证只保存在当前标签页时，重新打开页面也要再确认。" }))),
     costError,
     el("div", { class: "snow-modal-foot" }, el("span", { text: "随时可以在这里关闭。" }), el("div", { class: "modal-actions" }, costCancel, costConfirm)));
   document.body.append(costDialog);
@@ -432,7 +432,7 @@ export function installConversationUi(host, { icon, el, notify, readOnly, nameOf
     if (state.enabled) return { disabled: Boolean(state.busy), checked: true, note: "已开启：约定提醒到点时，她会先发一条消息，每条调用一次模型。每天最多 3 条。" };
     if (!snap.modelReady) return { disabled: true, checked: false, note: "需要先在「模型」里连接你的模型。" };
     return { disabled: Boolean(state.busy), checked: false,
-      note: "约定提醒到点时，她会先给你发一条消息。默认关闭；开启前会说明费用。更换模型或重新打开页面后需要再确认一次。" };
+      note: "约定提醒到点时，她会先给你发一条消息。默认关闭；开启前会说明费用，确认最长 12 小时有效。" };
   }
   function syncProactive() {
     const value = proactiveState();

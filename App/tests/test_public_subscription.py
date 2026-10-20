@@ -346,6 +346,15 @@ class SubscriptionAPITests(TestCase):
                                        json={"connector_token": token})
         self.assertEqual(response.status_code, 401)
 
+    def test_pair_rejects_non_tab_retention(self):
+        response = self.client.post(
+            "/public/v1/subscription/pair",
+            headers=ORIGIN,
+            json={**NOTICES, "retention": "24h"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"]["code"], "credential_retention_unavailable")
+
     def test_chat_relay_replays_after_disconnect_without_another_job(self):
         pairing = self.pair()
         token = self.connect(pairing["pairing_code"])

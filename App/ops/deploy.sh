@@ -843,6 +843,9 @@ build_candidate_public_env() {
   public_session_memory_v2=false
   # 雪境 ADV interface skin: presentation only, off unless explicitly enabled.
   public_ui_snow_adv=false
+  # Proactive generation and BYOK retention are opt-in release switches.
+  public_proactive_messages_enabled=false
+  public_byok_retention_enabled=false
   carriage_return="$(printf '\r')"
   while IFS= read -r public_line || [ -n "$public_line" ]; do
     case "$public_line" in
@@ -866,7 +869,7 @@ build_candidate_public_env() {
       PUBLIC_SUBSCRIPTION_ENABLED|PUBLIC_STATISTICS_ENABLED|WEB_CONCURRENCY|\
       PUBLIC_CHAT_LATENCY_V2|PUBLIC_VERIFIED_BLOCK_STREAM|PUBLIC_MOTION_V2|\
       PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2|\
-      PUBLIC_UI_SNOW_ADV|\
+      PUBLIC_UI_SNOW_ADV|PUBLIC_PROACTIVE_MESSAGES_ENABLED|PUBLIC_BYOK_RETENTION_ENABLED|\
       PUBLIC_APP_VERSION|PUBLIC_DATA_VERSION|PUBLIC_MEDIA_VERSION|PUBLIC_MEDIA_ROOT|\
       PUBLIC_EXPERIENCE_NOTICE_VERSION|PUBLIC_ARRIVAL_PROBABILITY|\
       PUBLIC_STICKER_VERSION|PUBLIC_STICKER_ROOT|TURNSTILE_SITE_KEY|\
@@ -927,11 +930,21 @@ build_candidate_public_env() {
           *) echo 'Public interface flags must be true or false.' >&2; return 1 ;;
         esac
         ;;
+      PUBLIC_PROACTIVE_MESSAGES_ENABLED|PUBLIC_BYOK_RETENTION_ENABLED)
+        case "$public_value" in
+          true|false) ;;
+          *) echo 'Public interface flags must be true or false.' >&2; return 1 ;;
+        esac
+        case "$public_key" in
+          PUBLIC_PROACTIVE_MESSAGES_ENABLED) public_proactive_messages_enabled="$public_value" ;;
+          PUBLIC_BYOK_RETENTION_ENABLED) public_byok_retention_enabled="$public_value" ;;
+        esac
+        ;;
     esac
   done < "$source_file"
 
   # The root release runner intentionally discards caller environment. A
-  # fixed, exact-SHA operator file enables only these three reviewed features
+  # fixed, exact-SHA operator file enables only these six reviewed features
   # in the inactive colour; shared public.env and old snapshots are untouched.
   # The resulting per-release env is self-contained, so later changes to this
   # input cannot change a running candidate or its rollback anchor.
@@ -975,7 +988,8 @@ build_candidate_public_env() {
             *) echo 'Candidate dialogue flags contain a malformed line.' >&2; return 1 ;;
           esac
           case "$public_override_key" in
-            PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2|PUBLIC_UI_SNOW_ADV) ;;
+            PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2|PUBLIC_UI_SNOW_ADV|\
+            PUBLIC_PROACTIVE_MESSAGES_ENABLED|PUBLIC_BYOK_RETENTION_ENABLED) ;;
             *) echo 'Candidate dialogue flags contain a disallowed key.' >&2; return 1 ;;
           esac
           case "$public_override_seen" in
@@ -992,6 +1006,8 @@ build_candidate_public_env() {
             PUBLIC_SCENE_ACTIONS_V2) public_scene_actions_v2="$public_override_value" ;;
             PUBLIC_SESSION_MEMORY_V2) public_session_memory_v2="$public_override_value" ;;
             PUBLIC_UI_SNOW_ADV) public_ui_snow_adv="$public_override_value" ;;
+            PUBLIC_PROACTIVE_MESSAGES_ENABLED) public_proactive_messages_enabled="$public_override_value" ;;
+            PUBLIC_BYOK_RETENTION_ENABLED) public_byok_retention_enabled="$public_override_value" ;;
           esac
         done < "$public_override_path"
         [ "$public_override_count" -gt 0 ] || {
@@ -1018,6 +1034,16 @@ build_candidate_public_env() {
       true|false) ;;
       *)
         echo 'Public presentation flags must be true or false.' >&2
+        return 1
+        ;;
+    esac
+  done
+  for public_interface_flag in \
+    "$public_ui_snow_adv" "$public_proactive_messages_enabled" "$public_byok_retention_enabled"; do
+    case "$public_interface_flag" in
+      true|false) ;;
+      *)
+        echo 'Public interface flags must be true or false.' >&2
         return 1
         ;;
     esac
@@ -1066,7 +1092,8 @@ build_candidate_public_env() {
       "$public_chat_latency_v2" "$public_verified_block_stream" "$public_motion_v2" || return 1
     printf 'PUBLIC_DIALOGUE_DOMAINS_V2=%s\nPUBLIC_SCENE_ACTIONS_V2=%s\nPUBLIC_SESSION_MEMORY_V2=%s\n' \
       "$public_dialogue_domains_v2" "$public_scene_actions_v2" "$public_session_memory_v2" || return 1
-    printf 'PUBLIC_UI_SNOW_ADV=%s\n' "$public_ui_snow_adv" || return 1
+    printf 'PUBLIC_UI_SNOW_ADV=%s\nPUBLIC_PROACTIVE_MESSAGES_ENABLED=%s\nPUBLIC_BYOK_RETENTION_ENABLED=%s\n' \
+      "$public_ui_snow_adv" "$public_proactive_messages_enabled" "$public_byok_retention_enabled" || return 1
     printf 'PUBLIC_APP_VERSION=%s\nPUBLIC_DATA_VERSION=%s\n' \
       "$candidate_app_version" "$candidate_data_version" || return 1
     printf 'PUBLIC_MEDIA_VERSION=%s\nPUBLIC_MEDIA_ROOT=%s\n' \
@@ -1080,8 +1107,8 @@ build_candidate_public_env() {
     printf '%s\n' \
       'PUBLIC_TURNSTILE_HOSTNAME=snow.xiaob.dev' \
       'PUBLIC_TURNSTILE_MAX_AGE_SECONDS=300' \
-      'PUBLIC_PRIVACY_POLICY_VERSION=0.9.2' \
-      'PUBLIC_PRIVACY_EFFECTIVE_AT=2026-08-20' \
+      'PUBLIC_PRIVACY_POLICY_VERSION=0.9.3' \
+      'PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-20' \
       'PUBLIC_ATTRIBUTION_URL=/public/v1/attributions' \
       'PUBLIC_MAX_PROVIDER_CALLS_PER_ACTION=2' \
       'PUBLIC_BYOK_LIFETIME_HOURS=12' || return 1

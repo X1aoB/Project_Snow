@@ -423,6 +423,7 @@ class PairRequest(StrictModel):
     accepted_transit_notice: bool
     accepted_cost_notice: bool
     accepted_local_history_notice: bool
+    retention: Literal["tab", "2h", "24h", "3d", "7d"] = "tab"
 
 
 class SubscriptionModel(StrictModel):
@@ -491,6 +492,8 @@ def install_subscription_routes(app: FastAPI, settings, broker: SubscriptionBrok
     @app.post("/public/v1/subscription/pair")
     async def pair(request: Request, payload: PairRequest):
         broker.require_enabled()
+        if payload.retention != "tab":
+            raise HTTPException(422, {"code": "credential_retention_unavailable"})
         if not all((payload.accepted_transit_notice, payload.accepted_cost_notice, payload.accepted_local_history_notice)):
             raise HTTPException(422, {"code": "byok_notices_required"})
         await async_store.call("consume_limits", request.state.subject_hash,

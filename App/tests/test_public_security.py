@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import base64
 import asyncio
+import json
+import secrets
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 from backend.snow_app.config import PublicSettings
 from backend.snow_app.public_security import (
+    BYOK_RETENTION_HOURS,
     PublicSecurityError,
     daily_ip_fingerprint,
     issue_byok_credential,
@@ -157,6 +162,13 @@ class PublicSecurityTests(TestCase):
                 api_key="sk-test-key",
                 lifetime=timedelta(hours=13),
             )
+        with self.assertRaisesRegex(PublicSecurityError, "lifetime is invalid"):
+            issue_byok_credential(
+                replace(settings, byok_lifetime_hours=13),
+                anonymous_id="anonymous-a",
+                provider="openai",
+                api_key="sk-test-key",
+            )
 
     def test_state_signature_rejects_tampering(self) -> None:
         settings = _settings()
@@ -164,6 +176,180 @@ class PublicSecurityTests(TestCase):
         self.assertEqual(verify_state(settings, token)["revision"], 3)
         with self.assertRaises(PublicSecurityError):
             verify_state(settings, token[:-1] + ("A" if token[-1] != "A" else "B"))
+
+    def test_retention_envelope_has_exact_v2_claims_and_revoke_cutoff(self) -> None:
+        settings = replace(_settings(), byok_retention_enabled=True)
+        token, expires_at = issue_byok_credential(
+            settings,
+            anonymous_id="anonymous-a",
+            provider="openai",
+            api_key="sk-test-key",
+            retention="3d",
+        )
+        claims = open_byok_credential(settings, anonymous_id="anonymous-a", token=token)
+        self.assertEqual(claims["v"], 2)
+        self.assertEqual(claims["ret"], "3d")
+        self.assertEqual(claims["exp"], claims["iat"] + 72 * 3600)
+        self.assertEqual(claims["exp"], int(expires_at.timestamp()))
+        with self.assertRaises(PublicSecurityError):
+            open_byok_credential(
+                settings,
+                anonymous_id="anonymous-a",
+                token=token,
+                revoked_before=datetime.now(UTC) + timedelta(seconds=1),
+            )
+
+    def test_revoke_cutoff_distinguishes_credentials_issued_within_one_second(self) -> None:
+        settings = _settings()
+        issued_at = datetime(2026, 10, 20, 12, 0, 0, 100000, tzinfo=UTC)
+        cutoff = issued_at + timedelta(microseconds=100000)
+        with patch("backend.snow_app.public_security.datetime") as clock:
+            clock.now.return_value = issued_at
+            before, _ = issue_byok_credential(
+                settings, anonymous_id="anonymous-a", provider="openai",
+                api_key="sk-test-key", retention="24h",
+            )
+            clock.now.return_value = cutoff + timedelta(microseconds=100000)
+            after, _ = issue_byok_credential(
+                settings, anonymous_id="anonymous-a", provider="openai",
+                api_key="sk-test-key", retention="24h",
+            )
+            with self.assertRaisesRegex(PublicSecurityError, "revoked"):
+                open_byok_credential(
+                    settings, anonymous_id="anonymous-a", token=before,
+                    revoked_before=cutoff,
+                )
+            self.assertEqual(
+                open_byok_credential(
+                    settings, anonymous_id="anonymous-a", token=after,
+                    revoked_before=cutoff,
+                )["ret"],
+                "24h",
+            )
+
+    def test_all_retention_terms_have_exact_claims_and_expire_at_the_term(self) -> None:
+        issued_at = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
+        for retention, hours in BYOK_RETENTION_HOURS.items():
+            with self.subTest(retention=retention), patch("backend.snow_app.public_security.datetime") as clock:
+                clock.now.return_value = issued_at
+                token, expires_at = issue_byok_credential(
+                    _settings(), anonymous_id="anonymous-a", provider="openai",
+                    api_key="sk-test-key", retention=retention,
+                )
+                claims = open_byok_credential(_settings(), anonymous_id="anonymous-a", token=token)
+                self.assertEqual(claims["exp"], int(expires_at.timestamp()))
+                if retention == "tab":
+                    self.assertEqual(claims["v"], 1)
+                    self.assertNotIn("iat", claims)
+                    self.assertNotIn("ret", claims)
+                else:
+                    self.assertEqual(claims["v"], 2)
+                    self.assertEqual(claims["ret"], retention)
+                    self.assertEqual(claims["exp"], claims["iat"] + hours * 3600)
+                clock.now.return_value = issued_at + timedelta(hours=hours, seconds=1)
+                with self.assertRaisesRegex(PublicSecurityError, "expired"):
+                    open_byok_credential(_settings(), anonymous_id="anonymous-a", token=token)
+
+    def test_v1_and_v2_aad_domains_reject_version_rollback(self) -> None:
+        settings = _settings()
+
+        def reseal(token: str, old_aad: bytes, new_aad: bytes) -> str:
+            raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
+            payload = AESGCM(settings.credential_key).decrypt(raw[:12], raw[12:], old_aad)
+            nonce = secrets.token_bytes(12)
+            sealed = AESGCM(settings.credential_key).encrypt(nonce, payload, new_aad)
+            return base64.urlsafe_b64encode(nonce + sealed).decode("ascii").rstrip("=")
+
+        v1, _ = issue_byok_credential(
+            settings, anonymous_id="anonymous-a", provider="openai", api_key="sk-test-key", retention="tab"
+        )
+        self.assertEqual(open_byok_credential(settings, anonymous_id="anonymous-a", token=v1)["v"], 1)
+        with self.assertRaises(PublicSecurityError):
+            open_byok_credential(
+                settings, anonymous_id="anonymous-a",
+                token=reseal(v1, b"project-snow-byok-v1", b"project-snow-byok-v2"),
+            )
+
+        v2, _ = issue_byok_credential(
+            settings, anonymous_id="anonymous-a", provider="openai", api_key="sk-test-key", retention="24h"
+        )
+        self.assertEqual(open_byok_credential(settings, anonymous_id="anonymous-a", token=v2)["v"], 2)
+        with self.assertRaises(PublicSecurityError):
+            open_byok_credential(
+                settings, anonymous_id="anonymous-a",
+                token=reseal(v2, b"project-snow-byok-v2", b"project-snow-byok-v1"),
+            )
+
+    def test_retention_envelope_rejects_non_whitelisted_duration(self) -> None:
+        settings = replace(_settings(), byok_retention_enabled=True)
+        short_tab = replace(settings, byok_lifetime_hours=2)
+        token, expires_at = issue_byok_credential(
+            short_tab,
+            anonymous_id="anonymous-a",
+            provider="openai",
+            api_key="sk-test-key",
+            retention="tab",
+        )
+        self.assertGreaterEqual(expires_at - datetime.now(UTC), timedelta(hours=1, minutes=59))
+        self.assertLessEqual(expires_at - datetime.now(UTC), timedelta(hours=2, seconds=1))
+        self.assertEqual(
+            open_byok_credential(short_tab, anonymous_id="anonymous-a", token=token)["v"],
+            1,
+        )
+        with self.assertRaises(PublicSecurityError):
+            issue_byok_credential(
+                settings,
+                anonymous_id="anonymous-a",
+                provider="openai",
+                api_key="sk-test-key",
+                retention="24h",
+                lifetime=timedelta(hours=23),
+            )
+
+    def test_v2_requires_valid_millisecond_issued_at_claim(self) -> None:
+        settings = _settings()
+        token, _ = issue_byok_credential(
+            settings,
+            anonymous_id="anonymous-a",
+            provider="openai",
+            api_key="sk-test-key",
+            retention="24h",
+        )
+
+        def reseal(mutator) -> str:
+            raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
+            payload = AESGCM(settings.credential_key).decrypt(
+                raw[:12], raw[12:], b"project-snow-byok-v2"
+            )
+            claims = json.loads(payload)
+            mutator(claims)
+            nonce = secrets.token_bytes(12)
+            sealed = AESGCM(settings.credential_key).encrypt(
+                nonce,
+                json.dumps(claims, separators=(",", ":")).encode(),
+                b"project-snow-byok-v2",
+            )
+            return base64.urlsafe_b64encode(nonce + sealed).decode("ascii").rstrip("=")
+
+        mutators = {
+            "missing": lambda claims: claims.pop("iat_ms"),
+            "type": lambda claims: claims.__setitem__("iat_ms", "not-an-int"),
+            "inconsistent": lambda claims: claims.__setitem__("iat_ms", claims["iat_ms"] + 1000),
+            "future": lambda claims: (
+                claims.__setitem__("iat", claims["iat"] + 31),
+                claims.__setitem__("iat_ms", claims["iat_ms"] + 31_000),
+                claims.__setitem__("exp", claims["exp"] + 31),
+            ),
+        }
+        for label, mutate in mutators.items():
+            with self.subTest(mutate=label), self.assertRaisesRegex(
+                PublicSecurityError, "issued time is invalid"
+            ):
+                open_byok_credential(
+                    settings,
+                    anonymous_id="anonymous-a",
+                    token=reseal(mutate),
+                )
 
     def test_ip_fingerprint_rotates_by_day(self) -> None:
         settings = _settings()

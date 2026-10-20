@@ -183,11 +183,12 @@ class PublicSettings:
     state_previous_key_id: str = ""
     turnstile_hostname: str = "snow.xiaob.dev"
     turnstile_max_age_seconds: int = 300
-    privacy_policy_version: str = "0.9.2"
-    privacy_effective_at: str = "2026-08-20"
+    privacy_policy_version: str = "0.9.3"
+    privacy_effective_at: str = "2026-10-20"
     attribution_url: str = "/public/v1/attributions"
     max_provider_calls_per_action: int = 2
     byok_lifetime_hours: int = 12
+    byok_retention_enabled: bool = False
     chat_latency_v2: bool = True
     verified_block_stream: bool = False
     motion_v2: bool = True
@@ -241,6 +242,7 @@ class PublicSettings:
             byok_lifetime_hours = int(os.getenv("PUBLIC_BYOK_LIFETIME_HOURS", "12"))
         except (TypeError, ValueError):
             byok_lifetime_hours = 12
+        byok_retention_enabled = os.getenv("PUBLIC_BYOK_RETENTION_ENABLED", "false") == "true"
         return cls(
             app_version=os.getenv("PUBLIC_APP_VERSION", "1.0.0"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
@@ -290,9 +292,9 @@ class PublicSettings:
             state_previous_key_id=os.getenv("PUBLIC_STATE_PREVIOUS_KEY_ID", "").strip(),
             turnstile_hostname=os.getenv("PUBLIC_TURNSTILE_HOSTNAME", "snow.xiaob.dev").strip(),
             turnstile_max_age_seconds=max(60, min(600, turnstile_max_age_seconds)),
-            privacy_policy_version=os.getenv("PUBLIC_PRIVACY_POLICY_VERSION", "0.9.2").strip(),
+            privacy_policy_version=os.getenv("PUBLIC_PRIVACY_POLICY_VERSION", "0.9.3").strip(),
             privacy_effective_at=os.getenv(
-                "PUBLIC_PRIVACY_EFFECTIVE_AT", "2026-08-20"
+                "PUBLIC_PRIVACY_EFFECTIVE_AT", "2026-10-20"
             ).strip(),
             attribution_url=os.getenv(
                 "PUBLIC_ATTRIBUTION_URL", "/public/v1/attributions"
@@ -302,6 +304,7 @@ class PublicSettings:
             # environment knob bounded so a deployment cannot silently turn
             # a tab-scoped convenience token into a long-lived credential.
             byok_lifetime_hours=max(1, min(12, byok_lifetime_hours)),
+            byok_retention_enabled=byok_retention_enabled,
             chat_latency_v2=os.getenv("PUBLIC_CHAT_LATENCY_V2", "true").casefold() == "true",
             verified_block_stream=os.getenv("PUBLIC_VERIFIED_BLOCK_STREAM", "false").casefold() == "true",
             motion_v2=os.getenv("PUBLIC_MOTION_V2", "true").casefold() == "true",
@@ -309,7 +312,9 @@ class PublicSettings:
             dialogue_domains_v2=os.getenv("PUBLIC_DIALOGUE_DOMAINS_V2", "false").casefold() == "true",
             scene_actions_v2=os.getenv("PUBLIC_SCENE_ACTIONS_V2", "false").casefold() == "true",
             session_memory_v2=os.getenv("PUBLIC_SESSION_MEMORY_V2", "false").casefold() == "true",
-            proactive_messages_enabled=os.getenv("PUBLIC_PROACTIVE_MESSAGES_ENABLED", "false").casefold() == "true",
+            # New release switches accept only the exact lowercase value
+            # written by deploy.sh.
+            proactive_messages_enabled=os.getenv("PUBLIC_PROACTIVE_MESSAGES_ENABLED", "false") == "true",
             ui_snow_adv=os.getenv("PUBLIC_UI_SNOW_ADV", "false").casefold() == "true",
         )
 
