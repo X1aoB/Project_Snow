@@ -53,12 +53,12 @@ def database():
         admin.dispose()
 
 
-def migrate(engine, revision="head"):
+def migrate(engine, revision="head", downgrade=False):
     config = Config(str(APP / "alembic.ini"))
     config.set_main_option("script_location", str(APP / "migrations"))
     with engine.begin() as connection:
         config.attributes["connection"] = connection
-        command.upgrade(config, revision)
+        (command.downgrade if downgrade else command.upgrade)(config, revision)
 
 
 def test_empty_database_upgrade_and_repeated_upgrade(database):
@@ -107,7 +107,7 @@ def test_credential_retention_migration_is_additive_and_old_new_old_safe(databas
         ).scalar_one() == 1
         assert legacy_store.request_result("before-retention", "subject")["answer"] == "legacy"
 
-    migrate(database, "20261019_0009")
+    migrate(database, "20261019_0009", downgrade=True)
     with database.connect() as connection:
         assert "public_credential_revocation" not in inspect(connection).get_table_names()
         assert legacy_store.request_result("before-retention", "subject")["answer"] == "legacy"
@@ -394,7 +394,7 @@ def test_failed_migration_rolls_back_ddl_and_revision_atomically(database, tmp_p
     (tmp_path / "failed_revision.py").write_text(
         "from alembic import op\n"
         "revision = 'synthetic_failure'\n"
-        "down_revision = '20261019_0009'\n"
+        "down_revision = '20261020_0010'\n"
         "branch_labels = None\n"
         "depends_on = None\n"
         "def upgrade():\n"
