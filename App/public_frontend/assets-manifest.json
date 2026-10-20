@@ -48,6 +48,65 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/modules/snow-reading-logic.js",
+      "public_url": "/modules/snow-reading-logic.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-reminder-logic.js",
+      "public_url": "/modules/snow-reminder-logic.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-feature-logic.js",
+      "public_url": "/modules/snow-feature-logic.js",
+      "dependencies": ["/modules/snow-reading-logic.js", "/modules/snow-reminder-logic.js"],
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-proactive-client.js",
+      "public_url": "/modules/snow-proactive-client.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-feature-runtime.js",
+      "public_url": "/modules/snow-feature-runtime.js",
+      "dependencies": ["/modules/snow-proactive-client.js"],
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-feature-icons.js",
+      "public_url": "/modules/snow-feature-icons.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-features.css",
+      "public_url": "/modules/snow-features.css",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-feature-card.js",
+      "public_url": "/modules/snow-feature-card.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-pager.js",
+      "public_url": "/modules/snow-pager.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-conversation-ui.js",
+      "public_url": "/modules/snow-conversation-ui.js",
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-features.js",
+      "public_url": "/modules/snow-features.js",
+      "dependencies": ["/modules/snow-feature-icons.js", "/modules/snow-features.css", "/modules/snow-feature-card.js",
+        "/modules/snow-pager.js", "/modules/snow-conversation-ui.js", "/modules/snow-reading-logic.js"],
+      "required_html": false
+    },
+    {
       "source": "public_frontend/app.js",
       "public_url": "/app.js",
       "dependencies": [
@@ -56,6 +115,9 @@
         "/modules/snow-icons.js",
         "/modules/snow-world.js",
         "/modules/snow-base-map.js",
+        "/modules/snow-feature-logic.js",
+        "/modules/snow-feature-runtime.js",
+        "/modules/snow-features.js",
         "/snow-adv-fonts.css",
         "/assets/avatars/longyan-neutral-96.webp",
         "/assets/avatars/longyan-neutral-200.webp"

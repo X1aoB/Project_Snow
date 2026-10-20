@@ -32,6 +32,7 @@ from .generation_stream import GenerationObserver, observe_generation
 from .model_capabilities import immersive_model_policy, public_model_profiles
 from .public_logging import configure_public_logger
 from .public_statistics import install_statistics_config
+from .proactive_message import authority_change, install_proactive_routes, proactive_config
 from .mvp_service import MVPProviderError, _normalize_expression_state, _normalize_stage_motion
 from .public_contracts import (
     ByokSessionRequest,
@@ -743,10 +744,13 @@ def create_app(
             task.add_done_callback(forget_lease)
         return result
 
-    async def complete_owned_request(request_id: str, result: dict[str, Any]) -> None:
+    async def complete_owned_request(request_id: str, result: dict[str, Any], *, rendezvous_change=None) -> None:
         task = asyncio.current_task()
         try:
-            await async_store.call("complete_request", request_id, result)
+            if rendezvous_change:
+                await async_store.call("complete_request", request_id, result, rendezvous_change=rendezvous_change)
+            else:
+                await async_store.call("complete_request", request_id, result)
         finally:
             # A failed/canceled write has an uncertain outcome. Do not keep its
             # lease alive after the task stops; recovery will fence it safely.
@@ -1056,6 +1060,7 @@ def create_app(
             "model_profiles": public_model_profiles(),
             "subscription": {"enabled": subscription_broker.enabled, "model": SUBSCRIPTION_MODEL,
                              "effort": SUBSCRIPTION_EFFORT, "protocol_version": SUBSCRIPTION_PROTOCOL_VERSION},
+            "proactive_messages": proactive_config(public_settings),
             "turnstile_site_key": public_settings.turnstile_site_key,
             "limits": {
                 "input_characters": 2000,
@@ -1285,7 +1290,8 @@ def create_app(
             if claim_status == "completed" and cached is not None:
                 return {**cached, "idempotent_replay": True}
             result = chat_service.transition_presence(payload, subject)
-            await complete_owned_request(cache_id, result)
+            change = authority_change(public_settings, subject, result, payload.state_package, payload.character_id)
+            await complete_owned_request(cache_id, result, rendezvous_change=change)
             return result
         except PublicSecurityError:
             if request_claimed:
@@ -1374,7 +1380,8 @@ def create_app(
                         # The gate rejects before starting the provider thread.
                         generation_started = False
                         raise
-            await complete_owned_request(cache_id, result)
+            change = authority_change(public_settings, subject, result, payload.state_package, payload.character_id)
+            await complete_owned_request(cache_id, result, rendezvous_change=change)
             return result
         except (Exception, asyncio.CancelledError) as exc:
             if request_claimed:
@@ -1411,6 +1418,10 @@ def create_app(
         if value not in {None, "1"}:
             raise _error("invalid_request", 422, retryable=False)
         return value == "1"
+
+    install_proactive_routes(app, public_settings, async_store, chat_service, get_dialogue_v2_service,
+        provider_http, subscription_broker, acquire_subject_generation, release_subject_generation,
+        active_request_leases)
 
     @app.post("/public/v2/presence/arrival")
     async def presence_arrival_v2(request: Request, payload: PresenceArrivalV2Request):
@@ -1550,7 +1561,8 @@ def create_app(
                 return {**cached, "idempotent_replay": True}
             result = await asyncio.to_thread(get_dialogue_v2_service().scene_action, envelope, subject)
             _dialogue_v2_metadata(result)
-            await complete_owned_request(cache_id, result)
+            change = authority_change(public_settings, subject, result, envelope.state_package, envelope.character_id)
+            await complete_owned_request(cache_id, result, rendezvous_change=change)
             return result
         except PublicSecurityError as exc:
             if request_claimed:
@@ -1591,9 +1603,12 @@ def create_app(
                 raise _error("invalid_dialogue_context", 422, retryable=False) from exc
 
         async def generate(subject, spec, api_key, *, gate_reserved=False):
-            return await get_dialogue_v2_service().chat(
+            result = await get_dialogue_v2_service().chat(
                 envelope, subject, spec, api_key, gate_reserved=gate_reserved,
             )
+            result["_proactive_authority_change"] = authority_change(public_settings, subject,
+                result, envelope.chat.state_package, envelope.chat.character_id)
+            return result
 
         return await chat_stream_impl(
             request, envelope.chat, business_body=_dialogue_v2_request_body(envelope),
@@ -1846,7 +1861,11 @@ def create_app(
                 if journal is not None:
                     journal.phase("saving", int((durable_started - started_at) * 1000))
                 try:
-                    await complete_owned_request(request_id, generated)
+                    change = generated.pop("_proactive_authority_change", None)
+                    if not dialogue_v2:
+                        change = authority_change(public_settings, subject, generated,
+                            payload.state_package, payload.character_id)
+                    await complete_owned_request(request_id, generated, rendezvous_change=change)
                 except PublicStoreUnavailable as exc:
                     exception_type = type(exc).__name__
                     terminal_stage = "idempotency_store"

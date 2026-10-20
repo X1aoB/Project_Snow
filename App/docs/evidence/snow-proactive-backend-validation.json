@@ -1,0 +1,167 @@
+{
+  "schema": "project-snow-proactive-backend-validation-1",
+  "recorded_at": "2026-10-19T13:49:18.200007+00:00",
+  "technical_qa_only": true,
+  "human_release_approval": false,
+  "real_paid_model_calls": 0,
+  "synthetic_fixtures_only": true,
+  "no_deployment_performed": true,
+  "schema_revision": "20261019_0009",
+  "postgres": {
+    "version": "17.11",
+    "isolated_new_data_directory": true,
+    "loopback_only": true,
+    "existing_data_untouched": true,
+    "own_instance_stopped": true,
+    "logs_directory": ".tmp/proactive-postgres-f06ef0593e6f40459ec46b75992e1944",
+    "actual_old_app_ref": "95005fe2efade3e9c3b916e8c47c73fced5b19e0",
+    "baseline_old_app_ref": "502ec99412bef843c37e4b31a53df8fa9faeb33c"
+  },
+  "runs": [
+    {
+      "group": "backend-service-store-arrival",
+      "pytest_passed": 83,
+      "subtests_passed": 127,
+      "duration_seconds": 6.68,
+      "xml": ".tmp/proactive-backend-results.xml",
+      "junit_metrics": {
+        "tests": 210,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time": 6.683
+      }
+    },
+    {
+      "group": "public-api-security-providers-subscription-migration-secret",
+      "pytest_passed": 101,
+      "subtests_passed": 39,
+      "duration_seconds": 18.81,
+      "xml": ".tmp/proactive-public-regression-results.xml",
+      "junit_metrics": {
+        "tests": 140,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time": 18.811
+      }
+    },
+    {
+      "group": "real-postgres-proactive-existing-contracts-arrival-dialogue",
+      "pytest_passed": 52,
+      "duration_seconds": 18.13,
+      "xml": ".tmp/proactive-postgres-results.xml",
+      "junit_metrics": {
+        "tests": 52,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time": 18.126
+      }
+    },
+    {
+      "group": "context-revision-and-unknown-usage-service-regression",
+      "pytest_passed": 26,
+      "subtests_passed": 6,
+      "xml": ".tmp/proactive-context-usage-regression-results.xml",
+      "junit_metrics": {
+        "tests": 32,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time": 5.35
+      },
+      "duration_seconds": 5.35
+    },
+    {
+      "group": "real-postgres-context-revision-and-unknown-usage-targeted-regression",
+      "pytest_passed": 6,
+      "xml": ".tmp/proactive-context-usage-postgres-results.xml",
+      "junit_metrics": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time": 3.749
+      },
+      "duration_seconds": 3.749
+    },
+    {
+      "group": "dialogue-v2-protocol-fixture-plus-proactive-regression",
+      "pytest_passed": 52,
+      "subtests_passed": 12,
+      "xml": ".tmp/proactive-protocol-fixture-regression.xml",
+      "junit_metrics": {
+        "tests": 64,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time": 7.196
+      },
+      "duration_seconds": 7.196
+    },
+    {
+      "group": "exact-ci-api-tier-after-synthetic-world-fixture-correction",
+      "pytest_passed": 333,
+      "subtests_passed": 447,
+      "pytest_skipped": 3,
+      "xml": ".tmp/proactive-ci-api-fixture-regression.xml",
+      "junit_metrics": {
+        "tests": 783,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 3,
+        "time": 76.132
+      },
+      "duration_seconds": 76.132
+    }
+  ],
+  "postgres_contracts_verified": [
+    "actual old code write on 0008, additive 0009 upgrade, new code paid-attempt completion, actual old code write and cleanup",
+    "public_request_cache columns unchanged",
+    "old cleanup cannot remove proactive day/attempt ledger",
+    "eight concurrent independent character rendezvous admit exactly three",
+    "eight request IDs for one rendezvous admit exactly one",
+    "closed authority cannot reopen",
+    "paid handler contracts rerun against actual PostgreSQL"
+  ],
+  "sha256": {
+    "App/backend/snow_app/async_store.py": "3d9f3ac6989f17b8e1a329324958e97465e2827841caa09cbab2e86f298a54f4",
+    "App/backend/snow_app/config.py": "01e4aeb3db3952f2a9e47ad91d7970459eb9bbcb392dc939ee09fa9aab626558",
+    "App/backend/snow_app/public_contracts.py": "551de506a0e5100288d1b7da24524f516b564bd3ff299c074616f40bdea4c1b5",
+    "App/backend/snow_app/public_main.py": "85051b5cb281631ecf7ad1b14e1a0b995d5c50129d06ce92a529c0b10dff2c5d",
+    "App/backend/snow_app/public_store.py": "18ef21cba1cffd23aada4857b738f9c6ff9ebbeaf5ff098cda2d2e7dd4cd31ce",
+    "App/backend/snow_app/proactive_message.py": "422f4e68dc809fec93e052cc4fe9e2db5930d0bd2c6180957efec13bb7e5ba63",
+    "App/backend/snow_app/proactive_store.py": "f987b03d58de93f43ebe139442ddc39a11b6bc0896b1b8752484b1621ad24fb8",
+    "App/migrations/versions/20261019_0009_proactive_messages.py": "487ae7b8e4cfbaf40e65381ff0729310049fdb4385155c4a3c3bc568a1419363",
+    "App/tests/test_proactive_message.py": "ad837d8ca6347560c802436b37a3c457f21485eebf3100a6c507067e03c82fff",
+    "App/tests/test_proactive_message_postgres.py": "221da3a97021e235b8724feba5b66d1a82c3578d02928dbf3e0cef026086600a",
+    "App/tests/test_postgres_integration.py": "0363f8a2f17d11e6f4925e108a726e1061728459c6604739108e6a03e5c7acdc",
+    "App/docs/snow-proactive-message-proposal.md": "695fe0af693efeb5d3a7f374f90949b0eb81a52ca64a9248ad497088ea231bdc",
+    "App/tests/test_dialogue_v2_protocol.py": "e94e131c175038908f5b812691ba7a460283b04e1b19c400671f1a950fc73dbe"
+  },
+  "regression_scope": {
+    "historical_runs_retained": true,
+    "schema_sql_unchanged_for_final_revision_fix": true,
+    "final_changes": [
+      "accept older per-character context with a newer signed global world only when the full pending rendezvous still matches; reject future context revision",
+      "retain closed authority rejection for cancelled rendezvous after other-character world advancement",
+      "unknown lost-result/lost-worker provider_calls and model_called remain null, never fabricate a paid call"
+    ],
+    "setup_failure_report": ".tmp/proactive-context-usage-postgres-setup-failure.xml",
+    "setup_failure_explanation": "Initial targeted PostgreSQL run used a nonexistent local role; all six cases stopped at connection setup. Corrected to the role initialized for this isolated test instance and all six passed."
+  },
+  "protocol_fixture_correction": {
+    "production_code_changed": false,
+    "cause": "Synthetic DialogueV2RouteTests service signed only a revision field and omitted subject_binding; the newly added authority projection correctly rejected this incomplete generated world.",
+    "correction": "Generate complete StatePayload public-state-2 fixtures with the actual anonymous subject, Hong Kong schedule date and expiry. Keep production authority checks unchanged.",
+    "negative_contracts": [
+      "foreign-subject chat result cannot publish reply or sidecar or create rendezvous authority",
+      "foreign-subject scene result cannot commit a result or create rendezvous authority"
+    ],
+    "initial_local_failure_report": ".tmp/proactive-protocol-initial-failure.xml",
+    "initial_local_failure_count": 4,
+    "ci_api_command_matches_workflow": true,
+    "local_api_skips": "Three PostgreSQL-only acceptance tests are skipped in the API tier without TEST_POSTGRES_URL; PostgreSQL contracts run separately in CI."
+  }
+}

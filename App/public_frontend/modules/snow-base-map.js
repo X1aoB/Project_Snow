@@ -171,7 +171,8 @@ function avatarInto(holder, character) {
   holder.append(image);
 }
 
-export async function installBaseMap({ snapshot, visit, icon, sceneKey }) {
+// avatarOf resolves the same picture the communicator shows (including approved overrides).
+export async function installBaseMap({ snapshot, visit, icon, sceneKey, avatarOf = character => character?.avatar }) {
   if (document.documentElement.dataset.ui !== "snow-adv") return null;
   if (typeof snapshot !== "function" || typeof visit !== "function" || typeof icon !== "function" || typeof sceneKey !== "function") {
     throw new TypeError("base_map_callbacks_required");
@@ -422,7 +423,7 @@ export async function installBaseMap({ snapshot, visit, icon, sceneKey }) {
         const location = text(item.location, 120), activity = text(item.activity, 240);
         const placeText = location ? `${current ? "位置" : "上次位置"}：${location}` : "位置尚未建立";
         const activityText = activity ? `${current ? "活动" : "上次活动"}：${activity}` : "活动尚未建立";
-        return [{ id, name: text(character?.display_name, 80) || "未命名角色", avatar: object(character?.avatar),
+        return [{ id, name: text(character?.display_name, 80) || "未命名角色", avatar: object(avatarOf(character)),
           location, activity, placeText, activityText, detail: `${placeText}；${activityText}`,
           zone: zoneFor(location, sceneKey), presence: location ? (current ? "known" : "stale") : "missing" }];
       });

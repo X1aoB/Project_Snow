@@ -1020,6 +1020,9 @@ class SnowAdvVeilProductionTests(TestCase):
                 self.assertEqual(self.page.evaluate("window.__firstReplyPaintVisibility"),
                                  {"visibility": "visible", "pushing": False, "veilPhase": "idle"})
                 self.page.wait_for_function("window.__projectSnowPerformance.getSamples()[0].send_to_first_effective_ms > 0")
+                # Once the lazily loaded pager owns the stage line, "first effective" is the first glyph it paints
+                # (reading.owns in recordReplyPaint) and the rest is revealed after it; read the line once it is complete.
+                self.page.wait_for_function("() => !document.getElementById('stage-speech').classList.contains('is-revealing')")
                 self.assertIn("合成的有效回复。", self.page.locator("#stage-speech").inner_text())
                 self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().worldScene"), expected_scene)
                 self.page.wait_for_timeout(1700)

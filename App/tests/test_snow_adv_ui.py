@@ -578,9 +578,11 @@ class SnowAdvStageTests(TestCase):
         page = self._page(1280, 820)
         self._open(page, True)
         self._reach_in_person(page)
+        # 按需加载的分页器会把「自动」放到最前；等它装好再读，结果不受加载时机影响。
+        page.locator('#stage-quick-menu [data-stage-quick="auto"]').wait_for(state="attached")
         names = page.evaluate("""() => [...document.querySelectorAll('#stage-quick-menu button')]
           .map(button => button.getAttribute('aria-label'))""")
-        self.assertEqual(names, ["跳过", "回看", "隐藏", "设置"])
+        self.assertEqual(names, ["自动", "跳过", "回看", "隐藏", "设置"])
         # 回看 opens the transcript drawer, reusing the existing handler.
         page.locator('#stage-quick-menu [data-stage-quick="backlog"]').click()
         page.locator("#transcript-panel.open").wait_for()
@@ -668,6 +670,7 @@ class SnowAdvStageTests(TestCase):
         page = self._page(390, 844)
         self._open(page, True)
         self._reach_in_person(page)
+        page.locator('#stage-quick-menu [data-stage-quick="auto"]').wait_for(state="attached")
         state = page.evaluate("""() => {
           const buttons = [...document.querySelectorAll('#stage-quick-menu button')];
           const input = document.getElementById('message-input').getBoundingClientRect();
@@ -685,7 +688,7 @@ class SnowAdvStageTests(TestCase):
             smallest,
           };
         }""")
-        self.assertEqual(state["names"], ["跳过", "回看", "隐藏", "设置"])
+        self.assertEqual(state["names"], ["自动", "跳过", "回看", "隐藏", "设置"])
         self.assertTrue(state["labelsHidden"])
         self.assertFalse(state["overlapsInput"])
         self.assertGreaterEqual(state["smallest"], 12)
@@ -2112,6 +2115,31 @@ class SnowAdvP8VisualTests(TestCase):
         self._choose_tone(page, "light")
         self._choose_tone(page, "dark")
         self.assertEqual(self._tone(page)["tone"], "dark", "深色档不看时段")
+        self.assertEqual(self.errors, [])
+
+    def test_stage_menu_items_stay_readable_in_every_tone(self):
+        # app.css 把菜单项文字写死为 #416277；深色和暮色把弹层底改深后，文字必须随色调变浅。
+        contrast = """items => items.map(node => {
+          const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
+          const paint=canvas.getContext('2d',{willReadFrequently:true});
+          const rgba=c=>{paint.clearRect(0,0,1,1);paint.fillStyle=c;paint.fillRect(0,0,1,1);const a=[...paint.getImageData(0,0,1,1).data];return [a[0],a[1],a[2],a[3]/255];};
+          const over=(f,b)=>[0,1,2].map(i=>f[i]*f[3]+b[i]*(1-f[3])).concat(1);
+          const layers=[];for(let n=node;n;n=n.parentElement){const c=rgba(getComputedStyle(n).backgroundColor);if(c[3]>0)layers.push(c);if(c[3]>=0.999)break;}
+          let bg=[255,255,255,1];for(const c of layers.reverse())bg=over(c,bg);
+          const fg=over(rgba(getComputedStyle(node).color),bg);
+          const lum=c=>{const v=c.slice(0,3).map(x=>{x/=255;return x<=0.03928?x/12.92:((x+0.055)/1.055)**2.4;});return 0.2126*v[0]+0.7152*v[1]+0.0722*v[2];};
+          const [a,b]=[lum(fg),lum(bg)].sort((x,y)=>y-x);return (a+0.05)/(b+0.05);})"""
+        for time, tone in (("day", "light"), ("dusk", "auto"), ("night", "dark")):
+            with self.subTest(time=time, tone=tone):
+                page = self._page(1280, 820)
+                self._open(page, True, init_script=self._stage_time(time, tone=tone))
+                self._reach_in_person(page)
+                page.locator("#stage-menu > summary").click()
+                page.locator(".scene-menu-popover").wait_for(state="visible")
+                ratios = page.locator(".scene-menu-popover").evaluate(
+                    f"menu => ({contrast})([...menu.querySelectorAll('button:not(:disabled), a')].filter(n => n.getClientRects().length))")
+                self.assertTrue(ratios and min(ratios) >= 4.5, ratios)
+                page.close()
         self.assertEqual(self.errors, [])
 
     def test_tone_setting_is_hidden_without_the_skin(self):

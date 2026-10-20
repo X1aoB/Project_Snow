@@ -183,9 +183,21 @@ async function pruneHistoryDatabase(db, cutoff) {
   await done;
   return counts;
 }
-async function mergeHistoryDatabase(db, backup, normalizeMessage) {
+async function mergeHistoryDatabase(db, backup, normalizeMessage, options = {}) {
   const tx = db.transaction(["threads", "messages", "app_state"], "readwrite");
   const done = transactionDone(tx);
+  let mergeError;
+  const merge = (callback, current, incoming) => {
+    try {
+      const result = callback(structuredClone(current), structuredClone(incoming));
+      if (!result || typeof result !== "object" || Array.isArray(result) || typeof result.then === "function") throw new Error("backup_merge_invalid");
+      return result;
+    } catch (error) {
+      mergeError = error;
+      tx.abort();
+      return null;
+    }
+  };
   try {
     const threads = tx.objectStore("threads");
     const messages = tx.objectStore("messages");
@@ -206,13 +218,20 @@ async function mergeHistoryDatabase(db, backup, normalizeMessage) {
       const existing = messages.get(String(message.id));
       existing.onsuccess = () => {
         if (!existing.result) messages.put(message);
+        else if (options.mergeMessage) {
+          const merged = merge(options.mergeMessage, existing.result, message);
+          if (merged) messages.put({ ...merged, id: existing.result.id });
+        }
       };
     }
     for (const entry of backup.appState) {
       const existing = appState.get(String(entry.key));
       existing.onsuccess = () => {
         if (entry.key === "drafts") appState.put({ key: "drafts", values: { ...entry.values || {}, ...existing.result?.values || {} } });
-        else if (!existing.result) appState.put(entry);
+        else if (entry.key === "ui_preferences" && existing.result && options.mergeUiPreferences) {
+          const merged = merge(options.mergeUiPreferences, existing.result, entry);
+          if (merged) appState.put({ ...merged, key: "ui_preferences" });
+        } else if (!existing.result) appState.put(entry);
       };
     }
   } catch (error) {
@@ -220,7 +239,11 @@ async function mergeHistoryDatabase(db, backup, normalizeMessage) {
     await done.catch(() => void 0);
     throw error;
   }
-  await done;
+  try {
+    await done;
+  } catch (error) {
+    throw mergeError ?? error;
+  }
 }
 async function clearHistoryDatabase(db, writerLease) {
   const tx = db.transaction(["threads", "messages", "app_state"], "readwrite");

@@ -15,6 +15,8 @@ from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.pool import StaticPool
 
+from .proactive_store import PROACTIVE_SCHEMA_SQL, ProactiveStoreMixin
+
 
 class PublicStoreUnavailable(RuntimeError):
     pass
@@ -193,7 +195,7 @@ PUBLIC_FEEDBACK_TRIAGE_STATUSES = {
 }
 
 
-class PublicStore:
+class PublicStore(ProactiveStoreMixin):
     def __init__(self, database_url: str, *, engine: Engine | None = None):
         self.database_url = database_url
         if engine is not None:
@@ -237,7 +239,7 @@ class PublicStore:
         with self.begin() as connection:
             for statement in (
                 SCHEMA_SQL + OUTBOX_SCHEMA_SQL + LEASE_SCHEMA_SQL
-                + FEEDBACK_TRIAGE_SCHEMA_SQL + REQUEST_BLOCKS_SCHEMA_SQL
+                + FEEDBACK_TRIAGE_SCHEMA_SQL + REQUEST_BLOCKS_SCHEMA_SQL + PROACTIVE_SCHEMA_SQL
             ).split(";"):
                 if statement.strip():
                     connection.execute(text(statement))
@@ -255,6 +257,7 @@ class PublicStore:
                 connection.execute(text("SELECT request_id FROM public_request_leases LIMIT 0"))
                 connection.execute(text("SELECT request_id FROM public_request_blocks LIMIT 0"))
                 connection.execute(text("SELECT event_id FROM public_feedback_triage LIMIT 0"))
+                connection.execute(text("SELECT request_id FROM public_proactive_attempt LIMIT 0"))
                 return True
         except PublicStoreUnavailable:
             return False
@@ -566,7 +569,8 @@ class PublicStore:
         ]
 
     def complete_request(
-        self, request_id: str, response: dict[str, Any], *, owner_token: str | None = None
+        self, request_id: str, response: dict[str, Any], *, owner_token: str | None = None,
+        rendezvous_change: dict[str, Any] | None = None,
     ) -> None:
         with self.begin() as connection:
             self._recover_expired(connection, _utcnow())
@@ -608,6 +612,7 @@ class PublicStore:
             )
             if result.rowcount != 1:
                 raise PublicStoreUnavailable("request ownership was lost before completion")
+            self._record_rendezvous(connection, rendezvous_change)
             connection.execute(
                 text("DELETE FROM public_request_leases WHERE request_id = :request_id"),
                 {"request_id": request_id},
@@ -1231,6 +1236,9 @@ class PublicStore:
                 ("public_verification", "expires_at"),
                 ("public_feedback_dedupe", "expires_at"),
                 ("public_feedback_email_outbox", "expires_at"),
+                ("public_proactive_attempt", "expires_at"),
+                ("public_proactive_day", "expires_at"),
+                ("public_rendezvous_authority", "expires_at"),
             ):
                 result = connection.execute(text(f"DELETE FROM {table} WHERE {column} <= :now"), {"now": now})
                 deleted[table] = max(0, int(result.rowcount or 0))
