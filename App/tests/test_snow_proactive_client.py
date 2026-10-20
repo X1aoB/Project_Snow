@@ -388,7 +388,8 @@ class SnowProactiveClientTests(TestCase):
         self.assertNotEqual(result["beforeSession"], result["afterSession"])
         self.assertFalse(result["changed"]["enabled"])
         self.assertFalse(result["restored"]["enabled"])
-        self.assertEqual(result["restored"]["model_session_id"], result["afterSession"])
+        # refresh() returns preferences only; the restored client must reuse the rotated session, not rotate again.
+        self.assertEqual(result["persisted"]["model_session_id"], result["afterSession"])
         self.assertIsNone(result["persisted"]["consent"])
         self.assertIn("clear", result["ops"])
 
