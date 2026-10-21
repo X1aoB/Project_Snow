@@ -7,6 +7,7 @@ provider or runtime database is involved.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -1675,6 +1676,74 @@ class SnowAdvOpeningTests(TestCase):
         self.assertEqual(self.errors, [])
         self.assertEqual(self._failed_skin_requests(), [])
 
+    def test_phone_lock_clock_follows_the_minute_and_stops_after_unlock(self):
+        # 锁屏时钟原先只在建锁屏时写一次；现在每到整分刷新时间、日期和时段，解锁时清掉计时。
+        hk = timezone(timedelta(hours=8))
+        page = self.browser.new_page(viewport={"width": 390, "height": 844}, timezone_id="Asia/Hong_Kong")
+        page.clock.install(time=datetime(2026, 10, 22, 16, 58, 30, tzinfo=hk))
+        page.add_init_script(PIN_LIGHT_TONE)
+        # 只记录锁屏时钟自己的计时（按回调函数名），用来确认解锁后没有残留的续订；要在假时钟之后包装。
+        page.add_init_script("""(() => { const pending = new Set(), set = window.setTimeout, clear = window.clearTimeout;
+          window.setTimeout = function (fn, ...rest) { let id; const tracked = typeof fn === 'function' && fn.name === 'snowTickLock';
+            id = set.call(this, tracked ? function () { pending.delete(id); return fn.apply(this, arguments); } : fn, ...rest);
+            if (tracked) pending.add(id); return id; };
+          window.clearTimeout = function (id) { pending.delete(id); return clear.call(this, id); };
+          window.__snowLockTimers = () => pending.size; })();""")
+        page.on("pageerror", lambda error: self.errors.append(str(error)))
+        page.set_default_timeout(8000)
+        self._open(page, True)
+        page.locator("#snow-lock").wait_for(state="visible")
+        read = lambda: page.evaluate("""() => [document.getElementById('snow-lock-time').textContent,
+          document.querySelector('.snow-lock-tod').textContent, document.getElementById('snow-lock-date').textContent]""")  # noqa: E731
+        start = read()
+        self.assertEqual(start[:2], ["16:58", "白天"])
+        self.assertIn("10 月 22 日", start[2])
+        page.clock.fast_forward("00:31")
+        self.assertEqual(read()[0], "16:59")
+        page.clock.fast_forward("01:00")
+        self.assertEqual(read()[:2], ["17:00", "黄昏"])
+        self.assertEqual(page.evaluate("window.__snowLockTimers()"), 1)
+        page.locator("#snow-lock").click(position={"x": 10, "y": 10})
+        page.locator("#snow-lock").wait_for(state="detached")
+        self.assertEqual(page.evaluate("window.__snowLockTimers()"), 0)
+        page.clock.fast_forward("02:00")
+        self.assertEqual(self.errors, [])
+
+    def test_phone_lock_reminder_card_shows_the_agreed_time(self):
+        # 约定提醒卡显示约好的提醒时间（香港时间），而不是锁屏出现时的当前时间；功能模块晚于锁屏装好时也要补上这张卡。
+        hk = timezone(timedelta(hours=8))
+        now = datetime.now(hk)
+        if now.hour == 0 and now.minute < 3:
+            self.skipTest("too close to Hong Kong midnight for a same-day reminder")
+        remind = max(now - timedelta(minutes=37), now.replace(hour=0, minute=0, second=0, microsecond=0))
+        context = self.browser.new_context(viewport={"width": 390, "height": 844}, timezone_id="Asia/Hong_Kong")
+        context.add_init_script(PIN_LIGHT_TONE)
+        first = context.new_page()
+        first.on("pageerror", lambda error: self.errors.append(str(error)))
+        self._open(first, True)
+        self._dismiss_opening(first)
+        reminder = {"id": "plan:ca0144ccd81b:synthetic-request", "characterId": "ca0144ccd81b", "rendezvousId": None,
+                    "pendingRequestId": "synthetic-request", "locationId": "observation", "locationName": "观景区",
+                    "remindAt": remind.isoformat(), "dayKey": remind.strftime("%Y-%m-%d"), "status": "fired",
+                    "createdAt": int(remind.timestamp() * 1000)}
+        first.evaluate("""reminder => new Promise((resolve, reject) => { const open = indexedDB.open('project-snow-public');
+          open.onsuccess = () => { const store = open.result.transaction('app_state', 'readwrite').objectStore('app_state');
+            const read = store.get('ui_preferences');
+            read.onsuccess = () => { const write = store.put({ ...(read.result || {}), key: 'ui_preferences', rendezvousReminders: [reminder] });
+              write.onsuccess = resolve; write.onerror = reject; }; }; })""", reminder)
+        first.close()
+        page = context.new_page()
+        page.on("pageerror", lambda error: self.errors.append(str(error)))
+        page.set_default_timeout(8000)
+        self._open(page, True)
+        card = page.locator('#snow-lock .snow-note-card[data-snow-note="reminder"]')
+        card.wait_for(state="visible")
+        self.assertEqual(card.locator("strong").inner_text(), "约定提醒 · 观景区")
+        self.assertEqual(card.locator("time").inner_text(), remind.strftime("%H:%M"))
+        self.assertNotEqual(card.locator("time").inner_text(), page.locator("#snow-lock-time").inner_text())
+        self.assertEqual(self.errors, [])
+        context.close()
+
     def test_phone_unlock_by_click_and_by_keyboard(self):
         # 点击解锁。
         page = self._page(390, 844)
@@ -2142,6 +2211,61 @@ class SnowAdvP8VisualTests(TestCase):
                 ratios = page.locator(".scene-menu-popover").evaluate(
                     f"menu => ({contrast})([...menu.querySelectorAll('button:not(:disabled), a')].filter(n => n.getClientRects().length))")
                 self.assertTrue(ratios and min(ratios) >= 4.5, ratios)
+                page.close()
+        self.assertEqual(self.errors, [])
+
+    def test_phone_stage_round_buttons_keep_icon_contrast_in_every_tone(self):
+        # 录制截图里手机雪白下这些圆形按钮发灰，是在夜→昼切换的背景色过渡（约 100–140ms）中途截的图；
+        # 这里锁住稳定后的样子：图标与实际画出来的按钮底对比度 >= 3:1，雪白下按钮底接近白色、与桌面一致。
+        import numpy as np
+        from PIL import Image
+
+        targets_js = """() => [...document.querySelectorAll(`.scene-hud-actions :is(summary, button:not(.primary)) svg.snow-icon,
+            .stage-quick-menu button:not(:disabled) svg.snow-icon, .composer-tool-button svg.snow-icon`)]
+          .filter(node => node.getClientRects().length).map(node => { const r = node.getBoundingClientRect();
+            const button = node.closest('button, summary');
+            return { name: button.id || button.dataset.stageQuick || button.className, color: getComputedStyle(node).color,
+              rect: [Math.floor(r.left), Math.floor(r.top), Math.ceil(r.right), Math.ceil(r.bottom)] }; })"""
+
+        def luminance(rgb):
+            v = [c / 255 for c in rgb]
+            v = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in v]
+            return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]
+
+        for time, tone in (("day", "light"), ("dusk", "auto"), ("night", "dark")):
+            with self.subTest(time=time, tone=tone):
+                page = self._page(390, 844)
+                self._open(page, True, init_script=self._stage_time(time, tone=tone))
+                self._dismiss_opening(page)
+                self._dismiss_notice(page)
+                if page.locator("#contact-panel").get_attribute("aria-hidden") == "true":
+                    page.locator("#open-contacts").click()
+                fixture.PublicFrontendE2ETests._configure_model(page)
+                if page.locator("#skip-onboarding").is_visible():
+                    page.locator("#skip-onboarding").click()
+                if page.locator("#contact-panel.open").count():
+                    page.locator("#close-contacts").click()
+                page.evaluate("() => document.getElementById('go-in-person').click()")
+                page.locator("#confirm-presence-transition").click()
+                page.locator("#in-person-surface:not([hidden])").wait_for()
+                page.locator("#presence-arrival-loading").wait_for(state="hidden", timeout=7000)
+                page.locator("#toast").wait_for(state="hidden")
+                SnowAdvDaylightContrastTests._wait_for_contrast_paint(page)
+                targets = page.evaluate(targets_js)
+                self.assertGreaterEqual(len(targets), 7, targets)
+                page.add_style_tag(content="svg.snow-icon { visibility: hidden !important; }")
+                page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+                behind = np.asarray(Image.open(_BytesIO(page.screenshot(animations="disabled"))).convert("RGB"), dtype=float)
+                results = []
+                for target in targets:
+                    left, top, right, bottom = target["rect"]
+                    background = np.median(behind[top:bottom, left:right].reshape(-1, 3), axis=0)
+                    ink, base = luminance(_rgb(target["color"])), luminance(background)
+                    ratio = (max(ink, base) + 0.05) / (min(ink, base) + 0.05)
+                    results.append((target["name"], round(ratio, 2), [int(c) for c in background]))
+                self.assertEqual([item for item in results if item[1] < 3], [], results)
+                if tone == "light":
+                    self.assertEqual([item for item in results if min(item[2]) < 232], [], results)
                 page.close()
         self.assertEqual(self.errors, [])
 

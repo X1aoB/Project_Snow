@@ -227,6 +227,7 @@ async function installFeatures() {
   featureOn("reminder-due", snowRefreshLockNotes);
   featureOn("reminders-changed", snowRefreshLockNotes);
   await logic.ready;
+  snowRefreshLockNotes();
   const { installFeatureRuntime } = await import("/modules/snow-feature-runtime.js");
   await installFeatureRuntime(logic, { snapshot: featureSnapshot, on: featureOn, emit: featureEmit,
     request: (path, options) => dialogueHttp.request(path, options), savePreferences: patch => saveUiPreferences(patch, true),
@@ -1399,7 +1400,7 @@ function snowLockNotes() {
   // 通知卡仅由既有状态构造：当前待赴约定、未读公告。
   const notes = [];
   for (const reminder of snowFeatureLogic?.reminders.active() || []) {
-    if (reminder.status === "fired") notes.push({ kind: "reminder", characterId: reminder.characterId,
+    if (reminder.status === "fired") notes.push({ kind: "reminder", characterId: reminder.characterId, at: reminder.remindAt,
       title: `约定提醒 · ${reminder.locationName || "约定地点"}`, detail: "点开确认是否赴约" });
   }
   try {
@@ -1417,6 +1418,15 @@ function snowLockNotes() {
     }
   } catch { /* 公告未加载则无此卡 */ }
   return notes;
+}
+let snowLockClock = 0;
+function snowTickLock() {
+  if (!$("snow-lock-time")) return;
+  const now = new Date();
+  $("snow-lock-time").textContent = now.toTimeString().slice(0, 5);
+  $("snow-lock-date").textContent = `${now.getMonth() + 1} 月 ${now.getDate()} 日 · 星期${"日一二三四五六"[now.getDay()]}`;
+  document.querySelector(".snow-lock-tod").textContent = snowTimeOfDayLabel();
+  snowLockClock = window.setTimeout(snowTickLock, 60000 - now % 60000);
 }
 function buildSnowLock() {
   if ($("snow-lock")) return;
@@ -1450,13 +1460,10 @@ function buildSnowLock() {
   hint.append(createSnowIcon("snowflake"));
   hint.append(document.createTextNode("点击任意处解锁"));
   lock.append(bar, main, hint);
-  // 时钟与日期。
-  const now = new Date();
-  time.textContent = now.toTimeString().slice(0, 5);
-  date.textContent = `${now.getMonth() + 1} 月 ${now.getDate()} 日 · 星期${"日一二三四五六"[now.getDay()]}`;
   // 通知卡（公告等异步源就绪后由 snowRefreshLockNotes 重渲染）。
   snowRenderLockNotes(notes);
   document.body.append(lock);
+  snowTickLock();
   lock.snowPreviousInert = $("chat-app").inert;
   $("chat-app").inert = true;
   lock.addEventListener("click", () => snowUnlock(null));
@@ -1499,7 +1506,9 @@ function snowRenderLockNotes(notesEl) {
     const strong = document.createElement("strong"); strong.textContent = note.title;
     const span = document.createElement("span"); span.textContent = note.detail;
     meta.append(strong, span);
-    const t = document.createElement("time"); t.textContent = now.toTimeString().slice(0, 5);
+    const t = document.createElement("time");
+    t.textContent = note.at ? new Date(note.at).toLocaleTimeString("zh-CN", { timeZone: "Asia/Hong_Kong", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      : now.toTimeString().slice(0, 5);
     card.append(glyph, meta, t);
     card.addEventListener("click", (event) => { event.stopPropagation(); snowUnlock(note); });
     notesEl.append(card);
@@ -1522,6 +1531,7 @@ function snowUnlock(note) {
   const finish = () => {
     $("chat-app").inert = Boolean(lock.snowPreviousInert);
     lock.remove();
+    window.clearTimeout(snowLockClock);
     $("open-settings")?.focus({ preventScroll: true });
     // 解锁后再按既有顺序弹出一次性体验须知等（锁屏期间被推迟）。
     void snowAfterUnlock(note);
@@ -2981,6 +2991,10 @@ function updateSubscriptionSelection(payload) {
     subscription.selectionNotice = "账号可用模型或推理强度已改变，请重新选择并保存。当前聊天配置不会自动替换。";
   }
 }
+function subscriptionModelLabel(id, effort) {
+  const name = state.subscription.models.find((item) => item.id === id)?.display_name || (id === SUBSCRIPTION_MODEL ? "GPT-5.6-Luna" : id);
+  return `${name} · ${effort ? SUBSCRIPTION_EFFORT_LABELS[effort] || effort : "请选择强度"}`;
+}
 function chooseSubscriptionModel(model) {
   const subscription = state.subscription;
   const selected = subscription.models.find((item) => item.id === model);
@@ -2989,7 +3003,7 @@ function chooseSubscriptionModel(model) {
   if (!selected) subscription.draftEffort = "";
   else if (!selected.reasoning_efforts.includes(subscription.draftEffort)) {
     subscription.draftEffort = selected.default_reasoning_effort;
-    subscription.selectionNotice = subscription.draftEffort ? `已显示该模型默认推理强度：${SUBSCRIPTION_EFFORT_LABELS[subscription.draftEffort]}（${subscription.draftEffort}）。保存后生效。` : "请为此模型选择推理强度。";
+    subscription.selectionNotice = subscription.draftEffort ? `已显示该模型默认推理强度：${SUBSCRIPTION_EFFORT_LABELS[subscription.draftEffort] || subscription.draftEffort}。保存后生效。` : "请为此模型选择推理强度。";
   }
   renderSubscriptionSettings();
 }
@@ -3002,7 +3016,7 @@ function renderSubscriptionModelControls() {
     const label = subscription.models.some((other) => other.id !== item.id && other.display_name === item.display_name) ? `${item.display_name} · ${item.id}` : item.display_name;
     return `<option value="${escapeHtml(item.id)}">${escapeHtml(label)}</option>`;
   }).join("");
-  const effortOptions = '<option value="">请选择推理强度</option>' + (model?.reasoning_efforts || []).map((effort) => `<option value="${effort}">${SUBSCRIPTION_EFFORT_LABELS[effort]} · ${effort}</option>`).join("");
+  const effortOptions = '<option value="">请选择推理强度</option>' + (model?.reasoning_efforts || []).map((effort) => `<option value="${effort}">${SUBSCRIPTION_EFFORT_LABELS[effort] || effort}</option>`).join("");
   if ($("subscription-model-select").innerHTML !== modelOptions) $("subscription-model-select").innerHTML = modelOptions;
   if ($("subscription-effort-select").innerHTML !== effortOptions) $("subscription-effort-select").innerHTML = effortOptions;
   $("subscription-model-select").value = subscription.draftModel;
@@ -3010,7 +3024,7 @@ function renderSubscriptionModelControls() {
   $("subscription-model-select").disabled = Boolean(modelSetupController);
   $("subscription-effort-select").disabled = Boolean(modelSetupController) || !model;
   $("subscription-model-name").textContent = connected ? model?.display_name || "选择订阅模型" : "默认 Luna Max";
-  $("subscription-model-detail").textContent = connected ? model ? `${model.id} · ${subscription.draftEffort || "请选择强度"}` : "使用此账号支持的模型与推理强度" : `${SUBSCRIPTION_MODEL} · ${SUBSCRIPTION_EFFORT}`;
+  $("subscription-model-detail").textContent = connected ? model ? subscriptionModelLabel(model.id, subscription.draftEffort) : "使用此账号支持的模型与推理强度" : subscriptionModelLabel(SUBSCRIPTION_MODEL, SUBSCRIPTION_EFFORT);
   const saved = state.provider === SUBSCRIPTION_PROVIDER && state.model === subscription.draftModel && state.reasoningEffort === subscription.draftEffort;
   $("subscription-selection-hint").textContent = subscription.selectionNotice || (saved ? "当前已保存此模型与推理强度。" : "选择会在点击“使用所选模型”后生效。");
 }
@@ -3472,7 +3486,7 @@ async function saveModelSession() {
       refreshCredentialStatus();
       updateComposerAvailability();
       $("settings-dialog").close();
-      toast(`已使用你自己的 Codex 订阅 · ${state.model} · ${state.reasoningEffort}`);
+      toast(`已使用你自己的 Codex 订阅 · ${subscriptionModelLabel(state.model, state.reasoningEffort)}`);
       return;
     }
     const model = $("discovered-models").value.trim() || $("model-id").value.trim();

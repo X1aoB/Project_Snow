@@ -135,7 +135,7 @@ class SubscriptionFrontendE2ETests(TestCase):
             page.locator("#open-settings").click()
             self.assertEqual(page.locator("#subscription-model-select").input_value(), "gpt-5.6-sol")
             self.assertEqual(page.locator("#subscription-effort-select").input_value(), "medium")
-            self.assertIn("gpt-5.6-sol · medium", page.locator("#subscription-model-detail").inner_text())
+            self.assertEqual(page.locator("#subscription-model-detail").inner_text(), "GPT-5.6 Sol · 中")
             self._screenshot(page, "model-choice-desktop")
             for width in (390, 320):
                 page.set_viewport_size({"width": width, "height": 844})
@@ -162,6 +162,86 @@ class SubscriptionFrontendE2ETests(TestCase):
             page.locator("#subscription-effort-select").select_option("low")
             page.locator("#subscription-model-select").select_option("gpt-5.6-luna")
             self.assertEqual(page.locator("#subscription-effort-select").input_value(), "low")
+            browser.close()
+
+    def test_model_names_read_as_display_name_and_effort_label(self):
+        # 设置里的模型说明、推理强度选项、默认强度提示和保存后的提示，都写成「显示名 · 推理强度中文标签」，不露出原始 id 或强度值。
+        with frontend.sync_playwright() as playwright:
+            browser = frontend._launch_browser(playwright)
+            page = browser.new_page()
+            self._subscription_routes(page)
+            self._open(page)
+            page.locator("#model-mode-subscription").click()
+            self.assertEqual(page.locator("#subscription-model-detail").inner_text(), "GPT-5.6-Luna · 极高")
+            self.assertIn("GPT-5.6-Luna · 极高", page.locator("#subscription-tutorial").text_content())
+            page.close()
+            page = browser.new_page()
+            self._subscription_routes(page, status="connected", models=SUBSCRIPTION_MODELS, protocol_version=2)
+            self._pair(page)
+            detail, hint = page.locator("#subscription-model-detail"), page.locator("#subscription-selection-hint")
+            self.assertEqual(detail.inner_text(), "GPT-5.6 Luna · 极高")
+            self.assertEqual(page.locator("#subscription-effort-select option").evaluate_all("els => els.map(el => el.textContent)"),
+                             ["请选择推理强度", "低", "中", "高", "极高"])
+            page.locator("#subscription-model-select").select_option("fixture-limited")
+            self.assertEqual(hint.inner_text(), "已显示该模型默认推理强度：中。保存后生效。")
+            self.assertEqual(detail.inner_text(), "合成受限模型 · 中")
+            page.locator("#subscription-model-select").select_option("gpt-5.6-sol")
+            page.locator("#subscription-effort-select").select_option("xhigh")
+            self.assertEqual(detail.inner_text(), "GPT-5.6 Sol · 更高")
+            shown = page.locator("#subscription-settings").inner_text()
+            self._save_model(page)
+            page.locator("#toast", has_text="Codex 订阅").wait_for()
+            toast = page.locator("#toast").inner_text()
+            self.assertEqual(toast, "已使用你自己的 Codex 订阅 · GPT-5.6 Sol · 更高")
+            for raw in ("gpt-5.6-sol", "fixture-limited", "xhigh", "medium"):
+                self.assertNotIn(raw, shown + toast)
+            browser.close()
+
+    def test_subscription_panel_text_stays_readable_in_every_snow_tone(self):
+        # 雪境深色（暮色、夜色）把正文改成浅色字，app.css 却把说明、模型卡、配对框的底色写死成浅色，字几乎看不见。
+        # 三种色调下正文对比度都要 >= 4.5:1；代码块沿用 .modal code 的配色，不受影响。
+        contrast = """nodes => nodes.filter(n => n.getClientRects().length && n.textContent.trim()).map(node => {
+          const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
+          const paint=canvas.getContext('2d',{willReadFrequently:true});
+          const rgba=c=>{paint.clearRect(0,0,1,1);paint.fillStyle=c;paint.fillRect(0,0,1,1);const a=[...paint.getImageData(0,0,1,1).data];return [a[0],a[1],a[2],a[3]/255];};
+          const over=(f,b)=>[0,1,2].map(i=>f[i]*f[3]+b[i]*(1-f[3])).concat(1);
+          const layers=[];for(let n=node;n;n=n.parentElement){const c=rgba(getComputedStyle(n).backgroundColor);if(c[3]>0)layers.push(c);if(c[3]>=0.999)break;}
+          let bg=[255,255,255,1];for(const c of layers.reverse())bg=over(c,bg);
+          const fg=over(rgba(getComputedStyle(node).color),bg);
+          const lum=c=>{const v=c.slice(0,3).map(x=>{x/=255;return x<=0.03928?x/12.92:((x+0.055)/1.055)**2.4;});return 0.2126*v[0]+0.7152*v[1]+0.0722*v[2];};
+          const [a,b]=[lum(fg),lum(bg)].sort((x,y)=>y-x);return [node.tagName+'.'+node.className, Math.round((a+0.05)/(b+0.05)*100)/100];})"""
+        selector = ("#subscription-tutorial :is(summary, li > strong, li p, a), #subscription-tutorial > p, #subscription-model-name, #subscription-model-detail,"
+                    " #subscription-pairing :is(span, small, code), #subscription-status")
+        with frontend.sync_playwright() as playwright:
+            browser = frontend._launch_browser(playwright)
+            for time, tone in (("day", "light"), ("dusk", "auto"), ("night", "dark")):
+                with self.subTest(tone=tone):
+                    page = browser.new_page(viewport={"width": 1280, "height": 900}, reduced_motion="reduce")
+                    page.add_init_script(f"localStorage.setItem('project-snow-public:tone', {json.dumps(tone)});" + """(() => {
+                      const set = () => { if (!document.documentElement) return false; document.documentElement.dataset.snowTime = %s; return true; };
+                      if (!set()) { const o = new MutationObserver(() => { if (set()) o.disconnect(); }); o.observe(document, { childList: true }); } })();""" % json.dumps(time))
+                    self._subscription_routes(page, features={"ui_snow_adv": True})
+                    page.goto(self.base_url, wait_until="networkidle")
+                    page.locator("#snow-boot").wait_for(state="detached")
+                    page.locator("#accept-experience-notice").click()
+                    page.locator("#open-settings").click()
+                    page.locator("#model-mode-subscription").click()
+                    page.locator("#pair-subscription").click()
+                    page.locator("#subscription-pairing-code", has_text="TEST-PAIR-3412").wait_for()
+                    page.locator("#subscription-tutorial summary").click()
+                    self.assertEqual(page.evaluate("document.documentElement.dataset.tone"), "light" if tone == "light" else "dark")
+                    ratios = page.locator(selector).evaluate_all(contrast)
+                    self.assertGreater(len(ratios), 10, ratios)
+                    self.assertEqual([item for item in ratios if item[1] < 4.5], [], ratios)
+                    code = page.locator("#subscription-tutorial pre code").first.evaluate("""node => { const root = getComputedStyle(document.documentElement);
+                      const probe = document.createElement('span'); probe.style.cssText = 'background: var(--snow-100); color: var(--ink-900)';
+                      document.body.append(probe); const want = getComputedStyle(probe); const style = getComputedStyle(node);
+                      const result = [style.backgroundColor === want.backgroundColor, style.color === want.color]; probe.remove(); return result; }""")
+                    self.assertEqual(code, [True, True])
+                    self.assertGreaterEqual(page.locator("#subscription-tutorial pre code").evaluate_all(contrast)[0][1], 4.5)
+                    page.locator("#subscription-tutorial pre").first.scroll_into_view_if_needed()
+                    self._screenshot(page, f"subscription-panel-{tone}")
+                    page.close()
             browser.close()
 
     def test_account_without_luna_requires_explicit_model_selection(self):
