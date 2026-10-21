@@ -1,0 +1,15 @@
+{
+  "schema": "project-snow-trivy-exceptions-1",
+  "exceptions": [
+    {
+      "artifact_digest": "sha256:92e613cf9a6578823fffbb56699f881d51f57f4b7a4a17cfd0337f229888c4f2",
+      "package": "certifi",
+      "installed": "2026.7.22",
+      "fixed": "2026.10.19",
+      "advisory": "GHSA-6q48-6c7w-9gw2 (emSign roots removed after intermediate key compromise)",
+      "expires": "2026-11-04",
+      "reason": "Reused embedding image only: it runs on the internal data network (no route out) with HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE and serves local inference, so the bundled CA store is not used for any TLS connection. A normal stage may not change the embedding image; rebuild it with certifi 2026.10.19 in a separate shared-service maintenance before this expires.",
+      "approved": "小B (repository owner) approved on 2026-10-21 17:45 HKT for the 2026-10-21 release"
+    }
+  ]
+}
