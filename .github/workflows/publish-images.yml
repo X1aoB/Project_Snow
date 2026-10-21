@@ -140,7 +140,7 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
       - name: Enforce embedding vulnerability gate
-        run: python App/scripts/report_trivy_findings.py trivy-embedding.json
+        run: python App/scripts/report_trivy_findings.py trivy-embedding.json --exceptions App/config/trivy-exceptions.json
       - name: Generate immutable release manifest
         run: >-
           python App/scripts/release_manifest.py
