@@ -108,20 +108,35 @@ class ProactiveMessageService:
             raise PublicSecurityError("Rendezvous package expired")
         return pending
 
-    async def generate(self, payload, pending, spec, api_key, *, on_publication):
-        character = next(item for item in MVP_CHARACTERS if item.character_id == payload.character_id)
-        # No retrieval/embedding call or chat turn is created. Reviewed persona
-        # source may shape tone, but cannot authorize a new event or movement.
-        persona = await asyncio.to_thread(self.chat.repository.get_persona, payload.character_id)
+    def _tone_reference(self, character_id):
+        mvp = self.chat.mvp
+        # Use the same reviewed knowledge and compact profile projection as
+        # ordinary dialogue, without retrieval, embedding or a new chat turn.
+        style = mvp._dialogue_profile_prompt_context(mvp._dialogue_profiles().get(character_id)) or {}
+        address = {
+            "preferred_address": mvp.public_knowledge.preferred_addresses().get(character_id),
+            "address_terms": style.get("address_terms", []),
+        }
+        persona = self.chat.repository.get_persona(character_id)
         approved = persona if isinstance(persona, dict) and persona.get("review_status") == "verified" else {}
         profile = json.dumps({key: approved[key] for key in
             ("character_name", "summary", "persona_summary", "speaking_style", "personality") if key in approved},
             ensure_ascii=False)[:4000]
+        # Keep the independently reviewed address ahead of the bounded persona
+        # excerpt, including when that persona is absent or still under review.
+        return json.dumps(address, ensure_ascii=False) + "\n" + profile
+
+    async def generate(self, payload, pending, spec, api_key, *, on_publication):
+        character = next(item for item in MVP_CHARACTERS if item.character_id == payload.character_id)
+        profile = await asyncio.to_thread(self._tone_reference, payload.character_id)
         on_publication()
         content, raw_usage = await simple_completion(spec, api_key, payload.model,
-            system_prompt=(f"你是《尘白禁区》的{character.display_name}。只输出你通过通讯器主动发给分析员的一条简短中文消息。"
-                "这是提醒，不是用户说过的话。不要代写分析员台词，不要行动描写，不移动任何人，不创建新约定、"
-                "共同经历或原作事实。不声称分析员已到场。不输出JSON、标签或角色名前缀。"
+            system_prompt=(f"你是《尘白禁区》的{character.display_name}。对方的身份是分析员，此处仅作第三人称身份说明。"
+                "只输出你通过通讯器主动发送的一条简短中文消息。称呼他时用你平时的称呼。语气参考已给出"
+                "preferred_address时，直接称呼只用该称呼；未提供时参考address_terms和已审阅语气，"
+                "也可以省略称呼，不另取昵称。"
+                "这是提醒，不是用户说过的话。不要代写他的台词，不要行动描写，不移动任何人，不创建新约定、"
+                "共同经历或原作事实。不声称他已到场。不输出JSON、标签或角色名前缀。"
                 "只温和提醒已经成立的当天约定，不催促、不施压。以下已审阅资料仅供语气参考：" + profile),
             user_prompt=f"系统提醒事件：你今天已在{pending.location_name}等待约定。请发一条自然、简短的提醒。",
             max_tokens=400, timeout=120, client=self.http, reasoning_effort=payload.reasoning_effort)
