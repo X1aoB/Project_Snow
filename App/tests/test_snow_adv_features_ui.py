@@ -822,6 +822,89 @@ class SnowAdvFeaturesUITests(TestCase):
                 page.close()
         self.assertEqual(self.errors, [])
 
+    STAGE_BOX = """() => {
+      const box = selector => { const node = document.querySelector(selector); if (!node || !node.getClientRects().length) return null;
+        const rect = node.getBoundingClientRect(); return [rect.left, rect.top, rect.right, rect.bottom].map(Math.round); };
+      return { dialogue: box('#stage-dialogue'), art: box('#stage-character-art'), row: box('#composer .composer-row'),
+        tab: box('#composer .request-status-row'), toast: box('#toast') };
+    }"""
+
+    def assert_stage_still(self, rest, state):
+        keys = ("dialogue", "art", "row")
+        self.assertEqual({key: state[key] for key in keys}, {key: rest[key] for key in keys}, state)
+
+    def assert_tab_above_dialogue(self, state):
+        tab, box = state["tab"], state["dialogue"]
+        self.assertIsNotNone(tab, state)
+        self.assertGreaterEqual(tab[1], 0, state)
+        self.assertLessEqual(tab[3], box[1] - 4, state)
+        self.assertGreaterEqual(tab[0], box[0], state)
+        self.assertLessEqual(tab[2], box[2], state)
+
+    def test_request_status_and_typing_never_resize_the_stage(self):
+        # Face to face, the request status (stop waiting, done, failed + retry), the input hint and toasts used to sit
+        # between the dialogue box and the composer: they split the two apart and shrank the stage and the portrait.
+        for width, height, tone in ((1440, 900, "light"), (1440, 900, "dusk"), (390, 844, "dark")):
+            with self.subTest(width=width, tone=tone):
+                dialogue.DialogueHandler.scenario = "success"
+                page = self.open(self.page(width=width, height=height, tone=tone, locale="zh-CN"))
+                self.enter_stage(page)
+                page.wait_for_timeout(300)
+                rest = page.evaluate(self.STAGE_BOX)
+                self.assertIsNone(rest["tab"])
+                page.locator("#message-input").fill("好")
+                page.wait_for_timeout(200)
+                self.assert_stage_still(rest, page.evaluate(self.STAGE_BOX))
+                # A multi-line draft lifts the dialogue box with the composer, but the portrait keeps its size.
+                page.locator("#message-input").fill("好\n再说一句\n还有一句\n最后一句")
+                page.wait_for_timeout(200)
+                grown = page.evaluate(self.STAGE_BOX)
+                self.assertLess(grown["row"][1], rest["row"][1] - 20, grown)
+                self.assertLessEqual(max(abs(a - b) for a, b in zip(grown["art"], rest["art"])), 6, (grown["art"], rest["art"]))
+                page.locator("#message-input").fill("好")
+                page.wait_for_timeout(200)
+                self.assert_stage_still(rest, page.evaluate(self.STAGE_BOX))
+
+                held = []
+                page.route("**/public/v2/chat/stream", lambda route: held.append(route))
+                page.locator("#send-message").click()
+                page.locator("#stop-waiting").wait_for(state="visible")
+                page.wait_for_timeout(200)
+                pending = page.evaluate(self.STAGE_BOX)
+                self.assert_stage_still(rest, pending)
+                self.assert_tab_above_dialogue(pending)
+                ratios = page.locator("#composer .request-status-row #stop-waiting").evaluate_all(CONTRAST)
+                page.evaluate("() => { const toast = document.getElementById('toast'); toast.textContent = '模型会话已保存到当前标签页'; toast.hidden = false; }")
+                toast = page.evaluate(self.STAGE_BOX)["toast"]
+                self.assertLessEqual(toast[3], pending["tab"][1] - 4, (toast, pending["tab"]))
+                page.evaluate("() => { document.getElementById('toast').hidden = true; }")
+
+                route = held[0]
+                response = route.fetch()
+                headers = {key: value for key, value in response.headers.items() if key.lower() != "content-length"}
+                page.unroute("**/public/v2/chat/stream")
+                route.fulfill(status=response.status, headers=headers, body=response.text())
+                page.wait_for_function("() => document.querySelector('#request-status')?.textContent === '已完成'")
+                page.wait_for_function("() => document.querySelector('#stage-advance')?.classList.contains('is-ready')")
+                done = page.evaluate(self.STAGE_BOX)
+                self.assert_stage_still(rest, done)
+                self.assertIsNone(done["tab"], "▼ already marks the line as finished; no lingering 已完成 tag")
+
+                dialogue.DialogueHandler.scenario = "manual"
+                page.locator("#message-input").fill("合成日常聊天")
+                page.locator("#send-message").click()
+                page.locator("#composer .request-status-row .request-retry").wait_for(state="visible")
+                failed = page.evaluate(self.STAGE_BOX)
+                self.assert_stage_still(rest, failed)
+                self.assert_tab_above_dialogue(failed)
+                ratios += page.locator("#composer .request-status-row :is(.request-status, .request-retry)").evaluate_all(CONTRAST)
+                self.assertEqual(page.locator("#composer .request-retry").evaluate("node => getComputedStyle(node).borderTopLeftRadius"), "999px")
+                low = [item for item in ratios if item[1] < 4.5]
+                self.assertGreaterEqual(len(ratios), 3)
+                self.assertEqual(low, [], low)
+                page.close()
+        self.assertEqual(self.errors, [])
+
     def test_flag_off_never_loads_the_feature_modules(self):
         page = self.open(self.page(enabled=False), enabled=False)
         page.wait_for_timeout(800)

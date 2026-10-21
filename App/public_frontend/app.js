@@ -928,17 +928,28 @@ function syncSnowComposerHeight(enabled) {
   const app = $("chat-app");
   const composer = $("composer");
   if (!app || !composer) return;
+  const toast = $("toast").style;
   if (!enabled || typeof ResizeObserver !== "function") {
     snowComposerObserver?.disconnect();
     snowComposerObserver = null;
     app.style.removeProperty("--snow-composer-h");
+    app.style.removeProperty("--snow-dialogue-h");
+    toast.removeProperty("--snow-toast-b");
     return;
   }
   if (snowComposerObserver) return;
+  const row = composer.querySelector(".request-status-row");
   snowComposerObserver = new ResizeObserver(() => {
-    app.style.setProperty("--snow-composer-h", `${Math.round(composer.getBoundingClientRect().height)}px`);
+    const composerH = Math.round(composer.getBoundingClientRect().height);
+    const dialogueH = Math.round($("stage-dialogue").getBoundingClientRect().height);
+    const tabH = Math.round(row?.getBoundingClientRect().height || 0);
+    app.style.setProperty("--snow-composer-h", `${composerH}px`);
+    app.style.setProperty("--snow-dialogue-h", `${dialogueH}px`);
+    toast.setProperty("--snow-toast-b", dialogueH ? `${composerH + dialogueH + (tabH && tabH + 8) + 8}px` : "");
   });
   snowComposerObserver.observe(composer);
+  snowComposerObserver.observe($("stage-dialogue"));
+  if (row) snowComposerObserver.observe(row);
 }
 // 雪境 ADV 世界层 (P2)：开关开启且处于面对面界面时，在 #scene-stage 内挂载程序化分层雪景与 Canvas 远近雪；关闭或离开面对面时销毁。
 let snowWorld = null;
@@ -3953,6 +3964,7 @@ function renderRequestStatus() {
   target.className = "request-status";
   target.setAttribute("aria-busy", pending ? "true" : "false");
   target.textContent = belongsToSegment ? state.requestStatusByCharacter.get(statusKey) || "" : "";
+  target.toggleAttribute("data-done", !pending && target.textContent === "已完成");
   if (belongsToSegment && state.requestRecoveryByCharacter.get(statusKey) === "refresh_scene") {
     const refresh = document.createElement("button");
     refresh.type = "button";
