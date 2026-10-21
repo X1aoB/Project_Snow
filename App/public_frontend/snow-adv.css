@@ -848,8 +848,9 @@ html[data-ui="snow-adv"] .selected-sticker {
   background: var(--snow-100);
 }
 html[data-ui="snow-adv"] .request-status { color: var(--ink-600); }
-html[data-ui="snow-adv"] .request-recovery { border-color: var(--ice-300); color: var(--ice-700); background: var(--snow-100); }
-html[data-ui="snow-adv"] .stop-waiting { color: var(--warm-600); background: color-mix(in oklab, var(--warm-500) 14%, var(--snow-0)); }
+html[data-ui="snow-adv"] :is(.request-recovery, .request-retry) { border-color: var(--ice-300); color: var(--ice-700); background: var(--snow-100); }
+html[data-ui="snow-adv"] .request-retry { min-height: 30px; margin-inline-start: 6px; padding: 3px 9px; border: 1px solid var(--ice-300); border-radius: 999px; font: inherit; font-weight: 700; }
+html[data-ui="snow-adv"] .stop-waiting { color: color-mix(in oklab, var(--warm-600) 62%, var(--ink-900)); background: color-mix(in oklab, var(--warm-500) 14%, var(--snow-0)); }
 
 /* 修复移动端 placeholder 换行被截断 */
 html[data-ui="snow-adv"] #message-input::placeholder {
@@ -1394,8 +1395,32 @@ html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .in-person-surface
 }
 html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .in-person-surface:not(.ui-hidden) .scene-stage { grid-row: 1 / 5; }
 html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .in-person-surface:not(.ui-hidden) :is(.stage-character-art, .stage-character-art-outgoing) {
-  bottom: var(--snow-composer-h, 0px);
-  height: calc((100% - var(--snow-hud-clear) - var(--snow-composer-h, 0px)) * 0.96 * var(--stage-character-scale, 1));
+  --snow-art-floor: min(var(--snow-composer-h, 0px), 80px);
+  bottom: var(--snow-art-floor);
+  height: calc((100% - var(--snow-hud-clear) - var(--snow-art-floor)) * 0.96 * var(--stage-character-scale, 1));
+}
+/* 请求状态：对白框上沿右侧的标签，不占布局（见 docs/snow-adv-ui-notes.md） */
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .request-status-row {
+  --snow-tab-w: min(var(--dialogue-max-width), calc(100% - 42px));
+  position: absolute;
+  right: calc((100% - var(--snow-tab-w)) / 2 + 26px);
+  bottom: calc(100% + var(--snow-dialogue-h, 0px) + 8px);
+  width: auto;
+  max-width: calc(var(--snow-tab-w) - 52px);
+  margin: 0;
+  padding: 4px 5px 4px 12px;
+  border: 1px solid color-mix(in srgb, var(--ice-300) 60%, transparent);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--snow-0) 94%, transparent);
+  box-shadow: var(--shadow-lift);
+}
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .request-status-row:not(:has(> .request-status:not(:empty):not([data-done]), > #stop-waiting:not([hidden]))),
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] :is(#fast-forward-reply, .composer-foot) { display: none; }
+html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .request-status { color: var(--ink-700); }
+html[data-ui="snow-adv"] .toast { bottom: var(--snow-toast-b, calc(110px + env(safe-area-inset-bottom, 0px))); }
+html[data-ui="snow-adv"][data-tone="dark"] .app-shell[data-channel="in_person"] .request-status-row { border-color: rgb(var(--tn-line) / 0.3); }
+@media (max-width: 820px) {
+  html[data-ui="snow-adv"] .app-shell[data-channel="in_person"] .request-status-row { --snow-tab-w: calc(100% - 20px); }
 }
 
 /* P8 深色状态 */

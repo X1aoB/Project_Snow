@@ -2197,7 +2197,7 @@ class SnowAdvP8VisualTests(TestCase):
           const stage = document.getElementById('scene-stage').getBoundingClientRect();
           const composer = document.getElementById('composer');
           return {
-            composerH: parseFloat(app.style.getPropertyValue('--snow-composer-h')) || 0,
+            composerH: parseFloat(getComputedStyle(app).getPropertyValue('--snow-composer-h')) || 0,
             stageBottom: Math.round(stage.bottom),
             composerTop: Math.round(composer.getBoundingClientRect().top),
             composerBg: getComputedStyle(composer).backgroundColor,

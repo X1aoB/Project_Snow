@@ -45,6 +45,15 @@
 - 隐私页「API Key 与模型供应商」和设置页开头的说明同步改为「默认只保存在当前标签页」。
 - 测试。`tests/test_credential_retention_ui.py`。
 
+## 面对面请求状态
+P8 起舞台延伸到输入栏下面：`app.js` 用 ResizeObserver 把 `#composer` 的高度写进 `--snow-composer-h`，舞台网格最后一行和立绘的 `bottom`/高度都按它算。请求状态行 `.request-status-row` 和字数提示 `.composer-foot` 原来都在 `#composer` 的文档流里，一出现输入栏就变高：对白框被顶上去，和输入栏之间多出一条状态行，原本连成一体的对白框和输入栏被拆开；立绘同时变矮（实测「停止等待」时对白框上移 61px、立绘矮 60px，「已完成」一直留着时矮 32px，输入第一个字时矮 19px）。
+
+- 状态行。只在雪境面对面时改为绝对定位：仍在 `#composer` 的 DOM 里（焦点顺序、`aria-live` 和按钮绑定都不变），显示在对白框上沿右侧，宽度不超过对白框。定位用 `--snow-dialogue-h`：同一个 ResizeObserver 也观察 `#stage-dialogue`。`#toast` 在 `body` 下拿不到 `#chat-app` 上的变量，所以对白框可见时脚本直接在它身上写 `--snow-toast-b`（输入栏 + 对白框 + 8px，状态标签显示时再加上标签高度，两者不重叠；ResizeObserver 也观察状态行），面对面时 toast 放在对白框上方，不再盖住对白框里的快捷菜单；对白框不可见时清掉，回到原来的位置。不要改用 `html:has(#chat-app[data-channel="in_person"])` 这类根元素 `:has()`：它会让 `test_daylight_fix_keeps_other_tones_pixel_identical` 的前后截图不一致。
+- 隐藏的内容。面对面时「立即显示」与快捷菜单的「跳过」是同一个操作（都调用 `finishReceivedPresentation`），隐藏；回复完成后的单纯「已完成」由 `renderRequestStatus` 标 `data-done`，面对面时隐藏，完成由 ▼ 表示；状态行没有可见内容时整行隐藏。字数提示在面对面时隐藏（手机原本就不显示快捷键提示），动作与对白合计超过 2,000 字时发送前仍有横幅提示。通讯器里的状态行、「立即显示」和字数提示都不变。
+- 立绘。立绘按 `min(--snow-composer-h, 80px)` 计算，输入栏静止时（约 75px）与原来完全一样；多行输入撑高输入栏时，对白框跟着上移，立绘最多变动 5px。
+- 按钮。面对面失败时的「重试」（`.request-retry`）原来没有任何样式，显示为浏览器默认灰按钮，改为和「重新读取场景」相同；「停止等待」文字改为暖色与墨色混合，三种色调对比度不低于 4.5:1。
+- 测试。`tests/test_snow_adv_features_ui.py::test_request_status_and_typing_never_resize_the_stage`：雪白、暮色桌面和深色手机下，输入、多行输入、等待回复、完成、失败重试各状态对白框、立绘、输入栏的位置不变，标签在对白框上方且不超出，toast 不压对白框，文字对比度不低于 4.5:1。
+
 ## snow-adv.css
 
 ### `html[data-ui="snow-adv"] {`

@@ -92,9 +92,9 @@
       },
       {
         "path": "App/public_frontend/app.js",
-        "lf_bytes": 454030,
-        "lf_sha256": "06eb597a1a483dfe34e2f276031cc5b0da9219c7fded22c67e71c4b34a50b483",
-        "gzip_bytes": 114563
+        "lf_bytes": 454775,
+        "lf_sha256": "7ee5c1a81fb3d93fbbe2c7f157f49c04cb507e3526def862e2ad5dcceb04afe6",
+        "gzip_bytes": 114742
       },
       {
         "path": "App/public_frontend/dialogue-context.js",
@@ -128,9 +128,9 @@
       },
       {
         "path": "App/public_frontend/snow-adv.css",
-        "lf_bytes": 79948,
-        "lf_sha256": "a551c80a7a1afc065cb5bc96ab417262d31b7396393857695a97abd3dcf7d540",
-        "gzip_bytes": 16705
+        "lf_bytes": 81759,
+        "lf_sha256": "df05cb0f03c1e25787bbe237ad1d51bb3dca5abeee1d16b33e0821933aa82906",
+        "gzip_bytes": 17101
       },
       {
         "path": "App/public_frontend/statistics/analytics.mjs",
@@ -163,16 +163,16 @@
         "gzip_bytes": 95
       }
     ],
-    "gzip_sum_bytes": 191671
+    "gzip_sum_bytes": 192246
   },
-  "increase_bytes": 60517,
+  "increase_bytes": 61092,
   "budget_bytes": 61440,
-  "remaining_bytes": 923,
-  "app_hook_increase_bytes": 4919,
+  "remaining_bytes": 348,
+  "app_hook_increase_bytes": 5098,
   "app_hook_budget_bytes": 6013,
   "passed": true,
   "second_batch_parent_ref": "95005fe2efade3e9c3b916e8c47c73fced5b19e0",
   "first_batch_increase_bytes": 57474,
   "second_batch_hook_budget_bytes": 3966,
-  "second_batch_hook_increase_bytes": 2872
+  "second_batch_hook_increase_bytes": 3051
 }
