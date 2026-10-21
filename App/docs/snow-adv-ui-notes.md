@@ -54,6 +54,14 @@ P8 起舞台延伸到输入栏下面：`app.js` 用 ResizeObserver 把 `#compose
 - 按钮。面对面失败时的「重试」（`.request-retry`）原来没有任何样式，显示为浏览器默认灰按钮，改为和「重新读取场景」相同；「停止等待」文字改为暖色与墨色混合，三种色调对比度不低于 4.5:1。
 - 测试。`tests/test_snow_adv_features_ui.py::test_request_status_and_typing_never_resize_the_stage`：雪白、暮色桌面和深色手机下，输入、多行输入、等待回复、完成、失败重试各状态对白框、立绘、输入栏的位置不变，标签在对白框上方且不超出，toast 不压对白框，文字对比度不低于 4.5:1。
 
+## 宣传片录制中发现的界面问题（2026-10-22）
+- 锁屏时钟。`buildSnowLock()` 原来只在建锁屏时写一次时间。现在 `snowTickLock()` 每到整分刷新时间、日期和时段标签，下一次按 `60000 - now % 60000` 续订；锁屏不在了就不再续订，解锁时 `clearTimeout`。
+- 锁屏约定提醒卡。`snowLockNotes()` 给提醒卡带上 `remindAt`，卡片右侧显示约好的提醒时间（香港时间 `HH:MM`，`hourCycle: "h23"`）；未读公告和待赴约定卡仍显示锁屏渲染时的时间。功能模块晚于锁屏装好（首屏稳定后才加载），已经到点的提醒不会再发事件，所以 `logic.ready` 后补刷新一次锁屏卡。
+- 订阅模型名。`subscriptionModelLabel(id, effort)` 统一写成「显示名 · 推理强度中文标签」：设置卡说明行、推理强度选项、默认强度提示和保存后的提示都用它，不直接显示原始 id 和强度值。显示名取连接器返回的列表；还没连接时默认模型写「GPT-5.6-Luna」，`index.html` 的初始文字和教程第 4 步同步。两个模型显示名相同时，模型下拉仍附 id 区分。
+- 订阅说明在深色下看不清。`app.css` 把说明、模型卡、配对框、人机验证框和状态条的底色写死为浅色，暮色和夜色把正文换成浅色字后对比度只有 1.1–1.9:1。这些表面在深色下改用 `--tn-surface`，和设置开关等小表面一致；出错状态并入危险色规则；代码块沿用 `.modal code`，不变。
+- 手机雪白下圆形按钮发灰。录制截图是在夜→昼切换的同一刻拍的：`button` 和快捷菜单按钮的背景色有 100–140ms 过渡，截到的是深色到白色的中间色。稳定后按钮底接近白色，与桌面一致，没有改样式；`test_phone_stage_round_buttons_keep_icon_contrast_in_every_tone` 用实际截图像素锁住三种色调下图标与按钮底对比度不低于 3:1、雪白下按钮底接近白色。录制切换色调后至少等 300ms 再截图。
+- 测试。`tests/test_snow_adv_ui.py` 的 `test_phone_lock_clock_follows_the_minute_and_stops_after_unlock`、`test_phone_lock_reminder_card_shows_the_agreed_time`、`test_phone_stage_round_buttons_keep_icon_contrast_in_every_tone`；`tests/test_public_subscription_frontend_e2e.py` 的 `test_model_names_read_as_display_name_and_effort_label`、`test_subscription_panel_text_stays_readable_in_every_snow_tone`。
+
 ## snow-adv.css
 
 ### `html[data-ui="snow-adv"] {`

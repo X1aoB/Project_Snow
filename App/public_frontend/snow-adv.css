@@ -1522,7 +1522,7 @@ html[data-ui="snow-adv"][data-tone="dark"] .snow-lock-notes:empty::before { back
 html[data-ui="snow-adv"][data-tone="dark"] .floating-feedback { border-color: rgb(var(--tn-line) / 0.3); color: var(--ink-700); background: rgb(var(--tn-surface) / 0.88); }
 html[data-ui="snow-adv"][data-tone="dark"] :is(.source-links, .provider-doc-links) a { border-color: rgb(var(--tn-line) / 0.26); color: var(--ice-700); background: rgb(var(--tn-raised) / 0.72); }
 /* 设置、须知、公告里写死浅色的小表面（app.css 原值） */
-html[data-ui="snow-adv"][data-tone="dark"] :is(.setting-toggle, .notice-choice, .announcement-tabs) { border-color: rgb(var(--tn-line) / 0.22); background: rgb(var(--tn-surface) / 0.72); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.setting-toggle, .notice-choice, .announcement-tabs, .subscription-tutorial, .subscription-model, .subscription-pairing, .model-verification, .subscription-status) { border-color: rgb(var(--tn-line) / 0.22); background: rgb(var(--tn-surface) / 0.72); }
 html[data-ui="snow-adv"][data-tone="dark"] .provider-options-mobile button:not([aria-checked="true"]) { border-color: rgb(var(--tn-line) / 0.22); color: var(--ink-700); background: rgb(var(--tn-surface) / 0.72); }
 html[data-ui="snow-adv"][data-tone="dark"] .announcements-modal .announcements-header { background: linear-gradient(125deg, rgb(var(--tn-raised)), rgb(var(--tn-surface)) 72%); }
 html[data-ui="snow-adv"][data-tone="dark"] .announcement-tabs button[aria-selected="true"] { background: rgb(var(--tn-accent) / 0.55); }
@@ -1532,7 +1532,7 @@ html[data-ui="snow-adv"][data-tone="dark"] .announcement-update h3 { color: var(
 html[data-ui="snow-adv"][data-tone="dark"] .announcement-update :is(p, li, .announcement-update-meta > span, time) { color: var(--ink-700); }
 html[data-ui="snow-adv"][data-tone="dark"] .announcement-update li::marker { color: var(--ice-700); }
 html[data-ui="snow-adv"][data-tone="dark"] :is(.form-hint, .subscription-status[data-status="connected"]) { color: #a8d8bb; background: rgba(46, 92, 68, 0.32); }
-html[data-ui="snow-adv"][data-tone="dark"] :is(.danger-button, .message.failed .message-body) { border-color: rgba(224, 122, 138, 0.42); color: #f2b3bf; background: rgba(96, 34, 48, 0.3); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.danger-button, .message.failed .message-body, .subscription-status[data-status="error"]) { border-color: rgba(224, 122, 138, 0.42); color: #f2b3bf; background: rgba(96, 34, 48, 0.3); }
 html[data-ui="snow-adv"][data-tone="dark"] .portrait.portrait-text { background: linear-gradient(145deg, rgb(var(--tn-high)), rgb(var(--tn-raised))); color: var(--ink-700); }
 html[data-ui="snow-adv"][data-tone="dark"] :is(.in-person-surface, .scene-stage) { background-color: rgb(var(--tn-surface)); }
 html[data-ui="snow-adv"][data-tone="dark"] .scene-menu-popover { border-color: rgb(var(--tn-line) / 0.26); background: rgb(var(--tn-surface) / 0.96); }
