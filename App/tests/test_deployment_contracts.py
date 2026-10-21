@@ -133,8 +133,17 @@ class DeploymentContractTests(TestCase):
         ci = (workflows / "ci.yml").read_text(encoding="utf-8")
         publish = (workflows / "publish-images.yml").read_text(encoding="utf-8")
         nightly = (workflows / "nightly-image-security.yml").read_text(encoding="utf-8")
-        self.assertIn("RUNTIME_DEPENDENCY_STAGE=pinned-runtime", ci)
-        self.assertIn("RUNTIME_DEPENDENCY_STAGE=pinned-runtime", publish)
+        spec = importlib.util.spec_from_file_location("public_runtime_base_workflows", self.app_root / "scripts" / "verify_public_runtime_base.py")
+        runtime_base = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runtime_base)
+        # The approved base is reused only while the committed lock is exactly the approved one; a
+        # changed lock must take the fresh dependency build until a published image is re-approved.
+        lock = (self.app_root / "requirements-public.txt").read_bytes().replace(b"\r\n", b"\n")
+        reuse = hashlib.sha256(lock).hexdigest() == runtime_base.APPROVED_LOCK_SHA256
+        expected, other = ("pinned-runtime", "refreshed-runtime") if reuse else ("refreshed-runtime", "pinned-runtime")
+        for workflow in (ci, publish):
+            self.assertIn(f"RUNTIME_DEPENDENCY_STAGE={expected}", workflow)
+            self.assertNotIn(f"RUNTIME_DEPENDENCY_STAGE={other}", workflow)
         self.assertIn("RUNTIME_DEPENDENCY_STAGE=refreshed-runtime", nightly)
         self.assertNotIn("RUNTIME_DEPENDENCY_STAGE=pinned-runtime", nightly)
         self.assertIn("no-cache: true", nightly)
