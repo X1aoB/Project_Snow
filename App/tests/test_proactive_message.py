@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,7 +17,10 @@ from sqlalchemy import text
 
 from backend.snow_app.config import Settings
 from backend.snow_app.dialogue_core import GenerationGate
+from backend.snow_app.mvp_policy import MVP_CHARACTERS
+from backend.snow_app.mvp_service import MVPService
 from backend.snow_app.proactive_message import authority_change, proactive_config, request_hash
+from backend.snow_app.public_knowledge import PublicKnowledge
 from backend.snow_app.public_contracts import (ProactiveConsentRequest, ProactiveMessageRequest,
                                              PresenceTransitionRequest, SceneActionRequest)
 from backend.snow_app.public_main import create_app
@@ -43,6 +47,9 @@ class ProactiveMessageTests(IsolatedAsyncioTestCase):
         self.legacy.gate = GenerationGate()
         self.legacy.repository = Mock()
         self.legacy.repository.get_persona.return_value = {"review_status": "verified", "summary": "合成角色资料"}
+        self.legacy.mvp.public_knowledge = PublicKnowledge()
+        self.legacy.mvp._dialogue_profiles.return_value = {}
+        self.legacy.mvp._dialogue_profile_prompt_context = MVPService._dialogue_profile_prompt_context
         self.legacy.media, self.legacy.stickers = Mock(), Mock()
         self.legacy.media.verify.return_value = self.legacy.stickers.verify.return_value = {"status": "unavailable"}
         engine = getattr(self, "store_engine", None)
@@ -129,6 +136,77 @@ class ProactiveMessageTests(IsolatedAsyncioTestCase):
         call = self.provider.call_args
         self.assertEqual(call.kwargs["max_tokens"], 400)
         self.assertIn("系统提醒事件", call.kwargs["user_prompt"])
+
+    async def test_prompt_shares_main_dialogue_addresses_for_every_formal_character(self):
+        expected = self.legacy.mvp.public_knowledge.preferred_addresses()
+        self.assertEqual(expected["ca0144ccd81b"], "亲爱的")
+        self.assertGreater(len(set(expected.values())), 1)
+        self.legacy.mvp._dialogue_profiles.return_value = {
+            cid: {"address_terms": [{"term": "分析员", "support_level": "observed"}]}
+            for cid in expected
+        }
+        # A long persona must not truncate the higher-priority address.
+        self.legacy.repository.get_persona.return_value = {"review_status": "verified", "summary": "合成资料" * 1200}
+        service = self.app.state.proactive_message_service
+        pending = service.prepare(self.payload, self.scene.subject)
+        for character in MVP_CHARACTERS:
+            if character.character_id not in expected:
+                continue
+            with self.subTest(character_id=character.character_id):
+                self.provider.reset_mock()
+                publication = Mock()
+                await service.generate(self.payload.model_copy(update={"character_id": character.character_id}),
+                    pending, Mock(), "synthetic", on_publication=publication)
+                prompt = self.provider.call_args.kwargs["system_prompt"]
+                reference = json.loads(prompt.split("以下已审阅资料仅供语气参考：", 1)[1].split("\n", 1)[0])
+                main_address = MVPService._relationship_address_memory({
+                    "character": character, "relationship_background": {"status": "explicit"},
+                })["preferred_address"]
+                self.assertEqual(reference["preferred_address"], main_address)
+                self.assertEqual(reference["preferred_address"], expected[character.character_id])
+                self.assertEqual(reference["address_terms"][0]["term"], "分析员")
+                self.assertIn("称呼他时用你平时的称呼", prompt)
+                self.assertIn("直接称呼只用该称呼", prompt)
+                self.assertIn("第三人称身份说明", prompt)
+                self.assertNotIn("发给分析员", prompt)
+                self.assertNotIn("代写分析员台词", prompt)
+                self.assertNotIn("分析员已到场", prompt)
+                self.assertEqual(self.provider.await_count, 1)
+                publication.assert_called_once_with()
+        self.assertEqual(self.quota(), 0)
+        self.legacy.repository.documents.assert_not_called()
+
+    async def test_reviewed_address_survives_unverified_persona(self):
+        self.legacy.repository.get_persona.return_value = {
+            "review_status": "pending", "speaking_style": "synthetic-unreviewed-address",
+        }
+        result = await self.endpoint(self.request, self.payload)
+        self.assertEqual(result["status"], "completed")
+        prompt = self.provider.call_args.kwargs["system_prompt"]
+        reference = json.loads(prompt.split("以下已审阅资料仅供语气参考：", 1)[1].split("\n", 1)[0])
+        expected = self.legacy.mvp.public_knowledge.preferred_addresses().get(self.payload.character_id)
+        self.assertEqual(reference["preferred_address"], expected)
+        self.assertNotIn("synthetic-unreviewed-address", prompt)
+        self.assertEqual(self.provider.await_count, 1)
+        self.assertEqual(self.quota(), 1)
+
+    async def test_other_character_uses_main_profile_terms_without_inventing_intimacy(self):
+        known = self.legacy.mvp.public_knowledge.preferred_addresses()
+        character = next(item for item in MVP_CHARACTERS if item.character_id not in known)
+        terms = [{"term": "队长", "support_level": "observed", "evidence_document_ids": ["synthetic-address-source"]}]
+        self.legacy.mvp._dialogue_profiles.return_value = {character.character_id: {"address_terms": terms}}
+        service = self.app.state.proactive_message_service
+        pending = service.prepare(self.payload, self.scene.subject)
+        await service.generate(self.payload.model_copy(update={"character_id": character.character_id}),
+            pending, Mock(), "synthetic", on_publication=Mock())
+        prompt = self.provider.call_args.kwargs["system_prompt"]
+        reference = json.loads(prompt.split("以下已审阅资料仅供语气参考：", 1)[1].split("\n", 1)[0])
+        self.assertIsNone(reference["preferred_address"])
+        main_profile = MVPService._dialogue_profile_prompt_context({"address_terms": terms})
+        self.assertEqual(reference["address_terms"], main_profile["address_terms"])
+        self.assertNotIn("亲爱的", prompt)
+        self.assertNotIn("发给分析员", prompt)
+        self.assertEqual(self.provider.await_count, 1)
 
     async def test_missing_recovery_is_read_only_and_default_is_off(self):
         self.assertFalse(proactive_config(replace(self.settings, proactive_messages_enabled=False))["enabled"])
