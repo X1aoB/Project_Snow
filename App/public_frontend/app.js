@@ -2826,8 +2826,7 @@ async function modelVerificationToken(signal) {
     const status = await api("/byok/verification", { signal, timeoutMs: 10000, cache: "no-store" });
     signal.throwIfAborted();
     if (typeof status.verification_required !== "boolean") throw new Error("invalid_response");
-    // This is an advisory read only. Session issuance independently checks the
-    // current browser cookie and verification state on the server.
+    // Session issuance rechecks this advisory status.
     if (status.verification_required === false) return "";
   } catch (error) {
     // Older servers do not expose this read. All other failures remain closed.
@@ -3526,8 +3525,7 @@ async function issueCredential(signal) {
       }),
     });
   } catch (error) {
-    // A cookie can expire or change in another tab after the advisory read.
-    // Ask for a fresh user action; never repeat session issuance blindly.
+    // A stale cookie requires a fresh user action, not an automatic replay.
     if (!token && error?.httpStatus === 403 && error?.message === "turnstile_required") throw new Error("turnstile_verification_changed");
     throw error;
   }
