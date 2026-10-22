@@ -141,7 +141,7 @@ function containmentWall(p, H) {
   }
   return s + "</g>";
 }
-function outdoor(p, r, H) {
+function outdoor(p, r, H, land) {
   const id = "f";
   let defs = lg(`${id}-sky`, [[0, p.sky[0]], [0.58, p.sky[1]], [1, p.sky[2]]], { y1: 0, y2: H + 40 });
   defs += rg(`${id}-sun`, [[0, p.sun, 0.9], [0.22, p.sun, 0.5], [1, p.sun, 0]]);
@@ -168,6 +168,7 @@ function outdoor(p, r, H) {
   body += `<circle cx="${f(sx * 1600)}" cy="${f(sy * H)}" r="${p.disc}" fill="${p.sun}" opacity=".96"/>`;
   defs += rg(`${id}-tree`, [[0, "#9fe6ff", 1], [0.4, "#9fe6ff", 0.35], [1, "#9fe6ff", 0]]);
   body += worldTree(p, id, H);
+  if (land) return svg(`<defs>${defs}</defs>${body}${land(p, r, H)}`, "far");
   body += `<path d="${ridge(r, { y: H - 190, amp: 250, n0: 6 })}" fill="url(#${id}-far)"/>`;
   body += `<rect y="${H - 230}" width="1600" height="260" fill="url(#${id}-haze)" opacity=".6"/>`;
   body += containmentWall(p, H);
@@ -429,16 +430,18 @@ const ROOMS = {
   },
 };
 
-export const SCENE_KEYS = Object.freeze(Object.keys(ROOMS));
+export function registerSnowPlaces(make) {
+  Object.assign(ROOMS, make({ mix, f, lg, rg, rr, arch, quad, svg, ridge, pines, wall, glass, shaft, floor, tone, lamp, marks: ROOM_MARKS }));
+}
 
 function buildScene(key, time) {
   const p = PALETTES[time] || PALETTES.day;
-  const builder = ROOMS[key] || ROOMS.generic;
+  const builder = ROOMS[key];
   const id = `r-${key}`;
   buildPalette = p;
   const room = builder(p, rng(`${key}:room`), id);
   buildPalette = null;
-  const far = outdoor(p, rng(`${key}:far`), room.horizon);
+  const far = outdoor(p, rng(`${key}:far`), room.horizon, room.land);
   return {
     far,
     room: svg(`<defs>${roomDefs(p, id)}</defs>${room.room}`, "room"),
@@ -623,7 +626,7 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
     const override = document.documentElement.dataset.snowTime;
     if (override) { world.time = resolveTime(); world.timeAt = now; }
     else if (!world.timeAt || now - world.timeAt > 600000) { world.time = resolveTime(); world.timeAt = now; }
-    const key = SCENE_KEYS.includes(world.scene) ? world.scene : "generic";
+    const key = Object.hasOwn(ROOMS, world.scene) ? world.scene : "generic";
     const built = buildScene(key, world.time);
     far.dataset.time = world.time;
     far.dataset.scene = key;

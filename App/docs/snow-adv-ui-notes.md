@@ -62,6 +62,18 @@ P8 起舞台延伸到输入栏下面：`app.js` 用 ResizeObserver 把 `#compose
 - 手机雪白下圆形按钮发灰。录制截图是在夜→昼切换的同一刻拍的：`button` 和快捷菜单按钮的背景色有 100–140ms 过渡，截到的是深色到白色的中间色。稳定后按钮底接近白色，与桌面一致，没有改样式；`test_phone_stage_round_buttons_keep_icon_contrast_in_every_tone` 用实际截图像素锁住三种色调下图标与按钮底对比度不低于 3:1、雪白下按钮底接近白色。录制切换色调后至少等 300ms 再截图。
 - 测试。`tests/test_snow_adv_ui.py` 的 `test_phone_lock_clock_follows_the_minute_and_stops_after_unlock`、`test_phone_lock_reminder_card_shows_the_agreed_time`、`test_phone_stage_round_buttons_keep_icon_contrast_in_every_tone`；`tests/test_public_subscription_frontend_e2e.py` 的 `test_model_names_read_as_display_name_and_effort_label`、`test_subscription_panel_text_stays_readable_in_every_snow_tone`。
 
+## 独立场景背景与换场（2026-10-22）
+宣传片录制时发现两处：一起去别处是硬切，没有白雪转场；基地海滩等地点没有专属背景，显示的是 `generic` 外景。
+
+- 场景键。后端 `mvp_policy.scene_visual_key()` 与前端 `dialogue-context.js` 的 `sceneVisualKey()` 同步增加 `beach`、`hot_spring`、`arcade`、`bar`、`healing`（与基地地图的区域键相同）和 `park`、`street`、`mall`、`analyst`。先判断「分析员的房间 / 我的房间」，再把「某某的房间 / 她的房间」归入 `quarters`。`visual_key` 只用于展示，不进签名状态；旧前端收到新键时按原逻辑回退 `generic`。`app.js` 的 `SCENE_KEYS` 仍只列有 SVG 素材的九个旧键，供关闭雪境时的旧背景使用，所以旧界面里新地点照旧显示 `generic.svg`，不会请求不存在的素材。
+- 背景。九个新场景在按需加载的 `modules/snow-scenes.js`，首屏稳定后与新功能模块一起导入，装好后刷新舞台和通讯器背后的两个世界。`snow-world.js` 只多了 `registerSnowPlaces(make)`：把绘图工具（`mix`、`lg`、`wall`、`lamp` 等）和墙面编号表交给模块，模块返回的构建函数并入场景表；渲染时用 `Object.hasOwn(ROOMS, key)` 判断，未注册的键（含模块还没装好时）回退 `generic`。构建函数可返回 `land`，替换远景里雪山以下的部分；海滩用它画出托着世界树的雪岛、海岬灯塔、海面和太阳（夜里是月亮）的光带。室外场景（海滩、温泉、公园、商业街）近处下雪，室内场景近处是灯色光尘。手机只看得到中间约四分之一宽，每个场景在中间都留了能认出地点的东西（海面、热气、霓虹灯牌、层架、圆窗、小路、串灯、雪花挂饰、百叶窗）。
+- 区域编号。附属设施和基地外沿用地点胶囊默认的 EXT；分析员的房间在宿舍区，`snow-scenes.css` 给它 B-03。标题卡的徽记取自 `modules/snow-scene-icons.js`，由 `build_snow_adv_icons.mjs` 的 `SCENE_ICONS` 生成（基地外用首屏已有的雪花）。
+- 硬切的原因。`renderScene()` 拉起转场后，同一轮回复开始呈现，`renderStage()` 里「已确认的回复优先于装饰转场」的规则调用 `cancelSnowScenePresentation()`，转场从盖住直接跳回 idle。规则原来还看 `state.snowVeilTimers.length`，而已经触发过的计时器 id 一直留在数组里，所以只要之前播过一次转场，之后每次回复都会触发取消。现在规则只看 `snowPushContext` 和 `state.snowVeilAnimation`（转场正在播放时才有）。
+- 新的换场时序。`maybePlaySnowVeil()` 发现地点变了而舞台正在呈现回复（`stageBusy()`：逐字显示中、呈现队列未完或面对面请求未结束，与 ▼ 提示同一判断）时，先不切换，等这句说完、再停 650ms 才播放；最多等 12 秒。等待期间舞台世界、`#in-person-surface[data-scene]`、地点胶囊都保持原地，它们和世界一起在白雪盖满时（`fadeIn` 结束）才提交；「已一起到达」提示挂在提交之后。尚未提交的换场统一记在 `state.snowVeilPending`（等待中、转场播放中、首次入室推进中都用它），`cancelSnowScenePresentation()` 先提交它，再把世界设回 `state.snowShown`（最后一次已提交的场景），不会因为取消而提前露出新地点。
+- 转场。完整档位下 `snow-scenes.js` 的 `veil()` 给 `#snow-scene-veil` 加一层：雪团从四周堆满、两层飘雪、标题卡上的场景徽记逐笔画出、编号写在标题上方，揭开时用注册过的 `--snow-open` 驱动径向遮罩从中间打开，最后再淡出；时长 560 / 720 / 780ms。`app.js` 只读它返回的时长和容器帧，子层动画都挂在转场节点下，原有的 `clearSnowVeil()` 会一并取消。浏览器不支持注册自定义属性时只淡出；轻量档位和模块未装好时仍是原来的淡入淡出；减少动态时不播放。暮色和夜色下雪幕用 `--tn-*` 深色，标题和副标题对比度不低于 4.5:1。
+- 首屏。`app.js` 的首屏增量控制在预算内：删去 14 条整行提要注释（全文本来就在下方「app.js」一节，见那里的说明）。
+- 测试。`tests/test_snow_adv_scenes.py`：后端映射与可邀请地点、前后端一致、九个场景四个时段各自成图且随时段变色、一起去先说完再完整播放转场（含转场前先完整播过一次普通转场）、首次入室推进中途一起去不会提前露出海滩、减少动态直接换场、区域编号与两种色调下标题卡对比度、关闭雪境时不加载新模块且旧背景回退。`tests/test_snow_adv_base_map.py` 的地点映射断言改为新场景键。`tests/test_dialogue_v2_frontend.py` 的 `test_fast_reply_cancels_camera_and_scene_veil_before_visible_measurement` 改为新约定：回复首次显示时仍没有镜头推进和遮罩；随回复而来的场景变化（她先去餐厅等你）在台词显示完后完整播放到「基地餐厅」的转场，标题不是被取消的镜头的目的地。
+
 ## snow-adv.css
 
 ### `html[data-ui="snow-adv"] {`
@@ -685,6 +697,8 @@ off/light 档位与减少动态下，调用方不应调用本函数（直接走 
 ## app.js
 
 2026-10-19：为给后续功能腾出首屏体积，`App/public_frontend/app.js` 里较长的整行注释移到这里，代码中只保留一句提要；acorn 8.14.0 核对过移动前后代码记号完全一致。行号是移动前的行号。
+
+2026-10-22：为给独立场景腾出首屏体积，下列 14 条提要也从代码里删去（只删整行注释，代码不变），全文仍在本节同名标题下：`let snowWorld = null;`、`function suppressArrivalDuplicateNotice()`、`const stageActorAnchorCache = new Map();`、`function snowOpeningActive()`、开机层消隐里的 `const app = $("chat-app");`、首帧处理的 `try {`、`renderOnboarding()` 里开场层与模态弹窗两处让开、立绘首次出现的 `const firstAppearance`、雪境抖动曲线的 `if (snowAdvActive()) {`、气泡的 `node.classList.add("is-snow-pop");`、面对面角色栏抽屉、`const stageHasArrivalReaction`、体验须知顺序的 `if (!snowBoot && !snowLock)`。
 
 ### `const SNOW_LAST_SEEN_KEY = "project-snow-public:snow-adv:last-seen";`
 
