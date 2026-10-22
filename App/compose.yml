@@ -42,6 +42,10 @@ services:
       APP_RUNTIME: /workspace/App/runtime
       PUBLIC_ALLOW_INSECURE_DEV: "true"
       PUBLIC_AUTO_CREATE_SCHEMA: "true"
+      # Local test credentials avoid production Turnstile bot detection in Chrome for Testing.
+      TURNSTILE_SITE_KEY: "1x00000000000000000000AA"
+      TURNSTILE_SECRET: "1x0000000000000000000000000000000AA"
+      TURNSTILE_SECRET_FILE: ""
       PUBLIC_DATABASE_URL: postgresql+psycopg://project_snow:${POSTGRES_PASSWORD}@postgres/project_snow
       EMBEDDING_URL: http://embedding:8000
       QDRANT_URL: http://qdrant:6333

@@ -11,8 +11,14 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import yaml
 
-from backend.snow_app.config import PublicSettings
+from backend.snow_app.config import (
+    PublicSettings,
+    TURNSTILE_TEST_SECRET,
+    TURNSTILE_TEST_SITE_KEY,
+    TURNSTILE_TEST_TOKEN,
+)
 from backend.snow_app.public_security import (
     BYOK_RETENTION_HOURS,
     PublicSecurityError,
@@ -68,6 +74,13 @@ class PublicSecurityTests(TestCase):
         missing = replace(complete, turnstile_site_key="", neo4j_password="")
         self.assertIn("TURNSTILE_SITE_KEY", missing.missing_production_secrets())
         self.assertIn("NEO4J_PASSWORD", missing.missing_production_secrets())
+        test_credentials = replace(
+            complete,
+            allow_insecure_dev=False,
+            turnstile_site_key=TURNSTILE_TEST_SITE_KEY,
+            turnstile_secret=TURNSTILE_TEST_SECRET,
+        )
+        self.assertIn("TURNSTILE_TEST_CREDENTIALS", test_credentials.missing_production_secrets())
 
     def test_public_image_uses_a_minimal_runtime_dependency_set(self) -> None:
         app_root = Path(__file__).resolve().parents[1]
@@ -103,6 +116,19 @@ class PublicSecurityTests(TestCase):
         self.assertIn("/opt/venv/lib/python3.12/site-packages/pip", embedding_dockerfile)
         self.assertIn("/opt/venv/lib/python3.12/site-packages/setuptools", embedding_dockerfile)
         self.assertIn("/opt/venv/lib/python3.12/site-packages/wheel", embedding_dockerfile)
+
+    def test_local_public_compose_uses_turnstile_test_keys_only(self) -> None:
+        app_root = Path(__file__).resolve().parents[1]
+        local_compose = yaml.safe_load((app_root / "compose.yml").read_text(encoding="utf-8"))
+        public_env = local_compose["services"]["public-api"]["environment"]
+        self.assertEqual(public_env["TURNSTILE_SITE_KEY"], TURNSTILE_TEST_SITE_KEY)
+        self.assertEqual(public_env["TURNSTILE_SECRET"], TURNSTILE_TEST_SECRET)
+        self.assertEqual(public_env["TURNSTILE_SECRET_FILE"], "")
+        self.assertEqual(public_env["PUBLIC_ALLOW_INSECURE_DEV"], "true")
+
+        production_compose = (app_root / "compose.prod.yml").read_text(encoding="utf-8")
+        self.assertNotIn(TURNSTILE_TEST_SITE_KEY, production_compose)
+        self.assertNotIn(TURNSTILE_TEST_SECRET, production_compose)
 
     def test_byok_credential_is_bound_to_anonymous_session_and_provider(self) -> None:
         settings = _settings()
@@ -415,3 +441,46 @@ class PublicSecurityTests(TestCase):
             self.assertFalse(asyncio.run(verify_turnstile(settings, "token", "127.0.0.1", action="feedback")))
             Client.payload = {**valid, "hostname": "evil.example"}
             self.assertFalse(asyncio.run(verify_turnstile(settings, "token", "127.0.0.1", action="feedback")))
+            Client.payload = {
+                "success": True,
+                "action": "test",
+                "hostname": "localhost",
+                "challenge_ts": "2022-02-28T15:14:30.096Z",
+            }
+            local_test_settings = replace(
+                settings,
+                allow_insecure_dev=True,
+                turnstile_site_key=TURNSTILE_TEST_SITE_KEY,
+                turnstile_secret=TURNSTILE_TEST_SECRET,
+            )
+            self.assertTrue(
+                asyncio.run(
+                    verify_turnstile(
+                        local_test_settings,
+                        TURNSTILE_TEST_TOKEN,
+                        "172.18.0.1",
+                        action="byok-session",
+                    )
+                )
+            )
+            self.assertFalse(
+                asyncio.run(
+                    verify_turnstile(
+                        local_test_settings,
+                        "not-the-cloudflare-test-token",
+                        "127.0.0.1",
+                        action="byok-session",
+                    )
+                )
+            )
+            production_test_settings = replace(local_test_settings, allow_insecure_dev=False)
+            self.assertFalse(
+                asyncio.run(
+                    verify_turnstile(
+                        production_test_settings,
+                        TURNSTILE_TEST_TOKEN,
+                        "127.0.0.1",
+                        action="byok-session",
+                    )
+                )
+            )

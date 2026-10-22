@@ -15,7 +15,13 @@ from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from backend.snow_app.config import PublicSettings, Settings
+from backend.snow_app.config import (
+    PublicSettings,
+    Settings,
+    TURNSTILE_TEST_SECRET,
+    TURNSTILE_TEST_SITE_KEY,
+    TURNSTILE_TEST_TOKEN,
+)
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
 from backend.snow_app.public_contracts import ChatRequest, HistoryTurn, SummarizeRequest
 from backend.snow_app.public_main import _anonymous_cookie_name, create_app
@@ -904,6 +910,58 @@ class PublicAPITests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         return response.json()["credential"], self.client.cookies.get(_anonymous_cookie_name(self.settings))
+
+    def test_local_turnstile_test_token_allows_byok_session(self) -> None:
+        test_settings = replace(
+            self.settings,
+            enabled_providers=("openai", "deepseek"),
+            turnstile_site_key=TURNSTILE_TEST_SITE_KEY,
+            turnstile_secret=TURNSTILE_TEST_SECRET,
+        )
+        test_app = create_app(test_settings, self.internal_settings, self.store)
+        test_client = TestClient(test_app)
+
+        class Response:
+            def json(self):
+                return {
+                    "success": True,
+                    "action": "test",
+                    "hostname": "localhost",
+                    "challenge_ts": "2022-02-28T15:14:30.096Z",
+                }
+
+        class Client:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, *_args, **_kwargs):
+                return Response()
+
+        try:
+            with patch("backend.snow_app.public_security.httpx.AsyncClient", Client):
+                response = test_client.post(
+                    "/public/v1/byok/session",
+                    headers={"Origin": "http://testserver"},
+                    json={
+                        "provider": "deepseek",
+                        "api_key": "sk-synthetic-never-log-this",
+                        "turnstile_token": TURNSTILE_TEST_TOKEN,
+                        "accepted_transit_notice": True,
+                        "accepted_cost_notice": True,
+                        "accepted_local_history_notice": True,
+                    },
+                )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["provider"], "deepseek")
+        finally:
+            test_client.close()
+            test_app.state.chat_service.close()
 
     def test_byok_retention_requires_switch_notice_and_returns_selected_term(self) -> None:
         disabled = self.client.post(

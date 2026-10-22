@@ -19,6 +19,11 @@ except ImportError:  # pragma: no cover - optional for env-only deployments
     keyring = None
 
 
+TURNSTILE_TEST_SITE_KEY = "1x00000000000000000000AA"
+TURNSTILE_TEST_SECRET = "1x0000000000000000000000000000000AA"
+TURNSTILE_TEST_TOKEN = "XXXX.DUMMY.TOKEN.XXXX"
+
+
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
@@ -341,4 +346,9 @@ class PublicSettings:
         ):
             if not value:
                 missing.append(name)
+        if not self.allow_insecure_dev and (
+            self.turnstile_site_key == TURNSTILE_TEST_SITE_KEY
+            or self.turnstile_secret == TURNSTILE_TEST_SECRET
+        ):
+            missing.append("TURNSTILE_TEST_CREDENTIALS")
         return missing
