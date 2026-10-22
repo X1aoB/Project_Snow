@@ -16,7 +16,12 @@ from typing import Any
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import httpx
 
-from .config import PublicSettings
+from .config import (
+    PublicSettings,
+    TURNSTILE_TEST_SECRET,
+    TURNSTILE_TEST_SITE_KEY,
+    TURNSTILE_TEST_TOKEN,
+)
 
 
 class PublicSecurityError(ValueError):
@@ -306,6 +311,13 @@ async def verify_turnstile(
         return False
     if not bool(payload.get("success")):
         return False
+    if (
+        settings.allow_insecure_dev
+        and settings.turnstile_site_key == TURNSTILE_TEST_SITE_KEY
+        and settings.turnstile_secret == TURNSTILE_TEST_SECRET
+        and token == TURNSTILE_TEST_TOKEN
+    ):
+        return True
     returned_action = str(payload.get("action") or "")
     returned_hostname = str(payload.get("hostname") or "").casefold().rstrip(".")
     if not returned_action or not hmac.compare_digest(returned_action, action):
