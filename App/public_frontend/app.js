@@ -535,8 +535,14 @@ const errorMessages = {
   turnstile_expired: "人机验证已过期，请重新验证。",
   turnstile_timeout: "人机验证超时，请再次点击按钮重试。",
   turnstile_unavailable: "人机验证组件加载失败，请刷新页面后重试。",
+  turnstile_browser_rejected: "验证服务未接受当前浏览器环境。请使用普通 Chrome 或 Edge 窗口打开本站，关闭可能拦截验证的扩展或代理后重试。",
+  turnstile_browser_unsupported: "验证服务不支持当前浏览器环境，请使用最新版普通 Chrome 或 Edge 窗口打开本站后重试。",
+  turnstile_configuration_invalid: "本站的人机验证配置暂时不可用，请稍后重试或联系管理员。",
+  turnstile_clock_invalid: "验证检测到时钟或缓存异常，请校准设备时间并刷新页面后重试。",
+  turnstile_verification_changed: "人机验证状态已更新，请再次点击按钮完成验证。API Key 和模型设置已保留。",
   chat_failed: "对话请求失败，请稍后重试。",
   request_failed: "请求失败，请稍后重试。",
+  invalid_response: "服务返回的数据不完整，请稍后重试。",
   network_unavailable: "网络连接失败，请检查网络后重试。",
   request_timeout: "提交超时，反馈未能确认是否送达；请稍后重试。",
   request_too_large: "本轮上下文过长，已无法在安全请求上限内发送；请先整理摘要或开始新的连续性段。",
@@ -2805,6 +2811,30 @@ async function waitForTurnstile(signal) {
   }
   return null;
 }
+function modelTurnstileError(code) {
+  const value = String(code || "");
+  if (/^(300|600)[0-9]{3}$/.test(value)) return new Error("turnstile_browser_rejected");
+  if (["110600", "110620"].includes(value)) return new Error("turnstile_timeout");
+  if (["110100", "110110", "110200", "400020", "400021", "400070"].includes(value)) return new Error("turnstile_configuration_invalid");
+  if (value === "200100") return new Error("turnstile_clock_invalid");
+  if (value === "200500") return new Error("turnstile_unavailable");
+  return new Error("turnstile_required");
+}
+async function modelVerificationToken(signal) {
+  if (!state.config?.turnstile_site_key) return tokenForModel(signal);
+  try {
+    const status = await api("/byok/verification", { signal, timeoutMs: 10000, cache: "no-store" });
+    signal.throwIfAborted();
+    if (typeof status.verification_required !== "boolean") throw new Error("invalid_response");
+    // Session issuance rechecks this advisory status.
+    if (status.verification_required === false) return "";
+  } catch (error) {
+    // Older servers do not expose this read. All other failures remain closed.
+    if (error?.httpStatus !== 404) throw error;
+  }
+  signal.throwIfAborted();
+  return tokenForModel(signal);
+}
 async function tokenForModel(signal) {
   const sitekey = state.config?.turnstile_site_key;
   if (!sitekey) return "development-bypass";
@@ -2821,6 +2851,7 @@ async function tokenForModel(signal) {
     let widget = null;
     let settled = false;
     let timeout = 0;
+    let iframeFailures = 0;
     const cleanup = () => {
       if (widget !== null) {
         try { turnstile.remove(widget); } catch { /* Still release the pending request. */ }
@@ -2846,9 +2877,22 @@ async function tokenForModel(signal) {
       widget = turnstile.render(container, {
         sitekey, action: "byok-session", execution: "execute", appearance: "interaction-only",
         size: container.clientWidth < 300 ? "compact" : "normal",
-        retry: "never",
+        retry: "auto", "retry-interval": 8000,
         callback: (token) => settle(null, token),
-        "error-callback": () => settle(new Error("turnstile_required")),
+        "error-callback": (code) => {
+          if (settled) return;
+          if (String(code) === "200500" && ++iframeFailures <= 2) {
+            $("model-verification-status").textContent = "验证组件连接暂时中断，正在重试，请保持此窗口打开…";
+            return;
+          }
+          settle(modelTurnstileError(code));
+        },
+        "unsupported-callback": () => settle(new Error("turnstile_browser_unsupported")),
+        "before-interactive-callback": () => {
+          if (settled) return;
+          $("model-verification-status").textContent = "请在此完成验证，成功后会自动继续。";
+          verification.scrollIntoView({ block: "nearest" });
+        },
         "expired-callback": () => settle(new Error("turnstile_expired")),
         "timeout-callback": () => settle(new Error("turnstile_timeout")),
       });
@@ -3460,24 +3504,31 @@ async function issueCredential(signal) {
   if (replacing) clearCredential();
   if (replacing || localPreferences.getItem("project-snow-public:byok-revoke")) await (await retentionModule()).revokeBeforeIssue(api, localPreferences, retention && retention !== "tab", replacing);
   signal.throwIfAborted();
-  const token = await tokenForModel(signal);
+  const token = await modelVerificationToken(signal);
   signal.throwIfAborted();
-  $("model-verification-status").textContent = "验证完成，正在建立模型会话…";
-  const payload = await api("/byok/session", {
-    method: "POST",
-    signal,
-    timeoutMs: 30000,
-    body: JSON.stringify({
-      provider,
-      api_key: apiKey,
-      turnstile_token: token,
-      accepted_transit_notice: true,
-      accepted_cost_notice: true,
-      accepted_local_history_notice: true,
-      ...(retention ? { retention } : {}),
-      ...(retention && retention !== "tab" ? { retention_notice_version: policy.notice_version, accepted_retention_notice: true } : {}),
-    }),
-  });
+  $("model-verification-status").textContent = token ? "验证完成，正在建立模型会话…" : "正在建立模型会话…";
+  let payload;
+  try {
+    payload = await api("/byok/session", {
+      method: "POST",
+      signal,
+      timeoutMs: 30000,
+      body: JSON.stringify({
+        provider,
+        api_key: apiKey,
+        turnstile_token: token,
+        accepted_transit_notice: true,
+        accepted_cost_notice: true,
+        accepted_local_history_notice: true,
+        ...(retention ? { retention } : {}),
+        ...(retention && retention !== "tab" ? { retention_notice_version: policy.notice_version, accepted_retention_notice: true } : {}),
+      }),
+    });
+  } catch (error) {
+    // A stale cookie requires a fresh user action, not an automatic replay.
+    if (!token && error?.httpStatus === 403 && error?.message === "turnstile_required") throw new Error("turnstile_verification_changed");
+    throw error;
+  }
   signal.throwIfAborted();
   state.credential = payload.credential;
   state.provider = provider;

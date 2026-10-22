@@ -5,6 +5,7 @@ import base64
 import json
 import time
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -910,6 +911,98 @@ class PublicAPITests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         return response.json()["credential"], self.client.cookies.get(_anonymous_cookie_name(self.settings))
+
+    def test_byok_verification_is_read_only_without_external_calls(self) -> None:
+        with (
+            patch.object(self.store, "mark_verified") as mark_verified,
+            patch.object(self.store, "consume_limits") as consume_limits,
+            patch("backend.snow_app.public_main.verify_turnstile") as verify,
+            patch("backend.snow_app.public_main.issue_byok_credential") as issue,
+            patch.object(self.app.state.provider_http, "get") as provider_get,
+            patch.object(self.app.state.provider_http, "post") as provider_post,
+        ):
+            response = self.client.get("/public/v1/byok/verification")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"verification_required": True})
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertNotIn("set-cookie", response.headers)
+        mark_verified.assert_not_called()
+        consume_limits.assert_not_called()
+        verify.assert_not_called()
+        issue.assert_not_called()
+        provider_get.assert_not_called()
+        provider_post.assert_not_called()
+        with self.store.begin() as connection:
+            self.assertEqual(connection.execute(text("SELECT count(*) FROM public_verification")).scalar_one(), 0)
+
+    def test_byok_verification_is_scoped_to_subject_purpose_and_expiry(self) -> None:
+        cookie_name = _anonymous_cookie_name(self.settings)
+        verified_id, other_id = "a" * 22, "b" * 22
+        self.store.mark_verified(subject_hash(verified_id), "byok")
+        self.store.mark_verified(subject_hash(other_id), "feedback")
+        self.client.cookies.set(cookie_name, verified_id)
+        verified = self.client.get("/public/v1/byok/verification")
+        self.assertEqual(verified.json(), {"verification_required": False})
+        self.assertEqual(verified.headers["Cache-Control"], "no-store")
+        self.client.cookies.set(cookie_name, other_id)
+        self.assertEqual(self.client.get("/public/v1/byok/verification").json(), {"verification_required": True})
+        self.client.cookies.clear()
+        self.assertEqual(self.client.get("/public/v1/byok/verification").json(), {"verification_required": True})
+
+        self.store.mark_verified(subject_hash(verified_id), "byok", lifetime=timedelta(seconds=-1))
+        self.client.cookies.set(cookie_name, verified_id)
+        expired = self.client.get("/public/v1/byok/verification")
+        self.assertEqual(expired.json(), {"verification_required": True})
+
+    def test_byok_verification_hint_never_authorizes_session_creation(self) -> None:
+        cookie_name = _anonymous_cookie_name(self.settings)
+        verified_id = "a" * 22
+        self.client.cookies.set(cookie_name, verified_id)
+        self.store.mark_verified(subject_hash(verified_id), "byok")
+        self.assertEqual(self.client.get("/public/v1/byok/verification").json(), {"verification_required": False})
+        self.store.mark_verified(subject_hash(verified_id), "byok", lifetime=timedelta(seconds=-1))
+        payload = {
+            "provider": "openai",
+            "api_key": "sk-synthetic-never-log-this",
+            "turnstile_token": "",
+            "accepted_transit_notice": True,
+            "accepted_cost_notice": True,
+            "accepted_local_history_notice": True,
+        }
+        with (
+            patch("backend.snow_app.public_main.verify_turnstile", return_value=False) as verify,
+            patch("backend.snow_app.public_main.issue_byok_credential") as issue,
+            patch.object(self.store, "mark_verified") as mark_verified,
+            patch.object(self.app.state.provider_http, "get") as provider_get,
+            patch.object(self.app.state.provider_http, "post") as provider_post,
+        ):
+            for token in ("", "forged-token"):
+                with self.subTest(token=token):
+                    response = self.client.post(
+                        "/public/v1/byok/session?verification_required=false",
+                        headers={"Origin": "http://testserver", "X-Verification-Required": "false"},
+                        json={**payload, "turnstile_token": token},
+                    )
+                    self.assertEqual(response.status_code, 403)
+                    self.assertEqual(response.json()["detail"]["code"], "turnstile_required")
+                    self.assertEqual(response.headers["Cache-Control"], "no-store")
+            self.assertEqual(verify.await_count, 2)
+            issue.assert_not_called()
+            mark_verified.assert_not_called()
+            provider_get.assert_not_called()
+            provider_post.assert_not_called()
+
+    def test_byok_verification_database_failure_is_retryable_and_uncached(self) -> None:
+        with patch.object(
+            self.app.state.async_store, "call",
+            side_effect=PublicStoreUnavailable("synthetic capacity"),
+        ):
+            response = self.client.get("/public/v1/byok/verification")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.headers["Retry-After"], "2")
+        self.assertEqual(response.json()["detail"]["code"], "public_database_unavailable")
+        self.assertTrue(response.json()["detail"]["retryable"])
 
     def test_local_turnstile_test_token_allows_byok_session(self) -> None:
         test_settings = replace(
