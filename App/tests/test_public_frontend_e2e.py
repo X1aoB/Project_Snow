@@ -149,6 +149,8 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
     feedback_attempts = 0
     feedback_mode = "success"
     turnstile_site_key = ""
+    turnstile_verification_required = True
+    session_verification_failures = 0
     chat_payloads: list[dict[str, object]] = []
     chat_attempts: dict[str, int] = {}
     chat_failure_mode = "success"
@@ -190,6 +192,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if path == "/public/v1/byok/verification":
+            self._json({"verification_required": type(self).turnstile_verification_required})
+            return
         if path == "/announcements.json":
             type(self).announcement_requests += 1
             if type(self).announcement_failures:
@@ -387,6 +392,11 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(length) or b"{}")
         type(self).request_paths.append(self.path)
         if self.path == "/public/v1/byok/session":
+            if type(self).session_verification_failures:
+                type(self).session_verification_failures -= 1
+                type(self).turnstile_verification_required = True
+                self._json({"detail": {"code": "turnstile_required"}}, status=403)
+                return
             if not payload.get("api_key"):
                 self._json({"detail": {"code": "invalid_request"}}, status=422)
                 return
@@ -796,6 +806,8 @@ class PublicFrontendE2ETests(TestCase):
         PublicFrontendHandler.feedback_attempts = 0
         PublicFrontendHandler.feedback_mode = "success"
         PublicFrontendHandler.turnstile_site_key = ""
+        PublicFrontendHandler.turnstile_verification_required = True
+        PublicFrontendHandler.session_verification_failures = 0
         PublicFrontendHandler.chat_payloads = []
         PublicFrontendHandler.chat_attempts = {}
         PublicFrontendHandler.chat_failure_mode = "success"
@@ -1213,8 +1225,17 @@ class PublicFrontendE2ETests(TestCase):
         page.add_init_script(
             """(() => {
                 const widgets = new Map();
+                const originalFetch = window.fetch.bind(window);
+                window.__modelVerificationFetchOptions = [];
+                window.fetch = (input, options) => {
+                    if (new URL(typeof input === 'string' ? input : input.url, location.href).pathname === '/public/v1/byok/verification') {
+                        window.__modelVerificationFetchOptions.push({ cache: options?.cache, credentials: options?.credentials });
+                    }
+                    return originalFetch(input, options);
+                };
                 window.__modelTurnstileOptions = [];
                 window.__modelTurnstileOutcome = 'success';
+                window.__modelTurnstileErrorCode = '';
                 window.turnstile = {
                     render(container, options) {
                         if (window.__modelTurnstileOutcome === 'unavailable') throw new Error('load failed');
@@ -1228,7 +1249,7 @@ class PublicFrontendE2ETests(TestCase):
                         challenge.onclick = () => {
                             const outcome = window.__modelTurnstileOutcome;
                             if (outcome === 'success') options.callback('model-e2e-token');
-                            else options[`${outcome}-callback`]?.();
+                            else options[`${outcome}-callback`]?.(window.__modelTurnstileErrorCode);
                         };
                         widgets.set(widget, challenge);
                         container.append(challenge);
@@ -1349,6 +1370,176 @@ class PublicFrontendE2ETests(TestCase):
                     self.assertEqual(page.evaluate("() => window.__modelTurnstileOptions[0].action"), "byok-session")
                     self.assertEqual(errors, [])
                     self._assert_no_horizontal_overflow(page)
+                    page.close()
+            browser.close()
+
+    def test_verified_model_setup_skips_widget_but_still_issues_a_server_session(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            for action in ("discover-models", "save-model"):
+                with self.subTest(action=action):
+                    page = browser.new_page()
+                    sessions, reads = [], []
+                    page.on("request", lambda request: sessions.append(request.post_data_json)
+                            if urlparse(request.url).path == "/public/v1/byok/session" else None)
+                    page.on("request", lambda request: reads.append(request.method)
+                            if urlparse(request.url).path == "/public/v1/byok/verification" else None)
+                    self._open_model_settings_with_interactive_verification(page)
+                    PublicFrontendHandler.turnstile_verification_required = False
+                    if action == "save-model":
+                        page.locator("#toggle-advanced-model").click()
+                        page.locator("#model-id").fill("gpt-e2e")
+                    page.locator(f"#{action}").click()
+                    if action == "save-model":
+                        page.locator("#settings-dialog").wait_for(state="hidden")
+                    else:
+                        page.locator("#discovered-models").wait_for(state="visible")
+                    self.assertEqual(reads, ["GET"])
+                    self.assertEqual(page.evaluate("window.__modelVerificationFetchOptions"),
+                                     [{"cache": "no-store", "credentials": "same-origin"}])
+                    self.assertEqual(len(sessions), 1)
+                    self.assertEqual(sessions[0]["turnstile_token"], "")
+                    self.assertEqual(page.evaluate("window.__modelTurnstileOptions.length"), 0)
+                    self.assertEqual(page.locator("[data-model-challenge]").count(), 0)
+                    page.close()
+            browser.close()
+
+    def test_model_verification_status_failures_stay_closed_and_legacy_servers_challenge(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            sessions = []
+            page.on("request", lambda request: sessions.append(request.post_data_json)
+                    if urlparse(request.url).path == "/public/v1/byok/session" else None)
+            self._open_model_settings_with_interactive_verification(page)
+            path = "**/public/v1/byok/verification"
+            for status, payload in ((503, {"detail": {"code": "request_failed"}}),
+                                    (200, {"verification_required": "false"}),
+                                    (200, {}), (200, {"verification_required": None}), (200, None)):
+                with self.subTest(status=status, payload=payload):
+                    def status_response(route):
+                        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+                    page.route(path, status_response)
+                    page.locator("#discover-models").click()
+                    page.wait_for_function("document.querySelector('#setup-error').textContent.length > 0 && !document.querySelector('#discover-models').disabled")
+                    self.assertEqual(sessions, [])
+                    self.assertEqual(page.evaluate("window.__modelTurnstileOptions.length"), 0)
+                    self.assertEqual(page.locator("#api-key").input_value(), "sk-e2e-only-not-real")
+                    page.unroute(path)
+            page.route(path, lambda route: route.fulfill(
+                status=404, content_type="application/json", body='{"detail":{"code":"not_found"}}'))
+            page.locator("#discover-models").click()
+            page.locator("[data-model-challenge]").wait_for(state="visible")
+            self.assertEqual(sessions, [])
+            page.locator("[data-model-challenge]").click()
+            page.locator("#discovered-models").wait_for(state="visible")
+            self.assertEqual(len(sessions), 1)
+            self.assertEqual(sessions[0]["turnstile_token"], "model-e2e-token")
+            browser.close()
+
+    def test_model_verification_state_race_requires_a_new_user_action(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            sessions = []
+            page.on("request", lambda request: sessions.append(request.post_data_json)
+                    if urlparse(request.url).path == "/public/v1/byok/session" else None)
+            self._open_model_settings_with_interactive_verification(page)
+            PublicFrontendHandler.turnstile_verification_required = False
+            PublicFrontendHandler.session_verification_failures = 1
+            page.locator("#toggle-advanced-model").click()
+            page.locator("#model-id").fill("gpt-e2e")
+            page.locator("#save-model").click()
+            page.locator("#setup-error").get_by_text("人机验证状态已更新", exact=False).wait_for(state="visible")
+            self.assertEqual(len(sessions), 1)
+            self.assertEqual(sessions[0]["turnstile_token"], "")
+            self.assertEqual(page.evaluate("window.__modelTurnstileOptions.length"), 0)
+            self.assertEqual(page.locator("#api-key").input_value(), "sk-e2e-only-not-real")
+            self.assertEqual(page.locator("#model-id").input_value(), "gpt-e2e")
+            page.locator("#save-model").click()
+            page.locator("[data-model-challenge]").wait_for(state="visible")
+            self.assertEqual(len(sessions), 1)
+            page.locator("[data-model-challenge]").click()
+            page.locator("#settings-dialog").wait_for(state="hidden")
+            self.assertEqual(len(sessions), 2)
+            self.assertEqual(sessions[1]["turnstile_token"], "model-e2e-token")
+            browser.close()
+
+    def test_model_verification_browser_and_configuration_errors_explain_recovery(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            sessions = []
+            page.on("request", lambda request: sessions.append(request.post_data_json)
+                    if urlparse(request.url).path == "/public/v1/byok/session" else None)
+            self._open_model_settings_with_interactive_verification(page)
+            page.locator("#toggle-advanced-model").click()
+            page.locator("#model-id").fill("gpt-e2e")
+            for code, outcome, message in (("300030", "error", "普通 Chrome 或 Edge"),
+                                           ("600010", "error", "普通 Chrome 或 Edge"),
+                                           ("", "unsupported", "不支持当前浏览器环境"),
+                                           ("110620", "error", "人机验证超时"),
+                                           ("110200", "error", "验证配置暂时不可用"),
+                                           ("200100", "error", "时钟或缓存异常")):
+                with self.subTest(code=code, outcome=outcome):
+                    page.evaluate("([code, outcome]) => { window.__modelTurnstileErrorCode = code; window.__modelTurnstileOutcome = outcome; }", [code, outcome])
+                    page.locator("#save-model").click()
+                    page.locator("[data-model-challenge]").click()
+                    page.locator("#setup-error").get_by_text(message, exact=False).wait_for(state="visible")
+                    self.assertEqual(sessions, [])
+                    self.assertTrue(page.locator("#save-model").is_enabled())
+                    self.assertEqual(page.locator("#api-key").input_value(), "sk-e2e-only-not-real")
+                    self.assertEqual(page.locator("#model-id").input_value(), "gpt-e2e")
+            browser.close()
+
+    def test_model_verification_iframe_failure_can_recover_without_reissuing_session(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            sessions = []
+            page.on("request", lambda request: sessions.append(request.post_data_json)
+                    if urlparse(request.url).path == "/public/v1/byok/session" else None)
+            self._open_model_settings_with_interactive_verification(page)
+            page.locator("#discover-models").click()
+            page.locator("[data-model-challenge]").wait_for(state="visible")
+            for _attempt in range(2):
+                page.evaluate("window.__modelTurnstileOptions.at(-1)['error-callback']('200500')")
+                self.assertEqual(page.locator("[data-model-challenge]").count(), 1)
+                self.assertFalse(page.locator("#discover-models").is_enabled())
+                self.assertEqual(sessions, [])
+            page.locator("#model-verification-status").get_by_text("正在重试", exact=False).wait_for(state="visible")
+            self.assertEqual(page.evaluate("window.__modelTurnstileOptions.at(-1).retry"), "auto")
+            self.assertEqual(page.evaluate("window.__modelTurnstileOptions.at(-1)['retry-interval']"), 8000)
+            page.locator("[data-model-challenge]").click()
+            page.locator("#discovered-models").wait_for(state="visible")
+            self.assertEqual(len(sessions), 1)
+            self.assertEqual(sessions[0]["turnstile_token"], "model-e2e-token")
+            browser.close()
+
+    def test_model_verification_retry_limit_and_cancel_discard_late_callbacks(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            for dismissal in ("limit", "cancel"):
+                with self.subTest(dismissal=dismissal):
+                    page = browser.new_page()
+                    sessions = []
+                    page.on("request", lambda request: sessions.append(request.post_data_json)
+                            if urlparse(request.url).path == "/public/v1/byok/session" else None)
+                    self._open_model_settings_with_interactive_verification(page)
+                    page.locator("#discover-models").click()
+                    page.locator("[data-model-challenge]").wait_for(state="visible")
+                    page.evaluate("window.__modelTurnstileOptions.at(-1)['error-callback']('200500')")
+                    if dismissal == "limit":
+                        page.evaluate("() => { const options=window.__modelTurnstileOptions.at(-1); options['error-callback']('200500'); options['error-callback']('200500'); }")
+                        page.locator("#setup-error").get_by_text("验证组件加载失败", exact=False).wait_for(state="visible")
+                    else:
+                        page.locator('[data-close-dialog="settings-dialog"]').click()
+                    page.wait_for_function("!document.querySelector('#discover-models').disabled")
+                    page.evaluate("async () => { window.__modelTurnstileOptions.at(-1).callback('late-e2e-token'); await Promise.resolve(); }")
+                    self.assertEqual(sessions, [])
+                    self.assertEqual(page.locator("[data-model-challenge]").count(), 0)
+                    self.assertEqual(page.locator("#api-key").input_value(), "sk-e2e-only-not-real")
                     page.close()
             browser.close()
 

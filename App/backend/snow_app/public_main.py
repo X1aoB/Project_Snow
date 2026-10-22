@@ -938,7 +938,7 @@ def create_app(
                     extra={"scope": exc.scope, "limit": exc.limit},
                 )
         response = await call_next(request)
-        if path.startswith("/public/v1/subscription/"):
+        if path.startswith(("/public/v1/subscription/", "/public/v1/byok/")):
             response.headers["Cache-Control"] = "no-store"
         if new_cookie and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             response.set_cookie(
@@ -1222,6 +1222,15 @@ def create_app(
             content=knowledge_review,
             headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=60"},
         )
+
+    @app.get("/public/v1/byok/verification")
+    async def byok_verification(request: Request) -> dict[str, bool]:
+        # This hint avoids a redundant client challenge; session creation still
+        # independently checks the current subject's verification below.
+        required = await async_store.call(
+            "verification_required", request.state.subject_hash, "byok"
+        )
+        return {"verification_required": required}
 
     @app.post("/public/v1/byok/session")
     async def byok_session(request: Request, payload: ByokSessionRequest) -> dict[str, Any]:

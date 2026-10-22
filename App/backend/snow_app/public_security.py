@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import ipaddress
+import logging
 import re
 import secrets
 import unicodedata
@@ -22,6 +23,15 @@ from .config import (
     TURNSTILE_TEST_SITE_KEY,
     TURNSTILE_TEST_TOKEN,
 )
+
+LOGGER = logging.getLogger("snow.public")
+
+
+def _turnstile_rejected(reason: str) -> bool:
+    # Only fixed local categories may reach the whitelist-only public logger.
+    # Never attach Siteverify payloads, exceptions, tokens, secrets or addresses.
+    LOGGER.warning("public_turnstile_" + reason)
+    return False
 
 
 class PublicSecurityError(ValueError):
@@ -295,7 +305,7 @@ async def verify_turnstile(
         except ValueError:
             return False
     if not settings.turnstile_secret or not token:
-        return False
+        return _turnstile_rejected("missing_input")
     try:
         async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
             response = await client.post(
@@ -307,10 +317,22 @@ async def verify_turnstile(
                 },
             )
         payload = response.json()
-    except (httpx.HTTPError, ValueError):
-        return False
-    if not bool(payload.get("success")):
-        return False
+    except httpx.HTTPError:
+        return _turnstile_rejected("network_unavailable")
+    except ValueError:
+        return _turnstile_rejected("invalid_response")
+    if not isinstance(payload, dict):
+        return _turnstile_rejected("invalid_response")
+    if payload.get("success") is not True:
+        codes = payload.get("error-codes")
+        codes = codes if isinstance(codes, list) else []
+        if any(code in codes for code in ("invalid-input-secret", "missing-input-secret")):
+            return _turnstile_rejected("secret_invalid")
+        if "timeout-or-duplicate" in codes:
+            return _turnstile_rejected("token_expired_or_duplicate")
+        if "internal-error" in codes:
+            return _turnstile_rejected("upstream_unavailable")
+        return _turnstile_rejected("token_rejected")
     if (
         settings.allow_insecure_dev
         and settings.turnstile_site_key == TURNSTILE_TEST_SITE_KEY
@@ -321,25 +343,25 @@ async def verify_turnstile(
     returned_action = str(payload.get("action") or "")
     returned_hostname = str(payload.get("hostname") or "").casefold().rstrip(".")
     if not returned_action or not hmac.compare_digest(returned_action, action):
-        return False
+        return _turnstile_rejected("action_mismatch")
     if not returned_hostname or not hmac.compare_digest(
         returned_hostname,
         settings.turnstile_hostname.casefold().rstrip("."),
     ):
-        return False
+        return _turnstile_rejected("hostname_mismatch")
     challenge_timestamp = str(payload.get("challenge_ts") or "").strip()
     if not challenge_timestamp:
-        return False
+        return _turnstile_rejected("timestamp_invalid")
     try:
         challenged_at = datetime.fromisoformat(challenge_timestamp.replace("Z", "+00:00"))
         if challenged_at.tzinfo is None:
             challenged_at = challenged_at.replace(tzinfo=UTC)
         age = datetime.now(UTC) - challenged_at.astimezone(UTC)
     except ValueError:
-        return False
-    return timedelta(seconds=-30) <= age <= timedelta(
-        seconds=settings.turnstile_max_age_seconds
-    )
+        return _turnstile_rejected("timestamp_invalid")
+    if not timedelta(seconds=-30) <= age <= timedelta(seconds=settings.turnstile_max_age_seconds):
+        return _turnstile_rejected("timestamp_expired")
+    return True
 
 
 _UNSAFE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (

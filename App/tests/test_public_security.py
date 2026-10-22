@@ -484,3 +484,66 @@ class PublicSecurityTests(TestCase):
                     )
                 )
             )
+
+    def test_turnstile_failure_diagnostics_never_include_private_inputs(self) -> None:
+        import httpx
+
+        class Response:
+            def json(self):
+                return Client.payload
+
+        class Client:
+            payload = {}
+            offline = False
+
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, *_args, **_kwargs):
+                if self.offline:
+                    raise httpx.ConnectError("DO_NOT_LOG network diagnostics")
+                return Response()
+
+        settings = replace(_settings(), allow_insecure_dev=False,
+                           turnstile_secret="DO_NOT_LOG secret")
+        valid = {"success": True, "action": "byok-session", "hostname": "snow.xiaob.dev",
+                 "challenge_ts": datetime.now(UTC).isoformat()}
+        cases = [
+            ([], "invalid_response"),
+            ({**valid, "success": "true"}, "token_rejected"),
+            ({"success": False, "error-codes": ["invalid-input-secret", "DO_NOT_LOG payload"]}, "secret_invalid"),
+            ({"success": False, "error-codes": ["timeout-or-duplicate"]}, "token_expired_or_duplicate"),
+            ({"success": False, "error-codes": ["internal-error"]}, "upstream_unavailable"),
+            ({**valid, "action": "DO_NOT_LOG action"}, "action_mismatch"),
+            ({**valid, "hostname": "DO_NOT_LOG hostname"}, "hostname_mismatch"),
+            ({**valid, "challenge_ts": "DO_NOT_LOG timestamp"}, "timestamp_invalid"),
+            ({**valid, "challenge_ts": (datetime.now(UTC) - timedelta(minutes=10)).isoformat()}, "timestamp_expired"),
+        ]
+        with patch("backend.snow_app.public_security.httpx.AsyncClient", Client):
+            for payload, reason in cases:
+                with self.subTest(reason=reason):
+                    Client.payload = payload
+                    with self.assertLogs("snow.public", level="WARNING") as records:
+                        accepted = asyncio.run(verify_turnstile(
+                            settings, "DO_NOT_LOG token", "203.0.113.123", action="byok-session"))
+                    self.assertFalse(accepted)
+                    self.assertEqual([record.getMessage() for record in records.records],
+                                     ["public_turnstile_" + reason])
+                    self.assertNotIn("DO_NOT_LOG", "".join(records.output))
+                    self.assertNotIn("203.0.113.123", "".join(records.output))
+            Client.offline = True
+            with self.assertLogs("snow.public", level="WARNING") as records:
+                self.assertFalse(asyncio.run(verify_turnstile(
+                    settings, "DO_NOT_LOG token", "203.0.113.123", action="byok-session")))
+            self.assertEqual(records.records[0].getMessage(), "public_turnstile_network_unavailable")
+            Client.offline = False
+            Client.payload = valid
+            with self.assertNoLogs("snow.public", level="WARNING"):
+                self.assertTrue(asyncio.run(verify_turnstile(
+                    settings, "DO_NOT_LOG token", "203.0.113.123", action="byok-session")))
