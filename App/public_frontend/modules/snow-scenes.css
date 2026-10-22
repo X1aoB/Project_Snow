@@ -1,0 +1,78 @@
+/* 换场白雪转场的增强层，只在 modules/snow-scenes.js 装好后、完整动态档位下生效；说明见 docs/snow-adv-ui-notes.md。 */
+html[data-ui="snow-adv"] .snow-scene-veil {
+  --veil-c: 255 255 255;
+  --veil-c2: 236 245 251;
+  --veil-flake: 255 255 255;
+}
+html[data-ui="snow-adv"][data-tone="dark"] .snow-scene-veil {
+  --veil-c: var(--tn-raised);
+  --veil-c2: var(--tn-base);
+  --veil-flake: 223 233 255;
+}
+html[data-ui="snow-adv"] .snow-scene-veil[data-tier="auto"]:has(> .snow-veil-fx) {
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  -webkit-mask-image: radial-gradient(circle at 50% 46%, transparent calc(var(--snow-open, 0%) - 26%), #000 var(--snow-open, 0%));
+  mask-image: radial-gradient(circle at 50% 46%, transparent calc(var(--snow-open, 0%) - 26%), #000 var(--snow-open, 0%));
+}
+html[data-ui="snow-adv"] .snow-scene-veil:not([data-tier="auto"]) > .snow-veil-fx,
+html[data-ui="snow-adv"] .snow-scene-veil:not([data-tier="auto"]) .snow-scene-veil-emblem { display: none; }
+html[data-ui="snow-adv"] .snow-veil-fx {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+html[data-ui="snow-adv"] .snow-veil-fill {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(72% 62% at 50% 48%, rgb(var(--veil-c) / 0.99), rgb(var(--veil-c2) / 0.98) 72%, rgb(var(--veil-c2) / 0.99));
+}
+html[data-ui="snow-adv"] .snow-veil-drift {
+  position: absolute;
+  width: var(--s);
+  height: var(--s);
+  border-radius: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.15);
+  background: radial-gradient(closest-side, rgb(var(--veil-c) / 0.96), rgb(var(--veil-c) / 0.7) 55%, rgb(var(--veil-c) / 0));
+}
+html[data-ui="snow-adv"] .snow-veil-flakes {
+  position: absolute;
+  inset: -10% -5%;
+  opacity: 0;
+  background-image:
+    radial-gradient(circle at 22% 30%, rgb(var(--veil-flake)) 0 1.5px, transparent 2.2px),
+    radial-gradient(circle at 68% 62%, rgb(var(--veil-flake)) 0 2.2px, transparent 3px),
+    radial-gradient(circle at 44% 86%, rgb(var(--veil-flake)) 0 1.1px, transparent 1.7px);
+  background-size: 96px 112px, 168px 150px, 64px 72px;
+}
+html[data-ui="snow-adv"] .snow-veil-flakes-near {
+  background-size: 180px 210px, 300px 260px, 120px 140px;
+  filter: blur(0.6px);
+}
+html[data-ui="snow-adv"] .snow-scene-veil[data-tier="auto"] .snow-scene-veil-card { position: relative; }
+html[data-ui="snow-adv"] .snow-scene-veil-emblem {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 4px;
+  border: 1px solid color-mix(in oklab, var(--ice-500) 46%, transparent);
+  border-radius: 50%;
+  color: var(--ice-600);
+}
+html[data-ui="snow-adv"] .snow-scene-veil-emblem svg {
+  width: 30px;
+  height: 30px;
+  stroke-width: 1.6;
+}
+html[data-ui="snow-adv"] .snow-scene-veil-emblem svg > * { stroke-dasharray: 1; }
+/* 分析员的房间在宿舍区（B-03），与基地地图一致。 */
+html[data-ui="snow-adv"] .in-person-surface[data-scene="analyst"] .scene-location > span::before { content: "B-03" / ""; }
+@media (max-width: 860px) {
+  html[data-ui="snow-adv"] .snow-scene-veil-emblem { width: 52px; height: 52px; }
+  html[data-ui="snow-adv"] .snow-scene-veil-emblem svg { width: 26px; height: 26px; }
+}

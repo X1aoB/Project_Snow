@@ -653,7 +653,6 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
 
     def test_floor_plan_places_locations_like_stage_scenes_and_marks_the_analyst(self):
         placements = PLACEMENTS
-        rooms = {"observation", "archive", "medical", "corridor", "quarters", "lounge", "canteen", "training"}
         state = spread_world()
         page = self.open_page(self.new_page())
         page.locator("#open-snow-base-map").wait_for(state="attached")
@@ -663,12 +662,12 @@ class SnowAdvBaseMapTests(MapBrowserFixture, TestCase):
         self.open_map(page)
         scene_keys = page.evaluate("""async places => {const {sceneVisualKey}=await import('/dialogue-context.js');
           return places.map(place => sceneVisualKey(place));}""", [where for where, _ in placements])
+        # The stage now draws its own scene for every annex and off-base place; the plan still files them by zone.
+        # 她的房间 shares the quarters scene, 我的房间 is the analyst's room, which the plan files under 宿舍.
+        stage = {"她的房间": "quarters", "我的房间": "analyst", "商业街": "street", "购物中心": "mall", "公园": "park"}
         for (where, zone), scene in zip(placements, scene_keys):
             with self.subTest(location=where):
-                # Rooms follow the stage scene mapping; annexes and the outside are scenes the stage draws as generic.
-                # The stage has no scene for "她的房间/我的房间", so the plan files them under 宿舍 by name.
-                generic = zone not in rooms or where in {"她的房间", "我的房间"}
-                self.assertEqual(scene, "generic" if generic else zone)
+                self.assertEqual(scene, stage.get(where, zone))
         for row, (where, zone) in zip(ROSTER, placements):
             cid = row["character_id"]
             with self.subTest(location=where, zone=zone):

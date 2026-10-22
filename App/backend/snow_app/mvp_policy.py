@@ -323,8 +323,13 @@ def scene_visual_key(location: str | None) -> str:
     normalized = str(location or "").strip()
     if not normalized:
         return "generic"
+    # Order matters: the analyst's room is checked before a character's
+    # "<name>的房间", which shares the quarters scene. The annex keys match
+    # the base map's zone keys (snow-base-map.js); public_frontend's
+    # dialogue-context.js sceneVisualKey must stay identical.
     mappings = (
-        (("个人房间", "宿舍"), "quarters"),
+        (("分析员的房间", "我的房间"), "analyst"),
+        (("个人房间", "宿舍", "的房间"), "quarters"),
         (("休息区", "公共区"), "lounge"),
         (("训练区",), "training"),
         (("资料室", "资料阅览区", "阅览区"), "archive"),
@@ -332,6 +337,14 @@ def scene_visual_key(location: str | None) -> str:
         (("观景区",), "observation"),
         (("医务室",), "medical"),
         (("走廊",), "corridor"),
+        (("海滩", "沙滩", "海边"), "beach"),
+        (("温泉",), "hot_spring"),
+        (("游戏厅", "街机"), "arcade"),
+        (("酒吧",), "bar"),
+        (("疗愈",), "healing"),
+        (("公园",), "park"),
+        (("商业街",), "street"),
+        (("购物中心", "商场"), "mall"),
     )
     for terms, key in mappings:
         if any(term in normalized for term in terms):

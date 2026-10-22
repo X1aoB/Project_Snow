@@ -19,6 +19,7 @@ const vendorPath = join(appRoot, "frontend", "vendor", "lucide.min.js");
 const outputPath = join(appRoot, "public_frontend", "modules", "snow-icons.js");
 // Icons only the lazily loaded feature UI uses: kept out of the first-screen module.
 const featureOutputPath = join(appRoot, "public_frontend", "modules", "snow-feature-icons.js");
+const sceneOutputPath = join(appRoot, "public_frontend", "modules", "snow-scene-icons.js");
 
 // kebab-case public name -> lucide export name.
 export const ICONS = Object.freeze({
@@ -51,6 +52,28 @@ export const FEATURE_ICONS = Object.freeze({
   star: "Star",
   "trash-2": "Trash2",
   "undo-2": "Undo2",
+});
+
+// Scene emblems drawn on the scene-change title card (modules/snow-scenes.js). The
+// outside ("generic") reuses the first-screen snowflake, so it is not listed here.
+export const SCENE_ICONS = Object.freeze({
+  "mountain-snow": "MountainSnow",
+  "book-open": "BookOpen",
+  "bed-double": "BedDouble",
+  sofa: "Sofa",
+  utensils: "Utensils",
+  dumbbell: "Dumbbell",
+  stethoscope: "Stethoscope",
+  "door-open": "DoorOpen",
+  waves: "Waves",
+  bath: "Bath",
+  "gamepad-2": "Gamepad2",
+  "glass-water": "GlassWater",
+  leaf: "Leaf",
+  trees: "Trees",
+  store: "Store",
+  "shopping-bag": "ShoppingBag",
+  monitor: "Monitor",
 });
 
 function lucideVersion(source) {
@@ -111,9 +134,12 @@ function build() {
   const version = lucideVersion(source);
   const overlap = Object.keys(FEATURE_ICONS).filter(name => Object.hasOwn(ICONS, name));
   if (overlap.length) throw new Error(`feature icons duplicate first-screen icons: ${overlap.join(", ")}`);
+  const sceneOverlap = Object.keys(SCENE_ICONS).filter(name => Object.hasOwn(ICONS, name) || Object.hasOwn(FEATURE_ICONS, name));
+  if (sceneOverlap.length) throw new Error(`scene icons duplicate other icon sets: ${sceneOverlap.join(", ")}`);
   return [
     [outputPath, render(iconNodes(ICONS, lucide), version, "SNOW_ICON_NAMES", "createSnowIcon")],
     [featureOutputPath, render(iconNodes(FEATURE_ICONS, lucide), version, "SNOW_FEATURE_ICON_NAMES", "createFeatureIcon")],
+    [sceneOutputPath, render(iconNodes(SCENE_ICONS, lucide), version, "SNOW_SCENE_ICON_NAMES", "createSceneIcon")],
   ];
 }
 

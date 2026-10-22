@@ -952,16 +952,16 @@ function syncSnowComposerHeight(enabled) {
   snowComposerObserver.observe($("stage-dialogue"));
   if (row) snowComposerObserver.observe(row);
 }
-// 雪境 ADV 世界层 (P2)：开关开启且处于面对面界面时，在 #scene-stage 内挂载程序化分层雪景与 Canvas 远近雪；关闭或离开面对面时销毁。
 let snowWorld = null;
 // P6a：通讯器背后的世界——一个 body 级 fixed 的「舞台」容器，仅桌面开关开启时存在， aria-hidden、pointer-events:non…
 let snowBackdrop = null;
 let snowBackdropStage = null;
 let snowPushContext = null;
 let snowPresentationSequence = 0;
+let snowScenes = null;
 function snowWorldScene() {
-  const scene = state.scene || {};
-  return SCENE_KEYS.has(scene.visual_key) ? scene.visual_key : "generic";
+  const key = state.scene?.visual_key;
+  return /^[a-z_]{1,24}$/.test(key || "") ? key : "generic";
 }
 function currentMotionLevel() {
   return document.documentElement.dataset.motionLevel || "auto";
@@ -1022,10 +1022,8 @@ function syncSnowBackdrop() {
 
 // P3 面对面主屏全部只在 ui_snow_adv 开启时生效。
 
-// 到场提示去重：开关开启时，仅保留舞台通知（旁白 / 对白），抑制重复的横幅与状态行；屏幕阅读播报仍只发生一次（来自 #stage-narration / #st…
 function suppressArrivalDuplicateNotice() { return featureEnabled("ui_snow_adv"); }
 
-// 立绘中轴：在缩小的同源副本上取头到腰（高度 12%~55%）的不透明像素重心，返回 0~1。
 const stageActorAnchorCache = new Map();
 function applyStageActorAnchor(node) {
   if (!node || !featureEnabled("ui_snow_adv")) {
@@ -1135,17 +1133,22 @@ function removeStageQuickMenu() {
   $("stage-dialogue")?.querySelectorAll(".stage-quick-menu, .stage-advance").forEach(node => node.remove());
 }
 // ▼ 可见 = 当前回复显示完、空闲（非打字 / 揭示 / 等待）；跳过按钮在无内容揭示时禁用。
+function stageSpeaking() {
+  return Boolean($("stage-speech")?.matches(".is-typing, .is-revealing") || presentationFor() || state.completedPresentationByCharacter.get(state.selected));
+}
+function stageBusy() {
+  const pending = typingStateFor();
+  return stageSpeaking() || pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment", "waiting", "presenting"].includes(pending.phase);
+}
 function syncStageQuickMenu() {
   if (!featureEnabled("ui_snow_adv")) return;
   const advance = $("stage-advance");
   const speech = $("stage-speech");
-  const pending = typingStateFor();
   const revealing = Boolean(speech && (speech.classList.contains("is-typing") || speech.classList.contains("is-revealing")));
-  const waiting = pending?.channel === "in_person" && ["connecting", "typing", "arrival", "segment", "waiting", "presenting"].includes(pending.phase);
   const queue = presentationFor();
   const hasAssistant = Boolean(latestInPersonMessage("assistant"));
   const inPerson = !$("in-person-surface").hidden;
-  if (advance) advance.classList.toggle("is-ready", Boolean(inPerson && hasAssistant && !revealing && !waiting && !queue));
+  if (advance) advance.classList.toggle("is-ready", Boolean(inPerson && hasAssistant && !stageBusy()));
   const skip = $("stage-quick-menu")?.querySelector('[data-stage-quick="skip"]');
   if (skip) skip.disabled = !(revealing || snowFeatureLogic?.reading.active() || queue || (state.streamingPresentationByCharacter.get(state.selected)?.receivedCount > state.streamingPresentationByCharacter.get(state.selected)?.visibleCount));
 }
@@ -1211,19 +1214,26 @@ function finishSnowCamera() {
   }
   if (snowWorld) snowWorld.setMotion(currentMotionLevel());
 }
+function snowCommitPending() {
+  window.clearTimeout(state.snowVeilWait);
+  const pending = state.snowVeilPending;
+  state.snowVeilPending = null;
+  pending?.commit();
+}
 function cancelSnowScenePresentation() {
   snowPresentationSequence += 1;
+  snowCommitPending();
   snowBackdrop?.cancelPush();
   clearSnowVeil();
   finishSnowCamera();
-  if (snowWorld) snowWorld.setScene(snowWorldScene());
+  if (snowWorld) snowWorld.setScene(state.snowShown || snowWorldScene());
 }
 function syncSnowVeilMount() {
   if (featureEnabled("ui_snow_adv")) buildSnowVeil();
   else removeSnowVeil();
 }
 // 决定是否在本次 renderScene 播放遮罩，并在遮罩掩护下切换 P2 世界场景（仅视觉延迟，不延迟逻辑）。
-function maybePlaySnowVeil(scene, visualKey) {
+function maybePlaySnowVeil(scene, visualKey, label) {
   const location = plain(scene?.character_location || "");
   const visible = snowAdvActive() && !$("in-person-surface").hidden;
   const tier = stageMotionTier();
@@ -1231,9 +1241,9 @@ function maybePlaySnowVeil(scene, visualKey) {
       || snowPushContext.characterId !== state.selected || snowPushContext.location !== location
       || snowPushContext.visualKey !== visualKey)) cancelSnowScenePresentation();
   // 遮罩不适用时，P2 舞台世界场景照旧立即切换（舞台世界仅面对面可见时存在）。
-  const commitScene = () => { if (snowWorld) snowWorld.setScene(visualKey); };
+  const commitScene = () => { label(); state.snowShown = visualKey; if (snowWorld) snowWorld.setScene(visualKey); };
   if (!visible || !location || tier === "off") {
-    if (state.snowVeilTimers.length || state.snowVeilAnimation) cancelSnowScenePresentation();
+    if (state.snowVeilTimers.length || state.snowVeilAnimation || state.snowVeilPending) cancelSnowScenePresentation();
     commitScene();
     if (visible && location) state.snowVeilLocation = location;
     if (visible && state.snowBeenInPerson && visualKey !== "generic") state.snowEntryConsumed = true;
@@ -1242,11 +1252,33 @@ function maybePlaySnowVeil(scene, visualKey) {
   }
   const changed = state.snowVeilArmed && location !== state.snowVeilLocation;
   state.snowVeilLocation = location;
-  if (!changed) { commitScene(); armSnowVeilSoon(); return; }
-  // P6a：首次由「外面」进入室内，先镜头推进再 P4 veil；推进接管后不再立即切场景。
-  if (snowMaybePushIntoScene(scene, visualKey, commitScene)) return;
-  if (state.snowBeenInPerson && visualKey !== "generic") state.snowEntryConsumed = true;
-  playSnowVeil(scene, location, tier, commitScene);
+  if (!changed) {
+    if (state.snowVeilPending) state.snowVeilPending.commit = commitScene;
+    else commitScene();
+    armSnowVeilSoon();
+    return;
+  }
+  const play = commit => {
+    // P6a：首次由「外面」进入室内，先镜头推进再 P4 veil；推进接管后不再立即切场景。
+    if (snowMaybePushIntoScene(scene, visualKey, commit)) return;
+    if (state.snowBeenInPerson && visualKey !== "generic") state.snowEntryConsumed = true;
+    playSnowVeil(scene, location, tier, commit, visualKey);
+  };
+  if (!stageSpeaking()) { play(commitScene); return; }
+  const pending = { commit: commitScene };
+  const since = performance.now();
+  state.snowVeilPending = pending;
+  const wait = () => {
+    if (state.snowVeilPending !== pending) return;
+    if (stageBusy() && performance.now() - since < 12000) { state.snowVeilWait = window.setTimeout(wait, 150); return; }
+    state.snowVeilWait = window.setTimeout(() => {
+      if (state.snowVeilPending !== pending) return;
+      state.snowVeilPending = null;
+      if ($("in-person-surface").hidden || document.hidden || stageMotionTier() !== tier) pending.commit();
+      else play(pending.commit);
+    }, 650);
+  };
+  wait();
 }
 // 首帧/历史恢复发生在同一帧的同步突发里；用一次 rAF 把布防推到下一帧，排除这段突发。
 function armSnowVeilSoon() {
@@ -1254,10 +1286,11 @@ function armSnowVeilSoon() {
   state.snowVeilSeen = true;
   requestAnimationFrame(() => { state.snowVeilArmed = true; });
 }
-function playSnowVeil(scene, location, tier, commitScene) {
+function playSnowVeil(scene, location, tier, commitScene, key) {
   const veil = $("snow-scene-veil");
   if (!veil || typeof veil.animate !== "function" || document.hidden) { commitScene(); return; }
   clearSnowVeil();
+  state.snowVeilPending = { commit: commitScene };
   const sequence = snowPresentationSequence;
   const card = veil.querySelector(".snow-scene-veil-card");
   const kicker = veil.querySelector(".snow-scene-veil-kicker");
@@ -1267,23 +1300,25 @@ function playSnowVeil(scene, location, tier, commitScene) {
   if (kicker) kicker.textContent = "场景";
   if (title) title.textContent = location;
   if (sub) sub.textContent = plain(scene?.character_activity || "");
-  const fadeIn = tier === "light" ? 180 : 300;
-  const hold = 600;
-  const fadeOut = tier === "light" ? 180 : 420;
-  veil.dataset.phase = "up";
   veil.dataset.tier = tier;
-  const inAnim = veil.animate([{ opacity: 0 }, { opacity: 1 }], { duration: fadeIn, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)", fill: "both" });
+  const fx = tier === "auto" ? snowScenes?.veil(veil, key) : null;
+  const fadeIn = fx?.fadeIn || (tier === "light" ? 180 : 300);
+  const hold = fx?.hold || 600;
+  const fadeOut = fx?.fadeOut || (tier === "light" ? 180 : 420);
+  veil.dataset.phase = "up";
+  const inAnim = veil.animate(fx?.inFrames || [{ opacity: 0 }, { opacity: 1 }], { duration: fadeIn, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)", fill: "both" });
   state.snowVeilAnimation = inAnim;
-  if (tier !== "light" && card) {
+  if (tier !== "light" && card && !fx) {
     card.animate([{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "translateY(0)" }],
       { duration: fadeIn + 160, easing: "cubic-bezier(0.34, 1.32, 0.5, 1)", fill: "both" });
   }
   // 掩护下切换世界场景（纯视觉延迟）。
-  state.snowVeilTimers.push(window.setTimeout(() => { if (sequence === snowPresentationSequence) commitScene(); }, fadeIn));
+  state.snowVeilTimers.push(window.setTimeout(() => { if (sequence === snowPresentationSequence) snowCommitPending(); }, fadeIn));
   state.snowVeilTimers.push(window.setTimeout(() => {
     if (sequence !== snowPresentationSequence) return;
     veil.dataset.phase = "down";
-    const outAnim = veil.animate([{ opacity: 1 }, { opacity: 0 }], { duration: fadeOut, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)", fill: "both" });
+    fx?.down();
+    const outAnim = veil.animate(fx?.outFrames || [{ opacity: 1 }, { opacity: 0 }], { duration: fadeOut, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)", fill: "both" });
     state.snowVeilAnimation = outAnim;
     outAnim.finished.catch(() => {}).finally(() => {
       if (state.snowVeilAnimation !== outAnim) return;
@@ -1306,7 +1341,6 @@ function snowOpeningState() {
   }
   return state.snowOpening;
 }
-// 开机层或锁屏层是否正占据屏幕——其间不得弹出体验须知、新手引导或任何对话框（<dialog>.showModal() 走顶层，会盖在开机/锁屏之上），须在消隐/…
 function snowOpeningActive() {
   return Boolean(document.getElementById("snow-boot") || document.getElementById("snow-lock"));
 }
@@ -1373,7 +1407,6 @@ function dismissSnowBoot(onRemoved) {
   if (tier === "off" || typeof boot.animate !== "function") { finish(); return; }
   boot.dataset.phase = "out";
   if (tier === "auto") {
-    // 完整动效：标志先收起（≈200ms），底色随后淡开（≈260ms），底下的通讯器各部分依次入场；入场结束后再交还给体验须知等，避免弹窗压在正在入场的界面上。
     const app = $("chat-app");
     app.dataset.snowEntering = "1";
     window.setTimeout(() => { delete app.dataset.snowEntering; finish(); }, 720);
@@ -1574,6 +1607,7 @@ function snowMaybePushIntoScene(scene, visualKey, commitScene) {
   state.snowEntryConsumed = true;
   const sequence = ++snowPresentationSequence;
   snowPushContext = { characterId: state.selected, location: destination, visualKey };
+  state.snowVeilPending = { commit: commitScene };
   $("chat-app").dataset.snowPushing = "1";
   // 仅把舞台的视觉层暂时让开，逻辑/回复照常推进。
   if (snowWorld) snowWorld.setMotion(currentMotionLevel());
@@ -1585,7 +1619,7 @@ function snowMaybePushIntoScene(scene, visualKey, commitScene) {
       playSnowVeil({ character_location: destination, character_activity: activity }, destination, tier, () => {
         commitScene();
         finishSnowCamera();
-      });
+      }, visualKey);
       return true; // 世界切换已由 veil 接管。
     },
   });
@@ -3240,7 +3274,6 @@ async function loadConfig() {
   state.config = await api("/config", { headers: {} });
   syncMotionState();
   syncInterfaceSkin();
-  // P6a 首帧处理：config 解析后解除中性保持（见模块顶部的 data-snow-booting 守卫）。
   try {
     if (featureEnabled("ui_snow_adv")) localPreferences.setItem(SNOW_LAST_SEEN_KEY, "1");
     else localPreferences.removeItem(SNOW_LAST_SEEN_KEY);
@@ -4209,9 +4242,7 @@ function finishOnboarding() {
 }
 function renderOnboarding() {
   if (localPreferences.getItem("project-snow-public:onboarding") === "complete") return;
-  // P6a：开机/锁屏层占屏时不显示新手引导，避免盖在开场层之上；消隐/解锁后由 snowRunDeferredOpenings() 再次调用本函数按正常顺序显示。
   if (snowOpeningActive()) { $("onboarding-guide").hidden = true; return; }
-  // P7：雪境界面下，体验须知、公告等模态弹窗打开时引导卡先让开（否则会在弹窗背后同时出现），弹窗关闭时由下方的 close 监听重新调用本函数。
   if (featureEnabled("ui_snow_adv") && document.querySelector("dialog[open]")) { $("onboarding-guide").hidden = true; return; }
   const step = Math.min(state.onboardingStep, ONBOARDING_STEPS.length - 1);
   const item = ONBOARDING_STEPS[step];
@@ -5006,7 +5037,6 @@ async function updateStageCharacterArt(node, character, expressionState, perform
       && Boolean(node.getAttribute("src"));
     const outgoingTransition = shouldCrossfade
       ? crossfadeStageCharacterArt(node, previousCharacterId === characterId ? 160 : 280) : null;
-    // 雪境 ADV (P4)：立绘首次为某场景/到场出现时（上一帧无图或已隐藏，且不是换表情交叉淡入），以 --ease-settle 做 ~420ms 的柔和上浮…
     const firstAppearance = !outgoingTransition && (node.hidden || !node.getAttribute("src"));
     const previousSurface = state.stageArtSurface;
     loadedRenderer.commit(node, loadedPresentation, loadedSurface);
@@ -5056,7 +5086,6 @@ function cancelStageMotion(characterId = "") {
   return Boolean(animation);
 }
 function stageMotionFrames(stageMotion) {
-  // 雪境 ADV (P4)：带缓冲、小振幅、会 settle 的曲线，替代旧的 ±10px 生硬抖动。
   if (snowAdvActive()) {
     if (stageMotion === "lean_in") return {
       duration: 1700, easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
@@ -5839,7 +5868,6 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
     const node = [...timeline.querySelectorAll("[data-message-id]")].find(item => item.dataset.messageId === message.id);
     if (!node) continue;
     if (snowAdvActive()) {
-      // 雪境 ADV (P5)：气泡 pop-in 由 CSS 关键帧按动态档位驱动（auto 上浮+淡入、 light 仅淡入、off 无），只动 transform…
       node.classList.add("is-snow-pop");
     } else {
       void transientMotion.play(node, [{ opacity: .25, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 180, easing: "cubic-bezier(.22,.72,.24,1)" });
@@ -6101,7 +6129,7 @@ function renderStageSpeech(assistantMessage) {
     || pending?.channel === "in_person" && pending.requestId === assistantMessage.requestId);
   // Confirmed replies take priority over decorative arrival/scene transitions…
   if (liveReply && (completeSpeech || action)
-      && (snowPushContext || state.snowVeilAnimation || state.snowVeilTimers.length)) cancelSnowScenePresentation();
+      && (snowPushContext || state.snowVeilAnimation)) cancelSnowScenePresentation();
   if (snowAdvActive() && snowFeatureLogic?.reading.enabled()) {
     window.clearTimeout(state.typewriter.timer);
     state.typewriter = { key: speechKey, timer: 0, fullText: "", displayedText: "" };
@@ -6146,13 +6174,18 @@ function renderInfo() {
 function renderScene() {
   const scene = state.scene || {};
   const visualKey = SCENE_KEYS.has(scene.visual_key) ? scene.visual_key : "generic";
-  $("in-person-surface").dataset.scene = visualKey;
+  const snowKey = snowAdvActive() ? snowWorldScene() : visualKey;
   const backdrop = SCENE_ASSET_URLS[visualKey] || `/assets/immersive/scenes/${visualKey}.svg`;
   if ($("scene-backdrop").getAttribute("src") !== backdrop) $("scene-backdrop").src = backdrop;
   syncSnowWorld();
-  maybePlaySnowVeil(scene, visualKey);
-  $("stage-location").textContent = scene.character_location || "场景尚未建立";
-  $("stage-activity").textContent = scene.character_activity || "选择角色后读取当前位置";
+  maybePlaySnowVeil(scene, snowKey, () => {
+    $("in-person-surface").dataset.scene = snowKey;
+    $("stage-location").textContent = scene.character_location || "场景尚未建立";
+    $("stage-activity").textContent = scene.character_activity || "选择角色后读取当前位置";
+    const after = state.snowVeilAfter;
+    state.snowVeilAfter = null;
+    after?.();
+  });
   const presenceLabel = scene.character_location ? `去见她 · ${scene.character_location}` : "去见她";
   $("go-in-person-label").textContent = presenceLabel;
   $("go-in-person").setAttribute("aria-label", presenceLabel);
@@ -6283,7 +6316,6 @@ async function setChannel(channel, persist = true, targetThread = null) {
   $("text-surface").inert = channel === "in_person";
   $("in-person-surface").inert = channel !== "in_person";
   $("chat-app").dataset.channel = channel === "in_person" ? "in_person" : "text";
-  // 雪境 ADV P3：开关开启进入面对面时，角色栏改为覆盖式抽屉，默认关闭让舞台占满视口；桌面端用既有 sidebar-collapsed 机制（#open-st…
   if (featureEnabled("ui_snow_adv") && channel === "in_person" && !window.matchMedia("(max-width: 820px)").matches
     && !$("chat-app").classList.contains("sidebar-collapsed")) {
     $("chat-app").classList.add("sidebar-collapsed");
@@ -6945,7 +6977,9 @@ async function runChat(thread, userMessage, { stateRecoveryAttempt = 0 } = {}) {
         renderScene();
         if (result.pendingStateEvent?.event_type === "joint_movement") {
           setRequestStatus(characterId, "", requestId);
-          showJointMovementNotice({ characterId, requestId, locationName: result.pendingSceneState.character_location || "新的地点" });
+          const notice = () => showJointMovementNotice({ characterId, requestId, locationName: result.pendingSceneState.character_location || "新的地点" });
+          if (state.snowVeilPending) state.snowVeilAfter = notice;
+          else notice();
         }
       }
     }
@@ -7584,7 +7618,6 @@ async function arriveInPerson() {
     if (ownsVisibleArrival()) {
       updateTypingPhase(characterId, arrivalId, "presenting");
       await setChannel("in_person");
-      // 雪境 ADV：到场反应已显示在舞台对白框（旁白 + 对白，aria-live 播报一次），开关开启且确有舞台反应时抑制重复的「她注意到了你的到来。
       const stageHasArrivalReaction = Boolean(arrivalMessage) && suppressArrivalDuplicateNotice();
       if (result.terminal_error) showBanner(arrivalReactionUnavailableMessage(result.terminal_error));
       else if (result.decision === "unnoticed") showBanner("你来到她身边，她暂时没有注意到。位置切换已经完成。");
@@ -8440,7 +8473,6 @@ async function boot() {
   try { snowBoot = maybeStartSnowBoot(); } catch { snowBoot = false; }
   try { snowLock = maybeStartSnowLock(); } catch { snowLock = false; }
   if (snowBoot) snowBootStep("读取本地记录");
-  // 体验须知与新手引导：桌面开机消隐后、手机解锁后按正常顺序出现（绝不盖在开场层之上）；其余情况（flag 关 / 跳过开机锁屏）保持原有顺序——config 之后…
   if (!snowBoot && !snowLock) await showExperienceNoticeIfNeeded();
   await loadCharacters();
   if (snowBoot) { snowBootStep("就绪"); dismissSnowBoot(() => { void snowRunDeferredOpenings(); }); }
@@ -8466,6 +8498,8 @@ async function boot() {
   settleFirstScreen();
   deferUntilFirstScreenSettled(() => {
     if (snowAdvActive()) void installFeatures().catch(() => {});
+    if (snowAdvActive()) void import("/modules/snow-scenes.js").then(module => {
+      snowScenes = module.installSnowScenes(); snowWorld?.refresh(); snowBackdrop?.refresh(); }).catch(() => {});
     if (snowAdvActive()) void import("/modules/snow-base-map.js").then(module => module.installBaseMap({
       snapshot: () => ({ characters: state.characters, worldPackage: state.worldPackage, selected: state.selected, busy: globalRequestBusy() }),
       visit: visitFromMap, icon: createSnowIcon, sceneKey: sceneVisualKey, avatarOf: characterAvatar,

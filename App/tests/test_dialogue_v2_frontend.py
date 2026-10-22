@@ -1024,9 +1024,18 @@ class SnowAdvVeilProductionTests(TestCase):
                 # (reading.owns in recordReplyPaint) and the rest is revealed after it; read the line once it is complete.
                 self.page.wait_for_function("() => !document.getElementById('stage-speech').classList.contains('is-revealing')")
                 self.assertIn("合成的有效回复。", self.page.locator("#stage-speech").inner_text())
-                self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().worldScene"), expected_scene)
-                self.page.wait_for_timeout(1700)
-                self.assertEqual(self._veil()["phase"], "idle", "cancelled camera must not bring back its delayed title")
+                if expected_scene == "observation":
+                    self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().worldScene"), expected_scene)
+                    self.page.wait_for_timeout(1700)
+                    self.assertEqual(self._veil()["phase"], "idle", "cancelled camera must not bring back its delayed title")
+                else:
+                    # A scene change that arrives with the reply waits until the line is shown, then plays the
+                    # snow transition to the new place (titled with it, not the cancelled camera's destination).
+                    self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().worldScene"), "observation")
+                    self.page.wait_for_function("document.getElementById('snow-scene-veil').dataset.phase === 'up'")
+                    self.assertEqual(self.page.locator("#snow-scene-veil .snow-scene-veil-title").inner_text().replace(" ", ""), "基地餐厅")
+                    self.page.wait_for_function("document.getElementById('snow-scene-veil').dataset.phase === 'idle'")
+                    self.assertEqual(self.page.evaluate("window.__projectSnowTest.snowProbe().worldScene"), expected_scene)
                 self.assertFalse(self.errors)
                 self.page.close()
 

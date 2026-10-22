@@ -47,6 +47,7 @@ export function isPureRendezvousJoin(text) {
 }
 export function sceneVisualKey(location) {
   const value = String(location || "").trim();
-  const mappings = [[['个人房间', '宿舍'], 'quarters'], [['休息区', '公共区'], 'lounge'], [['训练区'], 'training'], [['资料室', '资料阅览区', '阅览区'], 'archive'], [['餐厅', '食堂'], 'canteen'], [['观景区'], 'observation'], [['医务室'], 'medical'], [['走廊'], 'corridor']];
+  const mappings = [[['分析员的房间', '我的房间'], 'analyst'], [['个人房间', '宿舍', '的房间'], 'quarters'], [['休息区', '公共区'], 'lounge'], [['训练区'], 'training'], [['资料室', '资料阅览区', '阅览区'], 'archive'], [['餐厅', '食堂'], 'canteen'], [['观景区'], 'observation'], [['医务室'], 'medical'], [['走廊'], 'corridor'],
+    [['海滩', '沙滩', '海边'], 'beach'], [['温泉'], 'hot_spring'], [['游戏厅', '街机'], 'arcade'], [['酒吧'], 'bar'], [['疗愈'], 'healing'], [['公园'], 'park'], [['商业街'], 'street'], [['购物中心', '商场'], 'mall']];
   return mappings.find(([terms]) => terms.some(term => value.includes(term)))?.[1] || 'generic';
 }
