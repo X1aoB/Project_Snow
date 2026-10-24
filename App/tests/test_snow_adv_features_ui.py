@@ -28,6 +28,11 @@ LONG_SPEECH = ("今天的雪下得很安静，基地外面的灯一盏一盏亮�
                "明天早上训练区要检修，我们可以晚一点起床，先去食堂吃早饭，再慢慢走去资料室整理那批旧档案。"
                "要是路上又下雪，我就把伞撑过去一点，你别又把自己那一半让给我，上次你肩膀都湿透了。")
 LONG_ACTION = "她把围巾往上拉了拉，侧过头看你。"
+# 动作描写多到会把台词挤出对白框（小B 10-24 的截图）：三句动作 + 两句台词。
+MANY_ACTIONS = ("伊切尔仰起脸，眼睛弯成两道小月牙，认真地把这个回礼准备好。伊切尔踮起脚，凑近，在分析员的额头上轻轻碰了一下。"
+                "然后她像是做了什么了不起的大事一样，背着手往后退了两步，耳朵尖一点点红了起来，还假装若无其事地看向窗外的雪。")
+SHORT_SPEECH = ("嘿嘿，分析员真的低头啦——那伊切尔就不客气咯。这可是回礼哦，不许说不算数！下次你要是再帮我把训练器材搬回仓库，我还会这样谢你的。"
+                "明天早上训练区要检修，我们可以晚一点起床，先去食堂吃早饭。")
 CONTRAST = """nodes => nodes.filter(node => node.getClientRects().length).map(node => {
   const canvas=document.createElement('canvas');canvas.width=canvas.height=1;
   const paint=canvas.getContext('2d',{willReadFrequently:true});
@@ -180,7 +185,10 @@ class SnowAdvFeaturesUITests(TestCase):
         ready: !speech.classList.contains('is-revealing'), lines: lines.length,
         covered: lines.filter(line => blockers.some(rect => hit(line, rect))).length, outside: outside.length,
         where: outside.map(line => [Math.round(line.right - box.right), Math.round(line.bottom - box.bottom)]),
-        narration: Boolean(narration?.textContent && narration.getClientRects().length) };
+        narration: Boolean(narration?.textContent && narration.getClientRects().length),
+        lead: Boolean(page?.classList.contains('is-lead')),
+        clipped: Boolean(narration?.getClientRects().length && narration.scrollHeight > narration.clientHeight + 1),
+        prev: Boolean(document.querySelector('.snow-page-prev')?.checkVisibility?.({ visibilityProperty: true })) };
     }"""
     READY = "() => { const s = document.querySelector('#stage-speech'); return s.classList.contains('snow-paged') && !s.classList.contains('is-revealing'); }"
 
@@ -448,6 +456,111 @@ class SnowAdvFeaturesUITests(TestCase):
                       const b = box.getBoundingClientRect().height; surface.setAttribute('data-snow-pager', '1'); return [a, b]; }""")
                     self.assertTrue(50 <= taller - normal <= 70, (taller, normal))
                 page.close()
+        self.assertEqual(self.errors, [])
+
+    def test_long_action_gets_its_own_page_instead_of_squeezing_the_line(self):
+        # 小B reported: several action sentences took the box, leaving the line cut off under the quick menu
+        # (desktop) or the action itself hidden behind the narration's own scrollbar (phone).
+        for width, height in ((1440, 900), (390, 844)):
+            with self.subTest(width=width):
+                page = self.open(self.page(width=width, height=height, locale="zh-CN"))
+                self.enter_stage(page)
+                self.long_reply(page, speech=SHORT_SPEECH, action=MANY_ACTIONS)
+                self.send_long(page)
+                pages = self.read_pages(page)
+                leads = [state for state in pages if state["lead"]]
+                lines = [state for state in pages if not state["lead"]]
+                self.assertTrue(leads and pages[:len(leads)] == leads, [(state["meter"], state["lead"]) for state in pages])
+                # The action pages carry the whole action in order; the line then starts on a full box.
+                self.assertEqual("".join(state["text"] for state in leads).replace("\n", ""), MANY_ACTIONS)
+                self.assertEqual("".join(state["text"] for state in lines).replace("\n", ""), SHORT_SPEECH)
+                self.assertTrue(all(not state["narration"] for state in pages), pages)
+                self.assertEqual([(state["covered"], state["outside"]) for state in pages], [(0, 0)] * len(pages),
+                                 [(state["meter"], state["where"], state["text"][-12:]) for state in pages if state["covered"] or state["outside"]])
+                # A line page that shares the box with nothing shows at least two lines unless the line is shorter.
+                self.assertGreaterEqual(lines[0]["lines"], 2, lines[0])
+                page.close()
+        # A one-line action still shares the first page with the line, as before.
+        page = self.open(self.page(width=1440, height=900, locale="zh-CN"))
+        self.enter_stage(page)
+        self.long_reply(page)
+        self.send_long(page)
+        state = page.evaluate(self.PAGE_STATE)
+        self.assertEqual((state["lead"], state["narration"], state["clipped"]), (False, True, False), state)
+        self.assertEqual(self.errors, [])
+
+    def test_previous_page_button_and_keys_return_to_the_page_before(self):
+        page = self.open(self.page(width=1440, height=900, locale="zh-CN"))
+        self.enter_stage(page)
+        self.long_reply(page, action=MANY_ACTIONS)
+        self.send_long(page)
+        first = page.evaluate(self.PAGE_STATE)
+        self.assertTrue(first["lead"], first)
+        self.assertFalse(first["prev"], "no previous page on page 1")
+        pages = self.read_pages(page)
+        total = len(pages)
+        self.assertGreaterEqual(total, 3)
+        # 「上一页」 goes back one page and shows it whole at once (it has been read).
+        page.locator(".snow-page-prev").click()
+        page.wait_for_function(self.READY)
+        back = page.evaluate(self.PAGE_STATE)
+        self.assertEqual(back["meter"].split(" · ")[0], f"{total - 1} / {total}")
+        self.assertEqual(back["text"], pages[-2]["text"])
+        self.assertTrue(back["ready"] and back["prev"], back)
+        # ← and PageUp go back too, down to the action page; → returns without retyping.
+        page.locator("#stage-dialogue").focus()
+        for _ in range(total):
+            page.keyboard.press("ArrowLeft" if _ % 2 == 0 else "PageUp")
+            page.wait_for_timeout(60)
+        state = page.evaluate(self.PAGE_STATE)
+        self.assertEqual((state["meter"].split(" · ")[0], state["lead"], state["text"]), (f"1 / {total}", True, pages[0]["text"]))
+        page.keyboard.press("ArrowRight")
+        page.wait_for_function("() => document.querySelector('.snow-page-meter').textContent.startsWith('2 /')")
+        self.assertEqual(page.evaluate(self.PAGE_STATE)["text"], pages[1]["text"])
+        self.assertTrue(page.evaluate(self.PAGE_STATE)["ready"])
+        # Clicking 「上一页」 never also turns the page forward.
+        page.locator(".snow-page-prev").click()
+        page.wait_for_timeout(200)
+        self.assertTrue(page.evaluate(self.PAGE_STATE)["meter"].startswith("1 /"))
+        self.assertEqual(self.errors, [])
+
+    def test_time_of_day_change_crossfades_the_whole_page(self):
+        def shifted(motion, reduced):
+            page = self.page(width=1280, height=760, tone="dusk")
+            if not reduced:
+                page.emulate_media(reduced_motion="no-preference")
+            page.add_init_script(f"localStorage.setItem('project-snow-public:motion',{json.dumps(motion)});" + """(() => {
+              const set = () => { if (!document.documentElement) return false; document.documentElement.dataset.snowTime='day'; return true; };
+              if (!set()) { const o=new MutationObserver(() => { if (set()) o.disconnect(); }); o.observe(document,{childList:true}); } })();""")
+            self.open(page)
+            self.enter_stage(page)
+            page.wait_for_function("() => document.querySelector('link[href*=\"snow-scenes\"]')")
+            page.wait_for_timeout(2500)
+            before = page.evaluate("() => [document.documentElement.dataset.tone, document.querySelector('#scene-stage .snow-layer-far').dataset.time]")
+            page.evaluate("""() => { window.__shifts = []; const root = document.documentElement;
+              new MutationObserver(() => window.__shifts.push([root.dataset.snowTimeShift || '', performance.now()]))
+                .observe(root, { attributeFilter: ['data-snow-time-shift'] });
+              root.dataset.snowTime = 'dusk'; }""")
+            page.wait_for_timeout(2600)
+            after = page.evaluate("() => [document.documentElement.dataset.tone, document.querySelector('#scene-stage .snow-layer-far').dataset.time, document.documentElement.dataset.snowTimeShift || '']")
+            rows = page.evaluate("() => window.__shifts")
+            page.close()
+            # The marker stays on <html> for exactly as long as the view transition runs.
+            shifts = [value for value, _ in rows]
+            durations = [round(rows[1][1] - rows[0][1])] if len(rows) == 2 else []
+            return before, durations, after, shifts
+
+        before, durations, after, shifts = shifted("auto", reduced=False)
+        self.assertEqual(before, ["light", "day"])
+        # Dusk arrives within one view transition: stage backdrop and tone change together, over 1.6s, then the marker clears.
+        self.assertEqual(after, ["dark", "dusk", ""])
+        self.assertEqual(shifts, ["1", ""])
+        self.assertTrue(durations and 1500 <= durations[0] <= 2300, durations)
+        # Reduced motion (the app then runs with motion off) and motion off switch at once, as scene changes do.
+        for motion, reduced in (("auto", True), ("off", False)):
+            with self.subTest(motion=motion, reduced=reduced):
+                _, durations, after, shifts = shifted(motion, reduced=reduced)
+                self.assertEqual((after, shifts, durations), (["dark", "dusk", ""], [], []))
         self.assertEqual(self.errors, [])
 
     def test_restored_line_after_reload_is_paged_and_pages_read_before_say_so(self):

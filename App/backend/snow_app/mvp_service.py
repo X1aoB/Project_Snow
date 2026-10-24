@@ -19,6 +19,7 @@ import secrets
 import socket
 import threading
 import time
+import unicodedata
 from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -591,6 +592,130 @@ _RELATIONSHIP_REFUSAL_MARKERS = (
     "\u53ea\u662f\u6218\u53cb",
 )
 
+# A reply that names only a working relationship.  Together with the refusal
+# markers above, this is what the explicit-relationship guard repairs; a warm
+# reply that simply does not repeat the label is left as the model wrote it.
+_RELATIONSHIP_DOWNGRADE_MARKERS = (
+    "战友", "队友", "同事", "搭档", "上下级", "上司", "下属", "合作关系", "普通朋友", "只是朋友",
+)
+
+# Relationship-label questions, judged one clause at a time (see
+# MVPService._is_relationship_label_question).  Input is NFKC-normalised first,
+# so full-width punctuation arrives here in its ASCII form.
+_RELATIONSHIP_CLAUSE_SPLIT = re.compile(r"([,，。.!！?？~～…;；:：、\s]+)")
+_RELATIONSHIP_LABEL = r"(?:妻子|老婆|丈夫|老公|伴侣|夫妻|爱人|恋人)"
+_RELATIONSHIP_ASK_PATTERN = re.compile(
+    r"(?<![有没])(?:什么|啥)关系"
+    r"|关系(?:是|算)(?:什么|啥)"
+    r"|(?:我|你)(?:是|算)(?:你|我)的?(?:什么|啥)人?(?:呢|啊|呀)?$"
+    r"|(?:我们|咱们|咱俩|我俩)(?:之间)?(?:是|算)(?:什么|啥)(?:呢|啊|呀)?$"
+    r"|把我当(?:成)?(?:什么|啥)"
+)
+_RELATIONSHIP_COPULA_PATTERN = re.compile(
+    r"(?:是|算|算是|就是|当|做|成为|成了)(?:不是)?(?:我|你|我们|咱们|彼此)?的?" + _RELATIONSHIP_LABEL
+)
+_RELATIONSHIP_YES_NO_PATTERN = re.compile(
+    r"吗|嘛|是不是|算不算|对不对|是否|有没有|(?<![什怎这那多])么$|没有?$|对吧$"
+)
+_RELATIONSHIP_BOND_PATTERN = re.compile(
+    r"(?:结婚|结过婚|成婚|成亲|立[下过]?了?恒约|有了?恒约)[了过]?(?:吗|么|嘛|没有|没|对吧|吧)?$"
+)
+
+
+def _relationship_clauses(message: Any) -> list[tuple[str, str]]:
+    """Split a message into ``(clause, terminal punctuation)`` pairs."""
+
+    parts = _RELATIONSHIP_CLAUSE_SPLIT.split(unicodedata.normalize("NFKC", str(message or "")))
+    clauses: list[tuple[str, str]] = []
+    for index in range(0, len(parts), 2):
+        clause = parts[index].strip()
+        if not clause:
+            continue
+        delimiter = parts[index + 1].strip() if index + 1 < len(parts) else ""
+        clauses.append((clause, delimiter[-1:] if delimiter else ""))
+    return clauses
+
+
+# Original lines in the dialogue style profile are a voice reference, not
+# material to paste.  The profile is extracted automatically, so its "lines"
+# also include story narration (“少女痛苦地接受了现实。”), plot summaries and
+# even the analyst's own words; the prompt used to ask the model to prefer
+# these "direct lines", which made replies drop whole scene-bound sentences
+# into everyday chat.
+_VOICE_REFERENCE_RULE = (
+    "dialogue_style_profile 是从原文整理的语气参考卡。repeated_lines、emotion_patterns、analyst_interaction 里的句子"
+    "只用来把握她的用词、句子长短、语气词和自称：要写成她此刻会说的话，而不是她在原作某个场景里说过的话。"
+    "不要把这些句子整句或大段搬进回答，也不要把只属于某个剧情场景的句子用在无关的日常对话里；"
+    "只有分析员明确要求复述、表演或询问原作台词时，才原样引用有原文的句子。"
+    "support_level 为 inferred 的句式统计只能轻微影响语气，不能单独生成事实。"
+    "identity_evidence 用于补充角色背景，不等于新的人格设定。"
+)
+_VOICE_LINE_MAX_CHARS = 80
+_REPEATED_LINE_MAX_CHARS = 24
+_VOICE_SPEAKER_PATTERN = re.compile(r"[我你咱您]|人家")
+_ANALYST_SELF_REFERENCE_PATTERN = re.compile(r"(?:身为|作为|我是|我这个)分析员")
+_NARRATION_SUBJECT_PATTERN = re.compile(r"她|少女|分析员")
+# Spoken form without a pronoun: a vocative opening (“分析员，……”) or a line
+# ending as a question or exclamation.  Narration rarely does either.
+_VOICE_SPOKEN_FORM_PATTERN = re.compile(r"^分析员[，,、！!…~～]|[？?！!~～]$")
+# A reply sharing this many consecutive characters (punctuation and spaces
+# ignored) with a source line is counted as a pasted original line.
+_SOURCE_COPY_MIN_CHARS = 14
+_SOURCE_LINE_REQUEST_TERMS = (
+    "表演", "原作", "原话", "原台词", "台词", "那句话", "那句", "再说一遍", "再说一次", "复述", "念一下", "背一下",
+    "你以前说过", "你说过", "怎么说的",
+)
+
+
+def _is_character_voice_line(text: Any, character_name: str = "") -> bool:
+    """Whether a profile "line" reads as something the character says.
+
+    Rejects narration (no speaker and the character, 她, 少女 or 分析员 as the
+    subject), plot summaries longer than a spoken line, and lines in which the
+    speaker introduces themselves as the analyst.
+    """
+
+    value = str(text or "").strip()
+    if not value or len(value) > _VOICE_LINE_MAX_CHARS:
+        return False
+    if _ANALYST_SELF_REFERENCE_PATTERN.search(value):
+        return False
+    if not _VOICE_SPEAKER_PATTERN.search(value) and not _VOICE_SPOKEN_FORM_PATTERN.search(value):
+        if character_name and character_name in value:
+            return False
+        if _NARRATION_SUBJECT_PATTERN.search(value):
+            return False
+    return True
+
+
+def _is_source_line_request(message: Any) -> bool:
+    """The analyst asked to hear an original line (“再表演一下那个”)."""
+
+    value = _compact(message)
+    return any(_compact(term) in value for term in _SOURCE_LINE_REQUEST_TERMS)
+
+
+def _longest_copied_run(answer: Any, sources: list[str], minimum: int = _SOURCE_COPY_MIN_CHARS) -> int:
+    """Length of the longest stretch of ``answer`` copied from any source, or 0 below ``minimum``."""
+
+    text = _compact(answer)
+    if len(text) < minimum:
+        return 0
+    grams: set[str] = set()
+    for source in sources:
+        value = _compact(source)
+        grams.update(value[index:index + minimum] for index in range(len(value) - minimum + 1))
+    if not grams:
+        return 0
+    longest = run = 0
+    for index in range(len(text) - minimum + 1):
+        if text[index:index + minimum] in grams:
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    return longest + minimum - 1 if longest else 0
+
 # These are retrieval-report openings, not natural in-world replies.  They
 # are checked only for conversational questions; a factual assistant answer
 # may still explain its evidence range when the user explicitly asks for it.
@@ -647,7 +772,8 @@ _LATEST_NARRATIVE_STATE_GUIDANCE = (
 _EVIDENCE_USE_GUIDANCE = (
     "证据使用规则：检索到的故事是可供你回忆的背景，不是每轮回答都要复述的素材。"
     "先回答分析员真正问的对象，再决定是否用一句相关背景作补充；如果背景与问题不直接相关，就不要提及。"
-    "不得把检索片段拼接成原文没有出现的新句子、共同经历或对话；尤其不要使用‘你知道的’、‘你总说’、‘我们刚才一起……’等暗示共同记忆的套话，除非证据原文明确写出了这件事。"
+    "不得把检索片段拼接成原文没有出现的事实、共同经历或对话记忆；尤其不要使用‘你知道的’、‘你总说’、‘我们刚才一起……’等暗示共同记忆的套话，除非证据原文明确写出了这件事。"
+    "这条限制的是事实，不是措辞：回应当下的话时要用她自己的话说，不要为了“有出处”而把原文句子整句搬进回答。"
     "不要为了显得像角色而重复同一个故事、地点或场景；同一故事最多作为一次简短背景，答案通常只需 1—3 句。"
 )
 
@@ -1133,7 +1259,13 @@ _CASUAL_UNSUPPORTED_CURRENT_STATE_PATTERNS: tuple[re.Pattern[str], ...] = (
 # a named food/drink and an honest current-state answer (for example, "还没
 # 吃" or "没决定").  They do *not* include locations such as "餐厅": saying
 # where somebody ate is not an answer to "吃了什么".
-_FOOD_OR_DRINK_DIRECT_ANSWER_TERMS = (
+#
+# The item list names what can be eaten or drunk.  A live run answered
+# "今天吃什么" with dishes such as cake or hotpot and was rejected only
+# because the list had stopped at a handful of staples, so common dishes and
+# taste answers ("甜的") are listed too.  Single characters that also sit in
+# ordinary words (蛋 in 笨蛋, 酒 in 酒吧, 肉 in 肉麻) are deliberately left out.
+_FOOD_OR_DRINK_ITEM_TERMS = (
     "早餐",
     "午餐",
     "晚餐",
@@ -1154,6 +1286,64 @@ _FOOD_OR_DRINK_DIRECT_ANSWER_TERMS = (
     "果汁",
     "饮料",
     "喝水",
+    "菜",
+    "饺子",
+    "包子",
+    "馒头",
+    "蛋糕",
+    "饼干",
+    "布丁",
+    "冰淇淋",
+    "冰激凌",
+    "火锅",
+    "烧烤",
+    "烤肉",
+    "牛肉",
+    "鸡肉",
+    "猪肉",
+    "鸡蛋",
+    "煎蛋",
+    "咖喱",
+    "披萨",
+    "汉堡",
+    "三明治",
+    "沙拉",
+    "寿司",
+    "海鲜",
+    "鱼",
+    "虾",
+    "月饼",
+    "粽子",
+    "汤圆",
+    "苹果",
+    "草莓",
+    "西瓜",
+    "甜食",
+    "甜点",
+    "甜的",
+    "辣的",
+    "清淡",
+    "热乎",
+    "夜宵",
+    "宵夜",
+    "外卖",
+    "可可",
+    "奶茶",
+    "酸奶",
+    "豆浆",
+    "可乐",
+    "汽水",
+    "热水",
+    "温水",
+    "柠檬水",
+    "蜂蜜水",
+    "红酒",
+    "啤酒",
+    "果酒",
+    "清酒",
+    "鸡尾酒",
+)
+_FOOD_OR_DRINK_DIRECT_ANSWER_TERMS = _FOOD_OR_DRINK_ITEM_TERMS + (
     "还没吃",
     "没有吃",
     "没吃",
@@ -1245,6 +1435,76 @@ _FOOD_OR_DRINK_CURRENT_STATE_TERMS = (
     "不知道",
     "不确定",
 )
+# "要不今天吃火锅吧" proposes a meal; it does not claim one was eaten.  A
+# proposal is exempt from the current-meal check only while no completed
+# form (吃了/喝过/吃完) appears beside it.
+_FOOD_OR_DRINK_PROPOSAL_PATTERN = re.compile(
+    r"(?:要不|要不要|不如|咱们|我们|一起)[^。！？!?\r\n]{0,16}(?:吃|喝)"
+    r"|(?:吃|喝)[^。！？!?\r\n]{0,16}(?:吧|怎么样|好不好|好吗|如何)"
+)
+_FOOD_OR_DRINK_DONE_PATTERN = re.compile(r"(?:吃|喝)(?:了|过|完)")
+# One sentence of an opening, with its closing punctuation (。！？…～).
+_FOOD_OR_DRINK_SENTENCE_PATTERN = re.compile(r"[^。！？!?…~～\r\n]+[。！？!?…~～]*")
+# "今天吃什么" asks to settle a meal together; "你吃了什么" and "你想吃什么"
+# ask for the character's own record or wish.  Only the first may be answered
+# by asking the analyst back.
+_FOOD_OR_DRINK_PLAN_TERMS = ("吃什么", "喝什么", "吃啥", "喝啥", "吃点什么", "喝点什么")
+_FOOD_OR_DRINK_RECORD_TERMS = (
+    "吃了",
+    "喝了",
+    "吃过",
+    "喝过",
+    "吃完",
+    "喝完",
+    "吃饭了",
+    "喝水了",
+)
+_FOOD_OR_DRINK_WISH_TERMS = ("想吃", "想喝", "爱吃", "爱喝", "喜欢吃", "喜欢喝")
+_FOOD_OR_DRINK_ADDRESSEE_PATTERN = re.compile(r"你[^。！？!?，,\s]{0,4}(?:吃|喝)")
+_FOOD_OR_DRINK_ASK_BACK_TERMS = (
+    "你想",
+    "你要",
+    "你有",
+    "想吃",
+    "想喝",
+    "你定",
+    "你来",
+    "你挑",
+    "你选",
+    "你说",
+    "听你的",
+)
+# Fallbacks for a food or drink question whose rewrite still failed.  One
+# fixed sentence was shown to every user and every character, so the line
+# follows the question (settling a meal, the character's wish, or whether she
+# has eaten) and rotates by turn.  None of them claims a meal was eaten.
+_FOOD_OR_DRINK_FALLBACKS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("food", "plan"): (
+        "要不今天吃点热乎的？面或者汤都好，你挑一样，我陪你吃。",
+        "我想吃点甜的。正餐的话你来定，我陪你一起吃。",
+        "还没想好呢。你先说一个想吃的，我们就从那儿定下来。",
+    ),
+    ("food", "wish"): (
+        "要是现在能选，我想吃点甜的，蛋糕或者布丁都好。",
+        "让我想想……来一碗热汤面就很好。",
+        "还没想好呢。硬要选的话，大概是一杯热可可配点心吧。",
+    ),
+    ("food", "state"): (
+        "还没吃呢，正想着吃点什么。",
+        "还没吃。等想好了吃什么，再来告诉你。",
+        "还没吃呢。被你这么一问，倒真有点饿了。",
+    ),
+    ("drink", "plan"): (
+        "来杯热茶就好，暖和一点。",
+        "想喝点甜的，果汁或者热可可都行。",
+        "还没想好喝什么。你先挑，我跟你喝一样的。",
+    ),
+    ("drink", "state"): (
+        "还没喝呢，等会儿去倒杯水。",
+        "还没顾上喝。被你一提，倒想泡杯茶了。",
+        "还没喝。你提醒得正好，待会儿就喝点温水。",
+    ),
+}
 _STYLE_RESET_TERMS = (
     "换回本体",
     "回到本体",
@@ -1978,6 +2238,10 @@ class MVPService:
         """
         if not profile:
             return None
+        character_name = str(profile.get("character_name") or "")
+        # One spoken line is offered once, even when the builder filed it
+        # under several patterns.
+        voice_seen: set[str] = set()
 
         def compact_terms(items: Any, key: str = "term", limit: int = 8) -> list[dict[str, Any]]:
             result = []
@@ -2008,8 +2272,12 @@ class MVPService:
                     break
             return result
 
-        def compact_quotes(items: Any, limit: int, prefer_latest: bool = False) -> list[dict[str, Any]]:
+        def compact_quotes(items: Any, limit: int, prefer_latest: bool = False, voice_only: bool = False) -> list[dict[str, Any]]:
             raw_items = [item for item in (items or []) if isinstance(item, dict) and item.get("quote")]
+            if voice_only:
+                # Voice examples must be the character's own spoken lines;
+                # narration and plot summaries stay in retrieved evidence.
+                raw_items = [item for item in raw_items if _is_character_voice_line(item.get("quote"), character_name)]
             if prefer_latest:
                 raw_items.sort(
                     key=lambda item: (
@@ -2020,6 +2288,11 @@ class MVPService:
                 )
             result = []
             for item in raw_items:
+                if voice_only:
+                    key = _compact(item.get("quote"))
+                    if key in voice_seen:
+                        continue
+                    voice_seen.add(key)
                 result.append({
                     "quote": str(item.get("quote"))[:280],
                     "source_type": item.get("source_type"),
@@ -2042,24 +2315,31 @@ class MVPService:
             "identity_evidence": compact_claims(profile.get("identity_evidence"), 6),
             "address_terms": compact_terms(profile.get("address_terms"), limit=8),
             "self_reference_terms": compact_terms(profile.get("self_reference_terms"), limit=8),
-            "catchphrases": [
+            # The builder's "catchphrases" are lines that occur in more than
+            # one document, not habits: only short spoken ones are offered,
+            # under a name that does not ask to repeat them.
+            "voice_reference_rule": _VOICE_REFERENCE_RULE,
+            "repeated_lines": [
                 {
                     "phrase": item.get("phrase"),
                     "support_level": item.get("support_level"),
                     "evidence_document_ids": list(item.get("evidence_document_ids") or [])[:4],
                 }
-                for item in (profile.get("catchphrases") or [])[:6]
-            ],
+                for item in (profile.get("catchphrases") or [])
+                if isinstance(item, dict)
+                and len(str(item.get("phrase") or "").strip()) <= _REPEATED_LINE_MAX_CHARS
+                and _is_character_voice_line(item.get("phrase"), character_name)
+            ][:6],
             "sentence_style": {
                 "observations": list(style.get("observations") or [])[:6],
                 "note": style.get("note"),
             },
-            "emotion_patterns": compact_quotes(profile.get("emotion_patterns"), 10),
+            "emotion_patterns": compact_quotes(profile.get("emotion_patterns"), 8, voice_only=True),
             "supported_preferences": compact_claims(profile.get("supported_preferences"), 8),
             "supported_dislikes": compact_claims(profile.get("supported_dislikes"), 8),
             "supported_values": compact_claims(profile.get("supported_values"), 8),
             "supported_boundaries": compact_claims(profile.get("supported_boundaries"), 6),
-            "analyst_interaction": compact_quotes(profile.get("analyst_interaction"), 10),
+            "analyst_interaction": compact_quotes(profile.get("analyst_interaction"), 8, voice_only=True),
             "narrative_evolution": {
                 "policy": evolution.get("policy", "latest_available"),
                 # Current/transition evidence is intentionally exposed ahead
@@ -4518,7 +4798,7 @@ class MVPService:
             )
         focus = cls._question_focus(message, intents)
         contracts = {
-            "food_or_drink": "用户问的是吃了/喝了什么。第一句必须直接回答食物或饮品；不能回答地点、谁陪着、在哪里或相关剧情。没有当前事实时，用明确的假设/倾向表达，不要声称某个旧场景刚刚发生。",
+            "food_or_drink": "用户问的是吃/喝什么（吃了什么、想吃什么，或商量这顿吃什么）。第一句必须直接回答食物或饮品；商量这顿吃什么时，可以直接提议一样具体的吃的，也可以先说自己的倾向再问对方想吃什么；不能回答地点、谁陪着、在哪里或相关剧情。没有当前事实时，用明确的假设/倾向表达，不要声称某个旧场景刚刚发生。",
             "shared_meal": "分析员已经带来、准备或明确提出了本轮要吃的食物。直接回应这份邀请和已经说出的餐点，可以评价是否合胃口、接受一起用餐或承接下次外出的约定；不得回答‘还没决定吃什么’，也不要反问分析员想吃什么。",
             "open_invitation": "分析员是在邀请你说出当下希望他怎么做。承接最近几轮的情绪、动作和亲密程度，给出自然、具体但非露骨的回应；不要突然汇报训练、工作或地点，也不要用实现层或安全说明打断。若话题可能继续升温，可以用含蓄表达、确认彼此意愿或自然淡出场景，但不得擅自把露骨行为写成已经发生。",
             "visit_followup": "角色的当前位置最近已经明确说过，分析员是在确认要过来。自然接受、等待或提醒路上小心即可；不要机械重复地点，也不要改称自己在另一个地点或突然补写刚结束的活动。",
@@ -6620,7 +6900,7 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
 7. 保持分析员身份和既有叙事关系，不把分析员改写成玩家、第三人或其他角色。
 8. 关系背景卡是从正文事实生成的运行时叙事上下文，不是待审批关系边；当它标记为 explicit 时，必须把它当作本轮角色扮演的既定背景。
 
-9. dialogue_style_profile 是从原文台词和带文档 ID 的证据生成的表达辅助卡。优先使用其中 support_level 为 supported/observed 的直接台词；inferred 句式统计只能轻微影响语气，不能单独生成事实。identity_evidence 用于补充角色背景，不等于新的人格设定。
+9. {_VOICE_REFERENCE_RULE}
 10. profile 中 usage_rule 标为“仅作为叙事背景”的内容，只能说成故事中的经历或记忆，不能无证据改写成“我一直喜欢/我绝不喜欢”。过去证据只用于解释来历；优先使用 narrative_evolution.latest_state_evidence 中的 current/transition 证据。默认保持资料库最新状态，不切换旧人格。
 11. 用户问“喜欢/在意/不喜欢”时，先分别回答对应类别；不要用“担心分析员”替代“喜欢什么”。有直接偏好就自然说出，没有直接偏好时可以用角色口吻说明“我没有特别偏好”，随后补充有证据的在意事项，但不要输出检索免责声明。
 12. 先执行用户问题的回答契约，再决定是否补充背景；不得用地点回答食物、用旧剧情回答当前状态、用实验室等固定场景代替“在做什么”。
@@ -6665,6 +6945,48 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 prompt = prompt.replace('{"state_updates":[],"expression_state":',
                     '{"interaction_decision":null,"memory_candidates":[],"state_updates":[],"expression_state":', 1)
         return prompt
+
+    @staticmethod
+    def _source_line_copy_chars(message: str, answer: str, context: dict[str, Any]) -> int:
+        """Characters of ``answer`` pasted from an original line; 0 when the analyst asked for one."""
+
+        if _is_source_line_request(message):
+            return 0
+        profile = context.get("dialogue_profile") or {}
+        sources = [str(item.get("phrase") or "") for item in profile.get("catchphrases") or [] if isinstance(item, dict)]
+        for key in ("emotion_patterns", "analyst_interaction"):
+            sources.extend(str(item.get("quote") or "") for item in profile.get(key) or [] if isinstance(item, dict))
+        sources.extend(str(hit.get("text") or "")[:3200] for hit in (context.get("hits") or [])[:12])
+        return _longest_copied_run(answer, sources)
+
+    @staticmethod
+    def _relationship_answer_contract(relationship_background: dict[str, Any], question_focus: str) -> str | None:
+        """Prompt rule for the relationship card that this turn carries.
+
+        The card also rides along on intimate turns that are not about the
+        relationship itself (“我爱你”, “老婆，今天吃什么”).  Those get the
+        relationship as background only; demanding a label there is what made
+        replies open with the same confirmation every time.
+        """
+
+        if not relationship_background:
+            return None
+        status = relationship_background.get("status")
+        if status == "explicit" and question_focus == "relationship_label":
+            return (
+                "这是关系问题。用自己的口吻直接承认你们已经立下恒约、是彼此选择的伴侣/夫妻式关系；"
+                "分析员用‘妻子’‘老婆’确认时自然承接，措辞每次按当下语境来，不要套用固定句子，"
+                "不要先说资料不足、无法确定或只有战友关系。"
+            )
+        if status == "explicit":
+            return (
+                "关系背景：你们已经立下恒约，是彼此选择的伴侣。这只是背景——"
+                "分析员可能用‘老婆’之类的称呼叫你，但这句话问的不是关系本身，"
+                "围绕分析员这句话真正说的内容回应，不要主动复述或确认关系标签。"
+            )
+        if status == "supported":
+            return "这是关系问题。可以承认资料支持的亲密、信任和陪伴，但不要把尚未明确的婚姻标签说成事实。"
+        return "这是关系问题。若证据不足，用角色口吻简短说明目前能确认的范围，不要输出检索系统免责声明。"
 
     def _prompt(self, character: Any, message: str, context: dict[str, Any]) -> str:
         evidence = []
@@ -6736,22 +7058,9 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         ]
         relationship_background = context.get("relationship_background_for_prompt") or {}
         dialogue_profile = self._cached_dialogue_profile_prompt_context(character.character_id, context.get("dialogue_profile"))
-        relationship_answer_contract = None
-        if relationship_background:
-            if relationship_background.get("status") == "explicit":
-                relationship_answer_contract = (
-                    "这是关系问题。先直接回答我们已经立下恒约、属于彼此选择的伴侣/夫妻式关系；"
-                    "如果分析员使用‘妻子’称呼，要自然承接为‘我是你的妻子，也是你的恒约伴侣’，"
-                    "不要先说资料不足、无法确定或只有战友关系。"
-                )
-            elif relationship_background.get("status") == "supported":
-                relationship_answer_contract = (
-                    "这是关系问题。可以承认资料支持的亲密、信任和陪伴，但不要把尚未明确的婚姻标签说成事实。"
-                )
-            else:
-                relationship_answer_contract = (
-                    "这是关系问题。若证据不足，用角色口吻简短说明目前能确认的范围，不要输出检索系统免责声明。"
-                )
+        relationship_answer_contract = self._relationship_answer_contract(
+            relationship_background, str(context.get("question_focus") or "")
+        )
         return json.dumps(
             {
                 "character": character.display_name,
@@ -7226,8 +7535,40 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         """Safe, conversational fallback for a failed concrete-answer rewrite."""
 
         if str(context.get("question_focus") or "") == "food_or_drink":
-            return "我还没决定吃什么。你有想吃的，就告诉我吧。"
+            return MVPService._food_or_drink_fallback(context)
         return "我先直接回答你问的这件事，再慢慢聊其他的。"
+
+    @staticmethod
+    def _is_food_or_drink_plan_question(message: str) -> bool:
+        """Whether the analyst is settling a meal rather than asking for a record."""
+
+        compact = _compact(message)
+        if not any(term in compact for term in _FOOD_OR_DRINK_PLAN_TERMS):
+            return False
+        if any(term in compact for term in _FOOD_OR_DRINK_RECORD_TERMS + _FOOD_OR_DRINK_WISH_TERMS):
+            return False
+        return _FOOD_OR_DRINK_ADDRESSEE_PATTERN.search(str(message or "")) is None
+
+    @staticmethod
+    def _food_or_drink_fallback(context: dict[str, Any]) -> str:
+        """Pick a meal fallback that fits the question, without a meal fact."""
+
+        message = str(context.get("user_message") or "")
+        compact = _compact(message)
+        subject = "drink" if "喝" in compact and "吃" not in compact else "food"
+        if any(term in compact for term in _FOOD_OR_DRINK_RECORD_TERMS):
+            kind = "state"
+        elif subject == "drink" or MVPService._is_food_or_drink_plan_question(message):
+            kind = "plan"
+        else:
+            kind = "wish"
+        variants = _FOOD_OR_DRINK_FALLBACKS[(subject, kind)]
+        turns = list((context.get("session_context") or {}).get("turns") or [])
+        address = str(
+            (context.get("relationship_address_memory") or {}).get("preferred_address") or ""
+        ).strip()
+        prefix = f"{address}，" if address else ""
+        return prefix + variants[len(turns) % len(variants)]
 
     @staticmethod
     def _natural_dialogue_fallback(context: dict[str, Any]) -> str:
@@ -7493,6 +7834,10 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             return []
         if any(_contains_term(opening, term) for term in _FOOD_OR_DRINK_TENTATIVE_TERMS):
             return []
+        if _FOOD_OR_DRINK_PROPOSAL_PATTERN.search(opening) and not _FOOD_OR_DRINK_DONE_PATTERN.search(
+            opening
+        ):
+            return []
         if any(pattern.search(opening) for pattern in _FOOD_OR_DRINK_CURRENT_FACT_PATTERNS):
             return ["unsupported_current_food_fact"]
         # Catch forms such as "今天的猫饭是……" that have no explicit
@@ -7500,7 +7845,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         current_markers = ("刚", "刚刚", "刚才", "今天", "此刻", "现在", "已经")
         if any(_contains_term(opening, marker) for marker in current_markers) and any(
             _contains_term(opening, term)
-            for term in _FOOD_OR_DRINK_DIRECT_ANSWER_TERMS[:24]
+            for term in _FOOD_OR_DRINK_ITEM_TERMS
         ):
             return ["unsupported_current_food_fact"]
         return []
@@ -7727,6 +8072,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         answer: str,
         context: dict[str, Any],
         content_blocks: Any = None,
+        message: str = "",
     ) -> list[str]:
         """Detect concrete questions whose first answer evades the object.
 
@@ -7753,15 +8099,41 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         ):
             return ["direct_answer_focus:food_or_drink"]
         # Asking the analyst back is not a response to ``吃了什么`` even if
-        # the question repeats a food word.
-        if (
-            ("？" in opening or "?" in opening)
-            and _contains_term(normalized_opening, "你")
-            and any(_contains_term(normalized_opening, term) for term in ("吃", "喝"))
-        ):
+        # the question repeats a food word.  ``今天吃什么`` is different: it
+        # settles a meal together, and "你想吃什么？" is a natural answer.
+        # Only a question asked *before* any answer evades: "还没吃呢……你呢，
+        # 吃过了没？" answers first, and was rejected twice in a live run.
+        plan_question = cls._is_food_or_drink_plan_question(
+            message or str(context.get("user_message") or "")
+        )
+        for sentence in _FOOD_OR_DRINK_SENTENCE_PATTERN.findall(opening):
+            compact_sentence = _compact(sentence)
+            asks_back = (
+                ("？" in sentence or "?" in sentence)
+                and "你" in compact_sentence
+                and any(term in compact_sentence for term in ("吃", "喝"))
+            )
+            if not asks_back:
+                if any(
+                    _contains_term(sentence, term) for term in _FOOD_OR_DRINK_DIRECT_ANSWER_TERMS
+                ):
+                    return []
+                continue
+            head = compact_sentence.split("你", 1)[0]
+            if any(_contains_term(head, term) for term in _FOOD_OR_DRINK_DIRECT_ANSWER_TERMS):
+                return []
+            proposes_item = (
+                any(_contains_term(sentence, term) for term in _FOOD_OR_DRINK_ITEM_TERMS)
+                and _FOOD_OR_DRINK_PROPOSAL_PATTERN.search(sentence) is not None
+                and _FOOD_OR_DRINK_DONE_PATTERN.search(sentence) is None
+            )
+            if proposes_item:
+                return []
+            if plan_question and any(
+                term in compact_sentence for term in _FOOD_OR_DRINK_ASK_BACK_TERMS
+            ):
+                return []
             return ["direct_answer_focus:food_or_drink"]
-        if any(_contains_term(opening, term) for term in _FOOD_OR_DRINK_DIRECT_ANSWER_TERMS):
-            return []
         return ["direct_answer_focus:food_or_drink"]
 
     @classmethod
@@ -8395,7 +8767,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         if focus == "casual_check_in":
             return cls._casual_check_in_fallback(context)
         if focus == "food_or_drink":
-            return "我还没决定吃什么。"
+            return cls._food_or_drink_fallback(context)
         if focus == "current_activity":
             return "我现在在忙自己的事，不过可以和你说话。"
         if focus == "location":
@@ -8695,7 +9067,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             )
         )
         violations.extend(
-            cls._direct_answer_focus_violations(answer, context, content_blocks)
+            cls._direct_answer_focus_violations(answer, context, content_blocks, message)
         )
         if cls._logistics_evidence_missing(answer, context):
             violations.append("logistics_evidence_missing")
@@ -9138,24 +9510,21 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         so it does not flatten every intimate reply into the same sentence.
         """
 
-        normalized = _compact(message)
-        terms = (
-            "\u4ec0\u4e48\u5173\u7cfb",
-            "\u6211\u4eec\u7684\u5173\u7cfb",
-            "\u4ec0\u4e48\u5173\u7cfb\u5462",
-            "\u662f\u4ec0\u4e48\u5173\u7cfb",
-            "\u59bb\u5b50",
-            "\u8001\u5a46",
-            "\u4e08\u592b",
-            "\u8001\u516c",
-            "\u4f34\u4fa3",
-            "\u592b\u59bb",
-            "\u6052\u7ea6",
-            "\u7ed3\u5a5a",
-            "\u5a5a\u793c",
-            "\u6211\u4eec\u662f\u4ec0\u4e48",
-        )
-        return any(_compact(term) in normalized for term in terms)
+        # A relationship word alone is not a question about the relationship:
+        # “老婆，今天吃什么？” uses 老婆 as a form of address.  Earlier this
+        # classifier matched any such word, so the explicit-relationship guard
+        # replaced every ordinary reply with one fixed confirmation sentence.
+        # Each clause is now judged on its own and must actually ask for or
+        # confirm the label.
+        for clause, terminal in _relationship_clauses(message):
+            if _RELATIONSHIP_ASK_PATTERN.search(clause):
+                return True
+            yes_no = bool(_RELATIONSHIP_YES_NO_PATTERN.search(clause))
+            if _RELATIONSHIP_COPULA_PATTERN.search(clause) and (yes_no or terminal in "?？"):
+                return True
+            if yes_no and _RELATIONSHIP_BOND_PATTERN.search(clause):
+                return True
+        return False
 
     @staticmethod
     def _is_relationship_roster_question(message: str) -> bool:
@@ -9167,7 +9536,6 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         answer from intruding into ordinary intimate dialogue.
         """
 
-        normalized = _compact(message)
         relationship_terms = (
             "恒约",
             "妻子",
@@ -9188,8 +9556,12 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             "都有谁",
             "哪些",
         )
-        return any(_contains_term(normalized, term) for term in relationship_terms) and any(
-            _contains_term(normalized, term) for term in list_terms
+        # Both halves must sit in the same clause: “老婆，哪些菜好吃？” is a
+        # question about food addressed to a partner, not a roster request.
+        return any(
+            any(_contains_term(clause, term) for term in relationship_terms)
+            and any(_contains_term(clause, term) for term in list_terms)
+            for clause, _ in _relationship_clauses(message)
         )
 
     @classmethod
@@ -9246,6 +9618,13 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             for term in ("\u6052\u7ea6", "\u59bb\u5b50", "\u4f34\u4fa3", "\u592b\u59bb", "\u5a5a\u793c", "\u7ed3\u5a5a")
         )
         if has_explicit_label and not refusal:
+            return answer, False
+        # Only a refusal or a working-relationship-only answer is a downgrade.
+        # A warm reply that simply does not repeat the label (“这还用问吗”) is
+        # the model doing its job; replacing it made every such turn read the
+        # same fixed sentence.
+        downgraded = any(_compact(marker) in normalized for marker in _RELATIONSHIP_DOWNGRADE_MARKERS)
+        if not refusal and not downgraded:
             return answer, False
 
         user_words = _compact(message)
@@ -10770,6 +11149,12 @@ interaction_decision、memory_candidates 等元数据必须先于 content_blocks
             observer.ensure_prefix(content_blocks)
             if final_guardrail_violations:
                 observer.fail("stream_validation_failed")
+        # Measurement only: how much of the reply was pasted from an original
+        # line.  It never triggers a rewrite (that would cost the user another
+        # model call); it lands in the request diagnostics as a count.
+        copy_diagnostics = self.generation_diagnostics()
+        copy_diagnostics["source_line_copy_chars"] = self._source_line_copy_chars(message.strip(), answer_text, context)
+        self._generation_diagnostics.value = copy_diagnostics
         self._record_generation_duration("validation_total_ms", validation_started)
         timings = self.generation_diagnostics()
         timings["validation_local_ms"] = max(0, timings.get("validation_total_ms", 0)

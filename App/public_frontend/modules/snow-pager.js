@@ -43,16 +43,23 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
   const dialogue = $("stage-dialogue"), speech = $("stage-speech"), surface = $("in-person-surface");
   if (!dialogue || !speech || typeof host.stage?.setPager !== "function") return null;
   const copy = speech.parentElement;
-  const advanceListeners = new Set(), autoListeners = new Set();
+  const advanceListeners = new Set(), autoListeners = new Set(), backListeners = new Set();
   let geometry = null, last = null, frame = 0, disposed = false, pageKey = "";
 
   surface?.setAttribute("data-snow-pager", "1");
   if (!dialogue.hasAttribute("tabindex")) dialogue.tabIndex = 0;
   const hint = Object.assign(document.createElement("span"), { id: "snow-pager-hint", className: "sr-only",
-    textContent: "台词较长时会分页。有下一页时，点对白框或按 Enter、空格、右方向键继续。" });
+    textContent: "台词较长时会分页。有下一页时，点对白框或按 Enter、空格、右方向键继续；按左方向键或「上一页」回看上一页。" });
   dialogue.setAttribute("aria-describedby", hint.id);
+  // 页码前面是「上一页」：没有上一页时只隐藏不移除，右下角留位的宽度不随翻页变化。
   const meter = Object.assign(document.createElement("span"), { className: "snow-page-meter is-single" });
-  meter.setAttribute("aria-hidden", "true");
+  const prev = Object.assign(document.createElement("button"), { type: "button", className: "snow-page-prev", title: "上一页", disabled: true });
+  prev.setAttribute("aria-label", "上一页");
+  prev.append(icon("chevron-left"));
+  prev.addEventListener("click", event => { event.stopPropagation(); back(); });
+  const count = Object.assign(document.createElement("span"), { className: "snow-page-count" });
+  count.setAttribute("aria-hidden", "true");
+  meter.append(prev, count);
   const progress = document.createElement("span");
   progress.className = "snow-auto-progress";
   progress.hidden = true;
@@ -100,8 +107,8 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
     const style = getComputedStyle(speech), box = speech.getBoundingClientRect();
     const right = box.right - px(style.paddingRight), bottom = box.bottom - px(style.paddingBottom);
     // 页码按最宽的样子（两位页数 + 已读）留位，翻页时正文不会因为页码变宽而重排。
-    const shown = { text: meter.textContent, single: meter.classList.contains("is-single") };
-    meter.textContent = "10 / 10 · 已读";
+    const shown = { text: count.textContent, single: meter.classList.contains("is-single") };
+    count.textContent = "10 / 10 · 已读";
     meter.classList.remove("is-single");
     let left = Infinity, top = Infinity;
     for (const node of [menu, $("stage-advance"), meter]) {
@@ -110,7 +117,7 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
       if (rect.width <= 0 || rect.bottom <= box.top) continue;
       left = Math.min(left, rect.left); top = Math.min(top, rect.top);
     }
-    meter.textContent = shown.text;
+    count.textContent = shown.text;
     meter.classList.toggle("is-single", shown.single);
     if (!Number.isFinite(left) || top >= bottom) return { width: 0, height: 0 };
     return { width: Math.max(0, Math.ceil(right - left + 10)), height: Math.max(0, Math.ceil(bottom - top + 4)) };
@@ -120,6 +127,11 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
     speech.classList.add("snow-paged");
     dialogue.classList.remove("snow-page-rest");
     const first = measureBox();
+    // 旁白显示不全（超出它自己的最大高度）时整段放到旁白页，不让动作描写藏在框里的滚动条后面。
+    const narration = $("stage-narration");
+    const narrationShown = Boolean(narration?.textContent && narration.getClientRects().length);
+    const narrationClipped = narrationShown && narration.scrollHeight > narration.clientHeight + 1;
+    const narrationLines = narrationShown ? Math.round(narration.scrollHeight / (px(getComputedStyle(narration).lineHeight) || 22)) : 0;
     dialogue.classList.add("snow-page-rest");
     const later = measureBox();
     dialogue.classList.toggle("snow-page-rest", rest);
@@ -130,21 +142,21 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
     const heights = [first.height, later.height];
     const spacers = heights.map(height => corner.height <= 0 ? height
       : Math.min(height, Math.max(0, Math.floor((height - corner.height + slack) / lineHeight)) * lineHeight));
-    return { width: first.width, heights, spacers, corner };
+    return { width: first.width, heights, spacers, corner, narrationClipped, narrationLines };
   }
   function shapeReserve(fill, corner, height, spacer) {
     fill.style.height = `${spacer}px`;
     corner.style.width = `${geometry.corner.width}px`;
     corner.style.height = `${Math.max(0, height - spacer)}px`;
   }
-  function measurer(width, height, spacer) {
+  function measurer(width, height, spacer, lead = false) {
     const box = document.createElement("div");
     box.className = "stage-speech snow-paged snow-measure";
     box.setAttribute("aria-hidden", "true");
     Object.assign(box.style, { position: "absolute", left: "0", top: "0", width: `${width}px`, height: "auto",
       boxSizing: "border-box", visibility: "hidden", pointerEvents: "none", overflow: "visible", contain: "layout style" });
     const p = document.createElement("p");
-    p.className = "snow-page";
+    p.className = lead ? "snow-page is-lead" : "snow-page";
     p.style.height = `${height}px`;
     const fill = document.createElement("span"), corner = document.createElement("span");
     fill.className = "snow-reserve-spacer"; corner.className = "snow-reserve";
@@ -156,37 +168,51 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
     return { fits: value => { node.data = value; return p.scrollHeight <= height + 0.5; }, remove: () => box.remove() };
   }
 
-  function paginate(text) {
-    const value = String(text || "");
+  // 按「放得下」逐页切开 value；fitFor(第几页) 给出那一页用的测量器。
+  function split(value, fitFor) {
+    const { parts, ends } = segments(value), pages = [];
+    let first = 0;
+    while (first < parts.length) {
+      const fit = fitFor(pages.length);
+        const startOffset = first ? ends[first - 1] : 0;
+      let low = first, high = parts.length - 1, best = first;
+      if (fit(value.slice(startOffset, ends[high]))) best = high;
+      else {
+        while (low <= high) {
+          const middle = (low + high) >> 1;
+          if (fit(value.slice(startOffset, ends[middle]))) { best = middle; low = middle + 1; } else high = middle - 1;
+        }
+      }
+      let end = chooseBreak(parts, ends, first, best);
+      // 断点后面的空白和换行并进本页，下一页不以空行开头。
+      while (end + 1 < parts.length && SPACE.test(parts[end + 1])) end += 1;
+      pages.push({ start: startOffset, end: ends[end] });
+      first = end + 1;
+    }
+    return pages;
+  }
+  // options.lead 是这句的动作描写（旁白）。旁白只有一行时照旧和台词共用第一页；两行以上且台词在第一页放不下，
+  // 或旁白本身显示不全时，把旁白单独排成前面的「旁白页」（{start:0,end:0,lead:{start,end}}），台词从下一页起用整框。
+  function paginate(text, options) {
+    const value = String(text || ""), lead = String(options?.lead || "");
     if (!value) return [{ start: 0, end: 0 }];
     geometry = measureGeometry();
-    const { parts, ends } = segments(value);
     const lineHeight = px(getComputedStyle(speech).lineHeight) || 32;
     // 对白框没有排版（隐藏、未进入面对面）时整段作为一页，显示出来后再由 reflow 重新分页。
-    if (geometry.width < 80 || Math.min(...geometry.heights) < lineHeight) { geometry.pending = true; return [{ start: 0, end: value.length }]; }
+    if (geometry.width < 80 || geometry.heights[1] < lineHeight || (!lead && geometry.heights[0] < lineHeight)) {
+      geometry.pending = true; return [{ start: 0, end: value.length }];
+    }
     const tools = geometry.heights.map((height, index) => measurer(geometry.width, height, geometry.spacers[index]));
-    const pages = [];
     try {
-      let first = 0;
-      while (first < parts.length) {
-        const fit = tools[pages.length ? 1 : 0].fits;
-        const startOffset = first ? ends[first - 1] : 0;
-        let low = first, high = parts.length - 1, best = first;
-        if (fit(value.slice(startOffset, ends[high]))) best = high;
-        else {
-          while (low <= high) {
-            const middle = (low + high) >> 1;
-            if (fit(value.slice(startOffset, ends[middle]))) { best = middle; low = middle + 1; } else high = middle - 1;
-          }
-        }
-        let end = chooseBreak(parts, ends, first, best);
-        // 断点后面的空白和换行并进本页，下一页不以空行开头。
-        while (end + 1 < parts.length && SPACE.test(parts[end + 1])) end += 1;
-        pages.push({ start: startOffset, end: ends[end] });
-        first = end + 1;
-      }
+      geometry.lead = Boolean(lead) && (geometry.narrationClipped || geometry.heights[0] < lineHeight
+        || (geometry.narrationLines >= 2 && !tools[0].fits(value)));
+      if (!geometry.lead) return split(value, index => tools[index ? 1 : 0].fits);
+      const narration = measurer(geometry.width, geometry.heights[1], geometry.spacers[1], true);
+      try {
+        const leads = split(lead, () => narration.fits).map(range => ({ start: 0, end: 0, lead: range }));
+        return [...leads, ...split(value, () => tools[1].fits)];
+      } finally { narration.remove(); }
     } finally { tools.forEach(tool => tool.remove()); }
-    return pages;
   }
 
   // ---------- 绘制 ----------
@@ -196,8 +222,8 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
   let readText = null, freshFrom = Infinity;
   function render(state) {
     if (disposed) return;
-    const current = state.pages[state.index];
-    const revealing = state.revealedEnd < current.end;
+    const current = state.pages[state.index], lead = current.lead || null, leadMode = Boolean(state.pages[0]?.lead);
+    const revealing = !lead && state.revealedEnd < current.end;
     if (state.text !== readText) { readText = state.text; freshFrom = Infinity; }
     if (!state.read) freshFrom = Math.min(freshFrom, current.start);
     const readBefore = state.read && current.end <= freshFrom;
@@ -209,24 +235,28 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
     speech.classList.toggle("is-revealing", revealing);
     page.classList.toggle("is-revealing", revealing);
     speech.setAttribute("aria-busy", String(revealing));
-    dialogue.classList.toggle("snow-page-rest", state.index > 0);
+    // 有旁白页时旁白不再和台词挤在第一页：每一页都用收起旁白后的整框。
+    const rest = state.index > 0 || leadMode;
+    dialogue.classList.toggle("snow-page-rest", rest);
+    page.classList.toggle("is-lead", Boolean(lead));
     // 本页用的角落尺寸与分页测量时一致（第一页与后续页的台词区高度不同）。
-    if (geometry?.spacers) { const kind = state.index > 0 ? 1 : 0; shapeReserve(spacer, reserve, geometry.heights[kind], geometry.spacers[kind]); }
-    words.data = state.text.slice(current.start, state.revealedEnd);
+    if (geometry?.spacers) { const kind = rest ? 1 : 0; shapeReserve(spacer, reserve, geometry.heights[kind], geometry.spacers[kind]); }
+    words.data = lead ? String(state.lead || "").slice(lead.start, lead.end) : state.text.slice(current.start, state.revealedEnd);
     const multi = state.pages.length > 1;
     meter.classList.toggle("is-single", !multi);
-    meter.textContent = multi ? `${state.index + 1} / ${state.pages.length}${readBefore ? " · 已读" : ""}` : "";
+    count.textContent = multi ? `${state.index + 1} / ${state.pages.length}${readBefore ? " · 已读" : ""}` : "";
+    prev.disabled = state.index === 0;
     setReady(!revealing);
     autoButton.setAttribute("aria-pressed", String(state.auto));
     const showProgress = state.auto && !revealing && state.index < state.pages.length - 1;
     progress.hidden = !showProgress;
     progress.style.setProperty("--snow-auto", String(showProgress ? Math.max(0, Math.min(1, state.autoProgress || 0)) : 0));
-    const key = `${state.text.length}:${current.start}:${current.end}`;
+    const key = `${state.text.length}:${current.start}:${current.end}:${lead ? lead.start : ""}`;
     if (key !== pageKey) { pageKey = key; onPage(currentPage()); }
   }
   // 当前页在原文中的位置（canonical 文字的 UTF-16 偏移），给收藏「当前这一页」用。
   function currentPage() {
-    if (!last || speech.firstElementChild !== page) return null;
+    if (!last || last.current.lead || speech.firstElementChild !== page) return null;
     return { text: last.text, start: last.current.start, end: last.current.end, index: last.index, count: last.pages.length };
   }
   // 宿主改走旧呈现（打字提示、场景占位、没有 pager 的回复）时，收起分页专用的状态。
@@ -234,7 +264,8 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
     last = null;
     speech.classList.remove("snow-paged");
     dialogue.classList.remove("snow-page-rest");
-    meter.classList.add("is-single"); meter.textContent = "";
+    meter.classList.add("is-single"); count.textContent = ""; prev.disabled = true;
+    page.classList.remove("is-lead");
     progress.hidden = true;
     if (pageKey) { pageKey = ""; onPage(null); }
   }
@@ -245,6 +276,7 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
 
   // ---------- 翻页输入 ----------
   function advance() { for (const listener of advanceListeners) listener(); }
+  function back() { for (const listener of backListeners) listener(); }
   function onClick(event) {
     if (event.target.closest("button, a, input, textarea, select, details, summary, label, .snow-pop")) return;
     if (String(getSelection?.() || "").trim()) return;
@@ -252,7 +284,8 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
   }
   function onKey(event) {
     if (event.target !== dialogue || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (!["Enter", " ", "ArrowRight"].includes(event.key)) return;
+    if (["ArrowLeft", "PageUp"].includes(event.key)) { event.preventDefault(); back(); return; }
+    if (!["Enter", " ", "ArrowRight", "PageDown"].includes(event.key)) return;
     event.preventDefault();
     advance();
   }
@@ -282,6 +315,7 @@ export function installSnowPager(host, { icon, onPage = () => {} }) {
     render,
     onAdvance(listener) { advanceListeners.add(listener); return () => advanceListeners.delete(listener); },
     onToggleAuto(listener) { autoListeners.add(listener); return () => autoListeners.delete(listener); },
+    onBack(listener) { backListeners.add(listener); return () => backListeners.delete(listener); },
   };
   host.stage.setPager(pager);
   return {

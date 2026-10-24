@@ -76,3 +76,8 @@ html[data-ui="snow-adv"] .in-person-surface[data-scene="analyst"] .scene-locatio
   html[data-ui="snow-adv"] .snow-scene-veil-emblem { width: 52px; height: 52px; }
   html[data-ui="snow-adv"] .snow-scene-veil-emblem svg { width: 26px; height: 26px; }
 }
+
+/* 时段切换（清晨/白天/黄昏/夜晚）：整页交叉淡入，见 snow-scenes.js installSnowTimeShift。
+   过渡期间点击穿过过渡层落到页面上，输入不被挡住。 */
+html[data-snow-time-shift]::view-transition { pointer-events: none; }
+html[data-snow-time-shift]::view-transition-group(root) { animation-duration: 1.6s; animation-timing-function: ease-in-out; }

@@ -1161,6 +1161,112 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertFalse(repaired)
         self.assertEqual(answer, original)
 
+    def test_relationship_label_question_needs_an_actual_question_about_the_relationship(self) -> None:
+        # 苔丝 reported: any message containing 老婆 was answered with one fixed confirmation sentence,
+        # because the word alone counted as a relationship-label question.
+        asked = (
+            "我们是什么关系？", "苔丝，我们是什么关系？", "你是我的妻子吗？", "你是不是我老婆", "你是我老婆？",
+            "我们结婚了吗", "我们是夫妻吗？", "你是我的什么人？", "里芙，我们之间算什么呢", "你愿意当我老婆吗？",
+            "我们是不是已经结婚了",
+        )
+        not_asked = (
+            "老婆，今天吃什么？", "老婆你饿不饿", "老婆，我回来了", "我想和老婆一起去海边", "老婆，晚安。",
+            "你还记得我们的婚礼吗", "我们是什么时候认识的？", "这跟你有什么关系", "我们什么时候结婚？",
+            "你就是我的老婆。", "还记得我们立下恒约的那天吗？", "老婆，你是不是饿了？",
+        )
+        for message in asked:
+            with self.subTest(message=message):
+                self.assertTrue(MVPService._is_relationship_label_question(message))
+        for message in not_asked:
+            with self.subTest(message=message):
+                self.assertFalse(MVPService._is_relationship_label_question(message))
+        self.assertNotEqual(
+            MVPService._question_focus("老婆，今天吃什么？", MVPService._query_intents("老婆，今天吃什么？")),
+            "relationship_label",
+        )
+
+    def test_explicit_relationship_guard_keeps_ordinary_and_warm_replies(self) -> None:
+        background = {"status": "explicit"}
+        cases = (
+            ("老婆，今天吃什么？", "食堂今天有南瓜汤，我给你留了一份。"),
+            ("老婆，晚安。", "晚安，早点睡，明天见。"),
+            # A real label question answered warmly without repeating the label is still the model's reply.
+            ("你是我老婆吗？", "这还用问吗，笨蛋。当然是。"),
+        )
+        for message, original in cases:
+            with self.subTest(message=message):
+                self.assertEqual(MVPService._repair_explicit_relationship_answer(message, original, background), (original, False))
+        # Refusals and working-relationship-only answers to a real question are still repaired.
+        for message, refusal in (("我们是什么关系？", "抱歉，我无法确定我们是什么关系。"),
+                                 ("你是我的妻子吗？", "我们只是战友。")):
+            with self.subTest(message=message):
+                answer, repaired = MVPService._repair_explicit_relationship_answer(message, refusal, background)
+                self.assertTrue(repaired)
+                self.assertIn("恒约", answer)
+
+    def test_relationship_roster_question_needs_both_halves_in_one_clause(self) -> None:
+        self.assertFalse(MVPService._is_relationship_roster_question("老婆，哪些菜好吃？"))
+        self.assertFalse(MVPService._is_relationship_roster_question("老婆，今晚都有谁值班？"))
+        self.assertTrue(MVPService._is_relationship_roster_question("老婆，你知道和我立下恒约的有哪几位吗？"))
+
+    def test_relationship_prompt_contract_only_asks_for_the_label_on_label_questions(self) -> None:
+        explicit = {"status": "explicit", "relationship_label": "恒约伴侣"}
+        asked = MVPService._relationship_answer_contract(explicit, "relationship_label")
+        background = MVPService._relationship_answer_contract(explicit, "general")
+        self.assertIn("直接承认", asked)
+        self.assertIn("不要套用固定句子", asked)
+        self.assertNotIn("我是你的妻子", asked)
+        self.assertIn("只是背景", background)
+        self.assertIn("不要主动复述或确认关系标签", background)
+        self.assertIsNone(MVPService._relationship_answer_contract({}, "relationship_label"))
+
+    def test_style_profile_offers_only_spoken_lines_as_a_voice_reference(self) -> None:
+        # The extracted profile mixes narration, plot summaries and the analyst's own words into its "lines";
+        # the prompt asked to prefer those lines, which made replies paste scene-bound sentences.
+        profile = {
+            "character_name": "苔丝",
+            "catchphrases": [
+                {"phrase": "当然，我很久以后才知道，他那时就是公司安全部的队员，来到学校是为了调查与公司有关的事件。",
+                 "support_level": "observed", "evidence_document_ids": ["d1", "d2"]},
+                {"phrase": "分析员，不要忘了刚刚的约定哦！", "support_level": "observed", "evidence_document_ids": ["d3", "d4"]},
+            ],
+            "emotion_patterns": [
+                {"quote": "少女痛苦地接受了现实。", "interpretation": "fear_or_vulnerability"},
+                {"quote": "我……其实有一点害怕。", "interpretation": "fear_or_vulnerability"},
+                {"quote": "苔丝才不会认输呢！", "interpretation": "pride"},
+            ],
+            "analyst_interaction": [
+                {"quote": "分析员板着脸叫了苔丝的全名"},
+                {"quote": "身为分析员，我就绝对不会辜负你的期待。"},
+                {"quote": "啊……分析员，我们之后还有机会回这里吗？"},
+                {"quote": "我……其实有一点害怕。"},
+                {"quote": "通过定位卡片，分析员在冰原上找到了伪装成郊狼的苔丝，内心深处脆弱、委屈和恐惧的女孩还不愿入队，"
+                          "为了分析员她还在强迫自己做更进一步的调查。"},
+            ],
+        }
+        context = MVPService._dialogue_profile_prompt_context(profile)
+        self.assertNotIn("catchphrases", context)
+        self.assertEqual([item["phrase"] for item in context["repeated_lines"]], ["分析员，不要忘了刚刚的约定哦！"])
+        self.assertEqual([item["quote"] for item in context["emotion_patterns"]], ["我……其实有一点害怕。", "苔丝才不会认输呢！"])
+        self.assertEqual([item["quote"] for item in context["analyst_interaction"]], ["啊……分析员，我们之后还有机会回这里吗？"])
+        self.assertIn("不要把这些句子整句或大段搬进回答", context["voice_reference_rule"])
+        self.assertIn("只有分析员明确要求复述、表演或询问原作台词时", context["voice_reference_rule"])
+
+    def test_source_line_copy_is_counted_unless_the_analyst_asked_for_the_line(self) -> None:
+        line = "分析员我对你个人并没有任何偏见，只是希望以理性而非感性解决合作困难。"
+        context = {
+            "dialogue_profile": {"analyst_interaction": [{"quote": line}], "catchphrases": [], "emotion_patterns": []},
+            "hits": [{"text": "这是一段与回答无关的剧情文本。"}],
+        }
+        pasted = "嗯？" + line + "所以今天也请多指教。"
+        copied = MVPService._source_line_copy_chars("今天训练累吗？", pasted, context)
+        self.assertGreaterEqual(copied, len("分析员我对你个人并没有任何偏见只是希望以理性而非感性解决合作困难"))
+        # A reply in her own words shares no long stretch with the source line.
+        self.assertEqual(MVPService._source_line_copy_chars("今天训练累吗？", "还好啦，不过对你，我可没什么偏见哦。", context), 0)
+        # Asked to perform it, the original line is expected.
+        self.assertEqual(MVPService._source_line_copy_chars("能再给我表演一下那个吗？", pasted, context), 0)
+        self.assertEqual(MVPService._source_line_copy_chars("你在原作里是怎么说的？", pasted, context), 0)
+
     def test_generic_partner_word_does_not_upgrade_relationship_background(self) -> None:
         documents = [
             {
@@ -2245,6 +2351,94 @@ class ApplicationLayerTests(unittest.TestCase):
         )
         self.assertIn("direct_answer_focus:food_or_drink", violations)
 
+    @staticmethod
+    def _food_context(message: str, turns: int = 0, address: str = "") -> dict:
+        return {
+            "question_focus": "food_or_drink",
+            "user_message": message,
+            "session_context": {"turns": [{} for _ in range(turns)]},
+            "relationship_address_memory": {"preferred_address": address} if address else {},
+        }
+
+    def test_food_plan_question_is_told_apart_from_a_record_or_a_wish(self) -> None:
+        for message in ("老婆，今天吃什么？", "晚上吃啥", "我们中午吃点什么？", "待会儿喝什么？"):
+            self.assertTrue(MVPService._is_food_or_drink_plan_question(message), message)
+        for message in ("你吃了什么？", "今天想吃什么？", "你今天吃什么？", "吃饭了吗？", "你喝什么？"):
+            self.assertFalse(MVPService._is_food_or_drink_plan_question(message), message)
+
+    def test_food_guard_accepts_named_dishes_proposals_and_asking_back_on_a_plan(self) -> None:
+        def violations(message: str, answer: str) -> list[str]:
+            context = self._food_context(message)
+            blocks = [{"type": "speech", "text": answer}]
+            return MVPService._direct_answer_focus_violations(
+                answer, context, blocks, message
+            ) + MVPService._unsupported_current_food_claims(answer, context, blocks)
+
+        plan = "老婆，今天吃什么？"
+        for answer in (
+            "亲爱的，今晚我们吃火锅吧！",
+            "今天做咖喱给你吃好不好？",
+            "你要不要一起吃蛋糕？",
+            "亲爱的想吃什么？我都可以变出来哦。",
+            "你想吃什么？听你的。",
+        ):
+            self.assertEqual(violations(plan, answer), [], answer)
+        # Asking back still evades a question about the character herself,
+        # and a teasing deflection still evades the plan.
+        self.assertIn("direct_answer_focus:food_or_drink", violations("你吃了什么？", "你想吃什么？"))
+        self.assertIn("direct_answer_focus:food_or_drink", violations("今天想吃什么？", "你想吃什么？"))
+        self.assertIn("direct_answer_focus:food_or_drink", violations(plan, "这个嘛……你猜？"))
+        # Answering first and asking back afterwards is an answer.  These two
+        # are the replies a live run rejected for "你今天吃饭了吗？".
+        record = "你今天吃饭了吗？"
+        for answer in (
+            "还没呢，达令这么一问，我倒是有点想吃冰淇淋了……不过正餐可不能拿这个糊弄过去。你呢，吃过了没？",
+            "还没吃呢，达令。正餐我想吃点实在的，冰淇淋嘛……就当饭后甜点好了。你呢，吃过了没？",
+            "我想吃面，你呢？",
+        ):
+            self.assertEqual(violations(record, answer), [], answer)
+        self.assertIn(
+            "direct_answer_focus:food_or_drink",
+            violations(record, "你呢，吃过了没？我还没想好。"),
+        )
+        # A proposal never excuses a meal claimed as already eaten.
+        self.assertIn(
+            "unsupported_current_food_fact",
+            violations(plan, "我今天已经吃了火锅，我们晚上再吃点别的吧。"),
+        )
+
+    def test_food_fallback_follows_the_question_rotates_and_claims_no_meal(self) -> None:
+        old_fixed = "我还没决定吃什么。你有想吃的，就告诉我吧。"
+        cases = {
+            "老婆，今天吃什么？": "plan",
+            "今天想吃什么？": "wish",
+            "你吃了什么？": "state",
+            "想喝点什么？": "drink",
+            "喝水了吗？": "drink_state",
+        }
+        seen: dict[str, set[str]] = {}
+        for message, kind in cases.items():
+            for turns in range(3):
+                context = self._food_context(message, turns)
+                line = MVPService._direct_answer_fallback(context)
+                self.assertNotEqual(line, old_fixed)
+                blocks = [{"type": "speech", "text": line}]
+                self.assertEqual(
+                    MVPService._direct_answer_focus_violations(line, context, blocks, message)
+                    + MVPService._unsupported_current_food_claims(line, context, blocks),
+                    [],
+                    line,
+                )
+                seen.setdefault(kind, set()).add(line)
+        self.assertTrue(all(len(lines) == 3 for lines in seen.values()), seen)
+        self.assertTrue(all("还没吃" in line for line in seen["state"]))
+        self.assertTrue(all("吃" not in line for line in seen["drink_state"]))
+        self.assertTrue(seen["plan"].isdisjoint(seen["state"]))
+        with_address = MVPService._direct_answer_fallback(
+            self._food_context("老婆，今天吃什么？", 0, "亲爱的")
+        )
+        self.assertTrue(with_address.startswith("亲爱的，"))
+
     def test_mvp_cross_story_fact_guard_rejects_futiya_uncertainty(self) -> None:
         service = MVPService(self.settings, self.repository)
         context = {
@@ -2386,7 +2580,8 @@ class ApplicationLayerTests(unittest.TestCase):
             )
 
         self.assertIn("direct_answer_guard", result["response_adjustments"])
-        self.assertIn("还没决定吃什么", result["answer"])
+        self.assertIn("还没吃", result["answer"])
+        self.assertNotIn("还没决定吃什么。你有想吃的", result["answer"])
         self.assertEqual(result["content_blocks"], [{"type": "message", "text": result["answer"]}])
         self.assertEqual(result["citations"], [])
 
@@ -2415,7 +2610,7 @@ class ApplicationLayerTests(unittest.TestCase):
             )
 
         self.assertIn("current_food_guard", result["response_adjustments"])
-        self.assertIn("还没决定吃什么", result["answer"])
+        self.assertIn("还没吃", result["answer"])
         self.assertNotIn("刚刚", result["answer"])
         self.assertNotIn("营养补充剂", result["answer"])
         self.assertEqual(result["content_blocks"], [{"type": "message", "text": result["answer"]}])

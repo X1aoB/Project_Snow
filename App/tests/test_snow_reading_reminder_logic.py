@@ -210,6 +210,39 @@ class SnowReadingReminderLogicTests(TestCase):
         }""")
         self.assertEqual(result, {"first": {"index": 0, "text": "甲乙"}, "skipped": {"index": 3, "text": ""}, "last": "庚辛", "upTo": 8, "done": True})
 
+    def test_lead_pages_show_the_action_first_and_back_returns_a_whole_page(self):
+        result = self.page.evaluate("""async()=>{
+          const msg=speech('one','甲乙丙丁戊己'),h=featureHarness({messages:[msg]}),r=h.reading();await r.ready;
+          let seen=null,back=()=>{};
+          h.pager.paginate=(text,options)=>{seen=options||null;return [{start:0,end:0,lead:{start:0,end:2}},{start:0,end:0,lead:{start:2,end:3}},{start:0,end:3},{start:3,end:6}];};
+          h.pager.render=value=>{h.controls.rendered.push(structuredClone(value));const page=value.pages[value.index];
+            h.node.textContent=page.lead?value.lead.slice(page.lead.start,page.lead.end):value.text.slice(page.start,Math.min(page.end,value.revealedEnd));};
+          h.pager.onBack=fn=>{back=fn;return()=>{back=()=>{};};};
+          r.setPager(h.pager);let paints=0;const shown=[];const show=()=>shown.push(h.node.textContent);
+          r.present({message:msg,key:'one',lead:'走近了',onFirstPaint:()=>paints++});show();
+          const leadRead=[h.controls.rendered.at(-1).read,r.readUpTo('one',0)];
+          h.advance();show();h.advance();await h.tick(1000);show();
+          back();show();back();show();const stays=r.back();show();
+          // Forward again: the line page was read, so it shows whole without retyping.
+          h.advance();h.advance();show();const typedAgain=h.controls.revealPlans.length;h.advance();await h.tick(1000);show();
+          return {seen,paints,leadRead,shown,stays,typedAgain,announced:h.controls.announcements.slice(0,3),upTo:r.readUpTo('one',0),done:await r.wait('one')};
+        }""")
+        self.assertEqual(result, {"seen": {"lead": "走近了"}, "paints": 1, "leadRead": [False, 0],
+                                  "shown": ["走近", "了", "甲乙丙", "了", "走近", "走近", "甲乙丙", "丁戊己"], "stays": False, "typedAgain": 1,
+                                  "announced": ["走近", "了", "甲乙丙"], "upTo": 6, "done": True})
+
+    def test_lead_pages_must_cover_the_whole_action_in_order(self):
+        result = self.page.evaluate("""async()=>{
+          const msg=speech('one','甲乙丙丁'),h=featureHarness({messages:[msg]}),r=h.reading();await r.ready;r.setPager(h.pager);
+          const tryPages=(pages,lead)=>{h.pager.paginate=()=>pages;return r.present({message:msg,key:JSON.stringify(pages)+lead,lead});};
+          return [tryPages([{start:0,end:0,lead:{start:0,end:2}},{start:0,end:4}],'走近了'),
+                  tryPages([{start:0,end:0,lead:{start:0,end:3}},{start:0,end:4}],''),
+                  tryPages([{start:0,end:0,lead:{start:1,end:3}},{start:0,end:4}],'走近了'),
+                  tryPages([{start:0,end:0,lead:{start:0,end:3}}],'走近了'),
+                  tryPages([{start:0,end:0,lead:{start:0,end:3}},{start:0,end:4}],'走近了')];
+        }""")
+        self.assertEqual(result, [False, False, False, False, True])
+
     def test_auto_pauses_for_each_environment_and_resumes_remaining_duration(self):
         result = self.page.evaluate("""async()=>{
           const results=[];for(const key of ['hidden','modalOpen','uiHidden','typing','paused']){

@@ -46,6 +46,7 @@ export const ICONS = Object.freeze({
 
 export const FEATURE_ICONS = Object.freeze({
   "bell-ring": "BellRing",
+  "chevron-left": "ChevronLeft",
   coins: "Coins",
   gauge: "Gauge",
   "image-down": "ImageDown",
