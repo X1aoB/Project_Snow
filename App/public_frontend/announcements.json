@@ -3,8 +3,8 @@
   "timezone": "Asia/Shanghai",
   "updates": [
     {
-      "id": "2026-10-24-snow-dialogue-pages",
-      "published_at": "2026-10-24T21:35:00+08:00",
+      "id": "2026-10-25-snow-dialogue-pages",
+      "published_at": "2026-10-25T00:02:00+08:00",
       "title": "面对面对白：旁白单独成页、可回到上一页，时段交替有过渡",
       "summary": "动作描写较多时不再挤压台词；分页后可以回看上一页；清晨、白天、黄昏、夜晚交替时画面渐变；角色不再对含「老婆」等称呼的话、或被问吃什么时固定回复同一句。",
       "items": [
