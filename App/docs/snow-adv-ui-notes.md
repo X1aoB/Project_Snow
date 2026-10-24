@@ -74,6 +74,17 @@ P8 起舞台延伸到输入栏下面：`app.js` 用 ResizeObserver 把 `#compose
 - 首屏。`app.js` 的首屏增量控制在预算内：删去 14 条整行提要注释（全文本来就在下方「app.js」一节，见那里的说明）。
 - 测试。`tests/test_snow_adv_scenes.py`：后端映射与可邀请地点、前后端一致、九个场景四个时段各自成图且随时段变色、一起去先说完再完整播放转场（含转场前先完整播过一次普通转场）、首次入室推进中途一起去不会提前露出海滩、减少动态直接换场、区域编号与两种色调下标题卡对比度、关闭雪境时不加载新模块且旧背景回退。`tests/test_snow_adv_base_map.py` 的地点映射断言改为新场景键。`tests/test_dialogue_v2_frontend.py` 的 `test_fast_reply_cancels_camera_and_scene_veil_before_visible_measurement` 改为新约定：回复首次显示时仍没有镜头推进和遮罩；随回复而来的场景变化（她先去餐厅等你）在台词显示完后完整播放到「基地餐厅」的转场，标题不是被取消的镜头的目的地。
 
+## 旁白页、上一页与时段过渡（2026-10-24）
+
+小B反馈三处：动作描写多时挤压对白框（电脑上台词只剩一行、被快捷菜单那一行截断；手机上旁白超过它自己的 4.8em 最大高度，后半段藏在旁白的滚动条后面）；分页后回不到上一页；清晨、白天、黄昏、夜晚交替时直接跳变。
+
+- 旁白页。`app.js` 把这句的动作描写作为 `lead` 交给 `reading.present()`，逻辑再传给 `pager.paginate(text, { lead })`。分页器在第一页（旁白可见）测量时，若旁白显示不全，或旁白两行以上而第一页放不下全部台词，就把旁白单独排成前面的「旁白页」：页对象是 `{start: 0, end: 0, lead: {start, end}}`，`lead` 是动作描写里的 UTF-16 偏移，多页时按句末、逗号断开（与台词同一套断点规则）。有旁白页时每一页都用收起旁白后的整框（`.snow-page-rest`），旁白页的文字放在同一个 `.snow-page` 段落里，加 `.is-lead` 用旁白的斜体和字号。只有一行的动作描写照旧和台词共用第一页。
+- 逻辑。`snow-reading-logic.js` 校验旁白页必须是前缀、按顺序整段覆盖动作描写、不切开代理对，否则 `present()` 返回 false 走旧呈现。旁白页不占台词偏移、不逐字、不记已读；它的「已读」跟第一页台词走，重放读过的回复时旁白页也标「已读」。首次绘制（`onFirstPaint`）在旁白页出现时就算。停在旁白页时 `reflow()` 找新排版里含同一处旁白的那页，新排版不再需要旁白页时回到第一页。
+- 上一页。`reading.back()` 回到上一页并整页显示（`revealPage(page.end)`，那一页已经显示过），读过的页再往前翻也不重新逐字。分页器在页码前加「上一页」按钮（`.snow-page-prev`，图标 `chevron-left` 在按需加载的 `snow-feature-icons.js`），第一页时 `disabled` 并 `visibility: hidden`，不改变右下角留位宽度；页码数字移到 `.snow-page-count`，原来的 `aria-hidden` 也只放在数字上，按钮可以被读屏和键盘访问。对白框上 ← / PageUp 回上一页，→ / Enter / 空格 / PageDown 翻下一页。分页器的 `onBack` 是可选回调，旧的测试替身不提供也照常工作。
+- 时段过渡。`snow-world.js`（首屏）只加了 `setSnowTimeShift(wrap)` 和导出的 `checkSnowTime()`：30 秒一次的时段检查发现变化时，把通知所有订阅者（舞台世界、通讯器背后的世界、色调、锁屏）的那一步交给 `wrap`。`snow-scenes.js` 装好后注册的 `wrap` 用 `document.startViewTransition()` 把这一步包成一次整页交叉淡入，1.6 秒，期间 `<html data-snow-time-shift>`；`::view-transition` 设 `pointer-events: none`，过渡期间点击照常落到页面上。不支持视图过渡、页面在后台、动态效果为关闭（系统减少动态时也是关闭）时直接切换。场景模块还监听 `<html data-snow-time>` 时段覆盖（宣传片录制和测试用），一改就切，不等下一次检查。
+- 首屏。`snow-world.js` 的整行注释全部移到本文末尾「`modules/snow-world.js` 的行注释」，首屏从剩 60B 变为剩约 1.3KB。
+- 测试。`tests/test_snow_adv_features_ui.py`：`test_long_action_gets_its_own_page_instead_of_squeezing_the_line`（两种尺寸：旁白页在前、按顺序覆盖动作描写和台词、旁白不再出现在台词页、不压菜单不出框；一行动作描写仍与台词同页）、`test_previous_page_button_and_keys_return_to_the_page_before`、`test_time_of_day_change_crossfades_the_whole_page`（过渡约 1.6 秒且背景与色调一起换；减少动态和关闭动态时直接切换）。`tests/test_snow_reading_reminder_logic.py`：旁白页的顺序、已读、首次绘制、朗读和上一页，以及不合法旁白页被拒。
+
 ## snow-adv.css
 
 ### `html[data-ui="snow-adv"] {`
@@ -1665,3 +1676,34 @@ P6a：开关只在 config 解析后才已知，故开机/锁屏层只能此时�
 
 体验须知与新手引导：桌面开机消隐后、手机解锁后按正常顺序出现（绝不盖在开场层之上）；
 其余情况（flag 关 / 跳过开机锁屏）保持原有顺序——config 之后立即弹须知。
+
+## `modules/snow-world.js` 的行注释
+
+首屏只剩几十字节时，`snow-world.js` 里的整行注释全部移到这里（2026-10-24，代码不变）。每条写移出前的行号、注释和它后面那行代码的开头。
+
+- 第 5 行，`let activeSnowLoopCount = 0;` 之前：活动中的 SnowField rAF 循环计数
+- 第 9 行，`const PALETTES = {` 之前：配色
+- 第 28 行，`const snowTimeSubscribers = new Set();` 之前：P8：共享时段时钟
+- 第 52 行，`function rng(seed) {` 之前：工具
+- 第 116 行，`function worldTree(p, id, H) {` 之前：远景（室外，透过窗看到或 generic 全屏）
+- 第 186 行，`function roomDefs(p, id) {` 之前：室内（墙带窗洞，雪只透过窗显示）
+- 第 200 行，`const ROOM_MARKS = {` 之前：P8 尘白元素
+- 第 210 行，`for (let x = 0; x < 1600; x += 400) s += '<path d="M${x} 640H${x + 360}L…` 之前：腰线：每 400px 一段，段首做 45° 切角。
+- 第 212 行，`for (let x = 200; x < 1600; x += 400) s += '<path d="M${x} 0V36L${x + 18…` 之前：竖向接缝：顶部切角。
+- 第 217 行，`const [wr, wg, wb] = hex(p.wall[1]);` 之前：深色墙（夜晚）上用浅色墨，浅色墙上用深色墨，保持同样的对比。
+- 第 223 行，`s += '<path d="M${x - 8} ${y - 40}h14l-14 14z"/><g text-anchor="middle" …` 之前：竖排：编号逐字向下，再空一格写房间名。
+- 第 323 行，`const leaf = mix(tone(p, 0.3), "#7fa592", 0.42), leafDeep = mix(leaf, "#…` 之前：P7：两侧盆栽——花盆 + 扇形细叶，颜色压淡，不再是两块模糊的大绿椭圆。
+- 第 343 行，`s += '<rect x="1120" y="500" width="520" height="260" rx="10" fill="${to…` 之前：P7：右侧出餐台原为 32% 深灰块，压过人物；调浅并给台面一点暖白。
+- 第 361 行，`s += '<g filter="url(#${id}-soft)"><rect x="60" y="320" width="310" heig…` 之前：P7：左侧器械架与右侧沙袋原色偏深，调浅到与墙面同一明度区间，沙袋偏冰蓝。
+- 第 457 行，`let sharedSprite = null;` 之前：Canvas 雪
+- 第 519 行，`g: Math.random() < 0.12,` 之前：P8：夜间约 12% 的雪片带冰青闪光
+- 第 576 行，`if (art) stageEl.insertBefore(far, art); else stageEl.append(far);` 之前：远景三层插在立绘之前（在它背后），近景雪插在立绘之后（在它前面）。
+- 第 594 行，`const inPersonVisible = surface && !surface.hidden;` 之前：通讯器背后的世界
+- 第 628 行，`const override = document.documentElement.dataset.snowTime;` 之前：时间最多每 10 分钟刷新一次
+- 第 638 行，`room.hidden = false;` 之前：generic 的这一层也包含基地建筑和亮灯入口，必须保留可见。
+- 第 662 行，`let cancelCamera = null;` 之前：相机推进
+- 第 669 行，`if (!world.destroyed) onWhiteout?.();` 之前：不支持 Web Animations（或无入口）时退化为立即执行白光回调。
+- 第 678 行，`const px = onScreen ? t.left + t.width / 2 : vw / 2;` 之前：入口不在屏内（移动端竖屏裁掉建筑）时朝画面中心推进。
+- 第 705 行，`far.dataset.pushing = "1";` 之前：用数据属性标记正在推进，供证据截图/测试断言读取
+- 第 707 行，`let whiteoutTimer, finishTimer, settle;` 之前：硬性兜底
+- 第 745 行，`const commit = () => { if (key && key !== world.scene) { world.scene = k…` 之前：推进完成后由 onWhiteout 回调切场景

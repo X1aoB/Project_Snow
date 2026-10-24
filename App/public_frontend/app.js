@@ -6186,7 +6186,7 @@ function renderStageSpeech(assistantMessage) {
     state.typewriter = { key: speechKey, timer: 0, fullText: "", displayedText: "" };
   }
   const paged = snowAdvActive() && assistantMessage?.status === "sent" && completeSpeech
-    && snowFeatureLogic?.reading.present({ message: assistantMessage, text: completeSpeech, key: speechKey,
+    && snowFeatureLogic?.reading.present({ message: assistantMessage, text: completeSpeech, lead: action, key: speechKey,
       animate: !quietPresentation() && (!featureEnabled("chat_latency_v2") || Boolean(liveReply)),
       onFirstPaint: () => recordReplyPaint(assistantMessage.requestId, speechNode) });
   if (!paged) renderTypewriter(speech, speechKey, !featureEnabled("chat_latency_v2") || Boolean(liveReply));

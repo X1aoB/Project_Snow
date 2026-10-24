@@ -1,6 +1,6 @@
 // 独立场景的专属背景与换场白雪转场。首屏稳定后由 app.js 按需加载；背景注册进 snow-world.js 的场景表，
 // 转场只增强已有的 #snow-scene-veil（覆盖 -> 标题卡场景徽记 -> 中心揭开）。说明见 docs/snow-adv-ui-notes.md。
-import { registerSnowPlaces } from "/modules/snow-world.js";
+import { registerSnowPlaces, setSnowTimeShift, checkSnowTime } from "/modules/snow-world.js";
 import { createSnowIcon } from "/modules/snow-icons.js";
 import { createSceneIcon } from "/modules/snow-scene-icons.js";
 
@@ -527,12 +527,30 @@ function veil(root, key) {
   };
 }
 
+// 时段一变，舞台背景、地点胶囊和界面色调在同一次视图过渡里交叉淡入（看起来是天色慢慢变了），
+// 不再一下子跳过去。不支持视图过渡、页面在后台或动态关闭（含系统「减少动态」）时直接切换。
+// 时段覆盖（<html data-snow-time>，宣传片录制和测试用）一改就切，不等 30 秒一次的检查。
+function installSnowTimeShift() {
+  const root = document.documentElement;
+  setSnowTimeShift(run => {
+    if (typeof document.startViewTransition !== "function" || document.hidden || root.dataset.motionLevel === "off") { run(); return; }
+    root.dataset.snowTimeShift = "1";
+    try {
+      const shift = document.startViewTransition(run);
+      shift.ready.catch(() => {});
+      shift.finished.finally(() => { delete root.dataset.snowTimeShift; });
+    } catch { delete root.dataset.snowTimeShift; run(); }
+  });
+  new MutationObserver(checkSnowTime).observe(root, { attributes: true, attributeFilter: ["data-snow-time"] });
+}
+
 /** 注册专属背景并返回换场接口；重复调用返回同一份。 */
 export function installSnowScenes() {
   if (installation) return installation;
   registerSnowPlaces(places);
   registerOpen();
   loadStyles();
+  installSnowTimeShift();
   installation = Object.freeze({ veil, keys: PLACE_KEYS, scenes: SCENES });
   return installation;
 }

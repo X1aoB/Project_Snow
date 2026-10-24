@@ -310,6 +310,9 @@ html[data-ui="snow-adv"] .snow-page-meter {
   right: calc(var(--snow-menu-w, 0px) + 50px);
   bottom: 14px;
   z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   color: var(--ink-600);
   font: 600 var(--fs-12) / 20px var(--font-ui);
   letter-spacing: 0.08em;
@@ -318,6 +321,32 @@ html[data-ui="snow-adv"] .snow-page-meter {
   pointer-events: none;
 }
 html[data-ui="snow-adv"] .snow-page-meter.is-single { display: none; }
+/* 「上一页」：页码左边的小圆钮；第一页时只隐藏，不改变右下角留位的宽度。 */
+html[data-ui="snow-adv"] .snow-page-prev {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin: -3px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: var(--char);
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+html[data-ui="snow-adv"] .snow-page-prev .snow-icon { width: 18px; height: 18px; stroke-width: 2.4; }
+html[data-ui="snow-adv"] .snow-page-prev:hover:not(:disabled) { background: color-mix(in srgb, var(--char) 14%, transparent); }
+html[data-ui="snow-adv"] .snow-page-prev:focus-visible { outline: 2px solid var(--ice-500); outline-offset: 1px; }
+html[data-ui="snow-adv"] .snow-page-prev:disabled { visibility: hidden; }
+/* 旁白页：动作描写多到挤压台词时单独成页，排版同对白框里的旁白。 */
+html[data-ui="snow-adv"] .snow-page.is-lead {
+  color: var(--ink-600);
+  font-size: var(--fs-14);
+  font-style: italic;
+  line-height: 1.6;
+}
 /* 分页时 ▼ 和页码放到快捷菜单同一行，正文前几行占满宽度。 */
 html[data-ui="snow-adv"] .stage-dialogue:has(.snow-paged) .stage-advance { right: calc(var(--snow-menu-w, 0px) + 24px); bottom: 14px; }
 html[data-ui="snow-adv"] .stage-dialogue:has(.snow-paged) { cursor: default; }

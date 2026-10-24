@@ -2,11 +2,9 @@
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-// 活动中的 SnowField rAF 循环计数
 let activeSnowLoopCount = 0;
 export function activeSnowLoops() { return activeSnowLoopCount; }
 
-// 配色
 const PALETTES = {
   dawn: { sky: ["#b5c4e2", "#ead3dc", "#fbe7d9"], sun: "#ffdcc2", sunPos: [0.76, 0.52], glow: 170, disc: 46, far: ["#fbf2f1", "#b6c1d9"], mid: ["#f1f1f5", "#8f9fbe"], near: "#6c7c9c", snow: "#fff6f2", ground: ["#fbf3f1", "#dde0ea"], wall: ["#eff0f5", "#d8dce7"], frame: "#c7cddb", floor: ["#e3e6ef", "#c6cbda"], light: "#ffe2cc", lightOpacity: 0.36, lamp: "#ffd6a6", lampOpacity: 0.28, stars: 0, aurora: 0, flake: "#ffffff" },
   day: { sky: ["#8fbde3", "#cde4f4", "#f3f9fd"], sun: "#fffaf0", sunPos: [0.72, 0.2], glow: 170, disc: 26, far: ["#ffffff", "#a6c1da"], mid: ["#f8fbfe", "#7c9fbf"], near: "#5c81a2", snow: "#ffffff", ground: ["#ffffff", "#e1ecf5"], wall: ["#f4f7fa", "#e0e8ef"], frame: "#cddae5", floor: ["#e8eff5", "#cad8e4"], light: "#ffffff", lightOpacity: 0.44, lamp: "#fff3dd", lampOpacity: 0.08, stars: 0, aurora: 0, flake: "#ffffff" },
@@ -25,20 +23,22 @@ export function resolveTime(now = new Date()) {
   return "night";
 }
 
-// P8：共享时段时钟
 const snowTimeSubscribers = new Set();
 let snowTimeTimer = 0;
 let snowTimeLast = "";
+let snowTimeShift = run => run();
+export function setSnowTimeShift(wrap) { snowTimeShift = wrap; }
+export function checkSnowTime() {
+  const next = resolveTime();
+  if (next === snowTimeLast) return;
+  snowTimeLast = next;
+  snowTimeShift(() => { for (const fn of [...snowTimeSubscribers]) { try { fn(next); } catch { /* one subscriber never blocks another */ } } });
+}
 export function subscribeSnowTime(callback) {
   snowTimeSubscribers.add(callback);
   if (!snowTimeTimer) {
     snowTimeLast = resolveTime();
-    snowTimeTimer = window.setInterval(() => {
-      const next = resolveTime();
-      if (next === snowTimeLast) return;
-      snowTimeLast = next;
-      for (const fn of [...snowTimeSubscribers]) { try { fn(next); } catch { /* one subscriber never blocks another */ } }
-    }, 30000);
+    snowTimeTimer = window.setInterval(checkSnowTime, 30000);
   }
   return () => {
     snowTimeSubscribers.delete(callback);
@@ -46,7 +46,6 @@ export function subscribeSnowTime(callback) {
   };
 }
 
-// 工具
 function rng(seed) {
   let a = 0;
   for (const ch of String(seed)) a = (Math.imul(a, 31) + ch.charCodeAt(0)) | 0;
@@ -110,7 +109,6 @@ function pines(r, { baseY, count, hMin, hMax, color, snow, x0 = -30, x1 = 1630, 
   return `<path d="${body}" fill="${color}"/><path d="${caps}" fill="${snow}" opacity=".92"/>`;
 }
 
-// 远景（室外，透过窗看到或 generic 全屏）
 function worldTree(p, id, H) {
   const cx = 600, top = H - 400, base = H - 120;
   const light = mix(p.far[1], "#dff7ff", 0.42), dark = mix(p.far[1], "#6fb7d8", 0.22);
@@ -180,7 +178,6 @@ function outdoor(p, r, H, land) {
   return svg(`<defs>${defs}</defs>${body}`, "far");
 }
 
-// 室内（墙带窗洞，雪只透过窗显示）
 function roomDefs(p, id) {
   return lg(`${id}-wall`, [[0, p.wall[0]], [1, p.wall[1]]])
     + lg(`${id}-floor`, [[0, p.floor[0]], [1, p.floor[1]]])
@@ -194,7 +191,6 @@ const lamp = (p, id, x, y, rad, k = 1) => `<circle cx="${x}" cy="${y}" r="${rad}
 let buildPalette = null;
 const wall = (id, holes) => `<path d="M0 0H1600V900H0Z${holes.join("")}" fill="url(#${id}-wall)" fill-rule="evenodd"/>`
   + (buildPalette ? wallPanels(buildPalette, id, holes, id.replace(/^r-/, "")) : "");
-// P8 尘白元素
 const ROOM_MARKS = {
   archive: ["B-02", "资料室", 405, 170, 1, "v"], quarters: ["B-03", "宿舍", 250, 330, 1],
   lounge: ["B-04", "休息区", 460, 160, 1, "v"], canteen: ["B-05", "食堂", 1262, 462, 0.8], training: ["B-06", "训练区", 230, 272, 1],
@@ -204,20 +200,16 @@ function wallPanels(p, id, holes, key) {
   const line = mix(p.wall[1], "#1f2d3a", 0.16), mark = ROOM_MARKS[key];
   let s = `<defs><clipPath id="${id}-wallclip"><path d="M0 0H1600V900H0Z${holes.join("")}" clip-rule="evenodd"/></clipPath></defs>`;
   s += `<g clip-path="url(#${id}-wallclip)" fill="none" stroke="${line}" stroke-width="2" opacity=".42">`;
-  // 腰线：每 400px 一段，段首做 45° 切角。
   for (let x = 0; x < 1600; x += 400) s += `<path d="M${x} 640H${x + 360}L${x + 384} 616H${x + 400}"/>`;
-  // 竖向接缝：顶部切角。
   for (let x = 200; x < 1600; x += 400) s += `<path d="M${x} 0V36L${x + 18} 54V640"/>`;
   s += "</g>";
   if (mark) {
     const [code, name, x, y, k, dir] = mark;
-    // 深色墙（夜晚）上用浅色墨，浅色墙上用深色墨，保持同样的对比。
     const [wr, wg, wb] = hex(p.wall[1]);
     const ink = (wr * 0.299 + wg * 0.587 + wb * 0.114) < 110 ? mix(p.wall[1], "#cfe0ee", 0.42) : mix(p.wall[1], "#1f2d3a", 0.32);
     const cjk = `font-family="'LXGW WenKai Screen', 'Microsoft YaHei', sans-serif" font-weight="600"`;
     s += `<g clip-path="url(#${id}-wallclip)" opacity=".72" fill="${ink}" font-family="ui-monospace, Consolas, monospace" font-weight="700" transform="translate(${x} ${y}) scale(${k}) translate(${-x} ${-y})">`;
     if (dir === "v") {
-      // 竖排：编号逐字向下，再空一格写房间名。
       s += `<path d="M${x - 8} ${y - 40}h14l-14 14z"/><g text-anchor="middle" font-size="28">`;
       [...code].forEach((ch, i) => { s += `<text x="${x}" y="${y + i * 32}">${ch === "-" ? "|" : ch}</text>`; });
       s += `</g><g text-anchor="middle" font-size="20" ${cjk}>`;
@@ -317,7 +309,6 @@ const ROOMS = {
     s += `<rect x="380" y="626" width="840" height="130" rx="44" fill="${mix(sofa, "#1f2d3a", 0.08)}"/><rect x="330" y="712" width="940" height="120" rx="40" fill="${sofa}"/>`;
     s += `<rect x="300" y="664" width="110" height="180" rx="40" fill="${mix(sofa, "#1f2d3a", 0.12)}"/><rect x="1190" y="664" width="110" height="180" rx="40" fill="${mix(sofa, "#1f2d3a", 0.12)}"/>`;
     s += `<ellipse cx="800" cy="866" rx="280" ry="30" fill="${tone(p, 0.3)}"/>`;
-    // P7：两侧盆栽——花盆 + 扇形细叶，颜色压淡，不再是两块模糊的大绿椭圆。
     const leaf = mix(tone(p, 0.3), "#7fa592", 0.42), leafDeep = mix(leaf, "#1f2d3a", 0.16), pot = mix(p.wall[0], "#ffffff", 0.3);
     const plant = (x, base, flip) => {
       let g = `<g transform="translate(${x} ${base})${flip ? " scale(-1 1)" : ""}">`;
@@ -337,7 +328,6 @@ const ROOMS = {
     for (let x = 70 + 146; x < 1530; x += 146) s += `<rect x="${x - 3}" y="80" width="6" height="250" fill="${p.frame}"/>`;
     s += floor(id, fy) + shaft(id, 200, 330, 1200, fy, 60);
     s += `<g filter="url(#${id}-soft)"><rect x="180" y="380" width="300" height="110" rx="10" fill="${mix(p.wall[0], "#ffffff", 0.4)}" opacity=".85"/>`;
-    // P7：右侧出餐台原为 32% 深灰块，压过人物；调浅并给台面一点暖白。
     s += `<rect x="1120" y="500" width="520" height="260" rx="10" fill="${tone(p, 0.18)}"/><rect x="1110" y="490" width="540" height="24" rx="8" fill="${mix(p.wall[0], "#fff6ea", 0.55)}"/>`;
     const tableC = tone(p, 0.26);
     for (const [y, w, hgt] of [[650, 760, 18], [748, 940, 22], [866, 1180, 26]]) {
@@ -355,7 +345,6 @@ const ROOMS = {
     s += floor(id, fy) + [0, 1, 2, 3, 4].map((i) => shaft(id, 80 + i * 300, 230, 240, fy, 160)).join("");
     const mark = mix(p.floor[0], "#5d9bc2", 0.35);
     s += `<ellipse cx="800" cy="780" rx="440" ry="92" fill="none" stroke="${mark}" stroke-width="6" opacity=".7"/><path d="M0 660H1600M800 660V900" stroke="${mark}" stroke-width="4" opacity=".5"/>`;
-    // P7：左侧器械架与右侧沙袋原色偏深，调浅到与墙面同一明度区间，沙袋偏冰蓝。
     s += `<g filter="url(#${id}-soft)"><rect x="60" y="320" width="310" height="250" rx="10" fill="none" stroke="${tone(p, 0.24)}" stroke-width="12"/>`;
     for (let y = 370; y < 560; y += 46) s += `<rect x="70" y="${y}" width="290" height="8" fill="${tone(p, 0.2)}"/>`;
     s += `<path d="M1360 0V250" stroke="${tone(p, 0.28)}" stroke-width="5"/><rect x="1316" y="250" width="88" height="250" rx="40" fill="${mix(tone(p, 0.16), "#7fb0cf", 0.35)}"/></g>`;
@@ -451,7 +440,6 @@ function buildScene(key, time) {
   };
 }
 
-// Canvas 雪
 let sharedSprite = null;
 function baseSprite() {
   if (sharedSprite) return sharedSprite;
@@ -513,7 +501,6 @@ class SnowField {
     this.particles = Array.from({ length: n }, () => ({
       x: Math.random() * this.w, y: Math.random() * this.h, s: rnd(P.size), v: rnd(P.speed),
       a: rnd(P.alpha), sw: rnd(P.sway), ph: Math.random() * Math.PI * 2, fq: 0.3 + Math.random() * 0.6,
-      // P8：夜间约 12% 的雪片带冰青闪光
       g: Math.random() < 0.12,
     }));
   }
@@ -570,7 +557,6 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
     node.dataset.snowWorld = "";
   }
   const art = stageEl.querySelector("#stage-character-art");
-  // 远景三层插在立绘之前（在它背后），近景雪插在立绘之后（在它前面）。
   if (art) stageEl.insertBefore(far, art); else stageEl.append(far);
   if (art) stageEl.insertBefore(snowFar, art); else stageEl.append(snowFar);
   if (art) stageEl.insertBefore(room, art); else stageEl.append(room);
@@ -588,7 +574,6 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
     const surface = document.getElementById("in-person-surface");
     const cameraVisible = document.getElementById("chat-app")?.dataset.snowPushing === "1";
     if (role === "backdrop") {
-      // 通讯器背后的世界
       const inPersonVisible = surface && !surface.hidden;
       if (inPersonVisible && !cameraVisible) return true;
       return !stageEl || stageEl.hidden || stageEl.offsetParent === null;
@@ -622,7 +607,6 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
   function render() {
     if (world.destroyed) return;
     const now = performance.now();
-    // 时间最多每 10 分钟刷新一次
     const override = document.documentElement.dataset.snowTime;
     if (override) { world.time = resolveTime(); world.timeAt = now; }
     else if (!world.timeAt || now - world.timeAt > 600000) { world.time = resolveTime(); world.timeAt = now; }
@@ -632,7 +616,6 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
     far.dataset.scene = key;
     far.innerHTML = built.far;
     room.innerHTML = built.room;
-    // generic 的这一层也包含基地建筑和亮灯入口，必须保留可见。
     room.hidden = false;
     const tier = world.motion;
     const glint = world.time === "night" ? "#9fe8ff" : null;
@@ -656,14 +639,12 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("resize", onResize);
 
-  // 相机推进
   let cancelCamera = null;
   function pushCamera({ onWhiteout } = {}) {
     cancelCamera?.();
     const target = room.querySelector(".push-target");
     const layers = [far, snowFar, room, snowNear];
     if (typeof far.animate !== "function" || !target) {
-      // 不支持 Web Animations（或无入口）时退化为立即执行白光回调。
       if (!world.destroyed) onWhiteout?.();
       return Promise.resolve();
     }
@@ -672,7 +653,6 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
     const t = target.getBoundingClientRect();
     const vw = window.innerWidth, vh = window.innerHeight;
     const onScreen = t.right > 0 && t.left < vw && t.bottom > 0 && t.top < vh && t.width > 0;
-    // 入口不在屏内（移动端竖屏裁掉建筑）时朝画面中心推进。
     const px = onScreen ? t.left + t.width / 2 : vw / 2;
     const py = onScreen ? t.top + t.height / 2 : vh * 0.62;
     const span = (el, s) => {
@@ -699,9 +679,7 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
       snowNear.animate([{ transform: "scale(1)", opacity: 1 }, { transform: "scale(2.6)", opacity: 0.35 }], opts),
     ];
     world.pushAnimations = anims;
-    // 用数据属性标记正在推进，供证据截图/测试断言读取
     far.dataset.pushing = "1";
-    // 硬性兜底
     let whiteoutTimer, finishTimer, settle;
     const finish = new Promise(resolve => { settle = resolve; });
     const clearPushing = () => {
@@ -739,7 +717,6 @@ export function mountSnowWorld(stageEl, { visualKey = "generic", motionLevel, ro
     isPushing() { return Boolean(world.pushing); },
     cancelPush() { cancelCamera?.(); },
     pushInto(key, options) {
-      // 推进完成后由 onWhiteout 回调切场景
       const commit = () => { if (key && key !== world.scene) { world.scene = key; render(); } };
       const onWhiteout = options?.onWhiteout
         ? () => { const r = options.onWhiteout(); if (r === undefined) commit(); return r; }
