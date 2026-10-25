@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,12 +33,17 @@ class MaintenanceError(RuntimeError):
     pass
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @dataclass(frozen=True)
 class Paths:
     root: Path = Path("/srv/project-snow")
     secrets: Path = Path("/etc/project-snow/secrets")
     lock: Path = Path("/run/lock/project-snow-release.lock")
     docker_storage: Path = Path("/var/lib/docker")
+    embedding_swap: Path = Path("/etc/project-snow/embedding-swap")
 
 
 def require_regular(path: Path, *, private: bool = False) -> None:
@@ -286,6 +293,64 @@ def estimate_release_growth(paths: Paths, manifest_path: Path) -> int:
 SHARED_IMAGE_KEYS = ("POSTGRES_IMAGE", "QDRANT_IMAGE", "NEO4J_IMAGE", "EMBEDDING_IMAGE", "EGRESS_PROXY_IMAGE")
 SHARED_CONFIG_PATHS = ("infra/postgres/postgresql.conf", "infra/neo4j-entrypoint.sh", "infra/egress-squid.conf")
 
+EMBEDDING_SWAP_SCHEMA = "project-snow-embedding-swap-1"
+SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _candidate_embedding_digest(candidate_embedding: str) -> str:
+    """Return the 64-hex digest of an embedding image reference.
+
+    The authorization file is named by the destination digest so a single
+    directory holds at most one authorization per target image.
+    """
+    if not DIGEST.fullmatch(candidate_embedding):
+        raise MaintenanceError("Candidate embedding reference is not an immutable digest")
+    return candidate_embedding.rsplit(":", 1)[1]
+
+
+def _require_private_directory(path: Path) -> None:
+    info = path.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+            or info.st_mode & 0o077):
+        raise MaintenanceError("Embedding-swap authorization directory is not root-only")
+
+
+def embedding_swap_authorization(paths: Paths, current: str, candidate: str) -> dict[str, str] | None:
+    """Return the root-only authorization iff it names exactly current -> candidate.
+
+    A missing directory or file means "not authorized" and returns None; any
+    present-but-inconsistent file (wrong ownership/mode, wrong schema, mutable
+    or mismatched refs, bad receipt pointer) raises so a swap never proceeds on
+    a malformed grant. The file is pinned to the destination digest by name.
+    """
+    directory = paths.embedding_swap
+    if not directory.exists() and not directory.is_symlink():
+        return None
+    _require_private_directory(directory)
+    path = directory / f"{_candidate_embedding_digest(candidate)}.env"
+    if not path.exists() and not path.is_symlink():
+        return None
+    require_regular(path, private=True)
+    fields: dict[str, str] = {}
+    for line in read_text(path).splitlines():
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or not re.fullmatch(r"[a-z][a-z0-9_]*", key) or key in fields:
+            raise MaintenanceError("Invalid or duplicate embedding-swap authorization field")
+        fields[key] = value
+    if set(fields) != {"schema", "from", "to", "approved_at", "probe_sha256"}:
+        raise MaintenanceError("Embedding-swap authorization has an unexpected field set")
+    if fields["schema"] != EMBEDDING_SWAP_SCHEMA:
+        raise MaintenanceError("Embedding-swap authorization schema is unknown")
+    if not DIGEST.fullmatch(fields["from"]) or not DIGEST.fullmatch(fields["to"]):
+        raise MaintenanceError("Embedding-swap authorization refs are not immutable digests")
+    if not SHA256_HEX.fullmatch(fields["probe_sha256"]):
+        raise MaintenanceError("Embedding-swap authorization has an invalid probe receipt hash")
+    if fields["from"] != current or fields["to"] != candidate:
+        raise MaintenanceError("Embedding-swap authorization does not match the running and candidate digests")
+    return fields
+
 
 def shared_dependency_gate(paths: Paths, candidate_environment: Path, candidate_manifest: Path) -> dict[str, Any]:
     current = read_environment(paths.root / "runtime" / "compose.env")
@@ -298,9 +363,85 @@ def shared_dependency_gate(paths: Paths, candidate_environment: Path, candidate_
     next_hashes = next_manifest.get("configuration_sha256") or {}
     changed.extend(path for path in SHARED_CONFIG_PATHS if not re.fullmatch(r"[0-9a-f]{64}", str(previous_hashes.get(path, "")))
                    or next_hashes.get(path) != previous_hashes[path])
+    # A root-authorized, probe-backed embedding swap is the one shared change
+    # ordinary stage may accept, and only when it is the ONLY changed item.
+    if changed == ["EMBEDDING_IMAGE"]:
+        authorization = embedding_swap_authorization(paths, current["EMBEDDING_IMAGE"], candidate.get("EMBEDDING_IMAGE", ""))
+        if authorization is not None:
+            return {"status": "ok", "shared_dependencies": "embedding-swap-authorized",
+                    "from": authorization["from"], "to": authorization["to"]}
     if changed:
         raise MaintenanceError("Shared dependency changes require an independent backed-up maintenance release: " + ", ".join(changed))
     return {"status": "ok", "shared_dependencies": "unchanged"}
+
+
+def _require_probe_receipt(path: Path, current: str, candidate: str) -> str:
+    """Validate a root-only probe receipt for exactly current -> candidate.
+
+    Returns the sha256 of the receipt bytes, which the authorization pins so a
+    later edited receipt cannot be presented as the basis of an existing grant.
+    """
+    require_regular(path, private=True)
+    payload = path.read_bytes()
+    if len(payload) > 1024 * 1024:
+        raise MaintenanceError("Oversized probe receipt")
+    receipt = json.loads(payload)
+    if not isinstance(receipt, dict):
+        raise MaintenanceError("Probe receipt is not an object")
+    if receipt.get("schema") != "project-snow-embedding-probe-1":
+        raise MaintenanceError("Probe receipt schema is unknown")
+    if receipt.get("status") != "pass" or receipt.get("passed") is not True:
+        raise MaintenanceError("Probe receipt does not record a passing comparison")
+    if receipt.get("from") != current or receipt.get("to") != candidate:
+        raise MaintenanceError("Probe receipt is for different embedding digests")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def embedding_swap_authorize(paths: Paths, from_ref: str, to_ref: str, probe_receipt: Path) -> dict[str, Any]:
+    if not DIGEST.fullmatch(from_ref) or not DIGEST.fullmatch(to_ref):
+        raise MaintenanceError("Both embedding references must be immutable digests")
+    if from_ref == to_ref:
+        raise MaintenanceError("The embedding swap source and destination are identical")
+    current = active_release(paths)
+    running = read_environment(paths.root / "runtime" / "compose.env").get("EMBEDDING_IMAGE", "")
+    if running != from_ref:
+        raise MaintenanceError("The authorization source must equal the running embedding digest")
+    del current
+    receipt_sha = _require_probe_receipt(probe_receipt, from_ref, to_ref)
+    directory = paths.embedding_swap
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _require_private_directory(directory)
+    path = directory / f"{_candidate_embedding_digest(to_ref)}.env"
+    payload = (
+        f"schema={EMBEDDING_SWAP_SCHEMA}\n"
+        f"from={from_ref}\n"
+        f"to={to_ref}\n"
+        f"approved_at={_now_iso()}\n"
+        f"probe_sha256={receipt_sha}\n"
+    ).encode()
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        os.write(descriptor, payload)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return {"status": "authorized", "from": from_ref, "to": to_ref, "probe_sha256": receipt_sha}
+
+
+def embedding_swap_clear(paths: Paths) -> dict[str, Any]:
+    directory = paths.embedding_swap
+    if not directory.exists() and not directory.is_symlink():
+        return {"status": "absent"}
+    _require_private_directory(directory)
+    removed = []
+    for child in sorted(directory.iterdir()):
+        if child.is_symlink() or not child.is_file() or not re.fullmatch(r"[0-9a-f]{64}\.env", child.name):
+            raise MaintenanceError("Unexpected entry in the embedding-swap authorization directory")
+        child.unlink()
+        removed.append(child.name)
+    return {"status": "cleared", "removed": removed}
 
 
 def main() -> int:
@@ -315,6 +456,13 @@ def main() -> int:
     stage_parser = commands.add_parser("shared-dependency-gate")
     stage_parser.add_argument("--candidate-environment", type=Path, required=True)
     stage_parser.add_argument("--manifest", type=Path, required=True)
+    authorize_parser = commands.add_parser("embedding-swap-authorize")
+    authorize_parser.add_argument("--from", dest="from_ref", required=True)
+    authorize_parser.add_argument("--to", dest="to_ref", required=True)
+    authorize_parser.add_argument("--probe-receipt", type=Path, required=True)
+    authorize_parser.add_argument("--lock-held", action="store_true")
+    clear_parser = commands.add_parser("embedding-swap-clear")
+    clear_parser.add_argument("--lock-held", action="store_true")
     anchor_parser = commands.add_parser("anchor")
     anchor_parser.add_argument("--lock-held", action="store_true")
     pin_parser = commands.add_parser("pin-recovery-env")
@@ -365,6 +513,21 @@ def main() -> int:
             result = capacity(paths, estimated)
         elif args.operation == "shared-dependency-gate":
             result = shared_dependency_gate(paths, args.candidate_environment, args.manifest)
+        elif args.operation in {"embedding-swap-authorize", "embedding-swap-clear"}:
+            if os.geteuid() != 0:
+                raise MaintenanceError("Embedding-swap authorization requires root")
+
+            def _run_embedding_swap() -> dict[str, Any]:
+                if args.operation == "embedding-swap-authorize":
+                    return embedding_swap_authorize(paths, args.from_ref, args.to_ref, args.probe_receipt)
+                return embedding_swap_clear(paths)
+
+            if args.lock_held:
+                require_inherited_release_lock(paths.lock)
+                result = _run_embedding_swap()
+            else:
+                with release_lock(paths.lock):
+                    result = _run_embedding_swap()
         elif args.operation == "monitor":
             from monitor import monitor
 
