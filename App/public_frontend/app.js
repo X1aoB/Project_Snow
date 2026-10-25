@@ -3314,8 +3314,14 @@ function renderMobileProviderOptions() {
   syncProviderControls($("provider-select").value);
 }
 
+const bootRequests = { config: null, characters: null };
+function takeBootRequest(name, path) {
+  const early = bootRequests[name];
+  bootRequests[name] = null;
+  return early || api(path, { headers: {} });
+}
 async function loadConfig() {
-  state.config = await api("/config", { headers: {} });
+  state.config = await takeBootRequest("config", "/config");
   syncMotionState();
   syncInterfaceSkin();
   try {
@@ -4313,14 +4319,17 @@ document.addEventListener("close", (event) => {
   if (event.target instanceof HTMLDialogElement && featureEnabled("ui_snow_adv")) renderOnboarding();
 }, true);
 async function loadCharacters() {
-  const payload = await api("/characters", { headers: {} });
+  const payload = await takeBootRequest("characters", "/characters");
   state.characters = payload.characters || [];
   await Promise.all(state.characters.map((character) => dbGetThread(character.character_id, 1)));
   await restoreInterruptedChatRequests();
   $("history-character").innerHTML = state.characters.map((character) => `<option value="${escapeHtml(character.character_id)}">${escapeHtml(character.display_name)}</option>`).join("");
   renderCharacters();
-  if (!state.selected && state.characters[0]) {
-    await selectCharacter(state.characters[0].character_id, { closeContacts: false });
+  // 回访时回到上次聊天的角色，否则通讯器停在名单第一位的空会话上。
+  const remembered = state.characters.find(item => item.character_id === plain(state.featurePreferences?.lastCharacterId));
+  const initial = remembered || state.characters[0];
+  if (!state.selected && initial) {
+    await selectCharacter(initial.character_id, { closeContacts: false });
   }
 }
 function sceneKeyForLocation(location) {
@@ -5536,6 +5545,7 @@ async function selectCharacter(characterId, { closeContacts = true } = {}) {
 
     state.selected = characterId;
     featureEmit("selected-changed", { selected: characterId });
+    if (state.featurePreferences?.lastCharacterId !== characterId) void saveUiPreferences({ lastCharacterId: characterId }).catch(() => {});
     state.timelineVisibleLimit = 60;
     state.timelineEndId = "";
     state.transcriptEndId = "";
@@ -8513,6 +8523,11 @@ window.addEventListener("pagehide", () => {
 });
 
 async function boot() {
+  // 配置与角色列表不依赖本地存储：先并行发出（index.html 已预加载），不等 IndexedDB。
+  for (const [name, path] of [["config", "/config"], ["characters", "/characters"]]) {
+    bootRequests[name] = api(path, { headers: {} });
+    bootRequests[name].catch(() => {});
+  }
   await startTabCoordination();
   await openDB();
   await migrateBrowserState();

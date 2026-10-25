@@ -249,7 +249,7 @@ class PublicSettings:
             byok_lifetime_hours = 12
         byok_retention_enabled = os.getenv("PUBLIC_BYOK_RETENTION_ENABLED", "false") == "true"
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "1.0.0"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "1.0.1"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_public_database_url(),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),

@@ -1018,6 +1018,26 @@ class SnowAdvFeaturesUITests(TestCase):
                 page.close()
         self.assertEqual(self.errors, [])
 
+    def test_returning_visitor_reopens_the_last_character_and_channel(self):
+        page = self.open(self.page())
+        if page.locator("#contact-panel").get_attribute("aria-hidden") == "true":
+            page.locator("#open-contacts").click()
+        # Not the character the app opens by default.
+        target = page.locator("[data-character][aria-current='false']").first
+        character_id = target.get_attribute("data-character")
+        target.click()
+        current = "id => document.querySelector(`[data-character=\"${id}\"]`)?.getAttribute('aria-current') === 'true'"
+        page.wait_for_function(current, arg=character_id)
+        self.send(page, "下次接着聊")
+        channel = page.evaluate("document.getElementById('chat-app').dataset.channel")
+        page.reload(wait_until="networkidle")
+        page.wait_for_function("document.querySelector('#connection-status')?.textContent === '服务已连接'")
+        page.wait_for_function(current, arg=character_id)
+        self.assertEqual(page.evaluate("document.getElementById('chat-app').dataset.channel"), channel)
+        if channel == "text":
+            page.locator("#timeline").get_by_text("下次接着聊").wait_for(state="visible")
+        self.assertEqual(self.errors, [])
+
     def test_flag_off_never_loads_the_feature_modules(self):
         page = self.open(self.page(enabled=False), enabled=False)
         page.wait_for_timeout(800)
