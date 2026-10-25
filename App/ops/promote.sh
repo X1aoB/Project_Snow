@@ -63,6 +63,83 @@ is_immutable_image() {
   printf '%s\n' "$1" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$'
 }
 
+# Read the image reference (repo@sha256:...) of the single running shared
+# embedding container for this project. Prints nothing and returns non-zero
+# when the container is absent or ambiguous, so callers can detect both.
+running_embedding_image() {
+  running_embedding_ids="$(docker ps \
+    --filter label=com.docker.compose.project=project-snow-public \
+    --filter label=com.docker.compose.service=embedding \
+    --filter status=running --quiet --no-trunc)" || return 1
+  running_embedding_count="$(printf '%s\n' "$running_embedding_ids" | awk 'NF { c += 1 } END { print c + 0 }')"
+  [ "$running_embedding_count" -eq 1 ] || return 1
+  # The compose service pins the digest via the image reference, so read the
+  # container's configured image directly rather than any mutable label.
+  running_embedding_ref="$(docker inspect --format '{{.Config.Image}}' "$running_embedding_ids")" || return 1
+  is_immutable_image "$running_embedding_ref" || return 1
+  printf '%s\n' "$running_embedding_ref"
+}
+
+# Wait for the embedding container to report dimension 512 over its in-container
+# health endpoint. Bounded; returns non-zero on timeout. The embedding service
+# shares the data network and is reached through its own container only.
+embedding_dimension_ready() {
+  emb_env="$1"
+  emb_config_root="$2"
+  emb_colour="$3"
+  emb_attempt=0
+  while [ "$emb_attempt" -lt 30 ]; do
+    emb_dimension="$(docker compose --env-file "$emb_env" -f "$emb_config_root/compose.prod.yml" \
+      --profile "$emb_colour" exec -T embedding python -c \
+      "import json,urllib.request; print(json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)).get('dimension',''))" \
+      2>/dev/null)" || emb_dimension=""
+    if [ "$emb_dimension" = 512 ]; then
+      return 0
+    fi
+    emb_attempt=$((emb_attempt + 1))
+    sleep 2
+  done
+  return 1
+}
+
+# A quick /embed sanity call inside the embedding container: a single fixed
+# input must return a 512-dimension vector. No model is loaded anywhere else.
+embedding_embed_sane() {
+  emb_env="$1"
+  emb_config_root="$2"
+  emb_colour="$3"
+  docker compose --env-file "$emb_env" -f "$emb_config_root/compose.prod.yml" \
+    --profile "$emb_colour" exec -T embedding python -c \
+    "import json,urllib.request
+body=json.dumps({'inputs':['snow embedding swap sanity']}).encode()
+request=urllib.request.Request('http://127.0.0.1:8000/embed', data=body, headers={'Content-Type':'application/json'})
+payload=json.load(urllib.request.urlopen(request, timeout=15))
+vectors=payload.get('vectors') or []
+assert len(vectors)==1, 'expected one vector'
+vector=vectors[0]
+assert isinstance(vector, list) and len(vector)==512, 'expected a 512-dimension vector'" \
+    >/dev/null 2>&1
+}
+
+# Force-recreate the shared embedding container from the named env (whose
+# EMBEDDING_IMAGE pins the digest), then wait for a 512-dimension health and an
+# /embed sanity call. Returns non-zero on any failure; the caller reverts.
+recreate_embedding_from_env() {
+  emb_env="$1"
+  emb_config_root="$2"
+  emb_colour="$3"
+  docker compose --env-file "$emb_env" -f "$emb_config_root/compose.prod.yml" \
+    --profile "$emb_colour" up -d --no-deps --force-recreate embedding || return 1
+  embedding_dimension_ready "$emb_env" "$emb_config_root" "$emb_colour" || return 1
+  embedding_embed_sane "$emb_env" "$emb_config_root" "$emb_colour" || return 1
+}
+
+# Confirm a digest's image is present locally before any recreate, so a rollback
+# or swap never stops the running container to recreate from an absent image.
+embedding_image_present() {
+  docker image inspect "$1" >/dev/null 2>&1
+}
+
 fsync_promote_path() {
   python3 - "$1" <<'PY'
 import os
@@ -2503,6 +2580,56 @@ restore_previous_promoted_state() {
   fi
 }
 
+# The shared embedding container is recreated here, after the API readiness,
+# smoke and edge switch have all passed and immediately before the durable
+# compose.env/current write, so a normal release (unchanged embedding) never
+# reaches this block and keeps the identical pre-existing code path.
+embedding_swapped=0
+embedding_running_before=""
+if ! embedding_running_before="$(running_embedding_image)"; then
+  embedding_running_before=""
+fi
+# Fail closed: never commit a different embedding digest without knowing what
+# runs. An unreadable container with an unchanged digest keeps today's path.
+if [ -z "$embedding_running_before" ] &&
+   [ "${previous_embedding_image:-}" != "${marker_embedding_image:-}" ]; then
+  echo 'The running embedding container cannot be read while the target names a different digest; traffic restored.' >&2
+  restore_previous_runtime || exit 74
+  exit 73
+fi
+if [ -n "$embedding_running_before" ] &&
+   [ "$embedding_running_before" != "$marker_embedding_image" ]; then
+  # The target colour's marker names a different shared embedding digest than
+  # the one currently running. A forward promotion must present a root-written,
+  # probe-backed authorization naming exactly running -> target; an emergency
+  # rollback recreates the target colour's own signed, previously promoted
+  # digest without a fresh authorization.
+  if [ "$rollback_mode" = 0 ]; then
+    if ! python3 "$script_dir/maintenance.py" shared-dependency-gate \
+      --candidate-environment "$colour_env" --manifest "$colour_manifest" \
+      | grep -Fq '"shared_dependencies": "embedding-swap-authorized"'; then
+      echo 'Embedding digest differs but no matching swap authorization exists; traffic restored.' >&2
+      restore_previous_runtime || exit 74
+      exit 73
+    fi
+  fi
+  if ! embedding_image_present "$marker_embedding_image"; then
+    echo 'Target embedding image is not present locally; traffic restored.' >&2
+    restore_previous_runtime || exit 74
+    exit 73
+  fi
+  if recreate_embedding_from_env "$colour_env" "$colour_config_root" "$colour"; then
+    embedding_swapped=1
+  else
+    echo 'New embedding failed its health or /embed sanity check; recreating the previous digest.' >&2
+    if ! recreate_embedding_from_env "$previous_env" "$previous_config_root" "$previous_colour"; then
+      echo 'CRITICAL: failed to recreate the previous embedding digest after a failed swap.' >&2
+    fi
+    restore_previous_runtime || exit 74
+    exit 73
+  fi
+fi
+
 commit_promoted_state() {
   trap '' HUP INT QUIT TERM PIPE || return 1
   promoted_commit_failed=0
@@ -2558,8 +2685,22 @@ commit_promoted_state() {
 
 if ! commit_promoted_state; then
   echo 'Promotion state publication failed; restoring the previous runtime.' >&2
+  if [ "${embedding_swapped:-0}" -eq 1 ]; then
+    echo 'Reverting the embedding to its previous digest after a failed state commit.' >&2
+    if ! recreate_embedding_from_env "$previous_env" "$previous_config_root" "$previous_colour"; then
+      echo 'CRITICAL: failed to revert the embedding digest after a failed state commit.' >&2
+    fi
+  fi
   restore_previous_runtime || exit 74
   exit 73
+fi
+
+# The authorization is consumed only after the durable switch commits, so a
+# forward embedding swap can never be replayed. Rollback carries no file.
+if [ "${embedding_swapped:-0}" -eq 1 ] && [ "$rollback_mode" = 0 ]; then
+  if ! python3 "$script_dir/maintenance.py" embedding-swap-clear --lock-held; then
+    echo 'Promotion is durable; the embedding-swap authorization requires manual clearing.' >&2
+  fi
 fi
 
 # Durable promotion remains authoritative if this convenience index cannot be

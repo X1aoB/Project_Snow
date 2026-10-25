@@ -155,3 +155,191 @@ def test_stage_never_reconciles_shared_services():
     assert 'compose up -d --no-deps "$service"' in source
     assert 'compose up -d postgres qdrant neo4j embedding egress-proxy' not in source
     assert source.index("shared-dependency-gate") < source.index('compose pull "$service"')
+
+
+OLD_EMBEDDING = "ghcr.io/x1aob/project_snow-embedding@sha256:" + "b" * 64
+NEW_EMBEDDING = "ghcr.io/x1aob/project_snow-embedding@sha256:" + "c" * 64
+
+
+@pytest.fixture
+def swap(release, tmp_path):
+    paths, image = release
+    swap_dir = tmp_path / "embedding-swap"
+    swap_dir.mkdir()
+    paths = maintenance.Paths(root=paths.root, secrets=paths.secrets,
+                              docker_storage=paths.docker_storage, embedding_swap=swap_dir)
+    environment = {key: (OLD_EMBEDDING if key == "EMBEDDING_IMAGE" else image) for key in maintenance.SHARED_IMAGE_KEYS}
+    (paths.root / "runtime" / "compose.env").write_text("".join(f"{k}={v}\n" for k, v in environment.items()))
+    hashes = {key: "a" * 64 for key in maintenance.SHARED_CONFIG_PATHS}
+    (paths.root / "releases" / "current-config.json").write_text(json.dumps({"configuration_sha256": hashes}))
+    candidate_env = dict(environment)
+    candidate_env["EMBEDDING_IMAGE"] = NEW_EMBEDDING
+    candidate = paths.root / "runtime" / "candidate.env"
+    candidate.write_text("".join(f"{k}={v}\n" for k, v in candidate_env.items()))
+    manifest = paths.root / "candidate.json"
+    manifest.write_text(json.dumps({"configuration_sha256": hashes}))
+    return paths, candidate, manifest, swap_dir
+
+
+def write_authorization(swap_dir, *, to=NEW_EMBEDDING, from_=OLD_EMBEDDING, schema=maintenance.EMBEDDING_SWAP_SCHEMA):
+    digest = to.rsplit(":", 1)[1]
+    (swap_dir / f"{digest}.env").write_text(
+        f"schema={schema}\nfrom={from_}\nto={to}\napproved_at=2026-10-26T00:00:00+00:00\nprobe_sha256={'d' * 64}\n")
+
+
+def test_gate_refuses_embedding_change_without_authorization(swap):
+    paths, candidate, manifest, _swap_dir = swap
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_gate_accepts_embedding_change_with_matching_authorization(swap):
+    paths, candidate, manifest, swap_dir = swap
+    write_authorization(swap_dir)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"):
+        result = maintenance.shared_dependency_gate(paths, candidate, manifest)
+    assert result == {"status": "ok", "shared_dependencies": "embedding-swap-authorized",
+                      "from": OLD_EMBEDDING, "to": NEW_EMBEDDING}
+
+
+def test_gate_refuses_authorization_with_mismatched_refs(swap):
+    paths, candidate, manifest, swap_dir = swap
+    # Authorization names a different running digest than compose.env records.
+    write_authorization(swap_dir, from_="ghcr.io/x1aob/project_snow-embedding@sha256:" + "9" * 64)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="does not match the running"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_gate_refuses_authorization_with_unknown_schema(swap):
+    paths, candidate, manifest, swap_dir = swap
+    write_authorization(swap_dir, schema="project-snow-embedding-swap-9")
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="schema is unknown"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_gate_still_refuses_when_a_second_shared_key_also_changes(swap):
+    paths, candidate, manifest, swap_dir = swap
+    write_authorization(swap_dir)
+    # Flip POSTGRES_IMAGE too: an authorized embedding swap must be the ONLY change.
+    text = candidate.read_text().replace(
+        "POSTGRES_IMAGE=ghcr.io/x1aob/project_snow-public@sha256:" + "a" * 64,
+        "POSTGRES_IMAGE=ghcr.io/x1aob/project_snow-public@sha256:" + "e" * 64)
+    candidate.write_text(text)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_authorization_reader_rejects_unsafe_file_mode(swap):
+    paths, _candidate, _manifest, swap_dir = swap
+    write_authorization(swap_dir)
+    def unsafe(path, *, private=False):
+        if private:
+            raise maintenance.MaintenanceError("Expected a root-only file: " + path.name)
+    with patch.object(maintenance, "require_regular", unsafe), patch.object(maintenance, "_require_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="root-only file"):
+            maintenance.embedding_swap_authorization(paths, OLD_EMBEDDING, NEW_EMBEDDING)
+
+
+def test_authorization_absent_returns_none(swap):
+    paths, _candidate, _manifest, _swap_dir = swap
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"):
+        assert maintenance.embedding_swap_authorization(paths, OLD_EMBEDDING, NEW_EMBEDDING) is None
+
+
+def write_probe_receipt(path, *, from_=OLD_EMBEDDING, to=NEW_EMBEDDING, status="pass", passed=True):
+    path.write_text(json.dumps({"schema": "project-snow-embedding-probe-1", "status": status,
+                                "passed": passed, "from": from_, "to": to, "cosine_min": 0.999999}))
+
+
+def test_authorize_writes_pinned_file_from_passing_receipt(swap, tmp_path):
+    paths, _candidate, _manifest, swap_dir = swap
+    receipt = tmp_path / "receipt.json"
+    write_probe_receipt(receipt)
+    import hashlib as _h
+    expected_sha = _h.sha256(receipt.read_bytes()).hexdigest()
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"), \
+            patch.object(maintenance, "active_release", return_value={"colour": "blue"}):
+        result = maintenance.embedding_swap_authorize(paths, OLD_EMBEDDING, NEW_EMBEDDING, receipt)
+        written = maintenance.embedding_swap_authorization(paths, OLD_EMBEDDING, NEW_EMBEDDING)
+    assert result == {"status": "authorized", "from": OLD_EMBEDDING, "to": NEW_EMBEDDING, "probe_sha256": expected_sha}
+    assert written["from"] == OLD_EMBEDDING and written["to"] == NEW_EMBEDDING and written["probe_sha256"] == expected_sha
+    assert written["schema"] == maintenance.EMBEDDING_SWAP_SCHEMA
+
+
+def test_authorize_refuses_when_running_digest_differs(swap, tmp_path):
+    paths, _candidate, _manifest, _swap_dir = swap
+    receipt = tmp_path / "receipt.json"
+    write_probe_receipt(receipt, from_="ghcr.io/x1aob/project_snow-embedding@sha256:" + "7" * 64)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"), \
+            patch.object(maintenance, "active_release", return_value={"colour": "blue"}):
+        with pytest.raises(maintenance.MaintenanceError, match="running embedding digest"):
+            maintenance.embedding_swap_authorize(paths, "ghcr.io/x1aob/project_snow-embedding@sha256:" + "7" * 64,
+                                                 NEW_EMBEDDING, receipt)
+
+
+@pytest.mark.parametrize("fault,match", [
+    ("status", "passing comparison"),
+    ("refs", "different embedding digests"),
+])
+def test_authorize_refuses_non_passing_or_mismatched_receipt(swap, tmp_path, fault, match):
+    paths, _candidate, _manifest, _swap_dir = swap
+    receipt = tmp_path / "receipt.json"
+    if fault == "status":
+        write_probe_receipt(receipt, status="fail", passed=False)
+    else:
+        write_probe_receipt(receipt, to="ghcr.io/x1aob/project_snow-embedding@sha256:" + "8" * 64)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"), \
+            patch.object(maintenance, "active_release", return_value={"colour": "blue"}):
+        with pytest.raises(maintenance.MaintenanceError, match=match):
+            maintenance.embedding_swap_authorize(paths, OLD_EMBEDDING, NEW_EMBEDDING, receipt)
+
+
+def test_clear_removes_only_well_formed_authorizations(swap):
+    paths, _candidate, _manifest, swap_dir = swap
+    write_authorization(swap_dir)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"):
+        result = maintenance.embedding_swap_clear(paths)
+    assert result["status"] == "cleared"
+    assert result["removed"] == [NEW_EMBEDDING.rsplit(":", 1)[1] + ".env"]
+    assert list(swap_dir.iterdir()) == []
+    with patch.object(maintenance, "_require_private_directory"):
+        assert maintenance.embedding_swap_clear(paths)["status"] == "cleared"
+
+
+def test_clear_refuses_unexpected_directory_entry(swap):
+    paths, _candidate, _manifest, swap_dir = swap
+    (swap_dir / "notes.txt").write_text("stray")
+    with patch.object(maintenance, "_require_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="Unexpected entry"):
+            maintenance.embedding_swap_clear(paths)
+
+
+def test_promote_recreates_embedding_only_under_authorization_and_reverts():
+    source = (OPS / "promote.sh").read_text()
+    # The swap runs only when the running embedding differs from the marker.
+    assert 'if ! embedding_running_before="$(running_embedding_image)"; then' in source
+    assert '[ "$embedding_running_before" != "$marker_embedding_image" ]; then' in source
+    # Forward promotion requires the authorized gate result.
+    assert '"shared_dependencies": "embedding-swap-authorized"' in source
+    # The target image must be present locally before any recreate.
+    assert 'embedding_image_present "$marker_embedding_image"' in source
+    # Failure recreates the previous digest and restores traffic without committing.
+    assert 'recreate_embedding_from_env "$previous_env" "$previous_config_root" "$previous_colour"' in source
+    # The authorization is consumed only after a committed forward swap.
+    assert source.index("embedding_swapped=1") < source.index("embedding-swap-clear")
+    assert '--force-recreate embedding' in source
+    # A normal release keeps the identical pre-existing switch path: the swap is
+    # gated on a running-vs-marker digest difference, so an unchanged embedding
+    # skips the whole block.
+    guard = source.index('if ! embedding_running_before="$(running_embedding_image)"; then')
+    assert '[ "$embedding_running_before" != "$marker_embedding_image" ]; then' in source[guard:guard + 1200]
+
+
+def test_promote_embedding_health_checks_dimension_and_embed_sanity():
+    source = (OPS / "promote.sh").read_text()
+    assert "/health" in source and "'dimension'" in source and "= 512" in source
+    assert "/embed" in source and "len(vector)==512" in source

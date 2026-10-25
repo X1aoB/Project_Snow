@@ -471,6 +471,69 @@ class DeploymentContractTests(TestCase):
         )
         self.assertNotIn("/srv/project-snow/app/scripts/cloudflare_origin_firewall.py", service)
 
+    def test_promote_swaps_embedding_only_on_difference_and_only_under_authorization(self) -> None:
+        promote = self.read("ops/promote.sh")
+        # The swap block is reached only after the API readiness/smoke and the
+        # edge switch, and immediately before the durable state commit.
+        switch = promote.index('switch_edge "$colour_env" "$colour_config_root" "$colour"')
+        swap_guard = promote.index('if ! embedding_running_before="$(running_embedding_image)"; then')
+        commit = promote.index("if ! commit_promoted_state; then")
+        self.assertLess(switch, swap_guard)
+        self.assertLess(swap_guard, commit)
+        # The swap runs only when the running embedding differs from the marker.
+        self.assertIn('[ "$embedding_running_before" != "$marker_embedding_image" ]; then', promote)
+        # A forward promotion (rollback_mode 0) requires the authorized gate.
+        self.assertIn('if [ "$rollback_mode" = 0 ]; then', promote[swap_guard:commit])
+        self.assertIn('"shared_dependencies": "embedding-swap-authorized"', promote)
+        # The target image must be present locally before any recreate.
+        self.assertIn('embedding_image_present "$marker_embedding_image"', promote)
+        self.assertIn("up -d --no-deps --force-recreate embedding", promote)
+
+    def test_promote_embedding_failure_reverts_previous_digest_and_restores_traffic(self) -> None:
+        promote = self.read("ops/promote.sh")
+        swap_guard = promote.index('if ! embedding_running_before="$(running_embedding_image)"; then')
+        commit = promote.index("if ! commit_promoted_state; then")
+        swap_block = promote[swap_guard:commit]
+        # On a failed new-embedding health/sanity, recreate the previous digest
+        # and restore the previous runtime, then exit non-zero without committing.
+        self.assertIn('recreate_embedding_from_env "$previous_env" "$previous_config_root" "$previous_colour"', swap_block)
+        self.assertIn("restore_previous_runtime || exit 74", swap_block)
+        self.assertIn("exit 73", swap_block)
+        # A failed state commit after a successful swap also reverts the embedding.
+        commit_block = promote[commit:commit + 900]
+        self.assertIn('recreate_embedding_from_env "$previous_env" "$previous_config_root" "$previous_colour"', commit_block)
+
+    def test_promote_consumes_authorization_only_after_committed_forward_swap(self) -> None:
+        promote = self.read("ops/promote.sh")
+        self.assertIn("embedding-swap-clear --lock-held", promote)
+        commit = promote.index("if ! commit_promoted_state; then")
+        clear = promote.index("embedding-swap-clear")
+        self.assertLess(commit, clear)
+        clear_guard = promote.rindex('if [ "${embedding_swapped:-0}" -eq 1 ] && [ "$rollback_mode" = 0 ]; then', 0, clear)
+        self.assertGreaterEqual(clear_guard, commit)
+
+    def test_unchanged_embedding_release_keeps_the_existing_switch_path(self) -> None:
+        promote = self.read("ops/promote.sh")
+        # The whole swap mechanism is gated on a running-vs-marker digest
+        # difference; a normal release with an unchanged embedding never enters
+        # it, so the pre-existing colour switch/commit path is identical.
+        guard = promote.index('if ! embedding_running_before="$(running_embedding_image)"; then')
+        self.assertIn('[ "$embedding_running_before" != "$marker_embedding_image" ]; then',
+                      promote[guard:guard + 1200])
+        # An unreadable embedding container never lets a different digest be
+        # committed: it refuses and restores traffic instead of skipping.
+        fail_closed = promote[guard:guard + 1200]
+        self.assertIn('[ "${previous_embedding_image:-}" != "${marker_embedding_image:-}" ]', fail_closed)
+        self.assertLess(fail_closed.index("restore_previous_runtime || exit 74"),
+                        fail_closed.index('[ "$embedding_running_before" != "$marker_embedding_image" ]; then'))
+        # Rollback (rollback_mode 1) switches the embedding to the target
+        # colour's recorded digest without a fresh authorization.
+        self.assertIn('if [ "$rollback_mode" = 0 ]; then', promote)
+
+    def test_rollback_wrapper_delegates_to_promote(self) -> None:
+        rollback = self.read("ops/rollback.sh")
+        self.assertIn('exec "$script_dir/promote.sh" "$colour" "$expected_sha"', rollback)
+
     def test_firewall_bootstrap_installs_and_update_failure_stops_before_enable(self) -> None:
         deploy = self.read("ops/deploy.sh")
         function_start = deploy.index("install_direct_origin_firewall() {")

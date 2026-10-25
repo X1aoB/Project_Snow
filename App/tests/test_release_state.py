@@ -336,3 +336,46 @@ def test_legacy_requires_root_controlled_directories_and_single_link_files(state
     monkeypatch.setattr(release_state, "require_regular", REQUIRE_REGULAR)
     with pytest.raises(maintenance.MaintenanceError, match="root-controlled|regular file"):
         release_state.protected_image_references(state)
+
+
+def _set_runtime_shared(state, key, digest_char):
+    path = state.root / "runtime" / "compose.env"
+    lines = []
+    for line in path.read_text().splitlines():
+        name, _, value = line.partition("=")
+        if name == key:
+            value = value.rsplit(":", 1)[0] + ":" + digest_char * 64
+        lines.append(f"{name}={value}")
+    path.write_text("\n".join(lines) + "\n")
+
+
+def test_restore_allows_embedding_only_shared_difference(state):
+    # The green anchor records the original embedding; the running runtime now
+    # carries a different embedding digest (a prior authorized swap). Restoring
+    # green is permitted and writes the anchor's recorded embedding digest.
+    anchor = release_state.archive_colours(state)["colours"]["green"]
+    _set_runtime_shared(state, "EMBEDDING_IMAGE", "e")
+    prepared = release_state.restore_colour(state, anchor, "green")
+    assert prepared["status"] == "prepared"
+    restored_env = maintenance.read_environment(state.root / "runtime" / "colours" / "green.compose.env")
+    marker = (state.root / "releases" / "colours" / "green").read_text().split()
+    # Marker, compose.env agree with the anchor's recorded embedding (char 'b'),
+    # which the subsequent rollback recreates the container to.
+    assert restored_env["EMBEDDING_IMAGE"].endswith(":" + "b" * 64)
+    assert marker[3].endswith(":" + "b" * 64)
+
+
+@pytest.mark.parametrize("key", ["POSTGRES_IMAGE", "QDRANT_IMAGE", "NEO4J_IMAGE", "EGRESS_PROXY_IMAGE"])
+def test_restore_refuses_non_embedding_shared_difference(state, key):
+    anchor = release_state.archive_colours(state)["colours"]["green"]
+    _set_runtime_shared(state, key, "e")
+    with pytest.raises(maintenance.MaintenanceError, match="Restore shared dependencies separately"):
+        release_state.restore_colour(state, anchor, "green")
+
+
+def test_restore_refuses_embedding_plus_other_shared_difference(state):
+    anchor = release_state.archive_colours(state)["colours"]["green"]
+    _set_runtime_shared(state, "EMBEDDING_IMAGE", "e")
+    _set_runtime_shared(state, "POSTGRES_IMAGE", "f")
+    with pytest.raises(maintenance.MaintenanceError, match="Restore shared dependencies separately"):
+        release_state.restore_colour(state, anchor, "green")
