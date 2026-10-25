@@ -2352,12 +2352,16 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertIn("direct_answer_focus:food_or_drink", violations)
 
     @staticmethod
-    def _food_context(message: str, turns: int = 0, address: str = "") -> dict:
+    def _food_context(message: str, turns: int = 0, address: str = "", hour: int = 13) -> dict:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
         return {
             "question_focus": "food_or_drink",
             "user_message": message,
             "session_context": {"turns": [{} for _ in range(turns)]},
             "relationship_address_memory": {"preferred_address": address} if address else {},
+            "local_now": datetime(2026, 10, 25, hour, 0, tzinfo=ZoneInfo("Asia/Hong_Kong")),
         }
 
     def test_food_plan_question_is_told_apart_from_a_record_or_a_wish(self) -> None:
@@ -2401,10 +2405,10 @@ class ApplicationLayerTests(unittest.TestCase):
             "direct_answer_focus:food_or_drink",
             violations(record, "你呢，吃过了没？我还没想好。"),
         )
-        # A proposal never excuses a meal claimed as already eaten.
+        # A proposal never excuses a meal with the analyst that never happened.
         self.assertIn(
-            "unsupported_current_food_fact",
-            violations(plan, "我今天已经吃了火锅，我们晚上再吃点别的吧。"),
+            "unsupported_current_food_fact:shared",
+            violations(plan, "我今天已经和你一起吃了火锅，晚上再吃点别的吧。"),
         )
 
     def test_food_fallback_follows_the_question_rotates_and_claims_no_meal(self) -> None:
@@ -2585,13 +2589,13 @@ class ApplicationLayerTests(unittest.TestCase):
         self.assertEqual(result["content_blocks"], [{"type": "message", "text": result["answer"]}])
         self.assertEqual(result["citations"], [])
 
-    def test_mvp_chat_rejects_a_historical_meal_as_a_fabricated_current_fact(self) -> None:
+    def test_mvp_chat_rejects_an_invented_shared_meal(self) -> None:
         service = MVPService(self.settings, self.repository)
         fabricated_current_meal = json.dumps(
             {
-                "answer": "我刚刚随手抓了一把营养补充剂，就当是今天的猫饭了。",
+                "answer": "我刚刚和你一起吃过猫饭了呀，你忘啦？",
                 "content_blocks": [
-                    {"type": "message", "text": "我刚刚随手抓了一把营养补充剂，就当是今天的猫饭了。"}
+                    {"type": "message", "text": "我刚刚和你一起吃过猫饭了呀，你忘啦？"}
                 ],
                 "confidence": "low",
                 "used_document_ids": [],
@@ -2611,10 +2615,37 @@ class ApplicationLayerTests(unittest.TestCase):
 
         self.assertIn("current_food_guard", result["response_adjustments"])
         self.assertIn("还没吃", result["answer"])
-        self.assertNotIn("刚刚", result["answer"])
-        self.assertNotIn("营养补充剂", result["answer"])
+        self.assertNotIn("一起吃过", result["answer"])
         self.assertEqual(result["content_blocks"], [{"type": "message", "text": result["answer"]}])
         self.assertEqual(result["citations"], [])
+
+    def test_mvp_chat_keeps_an_everyday_meal_answer(self) -> None:
+        service = MVPService(self.settings, self.repository)
+        everyday_meal = "随手抓了一把营养补充剂，就当吃过了喵。"
+        reply = json.dumps(
+            {
+                "answer": everyday_meal,
+                "content_blocks": [{"type": "message", "text": everyday_meal}],
+                "confidence": "medium",
+                "used_document_ids": [],
+                "used_relation_candidate_ids": [],
+            },
+            ensure_ascii=False,
+        )
+        with patch.object(service, "chat_enabled", return_value=True), patch.object(
+            service, "_call_model", side_effect=[(reply, {})]
+        ) as model:
+            result = service.chat(
+                "6862c43d2ac9",
+                "你吃了什么？",
+                session_id="everyday-meal-test",
+                communication_channel="text",
+            )
+
+        self.assertEqual(model.call_count, 1)
+        self.assertNotIn("current_food_guard", result["response_adjustments"])
+        self.assertNotIn("direct_answer_guard", result["response_adjustments"])
+        self.assertEqual(result["answer"], everyday_meal)
 
     def test_mvp_chat_does_not_render_a_blank_provider_response(self) -> None:
         service = MVPService(self.settings, self.repository)
@@ -3684,12 +3715,75 @@ class ApplicationLayerTests(unittest.TestCase):
             self.assertIn(name, fallback)
         self.assertNotIn("\u6069\u96c5", fallback)
 
-    def test_mvp_current_food_guard_catches_just_ate_claim(self) -> None:
-        violations = MVPService._unsupported_current_food_claims(
-            "\u5526\u2026\u521a\u5403\u4e86\u70b9\u4e1c\u897f\uff0c\u4e0d\u8fc7\u6ca1\u4ec0\u4e48\u7279\u522b\u7684\u5473\u9053\u55b5\u2026",
-            {"question_focus": "food_or_drink"},
+    def test_mvp_food_guard_allows_everyday_meals_and_rejects_contradictions(self) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        def context(hour: int = 13, message: str = "中午吃了什么？", hits: list | None = None) -> dict:
+            return {
+                "question_focus": "food_or_drink",
+                "user_message": message,
+                "hits": hits or [],
+                "session_context": {"turns": []},
+                "local_now": datetime(2026, 10, 25, hour, 0, tzinfo=ZoneInfo("Asia/Hong_Kong")),
+            }
+
+        def claims(answer: str, ctx: dict) -> list[str]:
+            return MVPService._unsupported_current_food_claims(answer, ctx)
+
+        def evasion(answer: str, ctx: dict) -> list[str]:
+            blocks = [{"type": "speech", "text": answer}]
+            return MVPService._direct_answer_focus_violations(answer, ctx, blocks, ctx["user_message"])
+
+        # Everyday meals are answers, whatever the eating verb (2026-10-25).
+        for answer in (
+            "中午就啃了个面包。",
+            "随便对付了两口。",
+            "垫了两口饼干，还不太饿。",
+            "唔…刚吃了点东西，不过没什么特别的味道喵…",
+            "刚喝了杯咖啡，提提神。",
+            "我吃了一碗面。",
+            "随手抓了一把营养补充剂，就当是猫饭了。",
+            "还没吃呢，正想着吃点什么。",
+            "我没吃过这家，下次去试试。",
+            "吃完饭我们去散步吧。",
+        ):
+            self.assertEqual(claims(answer, context()), [], answer)
+            self.assertEqual(evasion(answer, context()), [], answer)
+        self.assertEqual(evasion("还没顾上吃，你呢？", context()), [])
+
+        # A meal with the analyst that the analyst never mentioned.
+        for answer in ("刚和你一起吃过了呀。", "我们昨天一起去吃了火锅。", "陪你吃完午饭就过来了。"):
+            self.assertIn("unsupported_current_food_fact:shared", claims(answer, context()), answer)
+        told = context(message="我们刚一起吃了火锅，你觉得怎么样？")
+        self.assertEqual(claims("刚和你一起吃了火锅，好饱。", told), [])
+
+        # A meal lifted from this turn's sources and presented as today's.
+        voice = [{"text": "猫汐尔：今天的猫饭是三文鱼罐头哦，分析员也要好好吃饭。"}]
+        self.assertIn(
+            "unsupported_current_food_fact:source",
+            claims("今天的猫饭是三文鱼罐头哦。", context(hits=voice)),
         )
-        self.assertEqual(violations, ["unsupported_current_food_fact"])
+        self.assertEqual(claims("中午就啃了个面包。", context(hits=voice)), [])
+
+        # A named meal of today before its hour; another day is fine.
+        self.assertIn("unsupported_current_food_fact:time", claims("午饭吃了碗面。", context(hour=9)))
+        self.assertIn("unsupported_current_food_fact:time", claims("中午就啃了个面包。", context(hour=9)))
+        self.assertIn("unsupported_current_food_fact:time", claims("刚吃了夜宵。", context(hour=10)))
+        self.assertEqual(claims("午饭吃了碗面。", context(hour=13)), [])
+        self.assertEqual(claims("昨天中午吃了面。", context(hour=9)), [])
+        self.assertEqual(claims("刚吃了夜宵。", context(hour=2)), [])
+
+        # Still an evasion: a place, an old scene, or only asking back.
+        for answer in ("我在基地食堂里。", "上次我们吃过一次面。", "你吃了吗？"):
+            self.assertIn("direct_answer_focus:food_or_drink", evasion(answer, context()), answer)
+
+    def test_food_contract_tells_the_model_the_hong_kong_time(self) -> None:
+        intents = MVPService._query_intents("中午吃了什么")
+        contract = MVPService._response_contract("中午吃了什么", intents)
+        self.assertRegex(contract, r"现在是香港时间 \d{2}:\d{2}。$")
+        self.assertIn("普通的日常小事", contract)
+        self.assertIn("不要编造和分析员一起吃过的经历", contract)
 
     @pytest.mark.runtime_data
     def test_mvp_runtime_logistics_projection_recovers_old_links(self) -> None:

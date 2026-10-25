@@ -1360,31 +1360,57 @@ _FOOD_OR_DRINK_DIRECT_ANSWER_TERMS = _FOOD_OR_DRINK_ITEM_TERMS + (
     "不想喝",
 )
 
-# A historical food scene is useful background, but it is not a record of
-# what the character ate a moment ago.  Natural-chat retrieval deliberately
-# excludes most dated scenes, yet a model can still turn a voice line or a
-# general preference into a fabricated "I just ate ...".  These patterns are
-# intentionally limited to an asserted, *current* meal.  They do not reject
-# a useful hypothetical such as "如果现在要选，我会想吃……" or a concise "还没
-# 决定" answer.
-_FOOD_OR_DRINK_CURRENT_FACT_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(
-        r"(?:我|本小姐|咱)[^。！？!?\r\n]{0,30}(?:吃了|喝了|吃完了|喝完了|抓了|拿了|做了|用了一)[^。！？!?\r\n]{0,72}"
-    ),
-    # ``刚吃了点东西`` / ``刚喝过水`` omit an explicit first-person subject
-    # and therefore were not caught by the older, broader ``今天/现在`` rule.
-    # Keep the verb in the expression so the standalone word ``刚好`` is not
-    # treated as a fabricated meal.
-    re.compile(
-        r"(?:刚|刚刚|刚才)[^。！？!?\r\n]{0,30}(?:吃了|喝了|吃过|喝过|吃完了|喝完了|吃东西|喝水)[^。！？!?\r\n]{0,72}"
-    ),
-    re.compile(
-        r"(?:刚刚|刚才|今天|此刻|现在|已经)[^。！？!?\r\n]{0,48}(?:吃|喝|抓|拿|做|用)[^。！？!?\r\n]{0,72}"
-    ),
-    re.compile(
-        r"(?:早餐|午餐|晚餐|早饭|午饭|晚饭|猫饭)[^。！？!?\r\n]{0,24}(?:是|吃了|喝了|已经|刚刚)[^。！？!?\r\n]{0,72}"
-    ),
+# Everyday meals (2026-10-25).  The dialogue layer keeps no record of what a
+# character ate, so a meal can never be proven -- but an ordinary "中午就啃了
+# 个面包" contradicts nothing either, and rejecting every such line made
+# characters dodge a plain question or fall back to "还没吃".  An everyday
+# meal is therefore an answer.  A meal claim is rejected only when it
+# contradicts what the system does know:
+#   * source: a meal lifted from this turn's sources (story, voice line,
+#     dialogue profile) and presented as today's -- the original reason for
+#     this guard;
+#   * shared: a meal eaten with the analyst that the analyst never mentioned;
+#   * time: a named meal whose time has not come yet (午饭 at 09:00).
+# Eating is an open class of verbs (吃/啃/垫/扒/对付...), so a claim is found
+# by a completed eating form rather than by a list of whole phrases.
+_FOOD_OR_DRINK_EATEN_PATTERN = re.compile(
+    r"(?:吃|喝|啃|咬|嚼|吞|咽|垫|尝|灌|塞|扒|嗦|抿|对付)(?:了|过|完)"
+    r"|(?:弄|做|煮|泡|买|叫|点|热|抓)了[^。！？!?，,\r\n]{0,8}(?:吃的|喝的|外卖|饭|面|粥|汤|茶|咖啡|营养)"
+    r"|(?:早餐|午餐|晚餐|早饭|午饭|晚饭|夜宵|猫饭)[^。！？!?，,\r\n]{0,8}(?:是|吃的|喝的)"
+    r"|当(?:作|成|是)[^。！？!?，,\r\n]{0,6}(?:早餐|午餐|晚餐|早饭|午饭|晚饭|夜宵|猫饭|一餐|一顿)"
 )
+# Eating mentioned without a completed form: "吃点甜的", "啃两口面包".
+_FOOD_OR_DRINK_EATING_PATTERN = re.compile(
+    r"(?:吃|喝|啃|垫|尝|扒|嗦|对付)[^。！？!?，,\r\n]{0,3}(?:点|些|口|碗|杯|块|个)"
+)
+_FOOD_OR_DRINK_NEGATIONS = ("没", "未", "不")
+_FOOD_OR_DRINK_CLAUSE_PATTERN = re.compile(r"[^，,；;。！？!?…~～\r\n]+[，,；;。！？!?…~～]*")
+_FOOD_OR_DRINK_SHARED_MARKERS = (
+    "我们",
+    "咱们",
+    "咱俩",
+    "我俩",
+    "和你",
+    "跟你",
+    "陪你",
+    "与你",
+    "你陪我",
+    "你和我",
+    "和分析员",
+    "跟分析员",
+)
+_FOOD_OR_DRINK_OTHER_DAY_MARKERS = ("昨天", "昨晚", "前天", "上次", "之前", "以前", "那次", "上周")
+# Hong Kong hour from which a named meal of *today* can have been eaten.
+_FOOD_OR_DRINK_MEAL_HOURS: tuple[tuple[tuple[str, ...], int], ...] = (
+    (("夜宵",), 21),
+    (("晚饭", "晚餐", "今晚", "傍晚"), 17),
+    (("午饭", "午餐", "中午"), 11),
+    (("早饭", "早餐", "早上"), 5),
+)
+# A copied line shares at least this many characters with a source.
+_FOOD_OR_DRINK_SOURCE_COPY_CHARS = 7
+# Where a question to the analyst starts; "和你/陪你" name a companion.
+_FOOD_OR_DRINK_ASK_PATTERN = re.compile(r"(?<![和跟陪与])你(?!陪我|和我)")
 _FOOD_OR_DRINK_TENTATIVE_TERMS = (
     "还没",
     "没有吃",
@@ -4798,7 +4824,7 @@ class MVPService:
             )
         focus = cls._question_focus(message, intents)
         contracts = {
-            "food_or_drink": "用户问的是吃/喝什么（吃了什么、想吃什么，或商量这顿吃什么）。第一句必须直接回答食物或饮品；商量这顿吃什么时，可以直接提议一样具体的吃的，也可以先说自己的倾向再问对方想吃什么；不能回答地点、谁陪着、在哪里或相关剧情。没有当前事实时，用明确的假设/倾向表达，不要声称某个旧场景刚刚发生。",
+            "food_or_drink": "用户问的是吃/喝什么（吃了什么、想吃什么，或商量这顿吃什么）。第一句必须直接回答食物或饮品；商量这顿吃什么时，可以直接提议一样具体的吃的，也可以先说自己的倾向再问对方想吃什么；不能回答地点、谁陪着、在哪里或相关剧情。可以像平常聊天一样说一件普通的日常小事，比如中午随便吃了点什么、还没吃或还没想好；要符合现在的时间，并和这次对话前面说过的保持一致。不要把剧情、语音或资料里的某次进餐说成今天刚发生，也不要编造和分析员一起吃过的经历。",
             "shared_meal": "分析员已经带来、准备或明确提出了本轮要吃的食物。直接回应这份邀请和已经说出的餐点，可以评价是否合胃口、接受一起用餐或承接下次外出的约定；不得回答‘还没决定吃什么’，也不要反问分析员想吃什么。",
             "open_invitation": "分析员是在邀请你说出当下希望他怎么做。承接最近几轮的情绪、动作和亲密程度，给出自然、具体但非露骨的回应；不要突然汇报训练、工作或地点，也不要用实现层或安全说明打断。若话题可能继续升温，可以用含蓄表达、确认彼此意愿或自然淡出场景，但不得擅自把露骨行为写成已经发生。",
             "visit_followup": "角色的当前位置最近已经明确说过，分析员是在确认要过来。自然接受、等待或提醒路上小心即可；不要机械重复地点，也不要改称自己在另一个地点或突然补写刚结束的活动。",
@@ -4815,7 +4841,21 @@ class MVPService:
             "costume_detail": "用户正在问具体时装、皮肤或适配装甲。先直接回答这套时装的简介、细节或与装甲的关联；如果用户点名了一套时装，必须同时参考该时装和它对应装甲的资料，不能只重复名字或改答泛泛的角色背景。",
             "general": "先自然回应用户这句话本身；只有与问题直接相关时才补充一条资料背景。",
         }
+        if focus == "food_or_drink":
+            # An everyday meal must fit the hour; the model is not told the
+            # time anywhere else in a food answer.
+            now = cls._food_or_drink_clock()
+            return f"{contracts[focus]}现在是香港时间 {now:%H:%M}。"
         return contracts[focus]
+
+    @staticmethod
+    def _food_or_drink_clock(context: dict[str, Any] | None = None) -> datetime:
+        """Current Hong Kong time; tests pin it with ``context["local_now"]``."""
+
+        value = (context or {}).get("local_now")
+        if isinstance(value, datetime):
+            return value
+        return datetime.now(ZoneInfo("Asia/Hong_Kong"))
 
     def _runtime_logistics_index(self) -> dict[str, dict[str, Any]]:
         """Recover missing logistics-to-armor links in memory.
@@ -7818,37 +7858,121 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         context: dict[str, Any],
         content_blocks: Any = None,
     ) -> list[str]:
-        """Reject an invented present-time meal without making chat rigid.
+        """Reject a meal claim that contradicts what the system knows.
 
-        The dialogue layer has a small deterministic scene state for current
-        locations and activities, but deliberately has no fabricated meal
-        state.  Therefore an asserted "I just ate X" can never be promoted
-        from a historical source into the present.  A hypothetical preference
-        or an honest "I have not decided" remains a perfectly natural answer.
+        An everyday meal ("中午就啃了个面包") is a normal answer; see
+        ``_FOOD_OR_DRINK_EATEN_PATTERN`` for why.  A claimed meal is rejected
+        only when it is lifted from this turn's sources, is shared with an
+        analyst who never mentioned it, or names a meal whose time has not
+        come yet.  The reason follows the colon.
         """
 
         if str(context.get("question_focus") or "") != "food_or_drink":
             return []
         opening = cls._first_verbal_response(answer, content_blocks)
-        if not opening:
+        claims = cls._food_or_drink_meal_claims(opening)
+        if not claims:
             return []
-        if any(_contains_term(opening, term) for term in _FOOD_OR_DRINK_TENTATIVE_TERMS):
-            return []
-        if _FOOD_OR_DRINK_PROPOSAL_PATTERN.search(opening) and not _FOOD_OR_DRINK_DONE_PATTERN.search(
-            opening
-        ):
-            return []
-        if any(pattern.search(opening) for pattern in _FOOD_OR_DRINK_CURRENT_FACT_PATTERNS):
-            return ["unsupported_current_food_fact"]
-        # Catch forms such as "今天的猫饭是……" that have no explicit
-        # first-person subject but still assert a current meal.
-        current_markers = ("刚", "刚刚", "刚才", "今天", "此刻", "现在", "已经")
-        if any(_contains_term(opening, marker) for marker in current_markers) and any(
-            _contains_term(opening, term)
-            for term in _FOOD_OR_DRINK_ITEM_TERMS
-        ):
-            return ["unsupported_current_food_fact"]
-        return []
+        reasons: list[str] = []
+        sources = cls._food_or_drink_source_texts(context)
+        hour = cls._food_or_drink_clock(context).hour
+        for clause in claims:
+            compact = _compact(clause)
+            if any(marker in compact for marker in _FOOD_OR_DRINK_SHARED_MARKERS) and not (
+                cls._analyst_mentioned_shared_meal(context)
+            ):
+                reasons.append("shared")
+            if any(
+                SequenceMatcher(None, compact, source, autojunk=False)
+                .find_longest_match(0, len(compact), 0, len(source))
+                .size
+                >= _FOOD_OR_DRINK_SOURCE_COPY_CHARS
+                for source in sources
+            ):
+                reasons.append("source")
+            if not any(marker in compact for marker in _FOOD_OR_DRINK_OTHER_DAY_MARKERS) and (
+                cls._food_or_drink_meal_not_due(compact, hour)
+            ):
+                reasons.append("time")
+        return [f"unsupported_current_food_fact:{reason}" for reason in dict.fromkeys(reasons)]
+
+    @staticmethod
+    def _food_or_drink_meal_claims(text: str) -> list[str]:
+        """Clauses that state the character ate or drank something.
+
+        Questions, denials ("还没吃", "没吃过"), plans ("吃完我们去散步吧",
+        "等会儿吃") and remarks about the analyst ("你吃过了吧") are not claims.
+        """
+
+        claims: list[str] = []
+        for clause in _FOOD_OR_DRINK_CLAUSE_PATTERN.findall(str(text or "")):
+            compact = _compact(clause)
+            if not compact or "？" in clause or "?" in clause or "吗" in compact:
+                continue
+            if any(_contains_term(compact, term) for term in _FOOD_OR_DRINK_TENTATIVE_TERMS):
+                continue
+            if any(term in compact for term in ("等", "待会", "一会", "晚点", "下次", "明天", "以后", "回头", "假如")):
+                continue
+            if re.search(r"(?:吧|好不好|怎么样|好吗|如何)[^\w]*$", compact):
+                continue
+            shared = any(marker in compact for marker in _FOOD_OR_DRINK_SHARED_MARKERS)
+            for match in _FOOD_OR_DRINK_EATEN_PATTERN.finditer(clause):
+                before = clause[: match.start()]
+                if any(negation in before[-3:] for negation in _FOOD_OR_DRINK_NEGATIONS):
+                    continue
+                if not shared and "你" in before and "我" not in before:
+                    continue
+                claims.append(clause.strip())
+                break
+        return claims
+
+    @classmethod
+    def _food_or_drink_source_texts(cls, context: dict[str, Any]) -> list[str]:
+        """Story, voice and profile text a meal must not be copied from."""
+
+        texts = [str(hit.get("text") or "") for hit in (context.get("hits") or [])[:12]]
+        relationship = context.get("relationship_background") or {}
+        texts.extend(str(item.get("excerpt") or "") for item in (relationship.get("evidence") or []))
+        profile = cls._dialogue_profile_prompt_context(context.get("dialogue_profile"))
+        if profile:
+            texts.append(json.dumps(profile, ensure_ascii=False))
+        return [compact for compact in (_compact(text) for text in texts) if compact]
+
+    @classmethod
+    def _analyst_mentioned_shared_meal(cls, context: dict[str, Any]) -> bool:
+        """Whether the analyst said in this conversation that they ate together."""
+
+        texts = [str(context.get("user_message") or "")]
+        if context.get("turn_frame") is not None:
+            texts.extend(
+                str(item.get("summary") or "")
+                for item in context.get("session_experiences") or []
+                if item.get("status") == "confirmed"
+            )
+        for turn in (context.get("session_context") or {}).get("turns") or []:
+            if isinstance(turn, dict):
+                texts.append(str(turn.get("user") or ""))
+        for text in texts:
+            compact = _compact(text)
+            if any(marker in compact for marker in _FOOD_OR_DRINK_SHARED_MARKERS + ("一起", "陪我", "和我")) and (
+                _FOOD_OR_DRINK_EATEN_PATTERN.search(text)
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _food_or_drink_meal_not_due(compact_clause: str, hour: int) -> bool:
+        """A named meal of today claimed before its hour (午饭 at 09:00).
+
+        Between midnight and 04:00 any meal of the day before is plausible.
+        """
+
+        if hour < 4:
+            return False
+        for words, start in _FOOD_OR_DRINK_MEAL_HOURS:
+            if any(word in compact_clause for word in words):
+                return hour < start
+        return False
 
     @classmethod
     def _shared_meal_continuity_violations(
@@ -8066,6 +8190,22 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                     return text
         return str(answer or "").strip()
 
+    @staticmethod
+    def _food_or_drink_answers(text: str) -> bool:
+        """Whether ``text`` names food or drink, or says what she ate or will.
+
+        "随便对付了两口" answers "中午吃了什么" as well as a dish name does.
+        """
+
+        return (
+            any(
+                _contains_term(text, term)
+                for term in _FOOD_OR_DRINK_DIRECT_ANSWER_TERMS + ("还没", "没顾上", "顾不上")
+            )
+            or _FOOD_OR_DRINK_EATEN_PATTERN.search(str(text or "")) is not None
+            or _FOOD_OR_DRINK_EATING_PATTERN.search(str(text or "")) is not None
+        )
+
     @classmethod
     def _direct_answer_focus_violations(
         cls,
@@ -8114,13 +8254,14 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 and any(term in compact_sentence for term in ("吃", "喝"))
             )
             if not asks_back:
-                if any(
-                    _contains_term(sentence, term) for term in _FOOD_OR_DRINK_DIRECT_ANSWER_TERMS
-                ):
+                if cls._food_or_drink_answers(sentence):
                     return []
                 continue
-            head = compact_sentence.split("你", 1)[0]
-            if any(_contains_term(head, term) for term in _FOOD_OR_DRINK_DIRECT_ANSWER_TERMS):
+            # "还没顾上吃，你呢？" answers before it asks back.  The "你" of
+            # "和你一起吃过" names a companion, not the start of a question.
+            ask = _FOOD_OR_DRINK_ASK_PATTERN.search(sentence)
+            head = sentence[: ask.start()] if ask else sentence
+            if cls._food_or_drink_answers(head):
                 return []
             proposes_item = (
                 any(_contains_term(sentence, term) for term in _FOOD_OR_DRINK_ITEM_TERMS)
@@ -9259,6 +9400,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 "live_scene_mismatch:",
                 "unsupported_quote:",
                 "text_rendezvous_",
+                "unsupported_current_food_fact:",
             )
         ) or value in {
             "unsupported_current_food_fact",
@@ -9294,8 +9436,9 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                      "若包含 unsupported_casual_state_claim，把回复改为自然、简短的问候；不要凭空说‘自从恒约之后’、‘变得嗜睡’、‘今天也是睡到自然醒’、‘刚起床’或其他未被本轮问题与证据支持的当前状态。"
                     "若包含 direct_answer_focus:food_or_drink，第一句必须给出食物/饮品，或明确说还没吃、没决定；"
                     "不得只回答餐厅、地点、同伴、任务或旧剧情。"
-                    "若包含 unsupported_current_food_fact，不得把旧剧情、语音或偏好写成‘刚刚/今天/现在已经吃了什么’；"
-                    "改为自然地说还没决定、还没吃，或用‘如果现在要选’表达带条件的偏好。"
+                    "若包含 unsupported_current_food_fact，说的这顿饭和已知情况对不上：冒号后 source 表示照搬了剧情、语音或资料里的进餐，"
+                    "shared 表示编造了和分析员一起吃过，time 表示那顿饭还没到时间；改成符合现在时间的普通日常说法，"
+                    "或自然地说还没吃、还没决定，不要编造共同经历。"
                     "若包含 shared_meal_context_lost，分析员已经把本轮餐点带来或说清楚；直接接受、评价或承接一起用餐，"
                     "不得再说没决定吃什么、让分析员重新挑选，或反问想吃什么。"
                      "若包含 routine_activity_time_scope，用户问的是早些时候或通常的安排；不得把 live_scene 的刚才/现在活动当作答案。"
@@ -10564,7 +10707,9 @@ interaction_decision、memory_candidates 等元数据必须先于 content_blocks
                     "citation_notes": ["问候回复混入了未经支持的当前状态，已改为不虚构日常事实的自然回应。"],
                 }
                 casual_state_guard = True
-            elif "unsupported_current_food_fact" in retry_violations:
+            elif any(
+                str(item).startswith("unsupported_current_food_fact") for item in retry_violations
+            ):
                 answer_text = self._direct_answer_fallback(context)
                 generated = {
                     "answer": answer_text,
