@@ -141,6 +141,67 @@ jobs:
           ignore-unfixed: true
       - name: Enforce embedding vulnerability gate
         run: python App/scripts/report_trivy_findings.py trivy-embedding.json --exceptions App/config/trivy-exceptions.json
+      - name: Resolve previous embedding digest for new-image vector comparison
+        if: inputs.embedding_changed
+        id: embedding-compare-previous
+        shell: bash
+        env:
+          IMAGE: ${{ steps.images.outputs.embedding }}
+          PREVIOUS_SHA: ${{ inputs.previous_sha }}
+        run: |
+          # Same first-parent ancestry walk as "Resolve previous embedding
+          # digest"; used only to prove the pushed new image matches the last
+          # released one.
+          digest=""
+          source_sha=""
+          for candidate in $(git rev-list --first-parent "$PREVIOUS_SHA"); do
+            if image_info="$(docker buildx imagetools inspect "$IMAGE:$candidate" 2>/dev/null)"; then
+              digest="$(printf '%s\n' "$image_info" | awk '/^Digest:/ {print $2; exit}')"
+              if [ -n "$digest" ]; then
+                source_sha="$candidate"
+                break
+              fi
+            fi
+          done
+          test -n "$digest"
+          echo "Resolved previous embedding digest from main ancestor $source_sha for vector comparison."
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Prove the new embedding image matches the previously released vectors
+        if: inputs.embedding_changed
+        env:
+          IMAGE: ${{ steps.images.outputs.embedding }}
+          NEW_DIGEST: ${{ steps.embedding.outputs.digest }}
+          PREVIOUS_DIGEST: ${{ steps.embedding-compare-previous.outputs.digest }}
+        run: |
+          cleanup() {
+            docker rm -f snow-embedding-new snow-embedding-old >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker pull "$IMAGE@$NEW_DIGEST"
+          docker pull "$IMAGE@$PREVIOUS_DIGEST"
+          docker run -d --name snow-embedding-new -p 18001:8000 "$IMAGE@$NEW_DIGEST"
+          docker run -d --name snow-embedding-old -p 18002:8000 "$IMAGE@$PREVIOUS_DIGEST"
+          for port in 18001 18002; do
+            ready=false
+            for i in $(seq 1 120); do
+              if curl -fsS "http://127.0.0.1:$port/health" >/dev/null; then
+                ready=true
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ready" != true ]; then
+              docker logs snow-embedding-new
+              docker logs snow-embedding-old
+              exit 1
+            fi
+          done
+          python App/scripts/compare_embedding_vectors.py payload > payload.json
+          curl -fsS -H 'Content-Type: application/json' -d @payload.json \
+            http://127.0.0.1:18001/embed > embed-new.json
+          curl -fsS -H 'Content-Type: application/json' -d @payload.json \
+            http://127.0.0.1:18002/embed > embed-old.json
+          python App/scripts/compare_embedding_vectors.py compare embed-old.json embed-new.json
       - name: Generate immutable release manifest
         run: >-
           python App/scripts/release_manifest.py

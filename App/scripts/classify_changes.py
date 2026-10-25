@@ -103,8 +103,10 @@ DEPLOY_PATTERNS = (
     "App/scripts/promote.ps1",
     "App/scripts/rollback.ps1",
     "App/scripts/release_manifest.py",
+    "App/scripts/compare_embedding_vectors.py",
     "App/scripts/validate_shared_design.py",
     "App/tests/test_deployment_contracts.py",
+    "App/tests/test_compare_embedding_vectors.py",
     "App/tests/test_subscription_deployment.py",
     "App/tests/test_shared_design.py",
 )

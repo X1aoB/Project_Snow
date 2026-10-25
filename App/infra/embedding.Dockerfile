@@ -2,7 +2,7 @@ FROM python:3.12-slim@sha256:09f7da3bc104798d0afb40bc08d23ab2da20a76130cec1f2ef1
 
 # Advance only after reviewing a fresh vulnerability scan; an unchanged image
 # must not reuse an older apt upgrade layer when security fixes are required.
-ARG SYSTEM_SECURITY_REVISION=2026-10-13
+ARG SYSTEM_SECURITY_REVISION=2026-10-26
 RUN test -n "$SYSTEM_SECURITY_REVISION" \
     && apt-get update \
     && apt-get upgrade -y --no-install-recommends \
@@ -30,6 +30,8 @@ RUN pip install --no-cache-dir --upgrade \
         sentence-transformers==5.7.0 \
         transformers==5.15.0 \
         msgpack==1.2.1 \
+        certifi==2026.10.19 \
+        filelock==4.2.1 \
     && pip check \
     && EMBEDDING_MODEL_ID="$EMBEDDING_MODEL_ID" \
        EMBEDDING_MODEL_REVISION="$EMBEDDING_MODEL_REVISION" \

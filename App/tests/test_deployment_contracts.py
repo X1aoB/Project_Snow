@@ -3169,7 +3169,16 @@ require_runner_controller_binding
         self.assertIn("payload.get('dimension') == 512", compose)
         self.assertIn("model()\n    yield", service)
         self.assertIn('status_code=503', service)
-        self.assertIn("len(vectors[0]) == 512", workflow)
+        self.assertIn("len(v) == 512", workflow)
+        # A rebuilt embedding image must be proven equivalent to the previously
+        # released one before merge: resolve the previous digest and run the
+        # stdlib comparison against the freshly built image.
+        self.assertIn("docker/login-action@", workflow)
+        self.assertIn("Resolve previously released embedding digest", workflow)
+        self.assertIn(
+            "python App/scripts/compare_embedding_vectors.py compare embed-old.json embed-new.json",
+            workflow,
+        )
 
     def test_ci_uses_risk_tiers_and_a_stable_summary_gate(self) -> None:
         workflow = (self.app_root.parent / ".github" / "workflows" / "ci.yml").read_text(
@@ -3198,6 +3207,17 @@ require_runner_controller_binding
         self.assertIn('git rev-list --first-parent "$PREVIOUS_SHA"', release)
         self.assertIn("Tag reused embedding digest for the current main SHA", release)
         self.assertIn("release_manifest.py", release)
+        # When the embedding image is rebuilt, publish must prove the pushed
+        # digest matches the previously released vectors before the manifest.
+        self.assertIn("Prove the new embedding image matches the previously released vectors", release)
+        self.assertIn(
+            "python App/scripts/compare_embedding_vectors.py compare embed-old.json embed-new.json",
+            release,
+        )
+        self.assertLess(
+            release.index("compare_embedding_vectors.py compare"),
+            release.index("Generate immutable release manifest"),
+        )
 
     def test_nightly_health_and_candidate_image_security_are_distinct(self) -> None:
         workflows = self.app_root.parent / ".github" / "workflows"
@@ -3210,7 +3230,7 @@ require_runner_controller_binding
         self.assertNotIn("github.event_name == 'schedule'", embedding_job)
         self.assertIn("github.event_name == 'workflow_dispatch'", embedding_job)
         self.assertLess(
-            embedding_job.index("Embedding container 512-dimension inference check"),
+            embedding_job.index("Embedding 512-dimension inference and old-vs-new vector equivalence"),
             embedding_job.index("Enforce embedding vulnerability gate"),
         )
         self.assertIn("steps.embedding-build.outcome == 'success'", embedding_job)
