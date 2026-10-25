@@ -316,7 +316,15 @@ def restore_colour(paths: Paths, identifier: str, colour: str) -> dict[str, Any]
     anchor, metadata = verify_anchor(paths, identifier)
     source_environment = read_environment(anchor / "compose.env")
     current_environment = read_environment(paths.root / "runtime" / "compose.env")
-    if any(source_environment.get(key) != current_environment.get(key) for key in SHARED_IMAGE_KEYS):
+    # Every shared dependency except the embedding image must match the running
+    # runtime. A difference in EMBEDDING_IMAGE alone is permitted: the anchor's
+    # digest is the one recorded in this colour's signed manifest and was
+    # promoted before, and the subsequent rollback recreates the embedding
+    # container to exactly that digest so marker, manifest, current and
+    # compose.env agree with what runs.
+    differing_shared = [key for key in SHARED_IMAGE_KEYS
+                        if source_environment.get(key) != current_environment.get(key)]
+    if [key for key in differing_shared if key != "EMBEDDING_IMAGE"]:
         raise MaintenanceError("Restore shared dependencies separately before selecting this recovery anchor")
     binding = json.loads(read_text(anchor / "config.json"))
     configuration_root = Path(binding.get("root", ""))

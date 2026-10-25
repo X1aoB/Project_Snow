@@ -64,6 +64,53 @@ python3 /usr/local/libexec/project-snow/maintenance.py gc-remove --image-id sha2
 
 删除前会逐项重新扫描；不使用 forced removal 或任何全局 prune。镜像显示的 Size 含共享层，不能相加当作预计可回收空间。
 
+## 共享 embedding 镜像的安全替换
+
+共享 embedding 容器由 blue/green 两个 colour 共用，普通 stage 仍拒绝其 image 变更。只有在模型 id/revision/维度均不变、仅为修补依赖（如 CVE 修复重建）的场景，才走本节的受控替换；它在 promote 时原子重建共享 embedding 容器，并在失败时自动回退，marker/manifest/current/compose.env 始终与运行中的容器一致。替换期间共享 embedding 重启约 1-2 分钟，两个 colour 的在线会话都会短暂检索失败，必须安排在低流量维护窗口。root runner `ops/project-snow-release` 与 `bootstrap-release-runner.sh` 不变。
+
+替换要素是一份 root 写入、按目标 digest 命名、与一次性探针回执绑定的授权文件 `/etc/project-snow/embedding-swap/<新 digest hex>.env`（目录 root 0700，文件 root 0600，无符号链接）：
+
+```
+schema=project-snow-embedding-swap-1
+from=<image@sha256:...>   # 必须等于当前运行的 embedding digest
+to=<image@sha256:...>     # 候选 embedding digest
+approved_at=<ISO>
+probe_sha256=<探针回执字节的 sha256>
+```
+
+`shared_dependency_gate` 只有在**唯一**变更项是 `EMBEDDING_IMAGE`、且存在 from=当前运行、to=候选 的匹配授权时，才返回 `shared_dependencies: embedding-swap-authorized`；其余任何共享 image/config 变更仍硬性拒绝。stage 仍只拉取新 embedding 镜像、绝不重建 embedding 容器，候选 API 仍以 `--no-deps` 对运行中的 embedding 启动。
+
+完整流程（★ 为所有者审批点）：
+
+1. 先合并独立的打包 PR（Dockerfile pin、CI 旧-新对比），main 的 manifest 随之携带新 embedding digest。
+2. ★ 所有者对两个 colour 执行 `backup --pin` 与 `anchor`，并确认新 embedding 镜像已 `docker pull` 到主机。
+3. ★ 所有者运行一次性探针（上传后在主机以 root 执行）：
+
+   ```sh
+   systemd-run --wait --collect -p UMask=0077 -- /usr/bin/python3 /受控目录/embedding_probe.py --from <运行 digest> --to <候选 digest>
+   ```
+
+   探针以 `--network none --read-only --cap-drop=ALL --memory 1536m` 无端口启动候选镜像，等待容器内 `/health` 维度 512，再对固定样本分别调用候选容器与**在线** embedding 容器的 `/embed`（均通过 `docker exec` 打本地 127.0.0.1:8000，不向线上容器加载第二个模型），比较 512 维向量（最小 cosine ≥ 0.99999，报告最大绝对差），始终删除探针容器，并在 root-only `/root/release-1026/` 写入回执 JSON、打印其 sha256。
+4. ★ 所有者据通过的回执写授权（二选一，二者等价且都校验 from=运行 digest、回执为 root 0600、状态 pass）：
+
+   ```sh
+   /usr/bin/python3 /受控目录/embedding_authorize.py --receipt /root/release-1026/probe-<新digest>.json
+   # 或
+   python3 /usr/local/libexec/project-snow/maintenance.py embedding-swap-authorize --from <运行> --to <候选> --probe-receipt <回执路径>
+   ```
+
+5. `project-snow-release stage <inactive> <sha>`：gate 因授权自洽通过；API 拉取新镜像，embedding 容器尚未重建。
+6. candidate 验收照常：`candidate_acceptance prepare` → ★ 所有者 `approve`。
+7. `project-snow-release promote <inactive> <sha>`：在 API 就绪/smoke 与边缘切换全部通过后、持久写 compose.env/current 之前，若运行中的 embedding 与目标 marker 的 digest 不同，promote 先校验匹配授权并确认目标镜像已在本机（`docker image inspect`），再 `compose up -d --no-deps --force-recreate embedding`，等待维度 512 健康并做一次 `/embed` 探活；任一失败则按上一份 compose.env 重建回旧 digest、等待健康并恢复旧运行态、非零退出且不提交切换。成功提交后删除授权文件（`embedding-swap-clear`），授权无法重放。embedding 未变的普通发布完全不进入该分支，走与此前逐字节相同的切换路径。
+
+清除未消费的授权：
+
+```sh
+python3 /usr/local/libexec/project-snow/maintenance.py embedding-swap-clear
+```
+
+回滚语义：回滚到某个 marker 记录了不同 embedding digest 的 colour 时，promote 的 rollback 模式会把共享 embedding 容器重建到**该 colour 签名 manifest 里记录的**那个 digest（同样的健康等待与失败回退），无需新授权（该 digest 此前已被晋级、已在签名清单中），重建前同样先 `docker image inspect` 确认镜像在本机。`restore_colour` 允许锚点与运行 compose.env **仅** `EMBEDDING_IMAGE` 不同（随后的 rollback/promote 完成容器切换，使 marker/manifest/current/compose.env 一致）；其余任何共享 key 不同仍拒绝。旧镜像由锚点保护不被 GC，替换前应确认仍在本机。
+
 ## 备份范围、基线与恢复演练
 
 daily backup 使用当前 PostgreSQL digest 对应容器生成一致 custom dump，以 `pg_restore --list` 检查并记录 SHA-256；restic 加密保存 dump、全部 releases/anchors/runtime、部署 repo、不可变 data/media、`/etc/project-snow` 和已安装 helpers/runner/sudoers。发布锁固定配置与 release 引用；immutable 包直接由 restic 读取，不先复制到根盘。

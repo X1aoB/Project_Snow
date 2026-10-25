@@ -363,8 +363,18 @@ jobs:
       github.event_name == 'workflow_dispatch'
     needs: changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - id: embedding-build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -387,29 +397,73 @@ jobs:
           scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-      - name: Embedding container 512-dimension inference check
+      - name: Resolve previously released embedding digest
+        id: embedding-previous
         if: ${{ always() && !cancelled() && steps.embedding-build.outcome == 'success' }}
+        shell: bash
+        env:
+          IMAGE: ghcr.io/x1aob/project_snow-embedding
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          cleanup() { docker rm -f snow-embedding >/dev/null 2>&1 || true; }
-          trap cleanup EXIT
-          docker run -d --name snow-embedding -p 18001:8000 project-snow-embedding:ci
-          ready=false
-          for i in $(seq 1 120); do
-            if curl -fsS http://127.0.0.1:18001/health >/dev/null; then
-              ready=true
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" != true ]; then
-            docker logs snow-embedding
-            exit 1
+          # Resolve the digest of the previously released embedding image by
+          # walking first-parent ancestry exactly like publish-images.yml.
+          # For workflow_dispatch (no pull_request base) start from github.sha's
+          # first parent so a dispatched run compares against the prior release.
+          start="$BASE_SHA"
+          if [ -z "$start" ]; then
+            start="$(git rev-list --first-parent -n 1 --skip 1 "$GITHUB_SHA" 2>/dev/null || true)"
+            [ -n "$start" ] || start="$GITHUB_SHA"
           fi
-          curl -fsS \
-            -H 'Content-Type: application/json' \
-            -d '{"inputs":["Project Snow 向量契约检查"]}' \
-            http://127.0.0.1:18001/embed \
-            | python -c 'import json, math, sys; payload = json.load(sys.stdin); vectors = payload["vectors"]; assert len(vectors) == 1 and len(vectors[0]) == 512; assert all(math.isfinite(value) for value in vectors[0])'
+          digest=""
+          source_sha=""
+          for candidate in $(git rev-list --first-parent "$start"); do
+            if image_info="$(docker buildx imagetools inspect "$IMAGE:$candidate" 2>/dev/null)"; then
+              digest="$(printf '%s\n' "$image_info" | awk '/^Digest:/ {print $2; exit}')"
+              if [ -n "$digest" ]; then
+                source_sha="$candidate"
+                break
+              fi
+            fi
+          done
+          test -n "$digest"
+          echo "Resolved previous embedding digest from ancestor $source_sha."
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Embedding 512-dimension inference and old-vs-new vector equivalence
+        if: ${{ always() && !cancelled() && steps.embedding-build.outcome == 'success' && steps.embedding-previous.outcome == 'success' }}
+        env:
+          IMAGE: ghcr.io/x1aob/project_snow-embedding
+          PREVIOUS_DIGEST: ${{ steps.embedding-previous.outputs.digest }}
+        run: |
+          cleanup() {
+            docker rm -f snow-embedding snow-embedding-old >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker pull "$IMAGE@$PREVIOUS_DIGEST"
+          docker run -d --name snow-embedding -p 18001:8000 project-snow-embedding:ci
+          docker run -d --name snow-embedding-old -p 18002:8000 "$IMAGE@$PREVIOUS_DIGEST"
+          for port in 18001 18002; do
+            ready=false
+            for i in $(seq 1 120); do
+              if curl -fsS "http://127.0.0.1:$port/health" >/dev/null; then
+                ready=true
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ready" != true ]; then
+              docker logs snow-embedding
+              docker logs snow-embedding-old
+              exit 1
+            fi
+          done
+          python App/scripts/compare_embedding_vectors.py payload > payload.json
+          curl -fsS -H 'Content-Type: application/json' -d @payload.json \
+            http://127.0.0.1:18001/embed > embed-new.json
+          curl -fsS -H 'Content-Type: application/json' -d @payload.json \
+            http://127.0.0.1:18002/embed > embed-old.json
+          # Keep the 512-dimension / finite-value check on the freshly built image.
+          python -c 'import json, math; vectors = json.load(open("embed-new.json"))["vectors"]; assert len(vectors) >= 1 and all(len(v) == 512 for v in vectors); assert all(math.isfinite(value) for v in vectors for value in v)'
+          python App/scripts/compare_embedding_vectors.py compare embed-old.json embed-new.json
       - name: Enforce embedding vulnerability gate
         if: ${{ always() && !cancelled() && steps.embedding-scan.outcome == 'success' }}
         run: python App/scripts/report_trivy_findings.py trivy-embedding.json
