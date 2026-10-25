@@ -85,6 +85,15 @@ P8 起舞台延伸到输入栏下面：`app.js` 用 ResizeObserver 把 `#compose
 - 首屏。`snow-world.js` 的整行注释全部移到本文末尾「`modules/snow-world.js` 的行注释」，首屏从剩 60B 变为剩约 1.3KB。
 - 测试。`tests/test_snow_adv_features_ui.py`：`test_long_action_gets_its_own_page_instead_of_squeezing_the_line`（两种尺寸：旁白页在前、按顺序覆盖动作描写和台词、旁白不再出现在台词页、不压菜单不出框；一行动作描写仍与台词同页）、`test_previous_page_button_and_keys_return_to_the_page_before`、`test_time_of_day_change_crossfades_the_whole_page`（过渡约 1.6 秒且背景与色调一起换；减少动态和关闭动态时直接切换）。`tests/test_snow_reading_reminder_logic.py`：旁白页的顺序、已读、首次绘制、朗读和上一页，以及不合法旁白页被拒。
 
+## 回到上次的聊天与启动请求（1.0.1，2026-10-25）
+
+小B反馈两处：再次打开网站后看不到上次通讯器的聊天记录；首次进入比较卡。
+
+- 上次的角色。记录本来就在浏览器 IndexedDB 里（只按角色保存），但 `loadCharacters()` 每次都选名单第一位，并在 `selectCharacter()` 里把它的 `lastActiveAt` 顶到最前，所以回访时停在别人的空会话上。现在 `selectCharacter()` 选定后把 `lastCharacterId` 写进 `app_state` 的 `ui_preferences`（与置顶、收藏同一条记录，清空本地数据时一起删除；只读标签页不写），`loadCharacters()` 优先恢复它，找不到才退回第一位。该角色上次在通讯器里就打开通讯器，在面对面就回到面对面（沿用线程自己的 `channel`）。
+- 启动请求。原来的链路是文档 → `app.js` → 它静态导入的 4 个模块 → 打开 IndexedDB、迁移本地状态 → `/public/v1/config` → `/public/v1/characters`，每一层要等上一层。`index.html` 现在用 `modulepreload` 预取 `app.js` 和 `runtime.js`、`dialogue-context.js`、`snow-icons.js`、`snow-world.js`，用 `preload as="fetch" crossorigin="anonymous"` 预取两个接口（与 `api()` 的 `credentials: "same-origin"`、默认 `cors` 一致，浏览器才会复用）。`snow-adv-fonts.css` 不预取：字体只在开关打开后才加载（`test_story_font_is_not_part_of_the_eager_stylesheet`）。`boot()` 一开始就发出这两个请求，`loadConfig()`、`loadCharacters()` 通过 `takeBootRequest()` 各取用一次，之后的调用照常重新请求。指纹化脚本按清单改写 `index.html` 里所有带引号的资源地址，预取地址与实际导入地址一致。
+- 测量。本地文本资源 gzip、手机 390px、250ms 延迟、1.5Mbps、CPU 4 倍降速、已读告示的回访：启动完成 3274→2495ms，配置就绪 2452→1106ms，首屏模块就绪 2074→1240ms（各 5 次取中位数）。剩下约 1.3 秒是 `app.js` 解析与启动本身，要再降得拆分 `app.js`。
+- 测试。`tests/test_public_frontend_e2e.py::test_returning_visitor_reopens_the_last_conversation_with_one_boot_request_each`：选第二位角色发一句后刷新，回到这位角色、通讯器里能看到那句；配置与角色列表各只请求一次，且由 `link` 预取取回。去掉恢复、去掉预取、把预取凭据改成 `use-credentials` 时这项测试都会失败。
+
 ## snow-adv.css
 
 ### `html[data-ui="snow-adv"] {`

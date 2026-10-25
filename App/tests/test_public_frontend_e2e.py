@@ -874,6 +874,46 @@ class PublicFrontendE2ETests(TestCase):
             finally:
                 browser.close()
 
+    def test_returning_visitor_reopens_the_last_conversation_with_one_boot_request_each(self):
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            try:
+                page = browser.new_page()
+                page.goto(self.base_url, wait_until="networkidle")
+                page.locator("#accept-experience-notice").click()
+                page.wait_for_function("document.querySelector('#connection-status').textContent === '服务已连接'")
+                if page.locator("#contact-panel").get_attribute("aria-hidden") == "true":
+                    page.locator("#open-contacts").click()
+                # Not the first character of the roster: that one was opened on every visit.
+                page.locator('[data-character="9f5804761c56"]').click()
+                page.wait_for_function("document.querySelector('#active-character h1')?.textContent === '安卡希雅'")
+                self._configure_model(page)
+                page.locator("#message-input").fill("下次再聊")
+                page.locator("#send-message").click()
+                page.locator("#timeline").get_by_text("晚上好，分析员。").wait_for(state="visible")
+
+                boot_requests = []
+                page.on("request", lambda request: boot_requests.append(urlparse(request.url).path))
+                page.reload(wait_until="networkidle")
+                page.wait_for_function("document.querySelector('#connection-status').textContent === '服务已连接'")
+                page.wait_for_function("document.querySelector('#active-character h1')?.textContent === '安卡希雅'")
+                page.locator("#timeline").get_by_text("下次再聊").wait_for(state="visible")
+                self.assertEqual(
+                    page.locator('[data-character="9f5804761c56"]').get_attribute("aria-current"), "true"
+                )
+                # index.html preloads both; app.js must reuse them, not fetch again.
+                self.assertEqual(boot_requests.count("/public/v1/config"), 1, boot_requests)
+                self.assertEqual(boot_requests.count("/public/v1/characters"), 1, boot_requests)
+                initiators = page.evaluate(
+                    """['/public/v1/config', '/public/v1/characters'].map(path => performance
+                      .getEntriesByType('resource')
+                      .filter(entry => new URL(entry.name).pathname === path)
+                      .map(entry => entry.initiatorType))"""
+                )
+                self.assertEqual(initiators, [["link"], ["link"]])
+            finally:
+                browser.close()
+
     def test_statistics_failures_allow_chat_under_production_csp(self):
         caddy = (APP_ROOT / "infra/Caddyfile").read_text(encoding="utf-8")
         PublicFrontendHandler.content_security_policy = next(
