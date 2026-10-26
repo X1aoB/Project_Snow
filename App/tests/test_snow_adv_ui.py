@@ -221,8 +221,10 @@ class SnowAdvBrowserTests(TestCase):
         self.page.set_default_timeout(8000)
 
     def tearDown(self):
-        self.browser.close()
-        self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
 
     def open(self, enabled: bool):
         def configure(route):
@@ -424,8 +426,10 @@ class SnowAdvStageTests(TestCase):
         self.page = None
 
     def tearDown(self):
-        self.browser.close()
-        self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
 
     def _page(self, width=1280, height=820):
         page = self.browser.new_page(viewport={"width": width, "height": height})
@@ -788,8 +792,10 @@ class SnowAdvPerformanceTests(TestCase):
         self.page = None
 
     def tearDown(self):
-        self.browser.close()
-        self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
 
     def _page(self, width=1280, height=820, reduced_motion=None):
         page = self.browser.new_page(viewport={"width": width, "height": height}, reduced_motion=reduced_motion)
@@ -1090,8 +1096,10 @@ class SnowAdvCommunicatorTests(TestCase):
         self.page = None
 
     def tearDown(self):
-        self.browser.close()
-        self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
 
     def _page(self, width=1280, height=820):
         page = self.browser.new_page(viewport={"width": width, "height": height})
@@ -1367,8 +1375,10 @@ class SnowAdvOpeningTests(TestCase):
         self.page = None
 
     def tearDown(self):
-        self.browser.close()
-        self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
 
     def _page(self, width=1280, height=820, reduced_motion=None):
         page = self.browser.new_page(viewport={"width": width, "height": height}, reduced_motion=reduced_motion)

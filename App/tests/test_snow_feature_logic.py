@@ -91,8 +91,10 @@ class SnowFeatureLogicTests(TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close()
-        cls.playwright.stop()
+        try:
+            cls.browser.close()
+        finally:
+            cls.playwright.stop()
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=5)

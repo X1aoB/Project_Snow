@@ -108,6 +108,13 @@ def backup(paths: Paths, execute: Callable[[list[str]], str] = run,
                 if source.is_symlink():
                     raise MaintenanceError("Immutable package root must not be a symlink")
                 sources.append(source)
+        # Retired anchors / origin-edge snapshots stay recoverable from every
+        # later snapshot too, not only from the backups taken before retirement.
+        retired = paths.root / "retired"
+        if retired.exists() or retired.is_symlink():
+            if retired.is_symlink():
+                raise MaintenanceError("Retired recovery records must not be a symlink")
+            sources.append(retired)
         sources = [source for source in sources if source.exists()]
         tag = f"project-snow-pinned-{active['commit_sha']}" if pin else BACKUP_TAG
         output = execute(["restic", "backup", "--json", "--tag", tag, "--", *map(str, sources)])

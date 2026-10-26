@@ -17,6 +17,23 @@ from maintenance import (DIGEST, OBJECT_ID, SHA, SHARED_IMAGE_KEYS, MaintenanceE
 
 ANCHOR_ID = re.compile(r"^[0-9a-f]{40}-[0-9a-f]{64}$")
 SNOW_REPOSITORIES = {"ghcr.io/x1aob/project_snow-public", "ghcr.io/x1aob/project_snow-embedding"}
+# x.Y.0 feature-release version, the only app_version a baseline may carry
+# (see the owner version rule), plus the grandfathered 1.0.0 baseline below.
+FEATURE_VERSION = re.compile(r"^[0-9]+\.[0-9]+\.0$")
+# Baseline #1: the last 1.0.0 release. PUBLIC_APP_VERSION stayed 1.0.0 across
+# many builds since 2026-09-09, so its manifest app_version is 1.0.0 (a z.0
+# release by the feature rule only accidentally) and this specific release id
+# is grandfathered: baseline-mark accepts 1.0.0 only for exactly this id.
+GRANDFATHERED_BASELINE_ID = "0c27109f1b02fbbcb409366f5fb1bbf7c850d2d7-6dcfa1b28547eb8d875b6912f9b27b1e4b0745e77f3ad5ecea325e96dc4c7681"
+MAX_ACTIVE_BASELINES = 2
+BASELINE_REGISTRY_SCHEMA = "project-snow-baseline-registry-1"
+# Immutable origin-edge listener snapshots, named by their own sha256
+# (promote.sh persist_live_origin_edge_binding). The origin-edge service runs only
+# ${CADDY_IMAGE} (compose.prod.yml), and every compose command promote.sh runs
+# with such a snapshot targets origin-edge alone, so only that key pins an image.
+ORIGIN_EDGE_SNAPSHOT = re.compile(r"^[0-9a-f]{64}\.compose\.env$")
+ORIGIN_EDGE_PROTECTED_KEYS = ("CADDY_IMAGE",)
+LIVE_ORIGIN_EDGE_SCHEMA = "project-snow-live-origin-edge-1"
 LEGACY_BASELINE_ID = "baseline-502ec99-0.9.6-20260907"
 LEGACY_BASELINE_SHA = "502ec99412bef843c37e4b31a53df8fa9faeb33c"
 LEGACY_BASELINE_FILES = frozenset({
@@ -365,6 +382,379 @@ def restore_colour(paths: Paths, identifier: str, colour: str) -> dict[str, Any]
             "next_command": f"project-snow-release rollback {colour} {metadata['commit_sha']}"}
 
 
+# --- Stable rollback baselines and reversible retirement ---------------------
+#
+# Retention policy (owner decision): the host keeps only the active colour's
+# release, the inactive colour's release (one-step rollback) and the two most
+# recent stable baselines. Everything else is RETIRED -- moved out of the
+# GC-protected namespace, never deleted here -- and recoverable from restic +
+# GHCR digests. Retired items live under paths.root/"retired", a sibling of
+# releases/ and runtime/, so protected_image_references()'s releases.rglob and
+# runtime.rglob scans no longer see them, while anchor-unretire can move them
+# back atomically on the same filesystem.
+
+
+def _retired_root(paths: Paths, kind: str) -> Path:
+    if kind not in {"anchors", "runtime-origin-edge"}:
+        raise MaintenanceError("Unknown retired-area kind")
+    return paths.root / "retired" / kind
+
+
+def _anchor_index(paths: Paths) -> dict[str, Any]:
+    """Read releases/anchors/latest.json: the active + inactive colour anchors.
+
+    These two anchor ids are the one-step rollback material and are never
+    retirable. A missing or malformed index is treated as protecting nothing
+    extra beyond the live colours the callers independently verify.
+    """
+    path = paths.root / "releases" / "anchors" / "latest.json"
+    if not path.exists() and not path.is_symlink():
+        return {}
+    index = json.loads(read_text(path))
+    colours = index.get("colours")
+    if index.get("schema_version") != "project-snow-anchor-index-1" or not isinstance(colours, dict):
+        raise MaintenanceError("Recovery anchor index is malformed")
+    return index
+
+
+def _referenced_colour_anchors(paths: Paths) -> set[str]:
+    index = _anchor_index(paths)
+    referenced = set()
+    for value in (index.get("colours") or {}).values():
+        if ANCHOR_ID.fullmatch(str(value)):
+            referenced.add(value)
+    if ANCHOR_ID.fullmatch(str(index.get("active", ""))):
+        referenced.add(index["active"])
+    return referenced
+
+
+def _anchor_index_is_fresh(paths: Paths) -> bool:
+    """True when latest.json names an anchor of exactly each colour's current release.
+
+    archive_colours() runs at stage, BEFORE a promotion, so after promoting the
+    index still names the slot's previous occupant until the next `anchor`.
+    Retirement trusts the index only when it matches the live colour markers.
+    """
+    index = _anchor_index(paths)
+    colours = index.get("colours") or {}
+    for colour in ("blue", "green"):
+        marker = paths.root / "releases" / "colours" / colour
+        if not marker.exists():
+            return False
+        commit = read_text(marker).split()[1]
+        if not str(colours.get(colour, "")).startswith(commit + "-"):
+            return False
+    return True
+
+
+def _require_fresh_anchor_index(paths: Paths) -> None:
+    if not _anchor_index_is_fresh(paths):
+        raise MaintenanceError("The anchor index does not match both colours; run `maintenance.py anchor` first")
+
+
+def baseline_registry(paths: Paths) -> dict[str, Any]:
+    """Return the root-owned baseline registry, or an empty default.
+
+    The registry is a single root-only file. 'active' lists the current stable
+    baselines newest-first (at most MAX_ACTIVE_BASELINES); 'retirable' lists
+    baselines demoted out of the active window and now eligible for anchor
+    retirement. Neither list ever deletes anything.
+    """
+    path = paths.root / "releases" / "baselines" / "registry.json"
+    if not path.exists() and not path.is_symlink():
+        return {"schema_version": BASELINE_REGISTRY_SCHEMA, "active": [], "retirable": []}
+    require_regular(path, private=True)
+    registry = json.loads(read_text(path))
+    active = registry.get("active")
+    retirable = registry.get("retirable")
+    if (registry.get("schema_version") != BASELINE_REGISTRY_SCHEMA
+            or not isinstance(active, list) or not isinstance(retirable, list)
+            or any(not isinstance(item, dict) for item in active + retirable)):
+        raise MaintenanceError("Baseline registry is malformed")
+    for item in active + retirable:
+        if (set(item) != {"release_id", "app_version", "commit_sha", "marked_at"}
+                or not ANCHOR_ID.fullmatch(str(item.get("release_id")))):
+            raise MaintenanceError("Baseline registry entry is malformed")
+    return registry
+
+
+def _write_baseline_registry(paths: Paths, registry: dict[str, Any]) -> None:
+    directory = paths.root / "releases" / "baselines"
+    directory.mkdir(mode=0o700, exist_ok=True)
+    _controlled_directory(directory)
+    atomic_write(directory / "registry.json", (json.dumps(registry, sort_keys=True, indent=2) + "\n").encode())
+
+
+def baseline_mark(paths: Paths, identifier: str) -> dict[str, Any]:
+    """Mark an anchor as a stable baseline. Idempotent; at most 2 active.
+
+    Verifies the anchor, requires a feature-release (x.Y.0) app_version except
+    for the grandfathered 1.0.0 baseline, and refuses symlinks/unsafe perms via
+    verify_anchor's root-controlled checks. Marking a third baseline DEMOTES the
+    oldest active one to 'retirable' (never deletes it).
+    """
+    _anchor, metadata = verify_anchor(paths, identifier)
+    manifest = json.loads(read_text(paths.root / "releases" / "anchors" / identifier / "manifest.json"))
+    app_version = str(manifest.get("app_version", ""))
+    # 1.0.0 was reused across many builds, so it is NOT a trustworthy feature
+    # marker: accept it ONLY for the one grandfathered baseline id. Every other
+    # baseline must carry a genuine x.Y.0 feature version that is not 1.0.0.
+    grandfathered = identifier == GRANDFATHERED_BASELINE_ID and app_version == "1.0.0"
+    if not grandfathered and (app_version == "1.0.0" or not FEATURE_VERSION.fullmatch(app_version)):
+        raise MaintenanceError("A baseline must be a feature release (x.Y.0) or the grandfathered 1.0.0 baseline")
+    registry = baseline_registry(paths)
+    active = [item for item in registry["active"] if item["release_id"] != identifier]
+    retirable = [item for item in registry["retirable"] if item["release_id"] != identifier]
+    entry = {"release_id": identifier, "app_version": app_version,
+             "commit_sha": metadata["commit_sha"], "marked_at": datetime.now(timezone.utc).isoformat()}
+    active.insert(0, entry)
+    demoted = []
+    while len(active) > MAX_ACTIVE_BASELINES:
+        old = active.pop()
+        demoted.append(old["release_id"])
+        retirable.insert(0, old)
+    registry = {"schema_version": BASELINE_REGISTRY_SCHEMA, "active": active, "retirable": retirable}
+    _write_baseline_registry(paths, registry)
+    return {"status": "ok", "release_id": identifier, "app_version": app_version,
+            "active_baselines": [item["release_id"] for item in active], "demoted_to_retirable": demoted}
+
+
+def _baseline_sets(paths: Paths) -> tuple[set[str], set[str]]:
+    registry = baseline_registry(paths)
+    active = {item["release_id"] for item in registry["active"]}
+    retirable = {item["release_id"] for item in registry["retirable"]}
+    return active, retirable
+
+
+def _protected_anchor_ids(paths: Paths) -> set[str]:
+    """Anchor ids that must never be retired: the live colours and current baselines."""
+    active_baselines, _ = _baseline_sets(paths)
+    return _referenced_colour_anchors(paths) | active_baselines
+
+
+def retire_plan(paths: Paths) -> dict[str, Any]:
+    """Dry-run: compute the anchor dirs eligible for reversible retirement.
+
+    An ANCHOR_ID anchor is retirable when it is neither a live-colour anchor
+    (latest.json), nor a current (active) baseline. Active baselines and the
+    two colour anchors stay; registry 'retirable' baselines are listed as
+    retirable like any other non-protected anchor. The legacy 0.9.6 baseline is
+    reported separately (it has permanent restic snapshots and is retired only
+    on explicit request).
+    """
+    anchors = paths.root / "releases" / "anchors"
+    protected = _protected_anchor_ids(paths)
+    retirable, present_legacy = [], False
+    if anchors.exists():
+        _controlled_directory(anchors)
+        for child in sorted(anchors.iterdir()):
+            if ANCHOR_ID.fullmatch(child.name):
+                if child.name not in protected:
+                    retirable.append(child.name)
+            elif child.name == LEGACY_BASELINE_ID:
+                present_legacy = True
+    return {"schema_version": "project-snow-retire-plan-1", "protected": sorted(protected),
+            "anchor_index_fresh": _anchor_index_is_fresh(paths),
+            "retirable_anchors": retirable, "legacy_baseline_retirable": present_legacy,
+            "origin_edge_snapshots_retirable": _retirable_origin_edge_snapshots(paths),
+            "note": "Reversible: anchor-retire / origin-edge-retire move these under retired/; images only they pinned become GC candidates. anchor-unretire / origin-edge-unretire reverse it."}
+
+
+def _backup_precondition(paths: Paths, release_id: str) -> None:
+    """Refuse to retire an anchor without a concrete, completed backup.
+
+    Reversible retirement already keeps the bytes on disk, but the owner policy
+    is that an anchor leaves the protected set only once its contents are also
+    captured off the protected namespace. The precondition is a successful
+    backup (backups/last-success.json) completed after the anchor directory was
+    created, OR the legacy baseline's permanent pinned restic snapshots.
+    """
+    if release_id == LEGACY_BASELINE_ID:
+        return  # permanent pinned restic snapshots (see RECOVERY.md)
+    anchor = paths.root / "releases" / "anchors" / release_id
+    success = paths.root / "backups" / "last-success.json"
+    if not success.exists():
+        raise MaintenanceError("No successful backup on record; run backup before retiring an anchor")
+    record = json.loads(read_text(success))
+    completed = record.get("completed_at")
+    if record.get("schema_version") != "project-snow-backup-success-1" or not isinstance(completed, str):
+        raise MaintenanceError("Backup success record is malformed")
+    anchor_created = datetime.fromtimestamp(anchor.stat().st_ctime, timezone.utc)
+    try:
+        completed_at = datetime.fromisoformat(completed)
+    except ValueError as exc:
+        raise MaintenanceError("Backup success timestamp is invalid") from exc
+    if completed_at <= anchor_created:
+        raise MaintenanceError("The latest successful backup predates this anchor; back up before retiring it")
+
+
+def _atomic_rename_dir(source: Path, destination: Path) -> None:
+    if destination.exists() or destination.is_symlink():
+        raise MaintenanceError("Retirement destination already exists")
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _controlled_directory(destination.parent)
+    # Moving a directory to another parent rewrites its "..", which Linux allows
+    # only with write access to the directory itself. Anchors are 0o500; root
+    # (the host) passes through CAP_DAC_OVERRIDE, so there this stays a plain
+    # rename. Only a non-root caller (the test suite) lends owner-write for the
+    # move and then puts the exact mode back.
+    mode = stat.S_IMODE(source.lstat().st_mode)
+    lend = hasattr(os, "geteuid") and os.geteuid() != 0 and not mode & stat.S_IWUSR
+    if lend:
+        source.chmod(mode | stat.S_IWUSR)
+    try:
+        os.rename(source, destination)  # same filesystem; atomic
+    except BaseException:
+        if lend:
+            source.chmod(mode)
+        raise
+    if lend:
+        destination.chmod(mode)
+    sync(destination.parent)
+    sync(source.parent)
+
+
+def anchor_retire(paths: Paths, release_id: str) -> dict[str, Any]:
+    """Reversibly retire one anchor dir out of releases/anchors.
+
+    Refuses the active colour's anchor, the inactive colour's anchor, any anchor
+    referenced by releases/anchors/latest.json, and any CURRENT baseline. The
+    legacy 0.9.6 baseline uses the same mechanism (kind 'runtime-origin-edge' is
+    for compose snapshots; anchors use kind 'anchors'). A concrete backup
+    precondition must hold. restore-anchor and gc-plan no longer see it.
+    """
+    is_legacy = release_id == LEGACY_BASELINE_ID
+    if not is_legacy and not ANCHOR_ID.fullmatch(release_id):
+        raise MaintenanceError("Invalid anchor release id")
+    anchors = paths.root / "releases" / "anchors"
+    _controlled_directory(anchors)
+    source = anchors / release_id
+    if not source.is_dir() or source.is_symlink():
+        raise MaintenanceError("Anchor directory is missing or linked")
+    _require_fresh_anchor_index(paths)
+    if not is_legacy:
+        verify_anchor(paths, release_id)
+        protected = _protected_anchor_ids(paths)
+        if release_id in protected:
+            raise MaintenanceError("Refusing to retire a live-colour anchor or a current baseline")
+    if release_id in _referenced_colour_anchors(paths):
+        raise MaintenanceError("Refusing to retire an anchor referenced by latest.json")
+    _backup_precondition(paths, release_id)
+    destination = _retired_root(paths, "anchors") / release_id
+    _atomic_rename_dir(source, destination)
+    return {"status": "retired", "release_id": release_id, "retired_path": str(destination),
+            "reversible": True, "unretire_command": f"anchor-unretire --release-id {release_id}"}
+
+
+def anchor_unretire(paths: Paths, release_id: str) -> dict[str, Any]:
+    """Move a retired anchor dir back into releases/anchors (reverse of retire)."""
+    is_legacy = release_id == LEGACY_BASELINE_ID
+    if not is_legacy and not ANCHOR_ID.fullmatch(release_id):
+        raise MaintenanceError("Invalid anchor release id")
+    source = _retired_root(paths, "anchors") / release_id
+    if not source.is_dir() or source.is_symlink():
+        raise MaintenanceError("Retired anchor is missing or linked")
+    anchors = paths.root / "releases" / "anchors"
+    anchors.mkdir(mode=0o700, exist_ok=True)
+    _controlled_directory(anchors)
+    _atomic_rename_dir(source, anchors / release_id)
+    if not is_legacy:
+        verify_anchor(paths, release_id)
+    else:
+        verify_legacy_baseline(paths)
+    return {"status": "unretired", "release_id": release_id}
+
+
+def _live_origin_edge_snapshot(paths: Paths) -> Path:
+    """The one runtime/origin-edge snapshot the running listener is bound to.
+
+    Mirrors promote.sh's validation of releases/live-origin-edge-config.json:
+    schema, a <sha256>.compose.env path directly under runtime/origin-edge, and
+    file bytes hashing to that name. Anything else refuses (never guesses).
+    """
+    binding_path = paths.root / "releases" / "live-origin-edge-config.json"
+    if not binding_path.exists() or binding_path.is_symlink():
+        raise MaintenanceError("No live origin-edge binding; refusing to retire origin-edge snapshots")
+    require_regular(binding_path, private=True)
+    binding = json.loads(read_text(binding_path))
+    origin = paths.root / "runtime" / "origin-edge"
+    env_path = Path(str(binding.get("origin_edge_env_path", "")))
+    env_sha = str(binding.get("origin_edge_env_sha256", ""))
+    if (binding.get("schema_version") != "project-snow-config-snapshot-1"
+            or binding.get("live_origin_edge_schema") != LIVE_ORIGIN_EDGE_SCHEMA
+            or env_path.parent != origin or env_path.name != f"{env_sha}.compose.env"
+            or not ORIGIN_EDGE_SNAPSHOT.fullmatch(env_path.name)):
+        raise MaintenanceError("Live origin-edge binding is malformed")
+    if not env_path.is_file() or env_path.is_symlink():
+        raise MaintenanceError("Live origin-edge snapshot is missing or linked")
+    require_regular(env_path, private=True)
+    if digest(env_path.read_bytes()) != env_sha:
+        raise MaintenanceError("Live origin-edge snapshot bytes do not match the binding")
+    return env_path
+
+
+def _retirable_origin_edge_snapshots(paths: Paths) -> list[str]:
+    origin = paths.root / "runtime" / "origin-edge"
+    if not origin.exists() and not origin.is_symlink():
+        return []
+    _controlled_directory(origin)
+    live = _live_origin_edge_snapshot(paths)
+    names = []
+    for child in sorted(origin.iterdir()):
+        if child.is_symlink() or not child.is_file() or not ORIGIN_EDGE_SNAPSHOT.fullmatch(child.name):
+            raise MaintenanceError("Unexpected entry in runtime/origin-edge")
+        if child != live:
+            names.append(child.name)
+    return names
+
+
+def origin_edge_snapshot_retire(paths: Paths) -> dict[str, Any]:
+    """Reversibly retire every runtime/origin-edge snapshot except the live binding.
+
+    Only releases/live-origin-edge-config.json's snapshot is read by promote.sh
+    (retain / overlay / restore of the running listener); older snapshots are
+    history whose only effect is to pin old images in protected_image_references.
+    """
+    origin = paths.root / "runtime" / "origin-edge"
+    names = _retirable_origin_edge_snapshots(paths)
+    destination_root = _retired_root(paths, "runtime-origin-edge")
+    retired = []
+    for name in names:
+        destination = destination_root / name
+        if destination.exists() or destination.is_symlink():
+            raise MaintenanceError("Origin-edge retirement destination already exists")
+        destination_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _controlled_directory(destination_root)
+        os.rename(origin / name, destination)
+        retired.append(name)
+    if retired:
+        sync(destination_root)
+        sync(origin)
+    return {"status": "ok", "retired": retired, "kept_live": _live_origin_edge_snapshot(paths).name,
+            "retired_root": str(destination_root),
+            "unretire_command": "origin-edge-unretire --name <sha256>.compose.env"}
+
+
+def origin_edge_snapshot_unretire(paths: Paths, name: str) -> dict[str, Any]:
+    """Move one retired origin-edge snapshot back under runtime/origin-edge."""
+    if not ORIGIN_EDGE_SNAPSHOT.fullmatch(name):
+        raise MaintenanceError("Invalid origin-edge snapshot name")
+    source = _retired_root(paths, "runtime-origin-edge") / name
+    if not source.is_file() or source.is_symlink():
+        raise MaintenanceError("Retired origin-edge snapshot is missing or linked")
+    if digest(source.read_bytes()) != name.split(".", 1)[0]:
+        raise MaintenanceError("Retired origin-edge snapshot bytes do not match its name")
+    origin = paths.root / "runtime" / "origin-edge"
+    _controlled_directory(origin)
+    destination = origin / name
+    if destination.exists() or destination.is_symlink():
+        raise MaintenanceError("Origin-edge snapshot already present")
+    os.rename(source, destination)
+    sync(origin)
+    sync(source.parent)
+    return {"status": "unretired", "name": name}
+
+
 def protected_image_references(paths: Paths, *, strict_unknown: bool = True) -> set[str]:
     references: set[str] = set()
     releases = paths.root / "releases"
@@ -388,7 +778,13 @@ def protected_image_references(paths: Paths, *, strict_unknown: bool = True) -> 
         if environment.is_symlink():
             raise MaintenanceError("Unexpected symlink in retained runtime metadata")
         if environment.name == "compose.env" or environment.name.endswith(".compose.env"):
-            references.update(value for value in read_environment(environment).values() if DIGEST.fullmatch(value))
+            values = read_environment(environment)
+            if environment.parent == runtime / "origin-edge" and ORIGIN_EDGE_SNAPSHOT.fullmatch(environment.name):
+                # A listener snapshot is only ever used to (re)create origin-edge,
+                # which runs CADDY_IMAGE alone; its other keys are incidental
+                # copies of the slot it was taken from and pin nothing.
+                values = {key: values.get(key, "") for key in ORIGIN_EDGE_PROTECTED_KEYS}
+            references.update(value for value in values.values() if DIGEST.fullmatch(value))
     for manifest in releases.rglob("*-manifest.json"):
         document = json.loads(read_text(manifest))
         for field in ("application", "embedding"):

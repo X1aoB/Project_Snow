@@ -57,7 +57,10 @@ class CredentialRetentionUITests(TestCase):
         self.counter = 0
 
     def tearDown(self):
-        self.browser.close(); self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
 
     def alive(self, credential):
         """Mirror public_security.open_byok_credential: a successful revoke invalidates every retained (v2)

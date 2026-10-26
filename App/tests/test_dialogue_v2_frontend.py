@@ -199,7 +199,10 @@ class DialogueV2FrontendTests(TestCase):
 
     def tearDown(self):
         DialogueHandler.join_release.set()
-        self.browser.close(); self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
 
     def open(self, v2=True, motion=True, memory=True, snow=False):
         DialogueHandler.memory_enabled = memory
@@ -883,7 +886,10 @@ class SnowAdvVeilProductionTests(TestCase):
 
     def tearDown(self):
         DialogueHandler.join_release.set()
-        self.browser.close(); self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
 
     def _open(self, width=1200, height=850, reduced_motion="no-preference", motion_pref=None, snow=True):
         page = self.browser.new_page(viewport={"width": width, "height": height}, reduced_motion=reduced_motion)
