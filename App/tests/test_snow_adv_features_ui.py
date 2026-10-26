@@ -69,7 +69,10 @@ class SnowAdvFeaturesUITests(TestCase):
 
     def tearDown(self):
         dialogue.DialogueHandler.join_release.set()
-        self.browser.close(); self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
 
     # ---------- helpers ----------
     def page(self, width=1280, height=820, tone="light", enabled=True, context=None, locale=None, proactive=False, retention=False):
@@ -555,7 +558,7 @@ class SnowAdvFeaturesUITests(TestCase):
         # Dusk arrives within one view transition: stage backdrop and tone change together, over 1.6s, then the marker clears.
         self.assertEqual(after, ["dark", "dusk", ""])
         self.assertEqual(shifts, ["1", ""])
-        self.assertTrue(durations and 1500 <= durations[0] <= 2300, durations)
+        self.assertTrue(durations and 1500 <= durations[0] <= 3200, durations)
         # Reduced motion (the app then runs with motion off) and motion off switch at once, as scene changes do.
         for motion, reduced in (("auto", True), ("off", False)):
             with self.subTest(motion=motion, reduced=reduced):

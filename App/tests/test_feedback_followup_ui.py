@@ -122,8 +122,10 @@ class FeedbackFollowupUITests(TestCase):
 
     def tearDown(self):
         FollowupHandler.release.set()
-        self.browser.close()
-        self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
         fixture.PublicFrontendE2ETests.setUp(self)
 
     def open(self):

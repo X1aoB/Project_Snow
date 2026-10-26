@@ -124,7 +124,10 @@ class SnowAdvScenesTests(TestCase):
 
     def tearDown(self):
         JointHandler.join_release.set()
-        self.browser.close(); self.playwright.stop()
+        try:
+            self.browser.close()
+        finally:
+            self.playwright.stop()
 
     def page(self, width=1280, height=820, tone="light", enabled=True, motion="auto"):
         page = self.browser.new_page(viewport={"width": width, "height": height}, timezone_id="Asia/Hong_Kong",
