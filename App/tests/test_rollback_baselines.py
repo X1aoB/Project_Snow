@@ -141,15 +141,20 @@ def test_anchor_retire_is_reversible_and_hidden_from_gc_and_restore(state):
     release_state.archive_colours(state)
     retirable = _extra_anchor(state, "1.1.0", "e")
     assert retirable in release_state.protected_image_references(state, strict_unknown=True) or True
+    mode = (state.root / "releases" / "anchors" / retirable).stat().st_mode & 0o777
     result = release_state.anchor_retire(state, retirable)
     assert result["reversible"] is True
     assert not (state.root / "releases" / "anchors" / retirable).exists()
     assert (state.root / "retired" / "anchors" / retirable).is_dir()
+    # The move keeps the anchor's read-only mode (Linux needs write access on a
+    # directory to re-parent it; a non-root caller lends it only for the move).
+    assert (state.root / "retired" / "anchors" / retirable).stat().st_mode & 0o777 == mode
     # gc-plan / protected_image_references no longer walk it (sibling of releases).
     release_state.protected_image_references(state, strict_unknown=True)
     # Reversible.
     release_state.anchor_unretire(state, retirable)
     assert (state.root / "releases" / "anchors" / retirable).is_dir()
+    assert (state.root / "releases" / "anchors" / retirable).stat().st_mode & 0o777 == mode
 
 
 def test_anchor_retire_refuses_live_colour_and_baseline(state):

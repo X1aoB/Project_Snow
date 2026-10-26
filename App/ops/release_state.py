@@ -593,7 +593,23 @@ def _atomic_rename_dir(source: Path, destination: Path) -> None:
         raise MaintenanceError("Retirement destination already exists")
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     _controlled_directory(destination.parent)
-    os.rename(source, destination)  # same filesystem; atomic
+    # Moving a directory to another parent rewrites its "..", which Linux allows
+    # only with write access to the directory itself. Anchors are 0o500; root
+    # (the host) passes through CAP_DAC_OVERRIDE, so there this stays a plain
+    # rename. Only a non-root caller (the test suite) lends owner-write for the
+    # move and then puts the exact mode back.
+    mode = stat.S_IMODE(source.lstat().st_mode)
+    lend = hasattr(os, "geteuid") and os.geteuid() != 0 and not mode & stat.S_IWUSR
+    if lend:
+        source.chmod(mode | stat.S_IWUSR)
+    try:
+        os.rename(source, destination)  # same filesystem; atomic
+    except BaseException:
+        if lend:
+            source.chmod(mode)
+        raise
+    if lend:
+        destination.chmod(mode)
     sync(destination.parent)
     sync(source.parent)
 
