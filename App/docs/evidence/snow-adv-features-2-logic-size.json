@@ -105,8 +105,8 @@
       {
         "path": "App/public_frontend/index.html",
         "lf_bytes": 40061,
-        "lf_sha256": "b2d5997796c3892325017d335b920d3da66555b3526238237302cd555abdaca0",
-        "gzip_bytes": 10711
+        "lf_sha256": "9383bf2833b216d9cc6237c0342816bc3adea401a1d4fe8f7655fc8e2880805b",
+        "gzip_bytes": 10710
       },
       {
         "path": "App/public_frontend/modules/runtime.js",
@@ -163,11 +163,11 @@
         "gzip_bytes": 95
       }
     ],
-    "gzip_sum_bytes": 191789
+    "gzip_sum_bytes": 191788
   },
-  "increase_bytes": 60635,
+  "increase_bytes": 60634,
   "budget_bytes": 61440,
-  "remaining_bytes": 805,
+  "remaining_bytes": 806,
   "app_hook_increase_bytes": 5517,
   "app_hook_budget_bytes": 6013,
   "passed": true,
