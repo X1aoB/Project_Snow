@@ -472,6 +472,20 @@ def main() -> int:
     restore_parser = commands.add_parser("restore-anchor")
     restore_parser.add_argument("--release-id", required=True)
     restore_parser.add_argument("--colour", choices=("blue", "green"), required=True)
+    baseline_parser = commands.add_parser("baseline-mark")
+    baseline_parser.add_argument("--release-id", required=True)
+    baseline_parser.add_argument("--lock-held", action="store_true")
+    commands.add_parser("baseline-list")
+    commands.add_parser("retire-plan")
+    for retire_operation in ("anchor-retire", "anchor-unretire"):
+        retire_parser = commands.add_parser(retire_operation)
+        retire_parser.add_argument("--release-id", required=True)
+        retire_parser.add_argument("--lock-held", action="store_true")
+    origin_retire_parser = commands.add_parser("origin-edge-retire")
+    origin_retire_parser.add_argument("--lock-held", action="store_true")
+    origin_unretire_parser = commands.add_parser("origin-edge-unretire")
+    origin_unretire_parser.add_argument("--name", required=True)
+    origin_unretire_parser.add_argument("--lock-held", action="store_true")
     commands.add_parser("gc-plan")
     gc_parser = commands.add_parser("gc-remove")
     gc_parser.add_argument("--image-id", action="append", required=True)
@@ -553,13 +567,20 @@ def main() -> int:
                 result = backup(paths, pin=args.pin) if args.operation == "backup" else restore_postgres(paths, args.dump, args.sha256)
         else:
             from release_state import (
+                anchor_retire,
+                anchor_unretire,
                 archive_colours,
+                baseline_mark,
+                baseline_registry,
                 delete_planned_images,
                 discard_candidate,
                 image_gc_plan,
+                origin_edge_snapshot_retire,
+                origin_edge_snapshot_unretire,
                 pin_recovery_environment,
                 record_candidate,
                 restore_colour,
+                retire_plan,
             )
 
             if os.geteuid() != 0:
@@ -572,6 +593,16 @@ def main() -> int:
                     result = pin_recovery_environment(paths, args.colour, args.data_root)
                 elif args.operation == "candidate-record":
                     result = record_candidate(paths, args.colour, args.manifest)
+                elif args.operation == "baseline-mark":
+                    result = baseline_mark(paths, args.release_id)
+                elif args.operation == "anchor-retire":
+                    result = anchor_retire(paths, args.release_id)
+                elif args.operation == "anchor-unretire":
+                    result = anchor_unretire(paths, args.release_id)
+                elif args.operation == "origin-edge-retire":
+                    result = origin_edge_snapshot_retire(paths)
+                elif args.operation == "origin-edge-unretire":
+                    result = origin_edge_snapshot_unretire(paths, args.name)
                 else:
                     result = discard_candidate(paths, args.sha, promoted=args.operation == "candidate-complete")
             else:
@@ -584,6 +615,20 @@ def main() -> int:
                         result = restore_colour(paths, args.release_id, args.colour)
                     elif args.operation == "gc-plan":
                         result = image_gc_plan(paths)
+                    elif args.operation == "baseline-mark":
+                        result = baseline_mark(paths, args.release_id)
+                    elif args.operation == "baseline-list":
+                        result = baseline_registry(paths)
+                    elif args.operation == "retire-plan":
+                        result = retire_plan(paths)
+                    elif args.operation == "anchor-retire":
+                        result = anchor_retire(paths, args.release_id)
+                    elif args.operation == "anchor-unretire":
+                        result = anchor_unretire(paths, args.release_id)
+                    elif args.operation == "origin-edge-retire":
+                        result = origin_edge_snapshot_retire(paths)
+                    elif args.operation == "origin-edge-unretire":
+                        result = origin_edge_snapshot_unretire(paths, args.name)
                     elif args.operation == "candidate-record":
                         result = record_candidate(paths, args.colour, args.manifest)
                     elif args.operation in {"candidate-complete", "discard-candidate"}:

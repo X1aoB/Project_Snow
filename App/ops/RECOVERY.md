@@ -64,6 +64,44 @@ python3 /usr/local/libexec/project-snow/maintenance.py gc-remove --image-id sha2
 
 删除前会逐项重新扫描；不使用 forced removal 或任何全局 prune。镜像显示的 Size 含共享层，不能相加当作预计可回收空间。
 
+## 稳定回滚基线与可逆退休
+
+保留策略（所有者决定）：主机只长期保留 (a) 活动 colour 的发布、(b) 非活动 colour 的发布（一步回滚）、(c) 最近 **2** 个稳定基线。其余锚点一律**退休**——移出受 GC 保护的命名空间、此处绝不删除——仍可由 restic + GHCR digest 恢复。退休项存放在 `/srv/project-snow/retired/`（`releases/`、`runtime/` 的同级同盘目录），因此 `protected_image_references` 的 `releases.rglob` / `runtime.rglob` 扫描不再看到它们，而 `anchor-unretire` 可原子移回。
+
+基线注册表是 root-only 的 `releases/baselines/registry.json`（0600，目录 0700）。`active` 为当前基线（newest-first，至多 2 个），`retirable` 为被挤出活动窗口、可退休的旧基线。
+
+- 版本规则：bug-fix 发布第三位 +1；feature 发布第二位 +1、第三位归零；第一位只由所有者拍板。基线只接受 **x.Y.0**（feature 发布）；`1.0.0` 因自 2026-09-09 起被多个构建复用而**不可信**，只对祖父基线 id `0c27109f1b02fbbcb409366f5fb1bbf7c850d2d7-6dcfa1b28547eb8d875b6912f9b27b1e4b0745e77f3ad5ecea325e96dc4c7681`（最后一个 1.0.0 发布）接受。
+- `baseline-mark` 幂等；标记第 3 个基线会把最旧的活动基线降级为 `retirable`（绝不删除）。
+- `anchor-retire` 拒绝活动 colour 锚点、非活动 colour 锚点、`releases/anchors/latest.json` 引用的锚点、以及任何**当前**基线；`latest.json` 必须正好指向两个 colour 当前发布的锚点（晋级后它仍指向旧占位者，需先跑一次 `anchor`），否则拒绝；并要求具体备份前提（`backups/last-success.json` 在锚点创建之后成功完成）。遗留 0.9.6 基线 `baseline-502ec99-0.9.6-20260907` 不是两个稳定基线之一，走同一机制退休但免备份前提（已有永久 pinned restic snapshot）。`anchor-unretire` 为其逆操作。
+- `runtime/origin-edge/<sha256>.compose.env` 是常驻 origin-edge 监听器的快照，promote.sh 只读取 `releases/live-origin-edge-config.json` 指向的那一份。`origin-edge-retire` 校验该绑定（schema、路径、字节哈希）后，退休其余全部快照；`origin-edge-unretire --name` 逐个移回。
+- GC 保护：origin-edge 快照只保护 `CADDY_IMAGE`——origin-edge 服务只运行这个镜像，promote.sh 用快照执行的 compose 命令也只针对 origin-edge；快照里的其他镜像键是拍摄时 slot 环境的副本，不再固定旧 API/embedding 镜像。colour slot、`runtime/compose.env`、锚点和 manifest 的保护不变。
+- `retired/` 纳入每日与 pinned 备份，退休后的记录在之后的快照里同样可恢复。
+
+常规 stage/promote/rollback 代码路径不变：本节新增 `maintenance.py` 子命令与 `release_state.py` 函数；`archive_colours`/`restore_colour`/`delete_planned_images` 不变，`protected_image_references` 只收窄了 origin-edge 快照一处，备份只多纳入 `retired/`。
+
+所有者批准的主机操作顺序（★ 为所有者审批点；只有 `gc-remove` 不可逆，被删镜像可按 digest 从 GHCR 重新拉取）：
+
+```sh
+# 1. 安装受审的新 helper generation（含本节修复，使 gc-plan 不再在 0.9.6 基线上报“Unknown recovery anchor format”）
+sh App/ops/install-maintenance.sh                       # 可逆：旧 generation 由安装收据保留
+# 2. 刷新锚点索引（幂等），并做一次成功备份
+python3 /usr/local/libexec/project-snow/maintenance.py anchor
+systemctl start project-snow-backup.service             # 与每日备份同一单元（带 restic 环境文件）
+# 3. ★ 标记基线（1.0.0 祖父基线；之后每个 x.Y.0 晋级后标记）
+python3 /usr/local/libexec/project-snow/maintenance.py baseline-mark --release-id <anchor-id>   # 可逆：仅写注册表
+python3 /usr/local/libexec/project-snow/maintenance.py baseline-list                           # 只读核对
+# 4. 干跑退休集（只读：锚点、遗留基线、origin-edge 快照、索引是否新鲜）
+python3 /usr/local/libexec/project-snow/maintenance.py retire-plan
+# 5. ★ 逐一可逆退休
+python3 /usr/local/libexec/project-snow/maintenance.py anchor-retire --release-id <id>   # 可逆：移到 retired/anchors
+python3 /usr/local/libexec/project-snow/maintenance.py origin-edge-retire                # 可逆：移到 retired/runtime-origin-edge
+# 6. 生成 GC 计划并逐 id 删除（★ 最后一步不可逆）
+python3 /usr/local/libexec/project-snow/maintenance.py gc-plan
+python3 /usr/local/libexec/project-snow/maintenance.py gc-remove --image-id sha256:<explicit-full-id>
+```
+
+退休写错时用 `anchor-unretire --release-id <id>` 原子移回，再重跑 `gc-plan`。只有确认目标镜像确实只被已退休锚点/快照固定后，才执行 `gc-remove`。
+
 ## 共享 embedding 镜像的安全替换
 
 共享 embedding 容器由 blue/green 两个 colour 共用，普通 stage 仍拒绝其 image 变更。只有在模型 id/revision/维度均不变、仅为修补依赖（如 CVE 修复重建）的场景，才走本节的受控替换；它在 promote 时原子重建共享 embedding 容器，并在失败时自动回退，marker/manifest/current/compose.env 始终与运行中的容器一致。替换期间共享 embedding 重启约 1-2 分钟，两个 colour 的在线会话都会短暂检索失败，必须安排在低流量维护窗口。root runner `ops/project-snow-release` 与 `bootstrap-release-runner.sh` 不变。
