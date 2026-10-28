@@ -97,7 +97,9 @@ def test_credential_retention_migration_is_additive_and_old_new_old_safe(databas
         assert "public_credential_revocation_expiry_idx" in indexes
 
     store = PublicStore("", engine=database)
-    cutoff = datetime(2026, 10, 20, 12, 34, 56, 789000, tzinfo=UTC)
+    # Revocations stay readable for eight days after their cutoff, so the cutoff
+    # follows the real clock; the fixed fraction still checks the exact round trip.
+    cutoff = (datetime.now(UTC) - timedelta(minutes=5)).replace(microsecond=789000)
     assert store.revoke_credentials("subject-retention", revoked_before=cutoff) == cutoff
     assert store.credential_revoked_before("subject-retention") == cutoff
     migrate(database, "20261020_0010")
