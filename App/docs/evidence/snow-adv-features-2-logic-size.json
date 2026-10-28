@@ -92,9 +92,9 @@
       },
       {
         "path": "App/public_frontend/app.js",
-        "lf_bytes": 459189,
-        "lf_sha256": "2e1da7998907d761088b3de38924ea63683bd9b3e8a667ba992a500607c96f72",
-        "gzip_bytes": 115161
+        "lf_bytes": 456093,
+        "lf_sha256": "cd458ec1ec2da0a21727ea1372b10fffef2cebc56c8948a2aa133e12226ea1d6",
+        "gzip_bytes": 112370
       },
       {
         "path": "App/public_frontend/dialogue-context.js",
@@ -104,15 +104,15 @@
       },
       {
         "path": "App/public_frontend/index.html",
-        "lf_bytes": 40061,
-        "lf_sha256": "9383bf2833b216d9cc6237c0342816bc3adea401a1d4fe8f7655fc8e2880805b",
-        "gzip_bytes": 10710
+        "lf_bytes": 39266,
+        "lf_sha256": "025635567c0bbdc15edefa345aa8b9b96ad64fd13eab6ffa809a936a68dd2a6e",
+        "gzip_bytes": 10264
       },
       {
         "path": "App/public_frontend/modules/runtime.js",
-        "lf_bytes": 25491,
-        "lf_sha256": "9b1f874e334ecdf3202b2a597400e3b74b455e7c829e6f2ce5a3a318933f62f0",
-        "gzip_bytes": 7397
+        "lf_bytes": 25554,
+        "lf_sha256": "4c12d57e6b104891390914276579c594286bc06b39f2fe79c094a01864802804",
+        "gzip_bytes": 7417
       },
       {
         "path": "App/public_frontend/modules/snow-icons.js",
@@ -128,9 +128,9 @@
       },
       {
         "path": "App/public_frontend/snow-adv.css",
-        "lf_bytes": 81913,
-        "lf_sha256": "9f6e50315a3368d92db1e70340bf5b267e50e60c20be8dd20731564a683dd060",
-        "gzip_bytes": 17137
+        "lf_bytes": 86230,
+        "lf_sha256": "934e3a68d41c61256e57394ddbaad0c78c11789d8b4559efa0a5936341596f2e",
+        "gzip_bytes": 18135
       },
       {
         "path": "App/public_frontend/statistics/analytics.mjs",
@@ -163,16 +163,16 @@
         "gzip_bytes": 95
       }
     ],
-    "gzip_sum_bytes": 191788
+    "gzip_sum_bytes": 189569
   },
-  "increase_bytes": 60634,
+  "increase_bytes": 58415,
   "budget_bytes": 61440,
-  "remaining_bytes": 806,
-  "app_hook_increase_bytes": 5517,
+  "remaining_bytes": 3025,
+  "app_hook_increase_bytes": 2726,
   "app_hook_budget_bytes": 6013,
   "passed": true,
   "second_batch_parent_ref": "95005fe2efade3e9c3b916e8c47c73fced5b19e0",
   "first_batch_increase_bytes": 57474,
   "second_batch_hook_budget_bytes": 3966,
-  "second_batch_hook_increase_bytes": 3470
+  "second_batch_hook_increase_bytes": 679
 }
