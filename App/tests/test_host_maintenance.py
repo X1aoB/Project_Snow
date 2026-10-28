@@ -343,3 +343,218 @@ def test_promote_embedding_health_checks_dimension_and_embed_sanity():
     source = (OPS / "promote.sh").read_text()
     assert "/health" in source and "'dimension'" in source and "= 512" in source
     assert "/embed" in source and "len(vector)==512" in source
+
+
+# --- egress-config swap (mirrors the embedding swap) ------------------------
+
+OLD_EGRESS_SHA = "a" * 64
+NEW_EGRESS_SHA = "e" * 64
+
+
+@pytest.fixture
+def egress_swap(release, tmp_path):
+    paths, image = release
+    swap_dir = tmp_path / "egress-swap"
+    swap_dir.mkdir()
+    paths = maintenance.Paths(root=paths.root, secrets=paths.secrets,
+                              docker_storage=paths.docker_storage, egress_swap=swap_dir)
+    environment = {key: image for key in maintenance.SHARED_IMAGE_KEYS}
+    (paths.root / "runtime" / "compose.env").write_text("".join(f"{k}={v}\n" for k, v in environment.items()))
+    hashes = {key: OLD_EGRESS_SHA for key in maintenance.SHARED_CONFIG_PATHS}
+    (paths.root / "releases" / "current-config.json").write_text(json.dumps({"configuration_sha256": hashes}))
+    candidate = paths.root / "runtime" / "candidate.env"
+    candidate.write_text("".join(f"{k}={v}\n" for k, v in environment.items()))
+    candidate_hashes = dict(hashes)
+    candidate_hashes[maintenance.EGRESS_SWAP_PATH] = NEW_EGRESS_SHA
+    manifest = paths.root / "candidate.json"
+    manifest.write_text(json.dumps({"configuration_sha256": candidate_hashes}))
+    return paths, candidate, manifest, swap_dir
+
+
+def write_egress_authorization(swap_dir, *, to=NEW_EGRESS_SHA, from_=OLD_EGRESS_SHA,
+                               schema=maintenance.EGRESS_SWAP_SCHEMA, parse_ok="true"):
+    (swap_dir / f"{to}.env").write_text(
+        f"schema={schema}\nfrom_sha256={from_}\nto_sha256={to}\n"
+        f"approved_at=2026-10-26T00:00:00+00:00\nparse_ok={parse_ok}\n")
+
+
+def test_egress_gate_refuses_without_authorization(egress_swap):
+    paths, candidate, manifest, _swap_dir = egress_swap
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_egress_gate_accepts_with_matching_authorization(egress_swap):
+    paths, candidate, manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        result = maintenance.shared_dependency_gate(paths, candidate, manifest)
+    assert result == {"status": "ok", "shared_dependencies": "egress-config-swap-authorized",
+                      "from": OLD_EGRESS_SHA, "to": NEW_EGRESS_SHA}
+
+
+def test_egress_gate_refuses_mismatched_hashes(egress_swap):
+    paths, candidate, manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir, from_="9" * 64)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="does not match the running"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_egress_gate_refuses_unknown_schema(egress_swap):
+    paths, candidate, manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir, schema="project-snow-egress-swap-9")
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="schema is unknown"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_egress_gate_refuses_when_parse_not_ok(egress_swap):
+    paths, candidate, manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir, parse_ok="false")
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="passing squid parse"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_egress_gate_still_refuses_when_a_second_shared_item_also_changes(egress_swap):
+    paths, candidate, manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir)
+    # A second shared config change alongside the egress conf must stay refused.
+    document = json.loads(manifest.read_text())
+    document["configuration_sha256"]["infra/postgres/postgresql.conf"] = "f" * 64
+    manifest.write_text(json.dumps(document))
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_egress_authorize_writes_pinned_file_and_reads_back(egress_swap):
+    paths, _candidate, manifest, swap_dir = egress_swap
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        result = maintenance.egress_swap_authorize(paths, manifest, parse_ok=True)
+        written = maintenance.egress_swap_authorization(paths, OLD_EGRESS_SHA, NEW_EGRESS_SHA)
+    assert result == {"status": "authorized", "from_sha256": OLD_EGRESS_SHA, "to_sha256": NEW_EGRESS_SHA}
+    assert written is not None and written["to_sha256"] == NEW_EGRESS_SHA
+
+
+def test_egress_authorize_refuses_without_parse_ok(egress_swap):
+    paths, _candidate, manifest, _swap_dir = egress_swap
+    with pytest.raises(maintenance.MaintenanceError, match="squid -k parse"):
+        maintenance.egress_swap_authorize(paths, manifest, parse_ok=False)
+
+
+def test_egress_clear_removes_only_well_formed(egress_swap):
+    paths, _candidate, _manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        result = maintenance.egress_swap_clear(paths)
+    assert result["status"] == "cleared"
+    assert result["removed"] == [NEW_EGRESS_SHA + ".env"]
+
+
+def test_promote_admits_a_changed_egress_conf_before_any_traffic_moves():
+    source = (OPS / "promote.sh").read_text()
+    guard = source.index('egress_conf_before="$(egress_conf_sha_from_binding "$previous_config_binding")"')
+    assert '[ "$egress_conf_before" != "$egress_conf_target" ]' in source[guard:guard + 400]
+    preflight = source[guard:source.index("\nfi\n", guard)]
+    # Authorization and squid -k parse are refused before the edge switch, so a
+    # refused conf never reaches the live proxy and needs no runtime restore.
+    authorization = preflight.index('"shared_dependencies": "egress-config-swap-authorized"')
+    assert authorization < preflight.index('egress_conf_parses "$colour_env" "$colour_config_root"')
+    assert "exit 73" in preflight and "restore_previous_runtime" not in preflight
+    assert source.index(preflight) < source.index('if ! switch_edge "$colour_env" "$colour_config_root" "$colour"')
+    # The edge switch recreates egress-proxy itself; promote never does it twice.
+    assert "recreate_egress_from_env" not in source
+    assert "--force-recreate egress-proxy" not in source
+
+
+def test_promote_verifies_egress_policy_after_the_switch_and_clears_after_commit():
+    source = (OPS / "promote.sh").read_text()
+    edge_switch = source.index('if ! switch_edge "$colour_env" "$colour_config_root" "$colour"')
+    policy = source.index('egress_policy_holds "$colour_env" "$colour_config_root" "$colour" $egress_new_hosts')
+    assert edge_switch < policy < source.index("commit_promoted_state() {")
+    # Only a forward swap probes the newly allowed vendor hosts: a rollback to a
+    # conf that predates them must still pass.
+    forward = source.rindex('if [ "$rollback_mode" = 0 ]; then', 0, policy)
+    assert 'egress_new_hosts="api.anthropic.com api.x.ai generativelanguage.googleapis.com"' in source[forward:policy]
+    # Authorization consumed only after a committed forward swap.
+    assert source.index("egress_swapped=1") < source.index("egress-config-swap-clear")
+
+
+def _promote_functions(*names: str) -> str:
+    source = (OPS / "promote.sh").read_text(encoding="utf-8")
+    chunks = []
+    for name in names:
+        start = source.index(f"\n{name}() {{\n") + 1
+        chunks.append(source[start:source.index("\n}\n", start) + 3])
+    return "\n".join(chunks)
+
+
+def _run_posix(script: str, tmp_path, **environment: str):
+    import os
+    import subprocess
+
+    candidates = ("C:/Program Files/Git/bin/bash.exe", shutil.which("sh"), shutil.which("bash"))
+    shell = next((candidate for candidate in candidates if candidate and Path(candidate).is_file()), None)
+    assert shell, "A POSIX shell is required for promote.sh behaviour tests."
+    path = tmp_path / "harness.sh"
+    path.write_text(script, encoding="utf-8", newline="\n")
+    return subprocess.run([shell, str(path)], capture_output=True, text=True, check=False,
+                          env={**os.environ, **environment})
+
+
+EGRESS_POLICY_HARNESS = r'''set -u
+sleep() { :; }
+egress_connect_status() {
+  printf '%s\n' "$4" >> "$PROBE_LOG"
+  case "$4" in
+    challenges.cloudflare.com) printf '%s\n' "$TURNSTILE_STATUS" ;;
+    169.254.169.254) printf '%s\n' "$METADATA_STATUS" ;;
+    *) printf '%s\n' "$VENDOR_STATUS" ;;
+  esac
+}
+'''
+
+
+@pytest.mark.parametrize(("turnstile", "metadata", "vendor", "hosts", "expected"), [
+    ("200", "403", "200", "api.anthropic.com api.x.ai", 0),
+    # A rollback to the 1.0.2 conf, which refuses the new vendors, names none.
+    ("200", "403", "403", "", 0),
+    ("200", "403", "403", "api.anthropic.com", 1),
+    ("200", "403", "000", "api.x.ai", 1),
+    ("200", "403", "503", "generativelanguage.googleapis.com", 0),
+    ("200", "200", "200", "", 1),
+    ("503", "403", "200", "", 1),
+])
+def test_egress_policy_probe_outcomes(tmp_path, turnstile, metadata, vendor, hosts, expected):
+    log = tmp_path / "probes.log"
+    script = (EGRESS_POLICY_HARNESS + _promote_functions("egress_policy_holds")
+              + f"\negress_policy_holds env root green {hosts}\n")
+    result = _run_posix(script, tmp_path, PROBE_LOG=str(log), TURNSTILE_STATUS=turnstile,
+                        METADATA_STATUS=metadata, VENDOR_STATUS=vendor)
+    assert result.returncode == expected, result.stderr
+    probed = log.read_text().split()
+    if turnstile != "200":
+        # Waits for the recreated proxy, then gives up without other probes.
+        assert probed == ["challenges.cloudflare.com"] * 15
+    if expected == 0:
+        assert probed == ["challenges.cloudflare.com", "169.254.169.254", *hosts.split()]
+    if vendor == "503" and hosts:
+        assert "its upstream answered 503" in result.stderr
+
+
+@pytest.mark.parametrize(("reply", "status", "expected"), [
+    ("200", "0", "200"),
+    ("403", "0", "403"),
+    ("HTTP/1.1 200", "0", "000"),
+    ("", "1", "000"),
+])
+def test_egress_connect_status_normalises_the_probe_reply(tmp_path, reply, status, expected):
+    script = ("set -u\ndocker() { printf '%s\\n' \"$DOCKER_REPLY\"; return \"$DOCKER_STATUS\"; }\n"
+              + _promote_functions("egress_connect_status")
+              + "\negress_connect_status env root blue api.x.ai\n")
+    result = _run_posix(script, tmp_path, DOCKER_REPLY=reply, DOCKER_STATUS=status)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected

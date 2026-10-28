@@ -1051,7 +1051,7 @@ build_candidate_public_env() {
 
   [ "$public_have_enabled_providers" -eq 1 ] &&
     printf '%s\n' "$public_enabled_providers" |
-      grep -Eq '^(openai|deepseek|dashscope|zhipu|moonshot)(,(openai|deepseek|dashscope|zhipu|moonshot))*$' || {
+      grep -Eq '^(openai|deepseek|dashscope|zhipu|moonshot|anthropic|xai|gemini|relay)(,(openai|deepseek|dashscope|zhipu|moonshot|anthropic|xai|gemini|relay))*$' || {
         echo 'Public environment has no valid enabled-provider allowlist.' >&2
         return 1
       }
@@ -1107,8 +1107,8 @@ build_candidate_public_env() {
     printf '%s\n' \
       'PUBLIC_TURNSTILE_HOSTNAME=snow.xiaob.dev' \
       'PUBLIC_TURNSTILE_MAX_AGE_SECONDS=300' \
-      'PUBLIC_PRIVACY_POLICY_VERSION=0.9.3' \
-      'PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-21' \
+      'PUBLIC_PRIVACY_POLICY_VERSION=1.1.0' \
+      'PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-28' \
       'PUBLIC_ATTRIBUTION_URL=/public/v1/attributions' \
       'PUBLIC_MAX_PROVIDER_CALLS_PER_ACTION=2' \
       'PUBLIC_BYOK_LIFETIME_HOURS=12' || return 1

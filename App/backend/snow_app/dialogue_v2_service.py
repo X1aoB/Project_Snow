@@ -291,9 +291,73 @@ class DialogueV2Service:
                     memories.append(self._memory(context, chat.request_id, "user_statement", clause.text))
             if chat.communication_channel == "in_person" and self.legacy._scene_state(world, chat.character_id)["co_located"]:
                 memories.extend(self._ordinary_experiences(context, chat, frame, result, memory_candidates))
+            elif chat.communication_channel == "text":
+                # Owner request: a text-channel turn should also leave a trace of
+                # what was discussed over the communicator — never recorded as a
+                # shared physical meeting. At most one honest topic per turn.
+                memories.extend(self._communicator_topics(context, chat, frame, memories))
         result["movement_status"] = {**action, "schedule_date": world["schedule_date"],
                                       "schedule_revision": world["schedule_revision"]}
         return self._finish(result, context, world, chat, subject, memories, action)
+
+    # A topic the analyst raised over the communicator: an everyday subject, not a
+    # physical event. Phrasing deliberately says "聊到/提到" (talked about), so the
+    # recalled line can never be mistaken for having been together in person.
+    _TOPIC_PATTERNS = (
+        (r"(?:喜欢|最爱|偏爱|喜爱)(?:上了|上)?([^，。！？!?；;、\s]{1,12})", "聊到你喜欢{0}"),
+        # 「看/听」很常用（我看你挺累的、我在听你说），只有后面跟着作品/媒介时才算话题。
+        (r"(?:看|追|读)(?:着|过|了|完)?([^，。！？!?；;、\s]{0,10}(?:剧|电影|纪录片|动画|番|小说|漫画|书|综艺|直播|视频|》))", "聊到你在看{0}"),
+        (r"听(?:着|了)?([^，。！？!?；;、\s]{0,10}(?:歌|乐|专辑|播客|电台|广播|》))", "聊到你在听{0}"),
+        (r"工作|上班|加班|学习|考试|天气|心情|家人|宠物|旅行|出差|感冒|失眠|健身|做饭|养花", "聊到{0}"),
+    )
+    # The object must be a thing, not a person in the conversation (我爱你 / 喜欢和你在一起).
+    _TOPIC_PERSON = re.compile(r"你|妳|您|她|他|我|自己|大家|别人")
+    # Questions, negations, plans/hypotheticals, quotes and non-everyday/major
+    # topics never become a topic memory.
+    _TOPIC_BLOCK = re.compile(
+        r"[？?]|吗(?:[。！!，,；;]|$)|"
+        r"打算|准备|计划|想要|将要|将会|改天|以后|回头|"
+        r"主线|剧情|任务线|战争|死亡|牺牲|秘密|身份|结婚|婚礼|戒指|恒约|受伤|伤亡|杀死|击杀|原作|原著|章节"
+    )
+    # A negator directly governing the topic verb (不喜欢 / 没在看 / 不想听), guarded
+    # so a compound like 特别 or 分别 cannot be mistaken for 别.
+    _TOPIC_NEGATOR = re.compile(r"(?:^|[^特分告道])(不|没|别|未|勿|非)(?:[^，。！？!?；;、\s]{0,2})$")
+
+    def _communicator_topics(self, context, chat, frame, existing):
+        """Return at most one communicator_topic memory for this text turn."""
+        existing_values = {item.value for item in existing}
+        existing_values.update(item.value for item in context.memories if item.kind == "communicator_topic")
+        for clause in frame.clauses:
+            # Completed, present, everyday, first-person-stated topics only.
+            if (clause.domain != "casual" or clause.time_scope != "now"
+                    or clause.negated or clause.quoted
+                    or clause.action in {"movement_invitation", "movement_acceptance"}):
+                continue
+            text = clause.text
+            if self._TOPIC_BLOCK.search(text):
+                continue
+            # The analyst must be the subject (self-report), not the character.
+            if not re.search(r"我(?![们们])|我的|咱们?都", text) or re.search(r"^你|^妳|^您", text):
+                continue
+            for pattern, template in self._TOPIC_PATTERNS:
+                match = re.search(pattern, text)
+                if not match:
+                    continue
+                # A negator immediately before the matched verb kills the topic.
+                if self._TOPIC_NEGATOR.search(text[:match.start() + 1]):
+                    continue
+                detail = (match.group(1).strip() if match.groups() else match.group(0).strip())
+                if match.groups() and self._TOPIC_PERSON.search(detail):
+                    continue
+                # 「我觉得你工作太累了」说的是她，不是分析员自己的话题。
+                if not match.groups() and re.search(r"你|妳|您|她|他", text):
+                    continue
+                value = template.format(detail)[:40]
+                if not value or value in existing_values:
+                    continue
+                # Never a shared physical event: keep wording about "talking".
+                return [self._memory(context, chat.request_id, "communicator_topic", value)]
+        return []
 
     def _ordinary_experiences(self, context, chat, frame, result, candidates):
         """A model candidate cannot establish history; both current actions must support it."""

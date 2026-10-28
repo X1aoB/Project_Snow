@@ -188,8 +188,8 @@ class PublicSettings:
     state_previous_key_id: str = ""
     turnstile_hostname: str = "snow.xiaob.dev"
     turnstile_max_age_seconds: int = 300
-    privacy_policy_version: str = "0.9.3"
-    privacy_effective_at: str = "2026-10-21"
+    privacy_policy_version: str = "1.1.0"
+    privacy_effective_at: str = "2026-10-28"
     attribution_url: str = "/public/v1/attributions"
     max_provider_calls_per_action: int = 2
     byok_lifetime_hours: int = 12
@@ -249,7 +249,7 @@ class PublicSettings:
             byok_lifetime_hours = 12
         byok_retention_enabled = os.getenv("PUBLIC_BYOK_RETENTION_ENABLED", "false") == "true"
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "1.0.2"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "1.1.0"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_public_database_url(),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),
@@ -297,9 +297,9 @@ class PublicSettings:
             state_previous_key_id=os.getenv("PUBLIC_STATE_PREVIOUS_KEY_ID", "").strip(),
             turnstile_hostname=os.getenv("PUBLIC_TURNSTILE_HOSTNAME", "snow.xiaob.dev").strip(),
             turnstile_max_age_seconds=max(60, min(600, turnstile_max_age_seconds)),
-            privacy_policy_version=os.getenv("PUBLIC_PRIVACY_POLICY_VERSION", "0.9.3").strip(),
+            privacy_policy_version=os.getenv("PUBLIC_PRIVACY_POLICY_VERSION", "1.1.0").strip(),
             privacy_effective_at=os.getenv(
-                "PUBLIC_PRIVACY_EFFECTIVE_AT", "2026-10-21"
+                "PUBLIC_PRIVACY_EFFECTIVE_AT", "2026-10-28"
             ).strip(),
             attribution_url=os.getenv(
                 "PUBLIC_ATTRIBUTION_URL", "/public/v1/attributions"

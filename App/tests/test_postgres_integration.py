@@ -303,8 +303,12 @@ def test_subscription_pair_poll_result_and_connector_limits_use_postgres(databas
         assert detail["retryable"] is True and detail["stage"] == "unknown"
         if "request_id" in detail:
             assert re.fullmatch(r"[0-9a-f-]{36}", detail["request_id"])
-        assert detail["retry_after_seconds"] == 60
-        assert rejected.headers["Retry-After"] == "60" and counters() == exhausted
+        # The refusal names when its hourly window ends; the header carries the
+        # full wait and the body field stays capped at 300 seconds.
+        reset_at = datetime.fromisoformat(detail["reset_at"])
+        wait = int(rejected.headers["Retry-After"])
+        assert reset_at.minute == reset_at.second == 0 and 1 <= wait <= 3601
+        assert detail["retry_after_seconds"] == min(300, wait) and counters() == exhausted
         other = client.post("/public/v1/subscription/connector/result", headers=origin, json=completed[1])
         assert other.status_code == 200
         after = counters()

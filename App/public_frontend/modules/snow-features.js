@@ -8,7 +8,10 @@ import { buildReadingText } from "/modules/snow-reading-logic.js";
 
 const STYLE_URL = "/modules/snow-features.css";
 const CARD_URL = "/modules/snow-feature-card.js";
-const KIND_LABELS = Object.freeze({ shared_scene_event: "一起经历", user_statement: "你说过的", assistant_commitment: "她答应的" });
+const KIND_LABELS = Object.freeze({ shared_scene_event: "一起经历", user_statement: "你说过的", assistant_commitment: "她答应的", communicator_topic: "通讯器里聊过" });
+// 来源徽章：面对面只有 shared_scene_event；其余（自述、承诺、通讯器话题）都来自通讯器文字渠道。
+const MEMORY_SOURCE = Object.freeze({ shared_scene_event: "面对面", user_statement: "通讯器", assistant_commitment: "通讯器", communicator_topic: "通讯器" });
+const CONVO_URL = "/modules/snow-memory-convo.js";
 const PART_LABELS = Object.freeze({ reply: "回复", arrival: "到场反应", summary: "连续性整理", proactive: "主动消息" });
 const SENTENCE_END = /[。！？!?…]/u;
 const FAVORITE_LIMIT = 240;
@@ -389,32 +392,72 @@ function mount(host) {
   const dialog = el("dialog", { class: "modal snow-feature-modal snow-memory-modal", id: "snow-memory-dialog", "aria-labelledby": "snow-memory-title" });
   const memoryTitle = el("h2", { id: "snow-memory-title" });
   const memoryClose = el("button", { type: "button", class: "icon-button", "aria-label": "关闭记忆档案" }, icon("x"));
+  // 两个视图的标签页：她记得的事（签名记忆）/ 通讯器对话（本机历史）。roving tabindex + aria-selected。
+  const tabMemories = el("button", { type: "button", role: "tab", id: "snow-memory-tab-remembers", "aria-selected": "true", "aria-controls": "snow-memory-view-remembers", tabindex: "0" }, "她记得的事");
+  const tabConvo = el("button", { type: "button", role: "tab", id: "snow-memory-tab-convo", "aria-selected": "false", "aria-controls": "snow-memory-view-convo", tabindex: "-1" }, "通讯器对话");
+  const memoryTabs = el("div", { class: "snow-memory-tabs", role: "tablist", "aria-label": "记忆档案视图" }, tabMemories, tabConvo);
   const memoryFilters = el("div", { class: "snow-memory-filters", role: "group", "aria-label": "按类别筛选" });
-  const memoryList = el("div", { class: "snow-memory-list", id: "snow-memory-list" });
+  const memoryList = el("div", { class: "snow-memory-list", id: "snow-memory-list", role: "tabpanel", "aria-labelledby": "snow-memory-tab-remembers" });
+  const convoView = el("div", { class: "snow-memory-list snow-memory-convo", id: "snow-memory-view-convo", role: "tabpanel", "aria-labelledby": "snow-memory-tab-convo", hidden: true });
   const memoryCount = el("span", { role: "status", "aria-live": "polite" });
   const memoryDone = el("button", { type: "button", class: "secondary-button" }, "关闭");
+  memoryList.id = "snow-memory-view-remembers";
   dialog.append(
     el("header", {}, el("div", {}, el("span", { class: "panel-kicker", text: "本机记录" }), memoryTitle,
-      el("p", { text: "这些是她记住的、和你一起经历的事，只保存在这个浏览器里。删除后，之后的对话不会再用到这一条。" })), memoryClose),
-    memoryFilters, memoryList,
+      el("p", { text: "她记得的事，和你们在通讯器里聊过的内容，都只保存在这个浏览器里。删除后，之后的对话不会再用到。" })), memoryClose),
+    memoryTabs, memoryFilters, memoryList, convoView,
     el("div", { class: "snow-modal-foot" }, memoryCount, el("div", { class: "modal-actions" }, memoryDone)));
   document.body.append(dialog);
-  const memory = { characterId: "", items: [], filter: "all", confirming: "", removed: new Set(), pending: "" };
+  const memory = { characterId: "", items: [], filter: "all", confirming: "", removed: new Set(), pending: "", view: "remembers" };
+  let convo = null;
+  async function ensureConvo() {
+    if (convo) return convo;
+    const module = await import(CONVO_URL);
+    convo = module.createMemoryConvoView(host, { el, icon, dayLabel, clock, dayKey, nameOf, openTranscript: viewInTranscript });
+    convoView.replaceChildren(convo.node);
+    return convo;
+  }
+  async function setMemoryView(next) {
+    memory.view = next;
+    const onConvo = next === "convo";
+    tabMemories.setAttribute("aria-selected", String(!onConvo));
+    tabConvo.setAttribute("aria-selected", String(onConvo));
+    tabMemories.tabIndex = onConvo ? -1 : 0;
+    tabConvo.tabIndex = onConvo ? 0 : -1;
+    memoryList.hidden = onConvo;
+    memoryFilters.hidden = onConvo || !memory.items.length;
+    convoView.hidden = !onConvo;
+    if (onConvo) { memoryCount.textContent = "只保存在本浏览器"; (await ensureConvo()).render(memory.characterId); }
+    else { renderMemories(); }
+  }
+  tabMemories.addEventListener("click", () => { setMemoryView("remembers"); tabMemories.focus(); });
+  tabConvo.addEventListener("click", () => { setMemoryView("convo"); tabConvo.focus(); });
+  memoryTabs.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "ArrowRight" || event.key === "End" ? "convo" : "remembers";
+    setMemoryView(next);
+    (next === "convo" ? tabConvo : tabMemories).focus();
+  });
   memoryClose.addEventListener("click", () => dialog.close());
   memoryDone.addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => {
     logic.memories.clearUndo(memory.characterId);
     memory.removed.clear();
     memory.confirming = "";
+    convo?.destroy();
     refreshInfo();
   });
-  async function loadMemories() { memory.items = await logic.memories.list(memory.characterId); renderMemories(); }
+  async function loadMemories() { memory.items = await logic.memories.list(memory.characterId); if (memory.view === "remembers") renderMemories(); }
   async function openMemories(characterId = snapshot().selected) {
     if (!characterId) return;
-    Object.assign(memory, { characterId, filter: "all", confirming: "", pending: "" });
+    Object.assign(memory, { characterId, filter: "all", confirming: "", pending: "", view: "remembers" });
     memory.removed.clear();
     dialog.dataset.snowCharacter = characterId;
     memoryTitle.textContent = `${nameOf(characterId)}记得的事`;
+    tabMemories.setAttribute("aria-selected", "true"); tabConvo.setAttribute("aria-selected", "false");
+    tabMemories.tabIndex = 0; tabConvo.tabIndex = -1;
+    memoryList.hidden = false; convoView.hidden = true;
     memoryList.replaceChildren(el("p", { class: "snow-empty", text: "正在读取……" }));
     if (!dialog.open) dialog.showModal();
     await loadMemories();
@@ -453,7 +496,7 @@ function mount(host) {
     memoryFilters.hidden = !memory.items.length;
     if (!keepStatus) memoryCount.textContent = memory.items.length ? `共 ${kept.length} 条 · 删除只影响本机` : "";
     if (!memory.items.length) {
-      memoryList.replaceChildren(el("p", { class: "snow-empty", text: "还没有共同的记忆。面对面聊聊天、一起去个地方，她就会记住。" }));
+      memoryList.replaceChildren(el("p", { class: "snow-empty", text: "她还没有记住什么。面对面聊聊天、一起去个地方，或在通讯器里聊几句，她就会记下来。" }));
       return;
     }
     const today = snapshot().localDayKey;
@@ -472,9 +515,12 @@ function mount(host) {
       const trash = el("button", { type: "button", class: "snow-round", "aria-label": `删除这条记忆：${item.text}`, title: "删除", disabled: Boolean(memory.pending) }, icon("trash-2"));
       trash.addEventListener("click", () => { memory.confirming = item.id; renderMemories(); memoryList.querySelector("[data-snow-confirm-cancel]")?.focus(); });
       const meta = [item.locationName, item.occurredAt ? clock(item.occurredAt) : ""].filter(Boolean).join(" · ");
+      const source = MEMORY_SOURCE[item.kind] || "通讯器";
       const node = el("article", { class: `snow-memory-item${memory.confirming === item.id ? " is-confirming" : ""}` },
         el("div", {}, el("p", { class: "snow-memory-text", text: item.text }),
-          el("div", { class: "snow-memory-meta" }, el("span", { class: "snow-kind", text: KIND_LABELS[item.kind] || "记忆" }), meta ? el("span", { text: meta }) : null)),
+          el("div", { class: "snow-memory-meta" },
+            el("span", { class: `snow-source${source === "面对面" ? " is-inperson" : " is-text"}`, text: source }),
+            el("span", { class: "snow-kind", text: KIND_LABELS[item.kind] || "记忆" }), meta ? el("span", { text: meta }) : null)),
         trash);
       if (memory.confirming === item.id) {
         const cancel = el("button", { type: "button", class: "secondary-button snow-small", "data-snow-confirm-cancel": "" }, "取消");
@@ -510,7 +556,7 @@ function mount(host) {
     card.dataset.snowCharacter = characterId;
     const version = ++infoVersion;
     const count = await logic.memories.count(characterId);
-    if (version === infoVersion && card.isConnected) card.querySelector(".snow-info-count").textContent = count ? `${count} 条 · 只保存在本浏览器` : "还没有共同的记忆";
+    if (version === infoVersion && card.isConnected) card.querySelector(".snow-info-count").textContent = count ? `${count} 条 · 只保存在本浏览器` : "还没有记住什么";
   }
 
   // ---------- 设置：「对话」分类（第二批界面）；「显示每轮用量」从「记录」移到这里 ----------

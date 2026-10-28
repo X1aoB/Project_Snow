@@ -5,12 +5,10 @@ import { mountSnowWorld, activeSnowLoops, resolveTime as snowResolveTime, subscr
 
 const localPreferences = createSafeStorage(() => window.localStorage);
 const tabPreferences = createSafeStorage(() => window.sessionStorage);
-// 雪境 ADV P6a/P7：开关随 /public/v1/config 下发，皮肤只能在 config 解析后才切换。
 const SNOW_LAST_SEEN_KEY = "project-snow-public:snow-adv:last-seen";
 try {
   if (localPreferences.getItem(SNOW_LAST_SEEN_KEY) === "1") {
     document.documentElement.dataset.snowBooting = "1";
-    // P8：深色时段的返回用户，首帧品牌底色直接用深色，避免先白后深。
     const tone = localPreferences.getItem("project-snow-public:tone");
     const time = snowResolveTime();
     if (tone === "dark" || (tone !== "light" && time === "night")) document.documentElement.dataset.toneHint = "dark";
@@ -30,6 +28,8 @@ const dialogueHttp = createHttpClient("/public/v2");
 const dbName = "project-snow-public";
 const dbVersion = 4;
 const SUBSCRIPTION_PROVIDER = "codex_subscription";
+const RELAY_PROVIDER = "relay";
+const providerMode = (id) => id === SUBSCRIPTION_PROVIDER ? "subscription" : id === RELAY_PROVIDER ? "relay" : "api";
 const SUBSCRIPTION_MODEL = "gpt-5.6-luna";
 const SUBSCRIPTION_EFFORT = "max";
 const SUBSCRIPTION_EFFORT_LABELS = Object.freeze({ none: "无推理", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "更高", max: "极高", ultra: "最高" });
@@ -57,6 +57,8 @@ const state = {
   reasoningEffort: "",
   modelSetupMode: "api",
   apiProviderChoice: "",
+  relayBase: "",
+  relayHost: "",
   subscription: createSubscriptionState(),
   characters: [],
   stickers: [],
@@ -126,7 +128,6 @@ const state = {
   snowVeilSeen: false,
   snowVeilTimers: [],
   snowVeilAnimation: null,
-  // 雪境 ADV P6a 开场与通讯器世界层。
   snowOpening: null,        // { phone, kind: 'boot'|'lock'|'none' } 页面加载时判定一次
   snowBeenInPerson: false,  // 本页会话内是否已亲身进过室内（决定首次入室镜头推进）
   snowPushPlayed: false,    // 首次入室镜头推进是否已经播放过
@@ -199,6 +200,7 @@ function featureSnapshot() {
     channel: currentThread()?.channel || "text", worldPackage: state.worldPackage, localDayKey: localDayKey(),
     movementCatalog: movementCatalog(), modelReady: configured(), writerOwned: state.writerOwned, historyEpoch: state.historyEpoch,
     tone: document.documentElement.dataset.tone, toneTime: document.documentElement.dataset.toneTime,
+    proactiveDuration: { options: retentionPolicy()?.options || [], current: state.credentialRetention || "tab", credentialExpiresAt: state.credentialExpiresAt || 0 },
     rendezvous: { authoritative: Object.hasOwn(decoded, "pending_rendezvous") || Object.hasOwn(decoded.world || {}, "pending_rendezvous"),
       dayKey: localDayKey(), items: Object.entries(pending || {}).map(([character_id, value]) => ({ ...value, character_id })) } }),
     busy: globalRequestBusy(), busyFor: featureBusyFor };
@@ -380,10 +382,12 @@ function birthdayRow(item, { today = false, calendar = false } = {}) {
   const name = escapeHtml(item.display_name);
   const source = item.source_url ? `<a class="birthday-source" href="${escapeHtml(item.source_url)}" target="_blank" rel="noreferrer" aria-label="查看${name}的生日资料">资料 ↗</a>` : "";
   const countdown = today ? "生日快乐" : item.days === 1 ? "明天" : `还有 ${item.days} 天`;
-  return `<article class="birthday-row${today ? " birthday-today" : ""}" data-birthday-character="${escapeHtml(item.character_id)}"><span class="birthday-monogram" aria-hidden="true">${escapeHtml(Array.from(item.display_name)[0])}</span><div class="birthday-row-copy"><strong>${name}</strong><span>${item.month}月${item.day}日${calendar ? "" : ` · ${countdown}`}</span></div>${source}${calendar ? `<span class="birthday-countdown">${countdown}</span>` : ""}</article>`;
+  const character = state.characters.find((entry) => entry.character_id === item.character_id);
+  const mark = characterAvatar(character) ? avatarMarkup(character, { className: "birthday-monogram" }).replace("<span ", '<span aria-hidden="true" ') : `<span class="birthday-monogram" aria-hidden="true">${escapeHtml(Array.from(item.display_name)[0])}</span>`;
+  return `<article class="birthday-row${today ? " birthday-today" : ""}" data-birthday-character="${escapeHtml(item.character_id)}">${mark}<div class="birthday-row-copy"><strong>${name}</strong><span>${item.month}月${item.day}日${calendar ? "" : ` · ${countdown}`}</span></div>${source}${calendar ? `<span class="birthday-countdown">${countdown}</span>` : ""}</article>`;
 }
 function announcementRenderSignature(view = announcementView()) {
-  return JSON.stringify([announcements.feed, view.day, view.updateKey, announcements.error]);
+  return JSON.stringify([announcements.feed, view.day, view.updateKey, announcements.error, state.characters.length]);
 }
 function renderAnnouncementStatus() {
   const loading = Boolean(announcements.pending);
@@ -412,6 +416,7 @@ function renderAnnouncements() {
   $("announcement-birthdays-upcoming").innerHTML = view.birthdays.filter((item) => item.days > 0).slice(0, 3).map((item) => birthdayRow(item)).join("") || '<p class="announcement-empty">暂无即将到来的生日。</p>';
   $("birthday-calendar-label").textContent = `查看全部 ${view.birthdays.length} 位角色的生日`;
   $("announcement-birthday-calendar").innerHTML = [...view.birthdays].sort((a, b) => a.month - b.month || a.day - b.day).map((item) => birthdayRow(item, { today: item.days === 0, calendar: true })).join("");
+  bindAvatarImages($("announcement-panel-birthdays"));
   if ($("announcements-dialog").open) {
     view.birthdayKeys.forEach((key) => announcements.visibleKeys.add(key));
     if (announcements.tab === "updates" && view.updateKey) announcements.visibleKeys.add(view.updateKey);
@@ -434,7 +439,6 @@ function openAnnouncements({ automatic = false } = {}) {
 }
 function maybeShowAnnouncements() {
   if (!announcements.ready || !announcements.feed || document.hidden || document.querySelector("dialog[open]") || globalRequestBusy()) return;
-  // P6a：开机/锁屏层占屏时不自动弹公告（<dialog> 走顶层会盖在开场层之上）。
   if (snowOpeningActive()) return;
   if (document.activeElement?.matches("input, textarea") && document.activeElement.value) return;
   if (announcementView().unread.some((key) => !announcements.attempted.has(key))) openAnnouncements({ automatic: true });
@@ -458,7 +462,6 @@ async function refreshAnnouncements() {
       if (announcementRenderSignature() !== announcements.renderSignature) renderAnnouncements();
       else { renderAnnouncementStatus(); renderAnnouncementBadges(); }
       maybeShowAnnouncements();
-      // P6a：锁屏仍在时，公告就绪后补上「未读公告」通知卡。
       snowRefreshLockNotes();
     }
   })();
@@ -492,6 +495,7 @@ const $ = (id) => document.getElementById(id);
 const errorMessages = {
   invalid_request: "请求内容不完整或格式不正确。",
   provider_not_enabled: "该模型厂商尚未启用，请选择其他厂商。",
+  relay_url_invalid: "中转站地址无效：只接受 https 域名地址，例如 https://api.example.com/v1。",
   provider_credential_rejected: "API Key 被模型厂商拒绝，请检查密钥、余额和模型权限。",
   provider_model_discovery_failed: "无法获取模型列表；你仍可手工填写正确的模型 ID。",
   provider_network_error: "暂时无法连接模型厂商，请稍后重试。",
@@ -519,7 +523,7 @@ const errorMessages = {
   generation_queue_timeout: "等待生成超时，请稍后重试。",
   upstream_invalid_response: "模型没有返回可用正文，本次不会写入角色回复，请重试。",
   role_guard_rejected: "本次生成未通过角色校验，请重试。",
-  rate_limit_exceeded: "当前额度已用完，位置切换已保留，但没有生成到场对白。",
+  rate_limit_exceeded: "已达到本站每位访客的使用频率上限，这不是你的模型额度，Key 和余额都不受影响。",
   credential_invalid: "模型会话已失效，请重新输入 API Key。",
   request_in_progress: "同一请求仍在处理中，请稍后重试。",
   request_id_conflict: "请求编号冲突，请重新操作。",
@@ -687,11 +691,17 @@ function chatError(code = "request_failed", detail = {}, status = 0) {
   error.retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0
     ? Math.min(300, Math.floor(retryAfter))
     : 0;
+  error.resetAt = Date.parse(payload.reset_at) || 0;
   error.httpStatus = Number(status) || 0;
   return error;
 }
 function displayError(error) {
   const code = error instanceof Error ? error.message : plain(error);
+  // The site's own per-visitor frequency cap: say when it lifts, never "your quota".
+  if (code === "rate_limit_exceeded" && error?.resetAt > Date.now()) {
+    const resume = new Date(error.resetAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    return `${errorMessages.rate_limit_exceeded}约 ${resume} 后恢复。`;
+  }
   if (["Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed"].includes(code)) return errorMessages.network_unavailable;
   if (code === "credential_invalid" && state.provider === SUBSCRIPTION_PROVIDER) return errorMessages.subscription_not_connected;
   const stage = normalizedErrorStage(error instanceof Error ? error.errorStage : "");
@@ -744,7 +754,6 @@ function fitPublicRequestPayload(payload, { arrays = [], texts = [], targetBytes
 if (["127.0.0.1", "localhost", "[::1]"].includes(window.location.hostname)) {
   Object.defineProperty(window, "__projectSnowTest", {
     value: Object.freeze({ escapeHtml, fitPublicRequestPayload, deriveDisplayBlocks, statePackageOrder, expressionStateForMessage, normalizeExpressionState, normalizeStageMotion, expressionManifestUrlForCharacter, normalizeExpressionManifest, stagePresentationRenderer, preloadStagePresentation, clearStagePresentationCache, warmCharacterStage, updateStageCharacterArt, playStageMotion, cancelStageMotion, renderStage,
-      // P6a 探针：读取开场/世界层状态，并可强制切换世界场景以单测镜头推进/veil。
       snowProbe: () => ({ opening: state.snowOpening, beenInPerson: state.snowBeenInPerson, pushPlayed: state.snowPushPlayed, bootDone: state.snowBootDone,
         worldScene: snowWorld ? snowWorld.scene : null,
         backdropScene: snowBackdrop ? snowBackdrop.scene : null,
@@ -799,9 +808,7 @@ function abortableDelay(milliseconds, signal) {
 function reducedMotion() { return window.matchMedia("(prefers-reduced-motion: reduce)").matches || localPreferences.getItem("project-snow-public:motion") === "off"; }
 function featureEnabled(name) { return state.config?.features?.[name] === true; }
 function quietPresentation() { return reducedMotion() || document.hidden; }
-// 雪境 ADV 演出 (P4)：是否处于雪境皮肤。
 function snowAdvActive() { return document.documentElement.dataset.ui === "snow-adv"; }
-// P4 立绘/动作档位：auto=完整（位移+缩放+呼吸）、light=仅淡入淡出、off=无动画（含减少动态）。
 function stageMotionTier() {
   if (reducedMotion()) return "off";
   return document.documentElement.dataset.motionLevel === "light" ? "light"
@@ -843,7 +850,6 @@ function syncMotionState() {
   if ($("motion-preference-setting")) $("motion-preference-setting").hidden = !featureEnabled("motion_v2");
 }
 function replyTiming(requestId) { return state.replyTimingByRequest.get(requestId); }
-// 雪境 ADV skin (P1).
 const SNOW_ADV_FONT_STYLESHEET = "/snow-adv-fonts.css";
 const SNOW_ADV_STATIC_ICONS = Object.freeze([
   [".contact-search > span[aria-hidden]", "search"],
@@ -899,7 +905,6 @@ function syncInterfaceSkin() {
   syncSnowComposerHeight(enabled);
   syncInterfaceTone(enabled);
 }
-// P8：界面深色状态。
 const SNOW_TONE_KEY = "project-snow-public:tone";
 let snowToneUnsubscribe = null;
 function snowTonePreference() {
@@ -921,7 +926,6 @@ function syncInterfaceTone(enabled) {
     const preference = snowTonePreference();
     const dark = preference === "dark" || (preference === "auto" && (time === "dusk" || time === "night"));
     root.dataset.tone = dark ? "dark" : "light";
-    // 黄昏用暮色（同一套深色规则换偏紫暖色变量）；固定「深色」始终是夜色。
     if (dark && preference === "auto" && time === "dusk") root.dataset.toneTime = "dusk";
     else delete root.dataset.toneTime;
     featureEmit("tone-changed", { tone: root.dataset.tone, toneTime: root.dataset.toneTime });
@@ -929,7 +933,6 @@ function syncInterfaceTone(enabled) {
   apply(snowResolveTime());
   if (!snowToneUnsubscribe) snowToneUnsubscribe = subscribeSnowTime(apply);
 }
-// P8：面对面舞台延伸到输入区下方。
 let snowComposerObserver = null;
 function syncSnowComposerHeight(enabled) {
   const app = $("chat-app");
@@ -959,7 +962,6 @@ function syncSnowComposerHeight(enabled) {
   if (row) snowComposerObserver.observe(row);
 }
 let snowWorld = null;
-// P6a：通讯器背后的世界——一个 body 级 fixed 的「舞台」容器，仅桌面开关开启时存在， aria-hidden、pointer-events:non…
 let snowBackdrop = null;
 let snowBackdropStage = null;
 let snowPushContext = null;
@@ -972,7 +974,6 @@ function snowWorldScene() {
 function currentMotionLevel() {
   return document.documentElement.dataset.motionLevel || "auto";
 }
-// 背后世界应显示的场景：首次入室镜头推进播放前恒为 generic 外景（推进从外景推入）；推进播放后（snowPushPlayed）跟随当前室内地点。
 function snowBackdropScene() {
   if (!state.snowBeenInPerson) return "generic";
   if (state.snowEntryConsumed || state.snowPushPlayed || stageMotionTier() !== "auto") return snowWorldScene();
@@ -980,7 +981,6 @@ function snowBackdropScene() {
 }
 function syncSnowWorld() {
   syncSnowBackdrop();
-  // P2 舞台世界：仅面对面可见时挂载在 #scene-stage（保持原状，不受通讯器背后世界影响）。
   const stage = $("scene-stage");
   const wanted = featureEnabled("ui_snow_adv") && stage && !$("in-person-surface").hidden;
   if (wanted && !snowWorld) {
@@ -992,7 +992,6 @@ function syncSnowWorld() {
     if (stage) delete stage.snowWorld;
   }
 }
-// 通讯器背后世界的建/拆与可见性。
 function syncSnowBackdrop() {
   const want = featureEnabled("ui_snow_adv") && !snowOpeningState().phone;
   const app = $("chat-app");
@@ -1016,7 +1015,6 @@ function syncSnowBackdrop() {
     document.getElementById("snow-backdrop")?.remove();
   }
   if (snowBackdrop) {
-    // 背后世界场景跟随「是否已入室」；推进进行中不要打断（pushInto 自行切场景）。
     if (!snowBackdrop.isPushing()) snowBackdrop.setScene(snowBackdropScene());
     snowBackdrop.setMotion(currentMotionLevel());  // 内部按 role 在面对面可见时暂停
   }
@@ -1026,7 +1024,6 @@ function syncSnowBackdrop() {
   }
 }
 
-// P3 面对面主屏全部只在 ui_snow_adv 开启时生效。
 
 function suppressArrivalDuplicateNotice() { return featureEnabled("ui_snow_adv"); }
 
@@ -1045,7 +1042,6 @@ function applyStageActorAnchor(node) {
     node.dataset.actorAnchor = cached.toFixed(3);
     return;
   }
-  // 占位：先用 0.5，测出后再更新，避免首帧跳动。
   node.style.setProperty("--actor-anchor-x", "0.5");
   node.dataset.actorAnchor = "0.5";
   measureStageActorAnchor(src).then((anchor) => {
@@ -1092,7 +1088,6 @@ function measureStageActorAnchor(src) {
   });
 }
 
-// 快捷菜单（跳过 / 回看 / 隐藏 / 设置）与 ▼ 推进标记：开关开启且处于面对面时建一次。
 const STAGE_QUICK_ACTIONS = Object.freeze([
   { key: "skip", icon: "fast-forward", label: "跳过", title: "立即显示（跳过逐字揭示）" },
   { key: "backlog", icon: "history", label: "回看", title: "回看对话" },
@@ -1138,7 +1133,6 @@ function buildStageQuickMenu() {
 function removeStageQuickMenu() {
   $("stage-dialogue")?.querySelectorAll(".stage-quick-menu, .stage-advance").forEach(node => node.remove());
 }
-// ▼ 可见 = 当前回复显示完、空闲（非打字 / 揭示 / 等待）；跳过按钮在无内容揭示时禁用。
 function stageSpeaking() {
   return Boolean($("stage-speech")?.matches(".is-typing, .is-revealing") || presentationFor() || state.completedPresentationByCharacter.get(state.selected));
 }
@@ -1164,7 +1158,6 @@ function syncStageQuickMenuMount() {
   syncStageNarrationMount();
   syncSnowVeilMount();
 }
-// 雪境 ADV（P7）：旁白放进对白框，排在名牌与台词之间，不再作为单独的条压在立绘上。
 function syncStageNarrationMount() {
   const narration = $("stage-narration");
   const copy = document.querySelector("#stage-dialogue .stage-dialogue-copy");
@@ -1178,7 +1171,6 @@ function syncStageNarrationMount() {
     stage.insertBefore(narration, restore?.parentElement === stage ? restore : null);
   }
 }
-// 雪境 ADV (P4 后续)：白雪转场遮罩。
 function buildSnowVeil() {
   const stage = $("scene-stage");
   if (!stage || stage.querySelector(".snow-scene-veil")) return;
@@ -1238,7 +1230,6 @@ function syncSnowVeilMount() {
   if (featureEnabled("ui_snow_adv")) buildSnowVeil();
   else removeSnowVeil();
 }
-// 决定是否在本次 renderScene 播放遮罩，并在遮罩掩护下切换 P2 世界场景（仅视觉延迟，不延迟逻辑）。
 function maybePlaySnowVeil(scene, visualKey, label) {
   const location = plain(scene?.character_location || "");
   const visible = snowAdvActive() && !$("in-person-surface").hidden;
@@ -1246,7 +1237,6 @@ function maybePlaySnowVeil(scene, visualKey, label) {
   if (snowPushContext && (!visible || document.hidden || tier !== "auto"
       || snowPushContext.characterId !== state.selected || snowPushContext.location !== location
       || snowPushContext.visualKey !== visualKey)) cancelSnowScenePresentation();
-  // 遮罩不适用时，P2 舞台世界场景照旧立即切换（舞台世界仅面对面可见时存在）。
   const commitScene = () => { label(); state.snowShown = visualKey; if (snowWorld) snowWorld.setScene(visualKey); };
   if (!visible || !location || tier === "off") {
     if (state.snowVeilTimers.length || state.snowVeilAnimation || state.snowVeilPending) cancelSnowScenePresentation();
@@ -1265,7 +1255,6 @@ function maybePlaySnowVeil(scene, visualKey, label) {
     return;
   }
   const play = commit => {
-    // P6a：首次由「外面」进入室内，先镜头推进再 P4 veil；推进接管后不再立即切场景。
     if (snowMaybePushIntoScene(scene, visualKey, commit)) return;
     if (state.snowBeenInPerson && visualKey !== "generic") state.snowEntryConsumed = true;
     playSnowVeil(scene, location, tier, commit, visualKey);
@@ -1286,7 +1275,6 @@ function maybePlaySnowVeil(scene, visualKey, label) {
   };
   wait();
 }
-// 首帧/历史恢复发生在同一帧的同步突发里；用一次 rAF 把布防推到下一帧，排除这段突发。
 function armSnowVeilSoon() {
   if (state.snowVeilArmed || state.snowVeilSeen) return;
   state.snowVeilSeen = true;
@@ -1302,7 +1290,6 @@ function playSnowVeil(scene, location, tier, commitScene, key) {
   const kicker = veil.querySelector(".snow-scene-veil-kicker");
   const title = veil.querySelector(".snow-scene-veil-title");
   const sub = veil.querySelector(".snow-scene-veil-sub");
-  // 标题卡文案：标题=地点名，副标题=角色活动（本层 aria-hidden，不额外播报）。
   if (kicker) kicker.textContent = "场景";
   if (title) title.textContent = location;
   if (sub) sub.textContent = plain(scene?.character_activity || "");
@@ -1318,7 +1305,6 @@ function playSnowVeil(scene, location, tier, commitScene, key) {
     card.animate([{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "translateY(0)" }],
       { duration: fadeIn + 160, easing: "cubic-bezier(0.34, 1.32, 0.5, 1)", fill: "both" });
   }
-  // 掩护下切换世界场景（纯视觉延迟）。
   state.snowVeilTimers.push(window.setTimeout(() => { if (sequence === snowPresentationSequence) snowCommitPending(); }, fadeIn));
   state.snowVeilTimers.push(window.setTimeout(() => {
     if (sequence !== snowPresentationSequence) return;
@@ -1335,7 +1321,6 @@ function playSnowVeil(scene, location, tier, commitScene, key) {
   }, fadeIn + hold));
 }
 
-// P6a 开场与通讯器世界层全部仅在 ui_snow_adv 开启时生效，节点由 JS 在开关开启时建出、关闭态不存在，所以 flag-off 的 DOM 与行为…
 const SNOW_BOOT_SEEN_KEY = "project-snow-public:snow-adv:boot-seen";   // 同一日历日跳过开机视觉
 const SNOW_LOCK_SEEN_KEY = "project-snow-public:snow-adv:lock-seen";  // 同一浏览器会话跳过锁屏
 const SNOW_TOD_LABELS = { dawn: "清晨", day: "白天", dusk: "黄昏", night: "夜晚" };
@@ -1350,7 +1335,6 @@ function snowOpeningState() {
 function snowOpeningActive() {
   return Boolean(document.getElementById("snow-boot") || document.getElementById("snow-lock"));
 }
-// 开场层消隐/解锁后调用：先按既有顺序弹一次性体验须知，再渲染尚未完成的新手引导。
 async function snowRunDeferredOpenings() {
   await showExperienceNoticeIfNeeded();
   renderOnboarding();
@@ -1359,7 +1343,6 @@ function snowLocalDay(now = new Date()) {
   return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
 }
 function snowTimeOfDayLabel() {
-  // 复用世界模块的 resolveTime 口径（含 html[data-snow-time] 覆盖，仅测试/截图）。
   const override = document.documentElement.dataset.snowTime;
   const h = new Date().getHours();
   const key = override && SNOW_TOD_LABELS[override] ? override
@@ -1367,7 +1350,6 @@ function snowTimeOfDayLabel() {
   return SNOW_TOD_LABELS[key];
 }
 
-// 开机层「终端开机」（桌面）
 function buildSnowBoot() {
   if ($("snow-boot") || document.body.querySelector(".snow-boot")) return;
   const boot = document.createElement("div");
@@ -1404,11 +1386,9 @@ function dismissSnowBoot(onRemoved) {
   state.snowBootDone = true;
   if (!boot) { if (onRemoved) onRemoved(); return; }
   snowBootStep("就绪");
-  // 同一日历日重访直接跳过视觉：记录「上次见过开机」的日期。
   try { localPreferences.setItem(SNOW_BOOT_SEEN_KEY, snowLocalDay()); } catch { /* 存储不可用则下次照常显示 */ }
   const tier = stageMotionTier();
   boot.dataset.tier = tier;
-  // 节点真正移除后才允许体验须知/新手引导出现（它们绝不能盖在开机层之上）。
   const finish = () => { boot.remove(); if (onRemoved) onRemoved(); };
   if (tier === "off" || typeof boot.animate !== "function") { finish(); return; }
   boot.dataset.phase = "out";
@@ -1418,10 +1398,8 @@ function dismissSnowBoot(onRemoved) {
     window.setTimeout(() => { delete app.dataset.snowEntering; finish(); }, 720);
     return;
   }
-  // 轻量档：只做 200ms 淡出。
   window.setTimeout(finish, 220);
 }
-// 开机层只在：桌面开场、开关开启、且今天还没见过时显示；否则不建（不加任何延迟）。
 function maybeStartSnowBoot() {
   if (!featureEnabled("ui_snow_adv")) return false;
   const opening = snowOpeningState();
@@ -1434,16 +1412,13 @@ function maybeStartSnowBoot() {
   return true;
 }
 
-// 锁屏层「终端锁屏」（手机）
 function snowLockNotes() {
-  // 通知卡仅由既有状态构造：当前待赴约定、未读公告。
   const notes = [];
   for (const reminder of snowFeatureLogic?.reminders.active() || []) {
     if (reminder.status === "fired") notes.push({ kind: "reminder", characterId: reminder.characterId, at: reminder.remindAt,
       title: `约定提醒 · ${reminder.locationName || "约定地点"}`, detail: "点开确认是否赴约" });
   }
   try {
-    // 当前待赴约定：复用既有签名约定判定；点开走「去见她/赴约」确认流程，绝不自动赴约。
     const pending = sceneActionsV2Enabled() ? signedPendingRendezvous().value : null;
     if (pending) {
       const location = pending.location_name || "约定地点";
@@ -1499,7 +1474,6 @@ function buildSnowLock() {
   hint.append(createSnowIcon("snowflake"));
   hint.append(document.createTextNode("点击任意处解锁"));
   lock.append(bar, main, hint);
-  // 通知卡（公告等异步源就绪后由 snowRefreshLockNotes 重渲染）。
   snowRenderLockNotes(notes);
   document.body.append(lock);
   snowTickLock();
@@ -1507,7 +1481,6 @@ function buildSnowLock() {
   $("chat-app").inert = true;
   lock.addEventListener("click", () => snowUnlock(null));
   lock.addEventListener("keydown", (event) => {
-    // 子通知按钮保留原生 Enter/Space 激活，不能被外层解锁处理吞掉。
     if (["Escape", "Esc"].includes(event.key)
         || event.target === lock && ["Enter", " ", "Spacebar"].includes(event.key)) {
       event.preventDefault(); snowUnlock(null);
@@ -1522,7 +1495,6 @@ function buildSnowLock() {
   });
   window.setTimeout(() => lock.focus({ preventScroll: true }), 0);
 }
-// 渲染锁屏通知卡（可重入，公告等异步源就绪后重渲染）。
 function snowRenderLockNotes(notesEl) {
   if (!notesEl) return;
   const now = new Date();
@@ -1555,7 +1527,6 @@ function snowRenderLockNotes(notesEl) {
   }
   if (focused) (restoreFocus || $("snow-lock"))?.focus({ preventScroll: true });
 }
-// 公告等异步源就绪时，若锁屏仍在，重渲染其通知卡（新出现的未读公告据此补上卡片）。
 function snowRefreshLockNotes() {
   const notesEl = document.getElementById("snow-lock-notes");
   if (notesEl) snowRenderLockNotes(notesEl);
@@ -1572,7 +1543,6 @@ function snowUnlock(note) {
     lock.remove();
     window.clearTimeout(snowLockClock);
     $("open-settings")?.focus({ preventScroll: true });
-    // 解锁后再按既有顺序弹出一次性体验须知等（锁屏期间被推迟）。
     void snowAfterUnlock(note);
   };
   if (tier === "off" || typeof lock.animate !== "function") { finish(); return; }
@@ -1580,10 +1550,8 @@ function snowUnlock(note) {
   window.setTimeout(finish, 340);
 }
 async function snowAfterUnlock(note) {
-  // 体验须知与新手引导在解锁后按正常顺序出现（锁屏期间被推迟，且绝不盖在锁屏之上）。
   await snowRunDeferredOpenings();
   if (!note) return;
-  // 通知卡复用既有处理，绝不自动赴约 / 自动发消息。
   if (["rendezvous", "reminder"].includes(note.kind)) { if (note.characterId && note.characterId !== state.selected) await selectCharacter(note.characterId); await openPresenceDialog(); }
   else if (note.kind === "notice") { openAnnouncements(); }
 }
@@ -1598,12 +1566,10 @@ function maybeStartSnowLock() {
   return true;
 }
 
-// 通讯器背后的世界层（桌面） 首次由「外面」进入某室内地点时的镜头推进 → 随后交给 P4 veil（显示目的地）。
 function snowMaybePushIntoScene(scene, visualKey, commitScene) {
   const tier = stageMotionTier();
   const destination = plain(scene?.character_location || "") || visualKey;
   const activity = plain(scene?.character_activity || "");
-  // 首次入室 = backdrop 当前仍是 generic 外景、目标是具体室内、尚未推进过、auto 档。
   const canPush = featureEnabled("ui_snow_adv") && !snowOpeningState().phone
     && !state.snowPushPlayed && !state.snowEntryConsumed && tier === "auto"
     && snowBackdrop && typeof snowBackdrop.pushInto === "function" && snowBackdrop.scene === "generic"
@@ -1615,13 +1581,11 @@ function snowMaybePushIntoScene(scene, visualKey, commitScene) {
   snowPushContext = { characterId: state.selected, location: destination, visualKey };
   state.snowVeilPending = { commit: commitScene };
   $("chat-app").dataset.snowPushing = "1";
-  // 仅把舞台的视觉层暂时让开，逻辑/回复照常推进。
   if (snowWorld) snowWorld.setMotion(currentMotionLevel());
   snowBackdrop.setMotion(currentMotionLevel());
   void snowBackdrop.pushInto(visualKey, {
     onWhiteout: () => {
       if (sequence !== snowPresentationSequence || !snowPushContext) return true;
-      // veil 真正盖住外景后才显示目的地，避免先出现室内再播放被遮住的推进。
       playSnowVeil({ character_location: destination, character_activity: activity }, destination, tier, () => {
         commitScene();
         finishSnowCamera();
@@ -2750,7 +2714,6 @@ function restoreDraft() {
 }
 
 function sessionKey() { return "project-snow-public:byok"; }
-// 凭证保存时长：说明见 docs/snow-adv-ui-notes.md「凭证保存时长」。
 const retentionModule = () => import("/modules/credential-retention.js");
 function retentionPolicy() {
   const policy = state.config?.credential_policy?.retention;
@@ -2761,12 +2724,13 @@ function syncRetentionField() {
   const policy = retentionPolicy();
   $("credential-retention-field").hidden = !policy;
   for (const option of [...$("credential-retention").options]) if (policy && option.value !== "tab" && !policy.options.includes(option.value)) option.remove();
+  $("proactive-sync-field").hidden = !(featureEnabled("ui_snow_adv") && state.config?.proactive_messages?.enabled === true);
 }
 function saveCredential() {
   snowFeatureLogic?.proactive?.invalidate();
   if (!state.credential || !state.credentialExpiresAt) return;
   const kept = state.credentialRetention !== "tab" && state.provider !== SUBSCRIPTION_PROVIDER;
-  (kept ? localPreferences : tabPreferences).setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, ...(state.provider === SUBSCRIPTION_PROVIDER ? { reasoningEffort: state.reasoningEffort } : {}), expiresAt: state.credentialExpiresAt, ...(kept ? { retention: state.credentialRetention } : {}) }));
+  (kept ? localPreferences : tabPreferences).setItem(sessionKey(), JSON.stringify({ credential: state.credential, provider: state.provider, model: state.model, ...(state.provider === SUBSCRIPTION_PROVIDER ? { reasoningEffort: state.reasoningEffort } : {}), ...(state.provider === RELAY_PROVIDER ? { relayBase: state.relayBase, relayHost: state.relayHost } : {}), expiresAt: state.credentialExpiresAt, ...(kept ? { retention: state.credentialRetention } : {}) }));
   (kept ? tabPreferences : localPreferences).removeItem(sessionKey());
 }
 function clearCredential() {
@@ -2778,6 +2742,7 @@ function clearCredential() {
   state.credentialRetention = "tab";
   state.model = "";
   state.reasoningEffort = "";
+  state.relayHost = "";
   refreshCredentialStatus();
   updateComposerAvailability();
 }
@@ -2787,19 +2752,25 @@ function configured() {
   return Boolean(state.credential && state.provider && state.model);
 }
 function refreshCredentialStatus() {
-  const active = Boolean(state.credential && state.credentialExpiresAt > Date.now() && state.provider === $("provider-select").value);
+  const live = Boolean(state.credential && state.credentialExpiresAt > Date.now());
+  const active = live && state.provider === $("provider-select").value;
   $("credential-status").hidden = !active;
+  const expiration = new Date(state.credentialExpiresAt);
+  const expires = localDayKey(expiration) === localDayKey()
+    ? expiration.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+    : expiration.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
   if (active) {
-    const expiration = new Date(state.credentialExpiresAt);
-    const expires = localDayKey(expiration) === localDayKey()
-      ? expiration.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
-      : expiration.toLocaleString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
     $("credential-status").textContent = state.provider === SUBSCRIPTION_PROVIDER
       ? `个人连接凭证有效至 ${expires}，仅保存在当前标签页。`
       : state.credentialRetention !== "tab"
         ? `加密凭证已保存在本机，有效至 ${expires}；清除模型会话会立即作废。`
         : `加密凭证有效至 ${expires}；获取模型列表和切换角色无需重新输入 Key。`;
   }
+  const ready = live && Boolean(state.model), detail = $("model-current-detail");
+  detail.dataset.empty ||= detail.textContent;
+  $("model-current").dataset.ready = String(ready);
+  $("model-current-title").textContent = ready ? `${state.provider === RELAY_PROVIDER ? `中转站 ${state.relayHost}` : state.config?.providers?.find((item) => item.provider_id === state.provider)?.display_name || ""} · ${state.provider === SUBSCRIPTION_PROVIDER ? subscriptionModelLabel(state.model, state.reasoningEffort) : state.model}` : "还没有连接模型";
+  detail.textContent = ready ? `正在使用，凭证有效至 ${expires}${state.credentialRetention !== "tab" ? "，保存在本机" : "，只在当前标签页"}。` : detail.dataset.empty;
   $("credential-retention-hint").hidden = !(active && retentionChanged());
 }
 
@@ -3011,7 +2982,7 @@ async function showExperienceNoticeIfNeeded() {
 let subscriptionPollController = null;
 let subscriptionPollTimer = 0;
 let subscriptionPollSequence = 0;
-function apiProviders() { return (state.config?.providers || []).filter((provider) => provider.provider_id !== SUBSCRIPTION_PROVIDER); }
+function apiProviders() { return (state.config?.providers || []).filter((provider) => providerMode(provider.provider_id) === "api"); }
 function createSubscriptionState(overrides = {}) {
   return { status: "disconnected", credential: "", expiresAt: 0, pairingExpiresAt: 0, pairingCode: "", error: "", models: [], protocolVersion: 1, draftModel: "", draftEffort: "", selectionInitialized: false, selectionNotice: "", ...overrides };
 }
@@ -3133,14 +3104,19 @@ function forgetSubscription(status = "disconnected", error = "") {
   if (state.provider === SUBSCRIPTION_PROVIDER) clearCredential();
 }
 function renderSubscriptionSettings() {
-  const selected = state.modelSetupMode === "subscription";
+  const mode = state.modelSetupMode, selected = mode === "subscription";
   const enabled = subscriptionEnabled();
   const subscription = state.subscription;
   const busy = Boolean(modelSetupController);
-  $("model-mode-api").setAttribute("aria-pressed", String(!selected));
+  $("model-mode-api").setAttribute("aria-pressed", String(mode === "api"));
+  $("model-mode-relay").setAttribute("aria-pressed", String(mode === "relay"));
+  $("model-mode-relay").hidden = !state.config?.providers?.some((item) => item.provider_id === RELAY_PROVIDER);
   $("model-mode-subscription").setAttribute("aria-pressed", String(selected));
+  $("provider-step").hidden = mode === "relay";
+  $("relay-base-field").hidden = mode !== "relay";
   $("api-model-settings").hidden = selected;
   $("subscription-settings").hidden = !selected;
+  if (selected) void import("/modules/model-guide.js").then((module) => module.renderSubscriptionTutorial($("subscription-tutorial"), window.location.origin));
   renderSubscriptionModelControls();
   const actions = $("model-session-actions");
   const subscriptionActions = $("subscription-session-actions");
@@ -3148,7 +3124,7 @@ function renderSubscriptionSettings() {
   else if (!selected && actions.parentElement === subscriptionActions) $("setup-error").after(actions);
   $("clear-credential").hidden = selected;
   $("save-model").textContent = selected ? "使用所选模型" : "保存本次模型会话";
-  $("save-model").disabled = busy || (selected ? !enabled || subscription.status !== "connected" || !subscription.credential || !subscriptionCombinationSupported(subscription.draftModel, subscription.draftEffort) : !apiProviders().length);
+  $("save-model").disabled = busy || (selected ? !enabled || subscription.status !== "connected" || !subscription.credential || !subscriptionCombinationSupported(subscription.draftModel, subscription.draftEffort) : !$("provider-select").value);
   $("pair-subscription").hidden = !enabled || subscription.status === "connected";
   $("pair-subscription").disabled = busy;
   $("pair-subscription").textContent = subscription.credential ? "重新生成配对码" : "生成配对码";
@@ -3158,7 +3134,6 @@ function renderSubscriptionSettings() {
   $("subscription-pairing-code").textContent = subscription.pairingCode;
   $("subscription-pairing-expiry").textContent = subscription.pairingExpiresAt
     ? `有效至 ${new Date(subscription.pairingExpiresAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}。配对完成后此页会隐藏配对码。` : "";
-  $("subscription-connect-command").textContent = `node snow-codex-connector.mjs --site ${window.location.origin}`;
   const statusCopy = {
     disconnected: "尚未连接个人连接器。请按下方教程完成登录和配对。",
     checking: "正在核对个人连接器状态……",
@@ -3172,15 +3147,13 @@ function renderSubscriptionSettings() {
 function chooseModelMode(mode) {
   stopSubscriptionPolling();
   const select = $("provider-select");
+  if (state.modelSetupMode === "api" && select.value) state.apiProviderChoice = select.value;
+  state.modelSetupMode = mode;
   if (mode === "subscription") {
-    if (select.value && select.value !== SUBSCRIPTION_PROVIDER) state.apiProviderChoice = select.value;
-    state.modelSetupMode = "subscription";
     if (subscriptionEnabled()) select.value = SUBSCRIPTION_PROVIDER;
-  } else {
-    state.modelSetupMode = "api";
-    select.value = state.apiProviderChoice || (state.provider !== SUBSCRIPTION_PROVIDER ? state.provider : "") || apiProviders()[0]?.provider_id || "";
-  }
+  } else select.value = mode === "relay" ? RELAY_PROVIDER : state.apiProviderChoice || (providerMode(state.provider) === "api" ? state.provider : "") || apiProviders()[0]?.provider_id || "";
   syncProviderControls(select.value);
+  refreshCredentialStatus();
   showError("setup-error", "");
   renderSubscriptionSettings();
   if (mode === "subscription") startSubscriptionPolling();
@@ -3274,6 +3247,12 @@ function syncProviderControls(providerId = $("provider-select")?.value || "") {
     button.setAttribute("aria-checked", String(selected));
     button.tabIndex = selected || (!providerId && button === $("provider-options-mobile")?.firstElementChild) ? 0 : -1;
   });
+  const provider = state.config?.providers?.find((item) => item.provider_id === providerId), docs = $("provider-doc-links");
+  docs.innerHTML = [["console_url", "获取 API Key"], ["documentation_url", "接口文档"], ["privacy_url", "隐私政策"]]
+    .map(([key, label]) => [safeExternalUrl(provider?.[key]), label]).filter(([url]) => url)
+    .map(([url, label]) => `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${label} ↗</a>`).join("")
+    + (provider?.caveat ? `<small>${escapeHtml(provider.caveat)}</small>` : "");
+  docs.hidden = !docs.innerHTML || providerMode(providerId) !== "api";
 }
 function chooseProvider(providerId) {
   const value = plain(providerId);
@@ -3334,18 +3313,9 @@ async function loadConfig() {
   $("website-github-link").href = state.config.source_links.mywebsite;
   $("releases-link").href = state.config.source_links.releases;
   $("provider-select").innerHTML = state.config.providers.length
-    ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}"${provider.provider_id === SUBSCRIPTION_PROVIDER ? " hidden" : ""}>${escapeHtml(provider.display_name)}</option>`).join("")
+    ? state.config.providers.map((provider) => `<option value="${escapeHtml(provider.provider_id)}"${providerMode(provider.provider_id) !== "api" ? " hidden" : ""}>${escapeHtml(provider.display_name)}</option>`).join("")
     : '<option value="">暂未开放模型厂商</option>';
   renderMobileProviderOptions();
-  const providerLinks = [];
-  for (const provider of state.config.providers || []) {
-    const docs = safeExternalUrl(provider.documentation_url || provider.docs_url);
-    const privacy = safeExternalUrl(provider.privacy_url);
-    if (docs) providerLinks.push(`<a href="${escapeHtml(docs)}" target="_blank" rel="noreferrer">${escapeHtml(provider.display_name)} 官方文档</a>`);
-    if (privacy) providerLinks.push(`<a href="${escapeHtml(privacy)}" target="_blank" rel="noreferrer">${escapeHtml(provider.display_name)} 隐私说明</a>`);
-  }
-  $("provider-doc-links").innerHTML = providerLinks.join("");
-  $("provider-doc-links").hidden = !providerLinks.length;
   $("provider-empty").hidden = Boolean(apiProviders().length);
   $("discover-models").disabled = !state.config.providers.length;
   $("save-model").disabled = !state.config.providers.length;
@@ -3368,7 +3338,9 @@ async function loadConfig() {
         state.provider = saved.provider;
         state.model = saved.model || "";
         state.reasoningEffort = saved.provider === SUBSCRIPTION_PROVIDER ? plain(saved.reasoningEffort) || (saved.model === SUBSCRIPTION_MODEL ? SUBSCRIPTION_EFFORT : "") : "";
-        if (saved.provider === SUBSCRIPTION_PROVIDER) state.modelSetupMode = "subscription";
+        state.modelSetupMode = providerMode(saved.provider);
+        $("relay-base-url").value = state.relayBase = plain(saved.relayBase);
+        state.relayHost = plain(saved.relayHost);
         $("provider-select").value = state.provider;
         syncProviderControls(state.provider);
         $("model-id").value = state.model;
@@ -3387,7 +3359,7 @@ async function loadConfig() {
     state.subscription.status = "disconnected";
     state.subscription.error = error?.message || "subscription_not_connected";
   }
-  state.apiProviderChoice = (state.provider !== SUBSCRIPTION_PROVIDER ? state.provider : "") || apiProviders()[0]?.provider_id || "";
+  state.apiProviderChoice = (providerMode(state.provider) === "api" ? state.provider : "") || apiProviders()[0]?.provider_id || "";
   refreshCredentialStatus();
   syncProviderControls($("provider-select").value);
   renderSubscriptionSettings();
@@ -3499,6 +3471,8 @@ async function issueCredential(signal) {
   }
   const apiKey = $("api-key").value;
   if (!apiKey) throw new Error("请先输入 API Key。");
+  const relayBase = provider === RELAY_PROVIDER ? $("relay-base-url").value.trim() : "";
+  if (provider === RELAY_PROVIDER && !relayBase) throw new Error("请先填写中转站地址。");
   const policy = retentionPolicy(), retention = policy ? $("credential-retention").value : "";
   if (retention && retention !== "tab" && state.retentionConsent !== retention) throw new Error("credential_retention_notice_required");
   if (!experienceNoticeAccepted()) {
@@ -3522,6 +3496,7 @@ async function issueCredential(signal) {
       body: JSON.stringify({
         provider,
         api_key: apiKey,
+        ...(relayBase ? { base_url: relayBase } : {}),
         turnstile_token: token,
         accepted_transit_notice: true,
         accepted_cost_notice: true,
@@ -3540,15 +3515,21 @@ async function issueCredential(signal) {
   state.provider = provider;
   state.credentialExpiresAt = Date.parse(payload.expires_at);
   state.credentialRetention = retention && retention !== "tab" && payload.retention === retention ? retention : "tab";
+  state.relayBase = relayBase;
+  state.relayHost = plain(payload.relay_host);
   $("api-key").value = "";
   saveCredential();
   refreshCredentialStatus();
+}
+function credentialStale() {
+  return !state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now() || retentionChanged()
+    || (state.provider === RELAY_PROVIDER && $("relay-base-url").value.trim() !== state.relayBase);
 }
 async function discoverModels() {
   return runModelSetup("discover-models", async (signal) => {
     if (state.modelSetupMode === "subscription") throw new Error("subscription_model_unavailable");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
-    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now() || retentionChanged()) await issueCredential(signal);
+    if (credentialStale()) await issueCredential(signal);
     const payload = await api("/byok/models", { method: "POST", signal, timeoutMs: 30000, body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
     signal.throwIfAborted();
     saveCredential();
@@ -3582,7 +3563,7 @@ async function saveModelSession() {
     const model = $("discovered-models").value.trim() || $("model-id").value.trim();
     if (!model) throw new Error("请填写或选择模型 ID。");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
-    if (!state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now() || retentionChanged()) await issueCredential(signal);
+    if (credentialStale()) await issueCredential(signal);
     signal.throwIfAborted();
     state.provider = $("provider-select").value;
     state.model = model;
@@ -3592,6 +3573,7 @@ async function saveModelSession() {
     updateComposerAvailability();
     $("settings-dialog").close();
     toast(state.credentialRetention !== "tab" ? "模型会话已保存，凭证保存在本机" : "模型会话已保存到当前标签页");
+    if (!$("proactive-sync-field").hidden && $("proactive-sync").checked) { $("proactive-sync").checked = false; featureEmit("proactive-sync-request", { duration: state.credentialRetention }); }
   });
 }
 
@@ -4270,7 +4252,6 @@ function renderCharacters() {
           ? `发送了表情：${last.contentBlocks.find((block) => block.type === "sticker")?.caption || "表情"}`
           : "尚未开始对话";
       const pinned = state.pinnedCharacters.has(character.character_id);
-      // 雪境 ADV (P5)：每行带 data-snow-character，让联系人卡片用各自的角色色（--char）。
       const rowCharacter = snowAdvActive() ? ` data-snow-character="${escapeHtml(character.character_id)}"` : "";
       return `<div class="character-row" role="listitem"${rowCharacter}><button class="character" aria-current="${character.character_id === state.selected}" data-character="${escapeHtml(character.character_id)}">${avatarMarkup(character, { thumbnail: true, priority: character.character_id === state.selected })}<span><strong>${escapeHtml(character.display_name)}</strong><small>${escapeHtml(summary)}</small></span></button><button class="pin-character" type="button" data-pin-character="${escapeHtml(character.character_id)}" aria-pressed="${pinned}" aria-label="${pinned ? "取消置顶" : "置顶"}${escapeHtml(character.display_name)}">${pinned ? "★" : "☆"}</button></div>`;
     }).join("");
@@ -4314,7 +4295,6 @@ function advanceOnboarding() {
   state.onboardingStep += 1;
   renderOnboarding();
 }
-// close 事件不冒泡，在捕获阶段监听所有 <dialog> 的关闭；只在雪境界面下补显引导。
 document.addEventListener("close", (event) => {
   if (event.target instanceof HTMLDialogElement && featureEnabled("ui_snow_adv")) renderOnboarding();
 }, true);
@@ -4325,7 +4305,6 @@ async function loadCharacters() {
   await restoreInterruptedChatRequests();
   $("history-character").innerHTML = state.characters.map((character) => `<option value="${escapeHtml(character.character_id)}">${escapeHtml(character.display_name)}</option>`).join("");
   renderCharacters();
-  // 回访时回到上次聊天的角色，否则通讯器停在名单第一位的空会话上。
   const remembered = state.characters.find(item => item.character_id === plain(state.featurePreferences?.lastCharacterId));
   const initial = remembered || state.characters[0];
   if (!state.selected && initial) {
@@ -4938,7 +4917,6 @@ function crossfadeStageCharacterArt(node, duration = 280) {
   node.parentNode.insertBefore(outgoing, node);
   node.style.opacity = "1";
   node.dataset.stageArtTransition = "incoming";
-  // 雪境 ADV (P4)：换表情不出现透明空档。
   const snowAdv = snowAdvActive();
   const options = {
     duration,
@@ -4968,7 +4946,6 @@ function crossfadeStageCharacterArt(node, duration = 280) {
   });
   return transition;
 }
-// 雪境 ADV (P4)：立绘入场。
 function playStageEnter(node) {
   if (!snowAdvActive() || !node || node.hidden || typeof node.animate !== "function") return false;
   const tier = stageMotionTier();
@@ -5244,7 +5221,6 @@ function playStageMotion(node, message, presentation, requestSequence = state.st
   node.dataset.stageMotionKey = playKey;
   node.dataset.stageMotion = reducedMotion() ? "suppressed" : stageMotion;
   if (document.hidden || reducedMotion() || typeof node.animate !== "function") return false;
-  // 雪境 ADV (P4)：light 档位只保留淡入淡出，不做任何位移/缩放动作；标记为 suppressed。
   if (snowAdvActive() && stageMotionTier() === "light") { node.dataset.stageMotion = "suppressed"; return false; }
   const definition = stageMotionFrames(stageMotion);
   if (!definition) return false;
@@ -5890,7 +5866,6 @@ function renderTimeline({ forceScroll = false, preserveScroll = false } = {}) {
   const newer = window.hasNewer ? '<button id="load-newer-messages" class="secondary-button load-older-messages" type="button">查看较新的 40 条</button>' : "";
   if (!messages.length) {
     const emptyCopy = "从一句问候开始吧。历史只保存在此浏览器。";
-    // 雪境 ADV (P5)：空会话用角色色问候卡取代纯灰文字；文案不变。
     const emptyBody = snowAdvActive() && currentCharacter()
       ? `<div class="snow-empty-greeting">${avatarMarkup(currentCharacter(), { thumbnail: false, priority: true, className: "snow-empty-avatar" })}<p>${escapeHtml(emptyCopy)}</p></div>`
       : `<p>${escapeHtml(emptyCopy)}</p>`;
@@ -6384,7 +6359,6 @@ async function setChannel(channel, persist = true, targetThread = null) {
     $("contact-panel").setAttribute("aria-hidden", "true");
     $("contact-panel").inert = true;
   } else if (channel !== "in_person" && $("chat-app").dataset.snowAutoCollapsed === "1") {
-    // 还原我们为面对面自动折叠的侧栏，避免把文字界面也折叠（不碰用户手动折叠的情况）。
     delete $("chat-app").dataset.snowAutoCollapsed;
     if (!window.matchMedia("(max-width: 820px)").matches) {
       $("chat-app").classList.remove("sidebar-collapsed");
@@ -7535,7 +7509,6 @@ async function sendPresenceArrival(characterId, { recoveryOnly = false } = {}) {
   }
 }
 async function arriveSceneAction(userText = "") {
-  // P6a：用户亲身进入室内，世界背景从此为当前室内地点，不再跳回外景。
   state.snowBeenInPerson = true;
   const characterId = state.selected;
   const thread = currentThread();
@@ -7572,7 +7545,6 @@ async function arriveSceneAction(userText = "") {
     if (state.selected !== characterId || thread.historyEpoch !== state.historyEpoch) return false;
     await setChannel(result.communication_channel === "in_person" ? "in_person" : "text", true, thread);
     renderScene();
-    // 雪境 ADV：舞台旁白「你已来到X。
     if (!suppressArrivalDuplicateNotice()) {
       setRequestStatus(characterId, `已来到${result.scene_state?.character_location || "她身边"}，可以继续聊天。`);
       showBanner(`已来到${result.scene_state?.character_location || "她身边"}。`);
@@ -7870,7 +7842,7 @@ function openSettings(tab = "models") {
   $("day-continuity-preference").value = state.dayContinuityPreference;
   $("summary-last-updated").textContent = activeThread?.summaryUpdatedAt ? `最近更新：${new Date(activeThread.summaryUpdatedAt).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" })}` : "尚未生成摘要";
   $("provider-select").value = state.modelSetupMode === "subscription" && subscriptionEnabled()
-    ? SUBSCRIPTION_PROVIDER : state.apiProviderChoice || state.provider || $("provider-select").value;
+    ? SUBSCRIPTION_PROVIDER : state.modelSetupMode === "relay" ? RELAY_PROVIDER : state.apiProviderChoice || state.provider || $("provider-select").value;
   syncProviderControls($("provider-select").value);
   $("model-id").value = state.model || $("model-id").value;
   refreshCredentialStatus();
@@ -8115,6 +8087,7 @@ $("stage-open-feedback").onclick = () => { const messageId = $("stage-open-feedb
 $("discover-models").onclick = discoverModels;
 $("save-model").onclick = saveModelSession;
 $("model-mode-api").onclick = () => chooseModelMode("api");
+$("model-mode-relay").onclick = () => chooseModelMode("relay");
 $("model-mode-subscription").onclick = () => chooseModelMode("subscription");
 $("subscription-model-select").onchange = () => chooseSubscriptionModel($("subscription-model-select").value);
 $("subscription-effort-select").onchange = () => {
@@ -8523,7 +8496,6 @@ window.addEventListener("pagehide", () => {
 });
 
 async function boot() {
-  // 配置与角色列表不依赖本地存储：先并行发出（index.html 已预加载），不等 IndexedDB。
   for (const [name, path] of [["config", "/config"], ["characters", "/characters"]]) {
     bootRequests[name] = api(path, { headers: {} });
     bootRequests[name].catch(() => {});
@@ -8533,7 +8505,6 @@ async function boot() {
   await migrateBrowserState();
   await pruneExpiredMessages();
   await loadConfig();
-  // P6a：开关只在 config 解析后才已知，故开机/锁屏层只能此时才出现。
   let snowBoot = false;
   let snowLock = false;
   try { snowBoot = maybeStartSnowBoot(); } catch { snowBoot = false; }
@@ -8556,7 +8527,6 @@ async function boot() {
   $("auto-summary-enabled").checked = state.autoSummaryEnabled;
   updateComposerAvailability();
   restoreDraft();
-  // P6a：桌面开关开启时，通讯器背后挂载世界背景（人在外→generic 外景）。
   syncSnowWorld();
   renderOnboarding();
   if (!state.storageAvailable) showBanner("浏览器未开放本地存储，本次聊天不会保存；仍可继续使用。 ");
@@ -8575,7 +8545,6 @@ async function boot() {
   window.setInterval(() => { void checkBuildUpdate(); }, 300000);
 }
 boot().catch((error) => {
-  // 启动失败（含 /public/v1/config 取回失败）也必须立刻解除首帧中性保持，绝不卡白。
   snowClearFirstFlashHold();
   $("snow-boot")?.remove();
   const lock = $("snow-lock");

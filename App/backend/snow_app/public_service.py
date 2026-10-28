@@ -28,6 +28,7 @@ from .mvp_service import (
     _normalize_expression_state,
     _normalize_performance_id,
     _normalize_stage_motion,
+    untrusted_model_host,
 )
 from .provider_registry import ProviderRegistry
 from .public_contracts import (
@@ -1916,9 +1917,10 @@ class PublicChatService:
                         allow_dialogue_channel_transition=False,
                     )
                 budget = GenerationBudget(1 if typed_arrival else self.public_settings.max_provider_calls_per_action)
-                result = self.engine.generate(
-                    DialogueContext(request.character_id, "", "in_person", WorldState(prepared["state"])),
-                    budget, generate).payload
+                with untrusted_model_host(provider.base_url if provider.kind == "relay" else None):
+                    result = self.engine.generate(
+                        DialogueContext(request.character_id, "", "in_person", WorldState(prepared["state"])),
+                        budget, generate).payload
                 if typed_arrival:
                     result["usage"] = {**(result.get("usage") or {}), "provider_calls": budget.provider_calls}
             except SubscriptionError as exc:
@@ -2331,7 +2333,8 @@ class PublicChatService:
                             "session_experiences": v2_context.get("session_experiences") or [],
                         } if v2_context is not None else {}),
                     )
-                result = self.engine.generate(context, budget, generate).payload
+                with untrusted_model_host(provider.base_url if provider.kind == "relay" else None):
+                    result = self.engine.generate(context, budget, generate).payload
             except GenerationStreamPartialError as exc:
                 return self._terminal_result(
                     request, provider, total_started, code="generation_partial",

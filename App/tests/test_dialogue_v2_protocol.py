@@ -127,7 +127,15 @@ class SessionContextContractTests(TestCase):
         with self.assertRaises(PublicSecurityError):
             self.verify(proof)
 
-    def test_legacy_near_limit_token_remains_verifiable_but_new_signing_reserves_wrapper(self):
+    def test_communicator_topic_proof_preserves_its_new_kind(self):
+        memory = SessionMemory(memory_id="memory-communicator", kind="communicator_topic",
+            value="聊到你喜欢下雪天", source_request_id=uuid4(), segment_id=self.segment)
+        proof = sign_session_memory(self.settings, memory, subject_hash="synthetic-subject",
+                                    character_id=self.character)
+        restored = verify_session_memory(self.settings, proof, subject_hash="synthetic-subject",
+                                         character_id=self.character)
+        self.assertEqual(restored, memory)
+        self.assertEqual(restored.kind, "communicator_topic")
         # Reproduce the previous token format without the new signer/transfer
         # limit, so this is an actual backward-verification regression.
         legacy_token = None

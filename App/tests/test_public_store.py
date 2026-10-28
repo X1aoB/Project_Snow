@@ -29,6 +29,15 @@ class PublicStoreTests(TestCase):
             ).scalar_one()
         self.assertEqual(count, 1)
 
+    def test_rate_limit_reports_when_its_window_ends(self) -> None:
+        now = datetime(2026, 10, 28, 4, 59, 55, tzinfo=UTC)
+        for period, expected in (("hour", datetime(2026, 10, 28, 5, 0, tzinfo=UTC)),
+                                 ("day", datetime(2026, 10, 29, 0, 0, tzinfo=UTC))):
+            self.store.consume_limits("subject", [(f"chat_{period}", period, 1)], now=now)
+            with self.assertRaises(RateLimitExceeded) as caught:
+                self.store.consume_limits("subject", [(f"chat_{period}", period, 1)], now=now)
+            self.assertEqual((caught.exception.scope, caught.exception.reset_at), (f"chat_{period}", expected))
+
     def test_request_cache_accepts_namespaced_idempotency_keys(self) -> None:
         self.assertIn("request_id VARCHAR(128) PRIMARY KEY", SCHEMA_SQL)
         request_id = "presence-transition:" + "a" * 36

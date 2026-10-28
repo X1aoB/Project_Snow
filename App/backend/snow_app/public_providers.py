@@ -1,12 +1,23 @@
-"""Fixed official BYOK provider adapters. Custom base URLs are never accepted."""
+"""Fixed official BYOK provider adapters plus the sealed third-party relay.
+
+A custom base URL is only ever the relay's base, opened from its credential.
+"""
 
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+
+# A relay station is an attacker-choosable upstream, so its response body is
+# read in chunks and refused past this ceiling instead of being buffered whole
+# (official vendors are trusted hosts and keep the plain path). 2 MiB
+# comfortably holds a model list or any legitimate single-turn completion JSON.
+RELAY_RESPONSE_BYTE_CAP = 2 * 1024 * 1024
 
 
 class ProviderHTTPPool:
@@ -67,6 +78,17 @@ class ProviderHTTPPool:
         client = await self._for_current_loop()
         return await client.post(url, **kwargs)
 
+    @asynccontextmanager
+    async def stream(self, method: str, url: str, **kwargs: Any):
+        # Only relay requests stream, and a relay can never be the in-process
+        # subscription broker.
+        if str(url).startswith("https://codex-subscription.invalid"):
+            from .public_subscription import SubscriptionError
+            raise SubscriptionError("subscription_disabled", 404)
+        client = await self._for_current_loop()
+        async with client.stream(method, url, **kwargs) as response:
+            yield response
+
     async def close(self) -> None:
         async with self._lock:
             client, self._client = self._client, None
@@ -82,6 +104,13 @@ class ProviderSpec:
     base_url: str
     documentation_url: str
     privacy_url: str
+    # Where the user creates a key ("" if none / not applicable).
+    console_url: str = ""
+    # "official" for a fixed-domain vendor adapter, "relay" for a user-entered
+    # third-party transit station whose base_url is sealed per credential.
+    kind: str = "official"
+    # Short zh-CN note shown in the UI/config ("" when there is nothing to warn).
+    caveat: str = ""
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
@@ -95,6 +124,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "https://api.openai.com/v1",
         "https://platform.openai.com/docs",
         "https://openai.com/policies/privacy-policy/",
+        console_url="https://platform.openai.com/api-keys",
     ),
     "deepseek": ProviderSpec(
         "deepseek",
@@ -102,6 +132,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "https://api.deepseek.com/v1",
         "https://api-docs.deepseek.com/",
         "https://cdn.deepseek.com/policies/zh-CN/deepseek-privacy-policy.html",
+        console_url="https://platform.deepseek.com/api_keys",
     ),
     "dashscope": ProviderSpec(
         "dashscope",
@@ -109,6 +140,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "https://help.aliyun.com/zh/model-studio/",
         "https://www.alibabacloud.com/help/en/legal/latest/privacy-policy",
+        console_url="https://bailian.console.aliyun.com/?apiKey=1",
     ),
     "zhipu": ProviderSpec(
         "zhipu",
@@ -116,6 +148,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "https://open.bigmodel.cn/api/paas/v4",
         "https://open.bigmodel.cn/dev/api",
         "https://docs.bigmodel.cn/cn/terms/privacy-policy",
+        console_url="https://open.bigmodel.cn/usercenter/apikeys",
     ),
     "moonshot": ProviderSpec(
         "moonshot",
@@ -123,6 +156,48 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "https://api.moonshot.cn/v1",
         "https://platform.moonshot.cn/docs",
         "https://platform.kimi.com/docs/agreement/userprivacy",
+        console_url="https://platform.moonshot.cn/console/api-keys",
+    ),
+    "anthropic": ProviderSpec(
+        "anthropic",
+        "Anthropic Claude",
+        # The OpenAI-compatible layer lives under the same host; keep the
+        # trailing slash so _official_url rstrips to a clean origin.
+        "https://api.anthropic.com/v1/",
+        "https://docs.anthropic.com/en/api/openai-sdk",
+        "https://www.anthropic.com/legal/privacy",
+        console_url="https://console.anthropic.com/settings/keys",
+        caveat="Anthropic 官方说明其 OpenAI 兼容层主要用于测试与迁移对比，长期/生产建议用原生 API。",
+    ),
+    "xai": ProviderSpec(
+        "xai",
+        "xAI Grok",
+        "https://api.x.ai/v1",
+        "https://docs.x.ai/docs/api-reference",
+        "https://x.ai/legal/privacy-policy",
+        console_url="https://console.x.ai/",
+    ),
+    "gemini": ProviderSpec(
+        "gemini",
+        "Google Gemini",
+        "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "https://ai.google.dev/gemini-api/docs/openai",
+        "https://ai.google.dev/gemini-api/terms",
+        console_url="https://aistudio.google.com/app/apikey",
+    ),
+    # Relay (第三方中转站) is a per-credential adapter: the real base_url is
+    # sealed into each BYOK credential, never read from this dict.  This
+    # sentinel only advertises the provider in /config and carries the UI
+    # caveat; relay_provider_spec() builds the live spec from the sealed claim.
+    "relay": ProviderSpec(
+        "relay",
+        "第三方中转站",
+        "https://relay.invalid/v1",
+        "",
+        "",
+        console_url="",
+        kind="relay",
+        caveat="第三方中转站由你自行选择与信任，密钥与对话内容会经由该站点转发，风险自担。",
     ),
 }
 
@@ -133,11 +208,86 @@ def _official_url(spec: ProviderSpec, path: str) -> str:
     return f"{spec.base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
+# Anthropic's version header. Its OpenAI-compatible layer accepts a standard
+# Authorization: Bearer, but /models and the native surface also look for the
+# x-api-key + anthropic-version pair, so we send both and the request works on
+# either path.
+ANTHROPIC_VERSION = "2023-06-01"
+
+
+def _auth_headers(spec: ProviderSpec, api_key: str, *, json_body: bool = False) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {api_key}"}
+    if json_body:
+        headers["Content-Type"] = "application/json"
+    else:
+        headers["Accept"] = "application/json"
+    if spec.provider_id == "anthropic":
+        headers["x-api-key"] = api_key
+        headers["anthropic-version"] = ANTHROPIC_VERSION
+    return headers
+
+
+def relay_provider_spec(base_url: str) -> ProviderSpec:
+    """Build the live relay adapter from a base URL sealed in a credential.
+
+    The base URL is never taken from a request body here — callers pass the
+    value already opened from the BYOK claim. The returned spec reuses the
+    normal OpenAI-compatible discover/completion code path with provider_id
+    "relay" so every route resolves identically.
+    """
+
+    relay = PROVIDERS["relay"]
+    return ProviderSpec(
+        provider_id="relay",
+        display_name=relay.display_name,
+        base_url=base_url,
+        documentation_url=relay.documentation_url,
+        privacy_url=relay.privacy_url,
+        console_url=relay.console_url,
+        kind="relay",
+        caveat=relay.caveat,
+    )
+
+
 class ProviderRequestError(RuntimeError):
     def __init__(self, code: str, status_code: int = 502):
         super().__init__(code)
         self.code = code
         self.status_code = status_code
+
+
+async def _bounded_relay_request(
+    client: ProviderHTTPPool | None,
+    method: str,
+    url: str,
+    *,
+    timeout: float,
+    **kwargs: Any,
+) -> httpx.Response:
+    """Send one relay request and return its response with a bounded body.
+
+    The body is streamed and refused past ``RELAY_RESPONSE_BYTE_CAP`` decoded
+    bytes, so a hostile station cannot make the API buffer an unbounded (or
+    decompression-bomb) payload. Status and JSON handling stay with the caller.
+    """
+
+    async def bounded(response: httpx.Response) -> httpx.Response:
+        body = bytearray()
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > RELAY_RESPONSE_BYTE_CAP:
+                raise ProviderRequestError("provider_response_too_large")
+        headers = [(key, value) for key, value in response.headers.items()
+                   if key.lower() not in {"content-encoding", "content-length", "transfer-encoding"}]
+        return httpx.Response(response.status_code, headers=headers, content=bytes(body),
+                              request=response.request)
+
+    if client is not None:
+        async with client.stream(method, url, timeout=timeout, **kwargs) as response:
+            return await bounded(response)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as request_client:
+        async with request_client.stream(method, url, **kwargs) as response:
+            return await bounded(response)
 
 
 def provider_spec(provider_id: str, enabled: tuple[str, ...]) -> ProviderSpec:
@@ -157,17 +307,22 @@ async def discover_models(
     if spec.provider_id == "codex_subscription" and client is None:
         raise ProviderRequestError("subscription_not_connected", 409)
     try:
-        if client is not None:
+        if spec.kind == "relay":
+            response = await _bounded_relay_request(
+                client, "GET", _official_url(spec, "models"),
+                headers=_auth_headers(spec, api_key), timeout=timeout,
+            )
+        elif client is not None:
             response = await client.get(
                 _official_url(spec, "models"),
-                headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+                headers=_auth_headers(spec, api_key),
                 timeout=timeout,
             )
         else:
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as request_client:
                 response = await request_client.get(
                     _official_url(spec, "models"),
-                    headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+                    headers=_auth_headers(spec, api_key),
                 )
     except httpx.TimeoutException as exc:
         raise ProviderRequestError("provider_timeout", 504) from exc
@@ -186,13 +341,16 @@ async def discover_models(
     records = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(records, list):
         return []
-    return sorted(
-        {
-            str(record.get("id"))
-            for record in records
-            if isinstance(record, dict) and str(record.get("id") or "").strip()
-        }
-    )[:500]
+    identifiers = {
+        str(record.get("id"))
+        for record in records
+        if isinstance(record, dict) and str(record.get("id") or "").strip()
+    }
+    if spec.provider_id == "gemini":
+        # Gemini's OpenAI-compatible list returns native "models/<id>" names;
+        # chat accepts the bare id, which is also what the reviewed profiles use.
+        identifiers = {identifier.removeprefix("models/") for identifier in identifiers}
+    return sorted(identifiers)[:500]
 
 
 async def simple_completion(
@@ -221,10 +379,15 @@ async def simple_completion(
     if spec.provider_id == "codex_subscription" and reasoning_effort is not None:
         body["reasoning_effort"] = reasoning_effort
     try:
-        if client is not None:
+        if spec.kind == "relay":
+            response = await _bounded_relay_request(
+                client, "POST", _official_url(spec, "chat/completions"),
+                headers=_auth_headers(spec, api_key, json_body=True), json=body, timeout=timeout,
+            )
+        elif client is not None:
             response = await client.post(
                 _official_url(spec, "chat/completions"),
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                headers=_auth_headers(spec, api_key, json_body=True),
                 json=body,
                 timeout=timeout,
             )
@@ -232,7 +395,7 @@ async def simple_completion(
             async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as request_client:
                 response = await request_client.post(
                     _official_url(spec, "chat/completions"),
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    headers=_auth_headers(spec, api_key, json_body=True),
                     json=body,
                 )
     except httpx.TimeoutException as exc:

@@ -20,7 +20,7 @@ HARNESS = r"""async () => {
     const state={selected:characterId,historyEpoch:0,writerOwned:true,localDayKey:day,
       rendezvous:{authoritative:true,dayKey:day,items:[{character_id:characterId,rendezvous_id:reminder.rendezvousId,
         location_id:reminder.locationId,schedule_date:day}]},...clone(initial.state||{})};
-    const context={enabled:true,notice_version:'proactive-cost-1',ready:true,provider:'openai',model:'synthetic-model',
+    const context={enabled:true,notice_version:'proactive-cost-2',ready:true,provider:'openai',model:'synthetic-model',
       credential:'synthetic-credential-only',segment_id:'00000000-0000-4000-8000-000000000001',
       state_package:'synthetic-signed-world',session_context_package:'synthetic-signed-dialogue',...clone(initial.context||{})};
     let preferences=clone(initial.preferences||{});
@@ -44,8 +44,8 @@ HARNESS = r"""async () => {
       async withRequest(id,work){return controls.withBusy?{ok:false,reason:'busy'}:work();},
       async request(path,options){const body=JSON.parse(options.body);requests.push({path,body,headers:clone(options.headers||{}),
           persisted:clone([...records.values()])});log.push('request:'+path);controls.requestStarted?.resolve();
-        if(path==='/rendezvous/consent'){const response=controls.consentResponse||{};return {consent_token:'synthetic-consent-only',notice_version:'proactive-cost-1',
-          model_session_id:body.model_session_id,expires_at:new Date(Date.now()+3600000).toISOString(),...clone(response),
+        if(path==='/rendezvous/consent'){const response=controls.consentResponse||{};return {consent_token:'synthetic-consent-only',notice_version:'proactive-cost-2',
+          model_session_id:body.model_session_id,duration:body.duration||'tab',expires_at:new Date(Date.now()+3600000).toISOString(),...clone(response),
           model_session_id:response.model_session_id||body.model_session_id};}
         if(path!=='/rendezvous/message')throw Error('unexpected_synthetic_endpoint');
         if(controls.requestGate)await controls.requestGate.promise;
@@ -146,7 +146,7 @@ class SnowProactiveClientTests(TestCase):
           const failures=[];for(const context of [{enabled:false},{notice_version:'other'},{ready:false},{credential:''}]){
             const x=harness({context});failures.push({result:await x.client.enable({acceptedCostNotice:true}),requests:x.requests.length});}
           return {initial,before,beforeContext,blocked:blocked.map(row=>row.reason),enabled:enabled.ok,
-            consent:{path:consent.path,accepted:consent.body.accepted_cost_notice,notice:consent.body.notice_version},
+            consent:{path:consent.path,accepted:consent.body.accepted_cost_notice,notice:consent.body.notice_version,duration:consent.body.duration},
             failures:failures.map(row=>[row.result.ok,row.requests]),durable:JSON.stringify([...h.records.values(),h.preferences()])};
         }""")
         self.assertFalse(result["initial"]["enabled"])
@@ -155,7 +155,7 @@ class SnowProactiveClientTests(TestCase):
         self.assertEqual(result["beforeContext"], 0)
         self.assertEqual(result["blocked"], ["cost_confirmation_required"] * 5)
         self.assertTrue(result["enabled"])
-        self.assertEqual(result["consent"], {"path": "/rendezvous/consent", "accepted": True, "notice": "proactive-cost-1"})
+        self.assertEqual(result["consent"], {"path": "/rendezvous/consent", "accepted": True, "notice": "proactive-cost-2", "duration": "tab"})
         self.assertEqual(result["failures"], [[False, 0]] * 4)
         self.assertNotIn("synthetic-credential-only", result["durable"])
         self.assertNotIn("synthetic-consent-only", result["durable"])
@@ -338,23 +338,48 @@ class SnowProactiveClientTests(TestCase):
         self.assertIsNone(result["first"]["consent"])
         self.assertEqual(result["firstSession"], result["consent"]["body"]["model_session_id"])
 
-    def test_expiry_clears_persisted_consent_and_confirmation_is_bounded_to_twelve_hours(self):
+    def test_expiry_clears_persisted_consent_and_confirmation_is_bounded_to_seven_days(self):
         result = self.page.evaluate("""async()=>{
           const h=harness({storage:true,retention:'24h'});h.controls.consentResponse={consent_token:'synthetic-consent-only',
-            notice_version:'proactive-cost-1',model_session_id:'',expires_at:new Date(Date.now()+60).toISOString()};
-          const enabled=await h.client.enable({acceptedCostNotice:true});const stored=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');
+            notice_version:'proactive-cost-2',duration:'24h',model_session_id:'',expires_at:new Date(Date.now()+60).toISOString()};
+          const enabled=await h.client.enable({acceptedCostNotice:true,duration:'24h'});const stored=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');
           await new Promise(resolve=>setTimeout(resolve,120));
           const after=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');
-          const long=harness({storage:true,retention:'24h'});long.controls.consentResponse={consent_token:'long-lived',
-            notice_version:'proactive-cost-1',model_session_id:'',expires_at:new Date(Date.now()+48*60*60*1000).toISOString()};
-          await long.client.enable({acceptedCostNotice:true});const bounded=long.storageMaps.local.get('project-snow-public:proactive-consent:v1');
-          return {enabled,stored,after,bounded,remaining:Date.parse(bounded.consent.expires_at)-bounded.confirmed_at};
+          const long=harness({storage:true,retention:'7d'});long.controls.consentResponse={consent_token:'long-lived',
+            notice_version:'proactive-cost-2',duration:'7d',model_session_id:'',expires_at:new Date(Date.now()+8*24*60*60*1000).toISOString()};
+          const longEnabled=await long.client.enable({acceptedCostNotice:true,duration:'7d'});const bounded=long.storageMaps.local.get('project-snow-public:proactive-consent:v1');
+          return {enabled,stored,after,bounded,prefs:long.client.preferences(),duration:longEnabled.duration,remaining:Date.parse(bounded.consent.expires_at)-bounded.confirmed_at};
         }""")
         self.assertTrue(result["enabled"]["ok"])
         self.assertIsNone(result["after"])
-        self.assertLessEqual(result["remaining"], 12 * 60 * 60 * 1000)
-        self.assertGreater(result["remaining"], 0)
+        self.assertEqual(result["bounded"]["consent"]["duration"], "7d")
+        self.assertEqual(result["duration"], "7d")
+        self.assertEqual(result["prefs"]["duration"], "7d")
+        self.assertTrue(isinstance(result["prefs"]["expiresAt"], str))
+        self.assertLessEqual(result["remaining"], 7 * 24 * 60 * 60 * 1000)
+        self.assertGreater(result["remaining"], 24 * 60 * 60 * 1000)
         self.assertNotIn("synthetic-credential-only", str(result))
+    def test_duration_is_forwarded_persisted_and_restored(self):
+        result = self.page.evaluate("""async()=>{
+          const h=harness({storage:true,retention:'7d'});
+          const enabled=await h.client.enable({acceptedCostNotice:true,duration:'3d'});
+          const body=h.consentRequests()[0].body,prefs=h.client.preferences();
+          const stored=h.storageMaps.local.get('project-snow-public:proactive-consent:v1');
+          h.newClient();await h.client.refresh();const restored=h.client.preferences();
+          return {ok:enabled.ok,sent:body.duration,enabledDuration:enabled.duration,
+            prefsDuration:prefs.duration,storedDuration:stored.consent.duration,restoredDuration:restored.duration,
+            restoredEnabled:restored.enabled,restoredExpiresAt:restored.expiresAt};
+        }""")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["sent"], "3d")
+        self.assertEqual(result["enabledDuration"], "3d")
+        self.assertEqual(result["prefsDuration"], "3d")
+        self.assertEqual(result["storedDuration"], "3d")
+        self.assertEqual(result["restoredDuration"], "3d")
+        self.assertTrue(result["restoredEnabled"])
+        self.assertTrue(isinstance(result["restoredExpiresAt"], str))
+
+
 
     def test_invalidate_clear_model_change_and_retention_change_remove_old_authorization(self):
         result = self.page.evaluate("""async()=>{

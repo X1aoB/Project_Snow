@@ -22,6 +22,7 @@ import time
 import unicodedata
 from collections import OrderedDict
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from hashlib import sha256
@@ -89,6 +90,50 @@ from .public_knowledge import PublicKnowledge
 from .repository import RuntimeRepository
 from .text_rules import _compact, _contains_term
 from .user_fact_store import UserFactStore
+
+# A third-party relay (第三方中转站) is a user-chosen upstream. While a public
+# relay generation runs, its host is recorded here so the model client reads
+# that host's responses with a byte ceiling; every other endpoint is unchanged.
+_UNTRUSTED_MODEL_HOST: ContextVar[str] = ContextVar("untrusted_model_host", default="")
+_RELAY_MODEL_RESPONSE_CAP = 4 * 1024 * 1024
+
+
+@contextmanager
+def untrusted_model_host(base_url: str | None):
+    token = _UNTRUSTED_MODEL_HOST.set((urlparse(base_url).hostname or "") if base_url else "")
+    try:
+        yield
+    finally:
+        _UNTRUSTED_MODEL_HOST.reset(token)
+
+
+class _CappedLineStream:
+    """Expose ``iter_lines`` of a streamed response, refusing more than *cap* bytes.
+
+    The ceiling counts body bytes before httpx assembles lines, so a single
+    endless line cannot be buffered without bound; httpx still splits the lines.
+    """
+
+    def __init__(self, response: Any, cap: int) -> None:
+        self._response, self._cap = response, cap
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._response, name)
+
+    def iter_lines(self):
+        def capped():
+            total = 0
+            for chunk in self._response.iter_bytes():
+                total += len(chunk)
+                if total > self._cap:
+                    raise GenerationStreamError("provider_stream_too_large")
+                yield chunk
+
+        lines = httpx.Response(self._response.status_code, content=capped(),
+                               headers={"content-type": self._response.headers.get("content-type", "")})
+        lines.encoding = self._response.encoding
+        yield from lines.iter_lines()
+
 
 _FEEDBACK_LOCK = threading.RLock()
 _FEEDBACK_RESOLUTION_STATUSES = {
@@ -1805,7 +1850,20 @@ class MVPService:
         **kwargs: Any,
     ) -> httpx.Response:
         self._reserve_model_call(max_provider_http_calls)
-        return self._model_http_client.post(endpoint, **kwargs)
+        relay_host = _UNTRUSTED_MODEL_HOST.get()
+        if not relay_host or (urlparse(endpoint).hostname or "") != relay_host:
+            return self._model_http_client.post(endpoint, **kwargs)
+        # A user-chosen relay host is untrusted: read its body with a ceiling
+        # instead of buffering whatever it sends until the timeout.
+        with self._model_http_client.stream("POST", endpoint, **kwargs) as response:
+            body = bytearray()
+            for chunk in response.iter_bytes():
+                body.extend(chunk)
+                if len(body) > _RELAY_MODEL_RESPONSE_CAP:
+                    raise MVPProviderError("模型响应超过大小上限。")
+            headers = [(key, value) for key, value in response.headers.items()
+                       if key.lower() not in {"content-encoding", "content-length", "transfer-encoding"}]
+            return httpx.Response(response.status_code, headers=headers, content=bytes(body), request=response.request)
 
     def _reserve_model_call(self, max_provider_http_calls: int | None = None) -> None:
         diagnostics = self.generation_diagnostics()
@@ -1832,6 +1890,9 @@ class MVPService:
                 self._record_generation_duration("provider_headers_ms", started)
                 if "text/event-stream" not in response.headers.get("content-type", ""):
                     raise GenerationStreamError("provider_stream_content_type")
+                relay_host = _UNTRUSTED_MODEL_HOST.get()
+                if relay_host and (urlparse(endpoint).hostname or "") == relay_host:
+                    return read_completion_stream(_CappedLineStream(response, _RELAY_MODEL_RESPONSE_CAP), started_at=started)
                 return read_completion_stream(response, started_at=started)
         except (GenerationStreamPartialError, GenerationPublicationError):
             raise
@@ -6578,7 +6639,7 @@ class MVPService:
         if "canon_recall" in scopes:
             rules.append("原作回忆只依据本轮原作文档和已审核角色资料回答；当时的位置与活动不能由此刻场景替代。没有能支持细节的原作证据时自然说明记不清，不补写新剧情。")
         if "session_recall" in scopes:
-            rules.append("共同经历只从 session_experiences 中 status=confirmed 且有来源标识的记录回忆。reported 按 provenance 区分：user_statement 是分析员自述，可说你提到过；assistant_commitment 是角色尚未履约的承诺，可说我答应过。两者都不得说成双方已经会合或完成的共同经历；摘要和普通历史对白不是已确认经历。无相关记录时自然问一次具体指哪次。")
+            rules.append("共同经历只从 session_experiences 中 status=confirmed 且有来源标识的记录回忆。reported 按 provenance 区分：user_statement 是分析员自述，可说你提到过；assistant_commitment 是角色尚未履约的承诺，可说我答应过；communicator_topic 是你们在通讯器里聊到的话题，可自然提起这是在通讯器上聊过的，但绝不能说成两人曾经面对面在一起或共同经历过。三者都不得说成双方已经会合或完成的共同经历；摘要和普通历史对白不是已确认经历。无相关记录时自然问一次具体指哪次。")
         if "casual" in scopes:
             rules.append("日常陪伴直接回应眼前话题，使用稳定人格、当前已确认场景和相关会话经历，不主动背诵剧情。过去、未来、假设和否定内容不触发当前地点或活动变更。")
         if scene and scene.get("status") == "active":

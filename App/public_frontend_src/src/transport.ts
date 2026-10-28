@@ -5,6 +5,7 @@ type TransportError = Error & {
   errorStage?: string;
   retryable?: boolean | null;
   retryAfterSeconds?: number;
+  resetAt?: number;
   httpStatus?: number;
 };
 
@@ -42,6 +43,7 @@ export function createHttpClient(root: string, fetcher: typeof fetch = fetch) {
             stage?: string;
             retryable?: boolean;
             retry_after_seconds?: number;
+            reset_at?: string;
           } | undefined;
           const failure = new Error(typeof detail?.code === "string" ? detail.code : "request_failed") as TransportError;
           failure.requestId = typeof detail?.request_id === "string" ? detail.request_id : "";
@@ -50,6 +52,8 @@ export function createHttpClient(root: string, fetcher: typeof fetch = fetch) {
           const retryAfter = Number(detail?.retry_after_seconds);
           failure.retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0
             ? Math.min(300, Math.floor(retryAfter)) : 0;
+          // When a site frequency cap lifts, for the user-facing message.
+          failure.resetAt = Date.parse(String(detail?.reset_at ?? "")) || 0;
           failure.httpStatus = response.status;
           throw failure;
         }

@@ -23,10 +23,12 @@ class PublicStoreUnavailable(RuntimeError):
 
 
 class RateLimitExceeded(RuntimeError):
-    def __init__(self, scope: str, limit: int):
+    def __init__(self, scope: str, limit: int, reset_at: datetime | None = None):
         super().__init__(scope)
         self.scope = scope
         self.limit = limit
+        # When the refused bucket's window ends, so callers can say when to retry.
+        self.reset_at = reset_at
 
 
 class DuplicateFeedback(RuntimeError):
@@ -315,7 +317,8 @@ class PublicStore(ProactiveStoreMixin):
                     # The failed attempt must not consume quota.  Raising from
                     # inside this transaction rolls back every increment made
                     # for this request, including any earlier hour/day bucket.
-                    raise RateLimitExceeded(scope, limit)
+                    window = timedelta(hours=1) if period == "hour" else timedelta(days=1)
+                    raise RateLimitExceeded(scope, limit, datetime.fromisoformat(bucket_start) + window)
                 counts[scope] = int(count)
         return counts
 

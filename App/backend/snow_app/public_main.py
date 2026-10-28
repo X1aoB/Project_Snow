@@ -55,7 +55,9 @@ from .public_providers import (
     ProviderRequestError,
     discover_models,
     provider_spec,
+    relay_provider_spec,
 )
+from .relay_url import RelayUrlError, normalise_relay_base_url
 from .public_security import (
     BYOK_RETENTION_HOURS,
     BYOK_RETENTION_NOTICE_VERSION,
@@ -295,6 +297,23 @@ def _error_response(
             )
         },
         headers=headers,
+    )
+
+
+def _rate_limit_response(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """A site frequency cap (not the user's model quota), retryable when its window ends."""
+    retry_after = 60
+    extra: dict[str, Any] = {"scope": exc.scope, "limit": exc.limit}
+    if exc.reset_at is not None:
+        retry_after = max(1, int((exc.reset_at - datetime.now(exc.reset_at.tzinfo)).total_seconds()) + 1)
+        extra["reset_at"] = exc.reset_at.isoformat()
+    return _error_response(
+        request,
+        "rate_limit_exceeded",
+        429,
+        headers={"Retry-After": str(retry_after)},
+        retry_after_seconds=retry_after,
+        extra=extra,
     )
 
 def _anonymous_cookie_name(settings: PublicSettings) -> str:
@@ -736,6 +755,22 @@ def create_app(
             revoked_before=revoked_before,
         )
 
+    def relay_aware_spec(spec, claims):
+        """Return the spec a route must use for the opened credential.
+
+        For a relay credential the real base URL is the one sealed into the
+        claim (never the request body); official providers keep their fixed
+        spec. Every model-calling route runs its opened claims through this so
+        discovery, chat, scene, arrival, summary and proactive all route to the
+        sealed relay host identically.
+        """
+        if spec.provider_id == "relay":
+            sealed = str((claims or {}).get("relay_base") or "")
+            if not sealed:
+                raise PublicSecurityError("Relay credential is missing its sealed base URL")
+            return relay_provider_spec(sealed)
+        return spec
+
     async def claim_owned_request(request_id: str, subject: str, request_hash: str):
         result = await async_store.call("claim_request", request_id, subject, request_hash)
         if result[0] == "claimed":
@@ -917,7 +952,7 @@ def create_app(
             elif path.startswith("/public/v1/byok/"):
                 ip_limits = [("byok_ip_hour", "hour", 30), ("byok_ip_day", "day", 100)]
             else:
-                ip_limits = [("write_ip_hour", "hour", 240), ("write_ip_day", "day", 1000)]
+                ip_limits = [("write_ip_hour", "hour", 600), ("write_ip_day", "day", 3000)]
             try:
                 await async_store.call("consume_limits", ip_subject, ip_limits)
             except PublicStoreUnavailable:
@@ -929,14 +964,7 @@ def create_app(
                     retry_after_seconds=PUBLIC_DATABASE_RETRY_AFTER_SECONDS,
                 )
             except RateLimitExceeded as exc:
-                return _error_response(
-                    request,
-                    "rate_limit_exceeded",
-                    429,
-                    headers={"Retry-After": "60"},
-                    retry_after_seconds=60,
-                    extra={"scope": exc.scope, "limit": exc.limit},
-                )
+                return _rate_limit_response(request, exc)
         response = await call_next(request)
         if path.startswith(("/public/v1/subscription/", "/public/v1/byok/")):
             response.headers["Cache-Control"] = "no-store"
@@ -1052,6 +1080,9 @@ def create_app(
                         "display_name": spec.display_name,
                         "documentation_url": spec.documentation_url,
                         "privacy_url": spec.privacy_url,
+                        "console_url": spec.console_url,
+                        "kind": spec.kind,
+                        "caveat": spec.caveat,
                     }
                 )
         return {
@@ -1083,8 +1114,8 @@ def create_app(
             "limits": {
                 "input_characters": 2000,
                 "output_characters": 1200,
-                "chat_hour": 50,
-                "chat_day": 200,
+                "chat_hour": 120,
+                "chat_day": 600,
                 "feedback_hour": 10,
                 "feedback_day": 30,
                 "history_rounds_per_request": 12,
@@ -1245,6 +1276,13 @@ def create_app(
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
         if spec.provider_id == SUBSCRIPTION_PROVIDER:
             raise _error("subscription_pairing_required", 422)
+        relay_base: str | None = None
+        relay_host = ""
+        if spec.provider_id == "relay":
+            try:
+                relay_base, relay_host = normalise_relay_base_url(payload.base_url)
+            except RelayUrlError as exc:
+                raise _error("relay_url_invalid", 422) from exc
         if payload.retention != "tab":
             if not public_settings.byok_retention_enabled:
                 raise _error("credential_retention_unavailable", 422)
@@ -1276,15 +1314,20 @@ def create_app(
             anonymous_id=request.state.anonymous_id,
             provider=spec.provider_id,
             api_key=payload.api_key,
+            relay_base=relay_base,
             **credential_kwargs,
         )
-        return {
+        result = {
             "provider": spec.provider_id,
             "credential": credential,
             "expires_at": expires_at.isoformat(),
             "stored": False,
             "retention": payload.retention,
         }
+        if spec.provider_id == "relay":
+            # Host only — never the sealed path, query or the key.
+            result["relay_host"] = relay_host
+        return result
 
     @app.post("/public/v1/byok/revoke")
     async def byok_revoke(request: Request) -> dict[str, Any]:
@@ -1297,6 +1340,7 @@ def create_app(
     async def models(request: Request, payload: ModelDiscoveryRequest) -> dict[str, Any]:
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
         claims = await open_request_credential(request, payload.credential, spec.provider_id)
+        spec = relay_aware_spec(spec, claims)
         await async_store.call("consume_limits", request.state.subject_hash, [("model_discovery_hour", "hour", 20)])
         try:
             discovered = await discover_models(
@@ -1362,6 +1406,7 @@ def create_app(
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported", 422)
         claims = await open_request_credential(request, payload.credential, spec.provider_id)
+        spec = relay_aware_spec(spec, claims)
         cache_id = "presence-arrival:" + str(payload.arrival_id)
         request_body = _model_request_body(payload)
         subject = request.state.subject_hash
@@ -1397,7 +1442,7 @@ def create_app(
                 try:
                     await async_store.call("consume_limits",
                         request.state.subject_hash,
-                        [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
+                        [("chat_hour", "hour", 120), ("chat_day", "day", 600)],
                     )
                 except RateLimitExceeded:
                     result = chat_service.failed_presence_arrival(
@@ -1507,6 +1552,7 @@ def create_app(
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported", 422)
         claims = await open_request_credential(request, payload.credential, spec.provider_id)
+        spec = relay_aware_spec(spec, claims)
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
         generation_started = False
@@ -1531,7 +1577,7 @@ def create_app(
                     str(claims["api_key"]), payload.model, payload.reasoning_effort)
             try:
                 await async_store.call("consume_limits", subject,
-                    [("chat_hour", "hour", 50), ("chat_day", "day", 200)])
+                    [("chat_hour", "hour", 120), ("chat_day", "day", 600)])
             except RateLimitExceeded:
                 result = PublicChatService.failed_presence_arrival(prepared, "rate_limit_exceeded", model_called=False)
             else:
@@ -1696,6 +1742,8 @@ def create_app(
                 original.caption = str(canonical.get("caption") or "")
         claims = ({"api_key": ""} if recovery else
                   await open_request_credential(request, payload.credential, spec.provider_id))
+        if not recovery:
+            spec = relay_aware_spec(spec, claims)
         request_body = business_body if business_body is not None else _model_request_body(payload)
         request_id = str(payload.request_id)
         request.state.public_request_id = request_id
@@ -1748,7 +1796,7 @@ def create_app(
                     )
                 await async_store.call("consume_limits",
                     request.state.subject_hash,
-                    [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
+                    [("chat_hour", "hour", 120), ("chat_day", "day", 600)],
                 )
             except Exception:
                 await release_owned_request(request_id)
@@ -2332,6 +2380,7 @@ def create_app(
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported", 422)
         claims = await open_request_credential(request, payload.credential, spec.provider_id)
+        spec = relay_aware_spec(spec, claims)
         cache_id = "chat-summary:" + str(payload.request_id)
         request_body = _model_request_body(payload)
         subject = request.state.subject_hash
@@ -2362,9 +2411,9 @@ def create_app(
                     str(claims["api_key"]), payload.model, payload.reasoning_effort,
                 )
             # Summaries are extra model calls and therefore consume the same
-            # daily 200-call budget as chat, but deliberately do not touch the
-            # hourly 50-round bucket.
-            await async_store.call("consume_limits", subject, [("chat_day", "day", 200)])
+            # daily 600-call budget as chat, but deliberately do not touch the
+            # hourly 120-round bucket.
+            await async_store.call("consume_limits", subject, [("chat_day", "day", 600)])
             generation = asyncio.create_task(chat_service.summarize(payload, spec, str(claims["api_key"])))
             if summary_control is not None:
                 summary_control["task"] = generation
@@ -2648,14 +2697,7 @@ def create_app(
 
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_error(request: Request, exc: RateLimitExceeded):
-        return _error_response(
-            request,
-            "rate_limit_exceeded",
-            429,
-            headers={"Retry-After": "60"},
-            retry_after_seconds=60,
-            extra={"scope": exc.scope, "limit": exc.limit},
-        )
+        return _rate_limit_response(request, exc)
 
     @app.exception_handler(GenerationBusy)
     async def generation_busy(request: Request, exc: GenerationBusy):

@@ -589,6 +589,60 @@ class DialogueV2ServiceTests(TestCase):
                 result = self.run_chat(channel="in_person", content_blocks=[{"type": "action", "text": analyst}])
                 self.assertFalse(any(item.kind == "shared_scene_event" for item in self.context(result).memories))
 
+    # ---- communicator_topic (1.1.0): honest text-channel topic memory ----
+    def topics(self, result):
+        return [item for item in self.context(result).memories if item.kind == "communicator_topic"]
+
+    def test_communicator_topic_records_one_honest_everyday_topic_per_text_turn(self):
+        for message, needle in (("我最近在看一部纪录片。", "纪录片"), ("我特别喜欢下雪天。", "下雪天"),
+                                ("我这几天在听爵士乐。", "爵士乐"), ("我最近工作很忙。", "工作")):
+            with self.subTest(message=message):
+                result = self.run_chat(message)
+                topics = self.topics(result)
+                self.assertEqual(len(topics), 1)
+                memory = topics[0]
+                self.assertIn(needle, memory.value)
+                self.assertLessEqual(len(memory.value), 40)
+                # Honest provenance: never a shared physical event, never "一起"/"面对面".
+                self.assertNotIn("一起", memory.value)
+                self.assertNotIn("面对面", memory.value)
+                self.assertTrue(memory.value.startswith("聊到"))
+                self.assertFalse(any(item.kind == "shared_scene_event" for item in self.topics_all(result)))
+                receipt = next(item for item in result["session_memories"]
+                               if item["memory"]["kind"] == "communicator_topic")
+                self.assertEqual(verify_session_memory(self.settings, receipt["proof"],
+                    subject_hash=self.subject, character_id=self.character.character_id), memory)
+
+    def topics_all(self, result):
+        return self.context(result).memories
+
+    def test_communicator_topic_skips_questions_negation_plan_hypothetical_and_quotes(self):
+        for message in ("你最近在看什么？", "我不喜欢这部剧。", "我打算去看一部电影。",
+                        "假如我喜欢下雪天呢？", "他说“我喜欢下雪天”。", "我喜欢原作的剧情。",
+                        "你喜欢什么？", "我明天要去健身。",
+                        # 1.1.0 审阅补充：常见口头语和对她说的话不能变成话题。
+                        "我爱你。", "我喜欢你。", "我喜欢和你在一起。", "我看你挺累的。", "我看了看窗外。",
+                        "我在听你说。", "我觉得你工作太辛苦了。"):
+            with self.subTest(message=message):
+                result = self.run_chat(message)
+                self.assertEqual(self.topics(result), [])
+
+    def test_communicator_topic_dedupes_against_existing_memories(self):
+        first = self.run_chat("我最近在看一部纪录片。")
+        self.assertEqual(len(self.topics(first)), 1)
+        second = self.run_chat("我最近在看一部纪录片。", previous=first)
+        # The same topic is not recorded twice across turns.
+        self.assertEqual(len([item for item in self.context(second).memories
+                              if item.kind == "communicator_topic"]), 1)
+
+    def test_communicator_topic_at_most_one_even_with_several_eligible_clauses(self):
+        result = self.run_chat("我喜欢下雪天，我最近也在听爵士乐。")
+        self.assertEqual(len(self.topics(result)), 1)
+
+    def test_in_person_turn_does_not_produce_communicator_topic(self):
+        result = self.run_chat("我最近在看一部纪录片。", channel="in_person")
+        self.assertEqual(self.topics(result), [])
+
 
 class DialogueV2RealGenerationStackTests(TestCase):
     """Real adapter -> public service -> MVP validation with a synthetic model."""

@@ -44,6 +44,7 @@ class Paths:
     lock: Path = Path("/run/lock/project-snow-release.lock")
     docker_storage: Path = Path("/var/lib/docker")
     embedding_swap: Path = Path("/etc/project-snow/embedding-swap")
+    egress_swap: Path = Path("/etc/project-snow/egress-swap")
 
 
 def require_regular(path: Path, *, private: bool = False) -> None:
@@ -370,6 +371,18 @@ def shared_dependency_gate(paths: Paths, candidate_environment: Path, candidate_
         if authorization is not None:
             return {"status": "ok", "shared_dependencies": "embedding-swap-authorized",
                     "from": authorization["from"], "to": authorization["to"]}
+    # The egress squid conf is the one shared CONFIG change ordinary stage may
+    # accept, mirroring the embedding image swap and only when it is the ONLY
+    # changed item. Keyed on the conf's content hash (from->to).
+    if changed == [EGRESS_SWAP_PATH]:
+        egress_authorization = egress_swap_authorization(
+            paths,
+            str(previous_hashes.get(EGRESS_SWAP_PATH, "")),
+            str(next_hashes.get(EGRESS_SWAP_PATH, "")),
+        )
+        if egress_authorization is not None:
+            return {"status": "ok", "shared_dependencies": "egress-config-swap-authorized",
+                    "from": egress_authorization["from_sha256"], "to": egress_authorization["to_sha256"]}
     if changed:
         raise MaintenanceError("Shared dependency changes require an independent backed-up maintenance release: " + ", ".join(changed))
     return {"status": "ok", "shared_dependencies": "unchanged"}
@@ -444,6 +457,124 @@ def embedding_swap_clear(paths: Paths) -> dict[str, Any]:
     return {"status": "cleared", "removed": removed}
 
 
+# ---------------------------------------------------------------------------
+# Egress-config swap: the single shared-config change ordinary stage may accept,
+# mirroring the embedding image swap. The one shared path it governs is
+# infra/egress-squid.conf; the authorization is a root-only file named by the
+# candidate conf's sha256 and pinned to the exact from->to content hashes.
+# ---------------------------------------------------------------------------
+EGRESS_SWAP_SCHEMA = "project-snow-egress-swap-1"
+EGRESS_SWAP_PATH = "infra/egress-squid.conf"
+
+
+def _require_egress_private_directory(path: Path) -> None:
+    info = path.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+            or info.st_mode & 0o077):
+        raise MaintenanceError("Egress-swap authorization directory is not root-only")
+
+
+def _config_hashes(binding_or_manifest: Path) -> dict[str, str]:
+    document = json.loads(read_text(binding_or_manifest))
+    hashes = document.get("configuration_sha256") or {}
+    if not isinstance(hashes, dict):
+        raise MaintenanceError("configuration_sha256 is not an object")
+    return hashes
+
+
+def egress_swap_authorization(paths: Paths, current: str, candidate: str) -> dict[str, str] | None:
+    """Return the root-only authorization iff it names exactly current -> candidate.
+
+    ``current``/``candidate`` are the sha256 of the egress conf as recorded in
+    the live config binding and the candidate manifest. Semantics mirror
+    ``embedding_swap_authorization``: missing => None; present-but-inconsistent
+    => raise so a swap never proceeds on a malformed grant.
+    """
+    directory = paths.egress_swap
+    if not directory.exists() and not directory.is_symlink():
+        return None
+    _require_egress_private_directory(directory)
+    if not SHA256_HEX.fullmatch(candidate):
+        raise MaintenanceError("Candidate egress configuration hash is invalid")
+    path = directory / f"{candidate}.env"
+    if not path.exists() and not path.is_symlink():
+        return None
+    require_regular(path, private=True)
+    fields: dict[str, str] = {}
+    for line in read_text(path).splitlines():
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or not re.fullmatch(r"[a-z][a-z0-9_]*", key) or key in fields:
+            raise MaintenanceError("Invalid or duplicate egress-swap authorization field")
+        fields[key] = value
+    if set(fields) != {"schema", "from_sha256", "to_sha256", "approved_at", "parse_ok"}:
+        raise MaintenanceError("Egress-swap authorization has an unexpected field set")
+    if fields["schema"] != EGRESS_SWAP_SCHEMA:
+        raise MaintenanceError("Egress-swap authorization schema is unknown")
+    if not SHA256_HEX.fullmatch(fields["from_sha256"]) or not SHA256_HEX.fullmatch(fields["to_sha256"]):
+        raise MaintenanceError("Egress-swap authorization hashes are invalid")
+    if fields["parse_ok"] != "true":
+        raise MaintenanceError("Egress-swap authorization does not record a passing squid parse")
+    if fields["from_sha256"] != current or fields["to_sha256"] != candidate:
+        raise MaintenanceError("Egress-swap authorization does not match the running and candidate conf hashes")
+    return fields
+
+
+def egress_swap_authorize(paths: Paths, candidate_manifest: Path, *, parse_ok: bool) -> dict[str, Any]:
+    """Record a root-only authorization for the running -> candidate egress conf.
+
+    ``parse_ok`` must be True: the caller is expected to have run ``squid -k
+    parse`` against the candidate conf first, mirroring the embedding probe
+    receipt. The current hash is read from the live config binding, the
+    candidate hash from the candidate manifest.
+    """
+    if not parse_ok:
+        raise MaintenanceError("The candidate egress configuration must pass squid -k parse first")
+    current_hashes = _config_hashes(paths.root / "releases" / "current-config.json")
+    candidate_hashes = _config_hashes(candidate_manifest)
+    current = str(current_hashes.get(EGRESS_SWAP_PATH, ""))
+    candidate = str(candidate_hashes.get(EGRESS_SWAP_PATH, ""))
+    if not SHA256_HEX.fullmatch(current) or not SHA256_HEX.fullmatch(candidate):
+        raise MaintenanceError("Both egress configuration hashes must be present and valid")
+    if current == candidate:
+        raise MaintenanceError("The egress swap source and destination are identical")
+    directory = paths.egress_swap
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _require_egress_private_directory(directory)
+    path = directory / f"{candidate}.env"
+    payload = (
+        f"schema={EGRESS_SWAP_SCHEMA}\n"
+        f"from_sha256={current}\n"
+        f"to_sha256={candidate}\n"
+        f"approved_at={_now_iso()}\n"
+        f"parse_ok=true\n"
+    ).encode()
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        os.write(descriptor, payload)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return {"status": "authorized", "from_sha256": current, "to_sha256": candidate}
+
+
+def egress_swap_clear(paths: Paths) -> dict[str, Any]:
+    directory = paths.egress_swap
+    if not directory.exists() and not directory.is_symlink():
+        return {"status": "absent"}
+    _require_egress_private_directory(directory)
+    removed = []
+    for child in sorted(directory.iterdir()):
+        if child.is_symlink() or not child.is_file() or not re.fullmatch(r"[0-9a-f]{64}\.env", child.name):
+            raise MaintenanceError("Unexpected entry in the egress-swap authorization directory")
+        child.unlink()
+        removed.append(child.name)
+    return {"status": "cleared", "removed": removed}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="operation", required=True)
@@ -463,6 +594,12 @@ def main() -> int:
     authorize_parser.add_argument("--lock-held", action="store_true")
     clear_parser = commands.add_parser("embedding-swap-clear")
     clear_parser.add_argument("--lock-held", action="store_true")
+    egress_authorize_parser = commands.add_parser("egress-config-swap-authorize")
+    egress_authorize_parser.add_argument("--manifest", type=Path, required=True)
+    egress_authorize_parser.add_argument("--parse-ok", action="store_true")
+    egress_authorize_parser.add_argument("--lock-held", action="store_true")
+    egress_clear_parser = commands.add_parser("egress-config-swap-clear")
+    egress_clear_parser.add_argument("--lock-held", action="store_true")
     anchor_parser = commands.add_parser("anchor")
     anchor_parser.add_argument("--lock-held", action="store_true")
     pin_parser = commands.add_parser("pin-recovery-env")
@@ -542,6 +679,21 @@ def main() -> int:
             else:
                 with release_lock(paths.lock):
                     result = _run_embedding_swap()
+        elif args.operation in {"egress-config-swap-authorize", "egress-config-swap-clear"}:
+            if os.geteuid() != 0:
+                raise MaintenanceError("Egress-config-swap authorization requires root")
+
+            def _run_egress_swap() -> dict[str, Any]:
+                if args.operation == "egress-config-swap-authorize":
+                    return egress_swap_authorize(paths, args.manifest, parse_ok=args.parse_ok)
+                return egress_swap_clear(paths)
+
+            if args.lock_held:
+                require_inherited_release_lock(paths.lock)
+                result = _run_egress_swap()
+            else:
+                with release_lock(paths.lock):
+                    result = _run_egress_swap()
         elif args.operation == "monitor":
             from monitor import monitor
 

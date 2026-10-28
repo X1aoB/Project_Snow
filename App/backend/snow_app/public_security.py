@@ -41,6 +41,15 @@ class PublicSecurityError(ValueError):
 BYOK_RETENTION_HOURS = {"tab": 12, "2h": 2, "24h": 24, "3d": 72, "7d": 168}
 BYOK_RETENTION_NOTICE_VERSION = "credential-retention-1"
 
+# Per-version AEAD associated data. v1 (tab) and v2 (retained) stay byte-stable
+# so existing tokens keep opening; v3 adds the sealed relay_base claim under a
+# new AAD domain. open_byok_credential tries them newest-first.
+_BYOK_AAD = {
+    1: b"project-snow-byok-v1",
+    2: b"project-snow-byok-v2",
+    3: b"project-snow-byok-v3",
+}
+
 
 def _b64encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
@@ -99,11 +108,17 @@ def issue_byok_credential(
     api_key: str,
     lifetime: timedelta | None = None,
     retention: str = "tab",
+    relay_base: str | None = None,
 ) -> tuple[str, datetime]:
     if not settings.credential_key:
         raise PublicSecurityError("PUBLIC_CREDENTIAL_KEY is not configured")
     if retention not in BYOK_RETENTION_HOURS:
         raise PublicSecurityError("BYOK credential retention is invalid")
+    if provider == "relay":
+        if not relay_base:
+            raise PublicSecurityError("A relay credential requires a sealed base URL")
+    elif relay_base:
+        raise PublicSecurityError("Only a relay credential may carry a sealed base URL")
     if lifetime is None:
         lifetime = timedelta(
             hours=(settings.byok_lifetime_hours if retention == "tab" else BYOK_RETENTION_HOURS[retention])
@@ -114,7 +129,13 @@ def issue_byok_credential(
         raise PublicSecurityError("BYOK credential lifetime does not match retention")
     issued_at = datetime.now(UTC)
     expires_at = issued_at + lifetime
-    version = 1 if retention == "tab" else 2
+    # A relay credential always uses the v3 envelope (it must carry the sealed
+    # base URL). Otherwise keep the byte-compatible v1 (tab) / v2 (retained)
+    # envelopes so existing credentials stay valid.
+    if relay_base is not None:
+        version = 3
+    else:
+        version = 1 if retention == "tab" else 2
     claims: dict[str, Any] = {
         "v": version,
         "sub": subject_hash(anonymous_id),
@@ -125,7 +146,7 @@ def issue_byok_credential(
     # Keep the tab-scoped envelope byte-compatible with public v1.  Only an
     # explicitly retained credential receives issued-at/retention claims and
     # the v2 AAD domain used by revocation checks.
-    if version == 2:
+    if version in (2, 3):
         claims.update({
             "iat": int(issued_at.timestamp()),
             # Keep the public second-based claim for compatibility while
@@ -133,13 +154,15 @@ def issue_byok_credential(
             "iat_ms": int(issued_at.timestamp() * 1000),
             "ret": retention,
         })
+    if version == 3:
+        claims["relay_base"] = relay_base
     payload = json.dumps(
         claims,
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode()
     nonce = secrets.token_bytes(12)
-    aad = b"project-snow-byok-v2" if version == 2 else b"project-snow-byok-v1"
+    aad = _BYOK_AAD[version]
     encrypted = AESGCM(settings.credential_key).encrypt(nonce, payload, aad)
     return _b64encode(nonce + encrypted), expires_at
 
@@ -157,7 +180,7 @@ def open_byok_credential(
     try:
         envelope = _b64decode(token)
         claims = None
-        for aad, version in ((b"project-snow-byok-v2", 2), (b"project-snow-byok-v1", 1)):
+        for aad, version in ((b"project-snow-byok-v3", 3), (b"project-snow-byok-v2", 2), (b"project-snow-byok-v1", 1)):
             try:
                 payload = AESGCM(settings.credential_key).decrypt(envelope[:12], envelope[12:], aad)
                 candidate = json.loads(payload)
@@ -173,9 +196,9 @@ def open_byok_credential(
     if not hmac.compare_digest(str(claims.get("sub") or ""), subject_hash(anonymous_id)):
         raise PublicSecurityError("BYOK credential belongs to another anonymous session")
     version = int(claims.get("v") or 0)
-    if version not in {1, 2}:
+    if version not in {1, 2, 3}:
         raise PublicSecurityError("BYOK credential version is invalid")
-    if version == 2 or "iat" in claims or "ret" in claims:
+    if version in {2, 3} or "iat" in claims or "ret" in claims:
         retention = str(claims.get("ret") or "")
         issued_at = claims.get("iat")
         expiry = claims.get("exp")
@@ -185,7 +208,7 @@ def open_byok_credential(
                 or type(issued_at) is not int or type(expiry) is not int):
             raise PublicSecurityError("BYOK credential retention is invalid")
         issued_at_ms = claims.get("iat_ms")
-        if version == 2 and type(issued_at_ms) is not int:
+        if version in {2, 3} and type(issued_at_ms) is not int:
             raise PublicSecurityError("BYOK credential issued time is invalid")
         if issued_at_ms is not None and (
             type(issued_at_ms) is not int
@@ -193,7 +216,11 @@ def open_byok_credential(
             or issued_at_ms > int(datetime.now(UTC).timestamp() * 1000) + 30_000
         ):
             raise PublicSecurityError("BYOK credential issued time is invalid")
-        if expiry != issued_at + BYOK_RETENTION_HOURS[retention] * 3600:
+        # A tab-scoped v3 relay credential lives exactly as long as a v1 tab one,
+        # which follows the operator's PUBLIC_BYOK_LIFETIME_HOURS (<= 12).
+        lifetime_hours = (settings.byok_lifetime_hours if version == 3 and retention == "tab"
+                          else BYOK_RETENTION_HOURS[retention])
+        if expiry != issued_at + lifetime_hours * 3600:
             raise PublicSecurityError("BYOK credential lifetime is invalid")
         if issued_at > int(datetime.now(UTC).timestamp()) + 30:
             raise PublicSecurityError("BYOK credential issued time is invalid")
@@ -203,6 +230,20 @@ def open_byok_credential(
     if int(claims.get("exp") or 0) <= int(datetime.now(UTC).timestamp()):
         raise PublicSecurityError("BYOK credential has expired")
     provider = str(claims.get("provider") or "")
+    # The relay base URL is a sealed routing claim present iff v3 + relay. A v3
+    # envelope is only minted for relay, so enforce the exact pairing here so a
+    # hand-rolled v3 token cannot carry a relay_base for an official provider or
+    # a relay token without one.
+    relay_base = claims.get("relay_base")
+    if version == 3:
+        if provider != "relay":
+            raise PublicSecurityError("A v3 relay credential must name the relay provider")
+        if not isinstance(relay_base, str) or not relay_base:
+            raise PublicSecurityError("A relay credential must carry a sealed base URL")
+    elif relay_base is not None:
+        raise PublicSecurityError("Only a relay credential may carry a sealed base URL")
+    if provider == "relay" and version != 3:
+        raise PublicSecurityError("A relay credential must be a sealed v3 envelope")
     if expected_provider and provider != expected_provider:
         raise PublicSecurityError("BYOK provider does not match the request")
     if not str(claims.get("api_key") or ""):

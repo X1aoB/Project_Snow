@@ -70,7 +70,7 @@ class ProactiveMessageTests(IsolatedAsyncioTestCase):
         self.model_session = uuid4()
         self.consent_payload = ProactiveConsentRequest(provider="openai", model="synthetic",
             credential="synthetic-credential-value", model_session_id=self.model_session,
-            notice_version="proactive-cost-1", accepted_cost_notice=True)
+            notice_version="proactive-cost-2", accepted_cost_notice=True, duration="24h")
         self.consent = await self.routes["/public/v2/rendezvous/consent"](self.request, self.consent_payload)
         self.accepted, self.before = await self.new_rendezvous()
         self.payload = self.message_payload(self.accepted)
@@ -103,7 +103,7 @@ class ProactiveMessageTests(IsolatedAsyncioTestCase):
             rendezvous_id=pending["rendezvous_id"], segment_id=self.scene.segment,
             state_package=accepted["state_package"], session_context_package=accepted["session_context_package"],
             provider="openai", model="synthetic", model_session_id=self.model_session,
-            notice_version="proactive-cost-1", credential="synthetic-credential-value",
+            notice_version="proactive-cost-2", credential="synthetic-credential-value",
             consent_token=self.consent["consent_token"])
 
     def quota(self):
@@ -271,6 +271,38 @@ class ProactiveMessageTests(IsolatedAsyncioTestCase):
             replay = await self.endpoint(self.make_request(True), self.payload.model_copy(update={"credential": "", "consent_token": ""}))
         self.assertEqual(replay["content_blocks"], first["content_blocks"])
         self.assertEqual(self.provider.await_count, 1)
+
+    async def test_consent_duration_maps_to_hours_capped_by_credential_and_matches_byok(self):
+        from backend.snow_app import proactive_message as proactive
+        from backend.snow_app.public_security import BYOK_RETENTION_HOURS
+        # The picker options must equal the credential retention policy exactly.
+        self.assertEqual(proactive.DURATION_HOURS, BYOK_RETENTION_HOURS)
+        route = self.routes["/public/v2/rendezvous/consent"]
+        far = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
+        with patch("backend.snow_app.proactive_message.open_byok_credential",
+                   return_value={"api_key": "synthetic", "exp": far}):
+            for duration, hours in proactive.DURATION_HOURS.items():
+                payload = self.consent_payload.model_copy(update={"duration": duration})
+                issued = await route(self.request, payload)
+                self.assertEqual(issued["notice_version"], "proactive-cost-2")
+                self.assertEqual(issued["duration"], duration)
+                raw = proactive._verify(self.settings, issued["consent_token"], proactive._CONSENT_DOMAIN, 2048)
+                remaining = raw["expires_at"] - raw["issued_at"]
+                self.assertEqual(remaining, hours * 3600)
+        # A short credential life clamps every duration down to the credential exp.
+        soon = int((datetime.now(UTC) + timedelta(hours=1)).timestamp())
+        with patch("backend.snow_app.proactive_message.open_byok_credential",
+                   return_value={"api_key": "synthetic", "exp": soon}):
+            issued = await route(self.request, self.consent_payload.model_copy(update={"duration": "7d"}))
+            raw = proactive._verify(self.settings, issued["consent_token"], proactive._CONSENT_DOMAIN, 2048)
+            self.assertEqual(raw["expires_at"], soon)
+        self.provider.assert_not_awaited()
+
+    async def test_old_notice_version_consent_request_is_rejected(self):
+        with self.assertRaises(Exception):
+            ProactiveConsentRequest(provider="openai", model="synthetic",
+                credential="synthetic-credential-value", model_session_id=self.model_session,
+                notice_version="proactive-cost-1", accepted_cost_notice=True)
 
     async def test_expired_consent_and_yesterday_package_are_not_paid(self):
         from backend.snow_app import proactive_message as proactive

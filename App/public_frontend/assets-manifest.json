@@ -95,20 +95,26 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/modules/snow-scene-icons.js",
+      "public_url": "/modules/snow-scene-icons.js",
+      "required_html": false
+    },
+    {
       "source": "public_frontend/modules/snow-conversation-ui.js",
       "public_url": "/modules/snow-conversation-ui.js",
+      "dependencies": ["/modules/snow-scene-icons.js"],
+      "required_html": false
+    },
+    {
+      "source": "public_frontend/modules/snow-memory-convo.js",
+      "public_url": "/modules/snow-memory-convo.js",
       "required_html": false
     },
     {
       "source": "public_frontend/modules/snow-features.js",
       "public_url": "/modules/snow-features.js",
       "dependencies": ["/modules/snow-feature-icons.js", "/modules/snow-features.css", "/modules/snow-feature-card.js",
-        "/modules/snow-pager.js", "/modules/snow-conversation-ui.js", "/modules/snow-reading-logic.js"],
-      "required_html": false
-    },
-    {
-      "source": "public_frontend/modules/snow-scene-icons.js",
-      "public_url": "/modules/snow-scene-icons.js",
+        "/modules/snow-pager.js", "/modules/snow-conversation-ui.js", "/modules/snow-reading-logic.js", "/modules/snow-memory-convo.js"],
       "required_html": false
     },
     {
@@ -128,6 +134,11 @@
       "required_html": false
     },
     {
+      "source": "public_frontend/modules/model-guide.js",
+      "public_url": "/modules/model-guide.js",
+      "required_html": false
+    },
+    {
       "source": "public_frontend/app.js",
       "public_url": "/app.js",
       "dependencies": [
@@ -141,6 +152,7 @@
         "/modules/snow-features.js",
         "/modules/snow-scenes.js",
         "/modules/credential-retention.js",
+        "/modules/model-guide.js",
         "/snow-adv-fonts.css",
         "/assets/avatars/longyan-neutral-96.webp",
         "/assets/avatars/longyan-neutral-200.webp"

@@ -20,8 +20,8 @@ CSS = PUBLIC / "snow-adv.css"
 PIN_LIGHT_TONE = "localStorage.setItem('project-snow-public:tone', 'light')"
 BASELINE_COMMIT = "0d6f97abb371bfd9a4b740c77f8d08e47943bf94"
 BASELINE_LF_SHA256 = "8bdfead121ba60ce8921c2cdf519412a306365b7240e194849c5d950d3bbf083"
-QUERIES = {("/shared/immersive.css", "v=0.9.2"), ("/app.css", "v=1.0.2"),
-           ("/snow-adv.css", "v=1.0.2"), ("/app.js", "v=1.0.2")}
+QUERIES = {("/shared/immersive.css", "v=0.9.2"), ("/app.css", "v=1.1.0"),
+           ("/snow-adv.css", "v=1.1.0"), ("/app.js", "v=1.1.0")}
 
 
 def synthetic_feed():
