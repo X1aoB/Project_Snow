@@ -992,7 +992,7 @@ grep '^PUBLIC_STATISTICS_ENABLED=' "$output_file"
             build_function,
         )
         self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=1.1.0", build_function)
-        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-28", build_function)
+        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-29", build_function)
 
         harness = r'''
 set -u
@@ -3168,7 +3168,7 @@ require_runner_controller_binding
         self.assertIn("Public environment contains a disallowed key.", script)
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", script)
         self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=1.1.0", script)
-        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-28", script)
+        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-29", script)
         self.assertIn("PUBLIC_TURNSTILE_HOSTNAME=snow.xiaob.dev", script)
         self.assertIn("PUBLIC_TURNSTILE_MAX_AGE_SECONDS=300", script)
         self.assertIn("PUBLIC_MAX_PROVIDER_CALLS_PER_ACTION=2", script)
@@ -3728,7 +3728,7 @@ seal_configuration_snapshot "$seal_root"
         self.assertIn("PUBLIC_APP_VERSION=1.1.0", public_env)
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", public_env)
         self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=1.1.0", public_env)
-        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-28", public_env)
+        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-29", public_env)
         self.assertIn("PUBLIC_BYOK_LIFETIME_HOURS=12", public_env)
         self.assertIn("PUBLIC_MEDIA_VERSION=2026.10.18.character.webp92.2", public_env)
         self.assertIn("PUBLIC_STICKER_VERSION=2026.08.19.sticker.1", public_env)

@@ -454,6 +454,81 @@ def test_egress_clear_removes_only_well_formed(egress_swap):
     assert result["removed"] == [NEW_EGRESS_SHA + ".env"]
 
 
+# --- an embedding rebuild and an egress conf change in one release ----------
+
+@pytest.fixture
+def dual_swap(release, tmp_path):
+    paths, image = release
+    embedding_dir, egress_dir = tmp_path / "embedding-swap", tmp_path / "egress-swap"
+    embedding_dir.mkdir()
+    egress_dir.mkdir()
+    paths = maintenance.Paths(root=paths.root, secrets=paths.secrets, docker_storage=paths.docker_storage,
+                              embedding_swap=embedding_dir, egress_swap=egress_dir)
+    environment = {key: (OLD_EMBEDDING if key == "EMBEDDING_IMAGE" else image) for key in maintenance.SHARED_IMAGE_KEYS}
+    (paths.root / "runtime" / "compose.env").write_text("".join(f"{k}={v}\n" for k, v in environment.items()))
+    hashes = {key: OLD_EGRESS_SHA for key in maintenance.SHARED_CONFIG_PATHS}
+    (paths.root / "releases" / "current-config.json").write_text(json.dumps({"configuration_sha256": hashes}))
+    candidate = paths.root / "runtime" / "candidate.env"
+    candidate.write_text("".join(f"{k}={NEW_EMBEDDING if k == 'EMBEDDING_IMAGE' else v}\n"
+                                 for k, v in environment.items()))
+    manifest = paths.root / "candidate.json"
+    manifest.write_text(json.dumps({"configuration_sha256": {**hashes, maintenance.EGRESS_SWAP_PATH: NEW_EGRESS_SHA}}))
+    return paths, candidate, manifest, embedding_dir, egress_dir
+
+
+def _private_checks_patched():
+    return (patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_private_directory"),
+            patch.object(maintenance, "_require_egress_private_directory"))
+
+
+def test_dual_swap_gate_accepts_only_with_both_authorizations(dual_swap):
+    paths, candidate, manifest, embedding_dir, egress_dir = dual_swap
+    regular, embedding_private, egress_private = _private_checks_patched()
+    with regular, embedding_private, egress_private:
+        with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+        write_authorization(embedding_dir)
+        with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+        write_egress_authorization(egress_dir)
+        result = maintenance.shared_dependency_gate(paths, candidate, manifest)
+    assert result == {"status": "ok", "shared_dependencies": "embedding-and-egress-swaps-authorized",
+                      "from": OLD_EMBEDDING, "to": NEW_EMBEDDING,
+                      "egress_from": OLD_EGRESS_SHA, "egress_to": NEW_EGRESS_SHA}
+
+
+def test_dual_swap_gate_refuses_the_egress_authorization_alone(dual_swap):
+    paths, candidate, manifest, _embedding_dir, egress_dir = dual_swap
+    write_egress_authorization(egress_dir)
+    regular, embedding_private, egress_private = _private_checks_patched()
+    with regular, embedding_private, egress_private:
+        with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_dual_swap_gate_still_refuses_a_third_shared_change(dual_swap):
+    paths, candidate, manifest, embedding_dir, egress_dir = dual_swap
+    write_authorization(embedding_dir)
+    write_egress_authorization(egress_dir)
+    document = json.loads(manifest.read_text())
+    document["configuration_sha256"]["infra/postgres/postgresql.conf"] = "f" * 64
+    manifest.write_text(json.dumps(document))
+    regular, embedding_private, egress_private = _private_checks_patched()
+    with regular, embedding_private, egress_private:
+        with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_promote_accepts_the_combined_verdict_in_both_swap_checks():
+    source = (OPS / "promote.sh").read_text()
+    combined = "-e '\"shared_dependencies\": \"embedding-and-egress-swaps-authorized\"'"
+    assert source.count(combined) == 2
+    egress = source.index("-e '\"shared_dependencies\": \"egress-config-swap-authorized\"'")
+    embedding = source.index("-e '\"shared_dependencies\": \"embedding-swap-authorized\"'")
+    assert source.index(combined, egress) - egress < 120
+    assert source.index(combined, embedding) - embedding < 120
+
+
 def test_promote_admits_a_changed_egress_conf_before_any_traffic_moves():
     source = (OPS / "promote.sh").read_text()
     guard = source.index('egress_conf_before="$(egress_conf_sha_from_binding "$previous_config_binding")"')

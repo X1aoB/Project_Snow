@@ -109,7 +109,7 @@ class PublicSecurityTests(TestCase):
         self.assertIn("--no-deps", embedding_dockerfile)
         self.assertIn("torch==2.13.0+cpu", embedding_dockerfile)
         self.assertIn("transformers==5.15.0", embedding_dockerfile)
-        self.assertIn("msgpack==1.2.1", embedding_dockerfile)
+        self.assertIn("msgpack==1.2.3", embedding_dockerfile)
         self.assertIn("&& pip check", embedding_dockerfile)
         self.assertIn("setuptools==84.0.0", embedding_dockerfile)
         self.assertIn("wheel==0.48.0", embedding_dockerfile)

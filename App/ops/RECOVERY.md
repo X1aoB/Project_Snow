@@ -188,6 +188,8 @@ python3 /usr/local/libexec/project-snow/maintenance.py egress-config-swap-clear
 
 回滚语义：rollback 模式不需要新授权，也不做 parse 前置检查（目标 conf 此前已晋级运行过）。边缘切换按该 colour 签名配置绑定里记录的 conf 重建 `egress-proxy`；切换后只做所有 conf 版本都满足的两项探测（Turnstile 主机 200、metadata 地址 403），不探测新厂商，所以从 1.1.0 回滚到 1.0.2 的白名单 conf 不会被探测挡住。回滚后旧 conf 不放行新厂商与中转站，这些接入方式会在代理处被拒，需要用户换回原有厂商。授权、哈希绑定和锚点步骤仍是强制的：`configuration_sha256` 按内容寻址，改了 conf 却不更新记录的哈希会让发布校验失败。
 
+**embedding 与 egress 同一次发布替换**：安全重建 embedding 镜像与 egress 配置变更落在同一个候选里时，两份授权都要先写好（embedding 的探测回执授权与本节的 egress 授权）。`shared_dependency_gate` 只在唯一变更项恰好是这两项、且两份授权都与运行中和候选的值匹配时，才返回 `shared_dependencies: embedding-and-egress-swaps-authorized`；缺任何一份，或还有第三项共享变更，仍然拒绝。promote 的 egress 前置检查和 embedding 分支都认这个结果，各自照常执行：先在切换前校验 egress，切换后重建 embedding 并探活，再做 egress 策略探测；两份授权各自在持久写之后删除。
+
 **新厂商在主机上的开启**：候选 colour 的 public env 由 `deploy.sh` 从主机源文件 `/etc/project-snow/public.env`（root 0600）规范化生成，`PUBLIC_ENABLED_PROVIDERS` 取自源文件；规范化正则已拓宽为 `openai|deepseek|dashscope|zhipu|moonshot|anthropic|xai|gemini|relay`。要在 1.1.0 候选里开启新厂商与中转站，需要在 stage 之前由 root 把它们加进源文件的列表（★ 所有者审批点）。已在运行的 colour 保留自己部署时生成的 env，不受影响；但 1.0.2 的 `deploy.sh` 只认原来 5 家，源文件改了以后不能再用它重新 stage 1.0.2。两个 colour 的 public env 因此会在 `PUBLIC_APP_VERSION`、`PUBLIC_PRIVACY_POLICY_VERSION`、`PUBLIC_PRIVACY_EFFECTIVE_AT`、`PUBLIC_ENABLED_PROVIDERS` 四个键上不同。发布用的本地验收脚本（`.tmp/release-*/host/verify_candidate.py`，不在仓库里）的 colour 差异放行项需要相应放宽，并核对每个键都等于签名 manifest 与 `deploy.sh` 写入的预期值；其余键仍须逐字一致。
 
 ## 备份范围、基线与恢复演练
