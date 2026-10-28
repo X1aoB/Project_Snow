@@ -120,6 +120,42 @@ class PublicAPITests(TestCase):
         })
         self.assertFalse(response.json()["draining"])
 
+    def test_live_health_answers_without_worker_threads(self) -> None:
+        # Sync routes and static files share the worker pool; probes must not queue there.
+        with patch("fastapi.routing.run_in_threadpool", side_effect=AssertionError("worker thread used")):
+            response = self.client.get("/public/v1/health/live")
+        self.assertEqual(response.json(), {"status": "ok", "version": "test"})
+
+    def test_edge_health_probes_are_capped_per_client_in_memory(self) -> None:
+        live, probe = "/public/v1/health/live", {"CF-Connecting-IP": "203.0.113.7"}
+        edge_settings = replace(self.settings, trust_proxy_headers=True)
+        edge_app = create_app(edge_settings, self.internal_settings, self.store)
+        edge_client = TestClient(edge_app)
+        try:
+            # The cap must not add a database round trip to the cheapest endpoint.
+            with patch.object(edge_app.state.async_store, "call", side_effect=AssertionError("database")):
+                accepted = [edge_client.get(live, headers=probe).status_code for _ in range(60)]
+                limited = edge_client.get(live, headers=probe)
+                other = edge_client.get(live, headers={"CF-Connecting-IP": "198.51.100.9"})
+                # Docker, release-script and monitor-internal probes carry no edge client.
+                direct = [edge_client.get(live).status_code for _ in range(80)]
+        finally:
+            edge_client.close()
+            edge_app.state.chat_service.close()
+        self.assertEqual(accepted, [200] * 60)
+        detail = limited.json()["detail"]
+        self.assertEqual((limited.status_code, detail["code"], detail["scope"], detail["limit"]),
+                         (429, "rate_limit_exceeded", "health_ip_minute", 60))
+        self.assertTrue(1 <= int(limited.headers["Retry-After"]) <= 61)
+        self.assertEqual(detail["retry_after_seconds"], int(limited.headers["Retry-After"]))
+        self.assertEqual(other.json(), {"status": "ok", "version": "test"})
+        self.assertEqual(direct, [200] * 80)
+
+    def test_untrusted_edge_header_never_caps_health_probes(self) -> None:
+        spoofed = {"CF-Connecting-IP": "203.0.113.7"}
+        statuses = [self.client.get("/public/v1/health/live", headers=spoofed).status_code for _ in range(80)]
+        self.assertEqual(statuses, [200] * 80)
+
     def test_summary_disconnect_releases_subject_and_replays_terminal_without_another_call(self) -> None:
         service = self.app.state.chat_service
         endpoint = next(route.endpoint for route in self.app.routes if route.path == "/public/v1/chat/summarize")
