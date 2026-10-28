@@ -46,7 +46,7 @@
 `GET /public/v1/config` 增加：
 
 ```json
-{"proactive_messages":{"enabled":false,"notice_version":"proactive-cost-1","max_per_day":3,"max_per_rendezvous":1,"recovery_only":true}}
+{"proactive_messages":{"enabled":false,"notice_version":"proactive-cost-2","max_per_day":3,"max_per_rendezvous":1,"recovery_only":true}}
 ```
 
 服务端环境变量 `PUBLIC_PROACTIVE_MESSAGES_ENABLED` 缺省为 `false`；同时需要已有 `scene_actions_v2` 开启。关闭只阻止新付费生成，保留按原 request ID 和业务正文恢复结果的能力。没有服务器定时器、推送或离线补发。关闭浏览器偏好即停止本地调度，不需额外模型请求。
@@ -54,15 +54,15 @@
 费用确认请求：
 
 ```json
-{"provider":"openai","model":"用户当前模型","reasoning_effort":null,"credential":"会话凭据","model_session_id":"当前模型会话UUID","notice_version":"proactive-cost-1","accepted_cost_notice":true}
+{"provider":"openai","model":"用户当前模型","reasoning_effort":null,"credential":"会话凭据","model_session_id":"当前模型会话UUID","notice_version":"proactive-cost-2","accepted_cost_notice":true,"duration":"24h"}
 ```
 
-返回 `consent_token`、`notice_version`、`model_session_id`、`expires_at`。费用 token 使用独立 HMAC domain，绑定匿名主体、原凭据 SHA256、provider/model/effort、实际订阅 effort、模型会话 UUID 和告知版本。到期不晚于原凭据或 12 小时；切换模型、模型会话、凭据或订阅默认 effort 后必须重新确认。`accepted_cost_notice` 必须是 JSON 布尔 `true`。
+返回 `consent_token`、`notice_version`、`model_session_id`、`duration`、`expires_at`。费用 token 使用独立 HMAC domain，绑定匿名主体、原凭据 SHA256、provider/model/effort、实际订阅 effort、模型会话 UUID 和告知版本。`duration` 取值 `tab/2h/24h/3d/7d`，有效期为 `min(now + {tab:12h,2h,24h,3d:72h,7d:168h}, 原凭据到期)`，范围与模型凭证的本机保存时长（`BYOK_RETENTION_HOURS`）一致；切换模型、模型会话、凭据或订阅默认 effort 后必须重新确认。`accepted_cost_notice` 必须是 JSON 布尔 `true`。
 
 消息请求：
 
 ```json
-{"request_id":"固定UUID","character_id":"公开角色ID","rendezvous_id":"签名约定ID","segment_id":"原会话段UUID","state_package":"原始签名世界包","session_context_package":"原始签名上下文包","provider":"openai","model":"用户当前模型","reasoning_effort":null,"model_session_id":"费用确认时的UUID","notice_version":"proactive-cost-1","credential":"会话凭据","consent_token":"费用确认token"}
+{"request_id":"固定UUID","character_id":"公开角色ID","rendezvous_id":"签名约定ID","segment_id":"原会话段UUID","state_package":"原始签名世界包","session_context_package":"原始签名上下文包","provider":"openai","model":"用户当前模型","reasoning_effort":null,"model_session_id":"费用确认时的UUID","notice_version":"proactive-cost-2","credential":"会话凭据","consent_token":"费用确认token"}
 ```
 
 返回 `request_id`、`character_id`、`source: "proactive_reminder"`、`status: "completed" | "unknown" | "failed"`、`message_id`、仅含 `message` 类型的 `content_blocks`、`usage`、`model_called`、`terminal_error` 和 `idempotent_replay`。没有用户消息，没有世界包、上下文更新、移动或共同经历写入。usage 保留一次调用和厂商实际 token 数，缺失字段为 `null`。

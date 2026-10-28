@@ -383,6 +383,49 @@ export function createFeatureLogic(adapter) {
         });
       },
     },
+    conversations: {
+      // 通讯器对话（communicationChannel !== "in_person"）按天分组，每轮取用户一句与她的回复的摘要，最新在前。
+      async byDay(characterId, { limit = 60, excerpt = 48 } = {}) {
+        const token = historyToken();
+        if (!string(characterId)) return [];
+        const records = copy(list(await adapter.messages(characterId))).filter(item =>
+          messageCharacter(item) === characterId
+          && (item.communicationChannel || item.communication_channel) !== "in_person");
+        if (!currentHistory(token)) return [];
+        const ordered = records.sort((a, b) => stamp(a.createdAt ?? a.created_at) - stamp(b.createdAt ?? b.created_at)
+          || string(a.id).localeCompare(string(b.id)));
+        const firstText = message => {
+          for (const block of list(message.contentBlocks || message.content_blocks)) {
+            const text = string(block?.text).trim();
+            if (["speech", "message", "action"].includes(block?.type) && text) return Array.from(text).slice(0, excerpt).join("");
+          }
+          return "";
+        };
+        const exchanges = [];
+        let pendingUser = null;
+        for (const item of ordered) {
+          const text = firstText(item);
+          if (!text) continue;
+          const createdAt = item.createdAt ?? item.created_at;
+          if (item.role === "user") pendingUser = { text, messageId: item.id, createdAt };
+          else if (item.role === "assistant") {
+            exchanges.push({ user: pendingUser, reply: { text, messageId: item.id, createdAt },
+              messageId: pendingUser?.messageId || item.id, replyId: item.id, createdAt: pendingUser?.createdAt ?? createdAt });
+            pendingUser = null;
+          }
+        }
+        exchanges.reverse();
+        const limited = Number.isFinite(limit) ? exchanges.slice(0, Math.max(0, Math.floor(limit))) : exchanges;
+        const days = new Map();
+        for (const exchange of limited) {
+          const key = exchange.createdAt ? dayKey(stamp(exchange.createdAt)) : "";
+          if (!days.has(key)) days.set(key, []);
+          days.get(key).push(exchange);
+        }
+        return { total: exchanges.length, shown: limited.length,
+          days: [...days.entries()].map(([dayKey, items]) => ({ dayKey, items })) };
+      },
+    },
     transcript: {
       async search(characterId, query, { limit = 200 } = {}) {
         const token = historyToken();

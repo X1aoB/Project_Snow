@@ -306,6 +306,39 @@ class PublicSecurityTests(TestCase):
                 token=reseal(v2, b"project-snow-byok-v2", b"project-snow-byok-v1"),
             )
 
+    def test_relay_v3_envelope_seals_base_and_keeps_v1_v2_open(self) -> None:
+        settings = _settings()
+        relay_base = "https://relay.example.com/v1"
+        token, _ = issue_byok_credential(
+            settings, anonymous_id="anonymous-a", provider="relay",
+            api_key="sk-relay-key", relay_base=relay_base,
+        )
+        claims = open_byok_credential(
+            settings, anonymous_id="anonymous-a", token=token, expected_provider="relay",
+        )
+        self.assertEqual(claims["v"], 3)
+        self.assertEqual(claims["relay_base"], relay_base)
+        self.assertEqual(claims["provider"], "relay")
+        # An official provider must not carry a sealed base.
+        with self.assertRaises(PublicSecurityError):
+            issue_byok_credential(
+                settings, anonymous_id="anonymous-a", provider="openai",
+                api_key="sk-test-key", relay_base=relay_base,
+            )
+        # A relay provider must carry a sealed base.
+        with self.assertRaises(PublicSecurityError):
+            issue_byok_credential(
+                settings, anonymous_id="anonymous-a", provider="relay", api_key="sk-relay-key",
+            )
+        # v1 (tab) and v2 (retained) still open after v3 was added.
+        retained = replace(settings, byok_retention_enabled=True)
+        v1, _ = issue_byok_credential(
+            settings, anonymous_id="anonymous-a", provider="openai", api_key="sk-test-key", retention="tab")
+        self.assertEqual(open_byok_credential(settings, anonymous_id="anonymous-a", token=v1)["v"], 1)
+        v2, _ = issue_byok_credential(
+            retained, anonymous_id="anonymous-a", provider="openai", api_key="sk-test-key", retention="24h")
+        self.assertEqual(open_byok_credential(retained, anonymous_id="anonymous-a", token=v2)["v"], 2)
+
     def test_retention_envelope_rejects_non_whitelisted_duration(self) -> None:
         settings = replace(_settings(), byok_retention_enabled=True)
         short_tab = replace(settings, byok_lifetime_hours=2)

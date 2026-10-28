@@ -140,6 +140,69 @@ embedding_image_present() {
   docker image inspect "$1" >/dev/null 2>&1
 }
 
+# Read the sha256 of the egress squid conf recorded in a colour's config
+# binding. Prints the hash or returns non-zero.
+egress_conf_sha_from_binding() {
+  egress_binding_file="$1"
+  egress_conf_hash="$(jq -r '.configuration_sha256["infra/egress-squid.conf"] // empty' \
+    "$egress_binding_file")" || return 1
+  printf '%s\n' "$egress_conf_hash" | grep -Eq '^[0-9a-f]{64}$' || return 1
+  printf '%s\n' "$egress_conf_hash"
+}
+
+# squid -k parse the conf the egress-proxy would load, inside a throwaway
+# container built from the same proxy image, before recreating the live one.
+egress_conf_parses() {
+  egr_env="$1"
+  egr_config_root="$2"
+  docker run --rm --pull=never --network none --read-only \
+    --tmpfs /var/log/squid --tmpfs /var/spool/squid --tmpfs /run \
+    -v "$egr_config_root/infra/egress-squid.conf:/etc/squid/squid.conf:ro" \
+    --entrypoint squid \
+    "$(docker compose --env-file "$egr_env" -f "$egr_config_root/compose.prod.yml" \
+      config --images egress-proxy 2>/dev/null | head -n1)" \
+    -k parse -f /etc/squid/squid.conf >/dev/null 2>&1
+}
+
+# Force-recreate the shared egress-proxy from the named env, then CONNECT-probe
+# the three official 1.1.0 vendor hosts (must succeed) and a known private
+# target (must be DENIED). Returns non-zero on any failure; the caller reverts.
+recreate_egress_from_env() {
+  egr_env="$1"
+  egr_config_root="$2"
+  egr_colour="$3"
+  docker compose --env-file "$egr_env" -f "$egr_config_root/compose.prod.yml" \
+    --profile "$egr_colour" up -d --no-deps --force-recreate egress-proxy || return 1
+  # Give squid a moment to listen.
+  egr_attempt=0
+  while [ "$egr_attempt" -lt 15 ]; do
+    if docker compose --env-file "$egr_env" -f "$egr_config_root/compose.prod.yml" \
+      --profile "$egr_colour" exec -T egress-proxy squid -k check >/dev/null 2>&1; then
+      break
+    fi
+    egr_attempt=$((egr_attempt + 1))
+    sleep 1
+  done
+  # Reachability: each official vendor host must CONNECT; a private target must
+  # be refused by the deny-first ACLs. Probes run from the API container, which
+  # is the only member of the egress-client network.
+  for egr_host in api.anthropic.com api.x.ai generativelanguage.googleapis.com; do
+    docker compose --env-file "$egr_env" -f "$egr_config_root/compose.prod.yml" \
+      --profile "$egr_colour" exec -T "public-api-$egr_colour" \
+      python -c "import socket,sys
+s=socket.create_connection(('egress-proxy',3128),timeout=8)
+s.sendall(b'CONNECT ${egr_host}:443 HTTP/1.1\r\nHost: ${egr_host}:443\r\n\r\n')
+sys.exit(0 if b'200' in s.recv(128) else 1)" >/dev/null 2>&1 || return 1
+  done
+  docker compose --env-file "$egr_env" -f "$egr_config_root/compose.prod.yml" \
+    --profile "$egr_colour" exec -T "public-api-$egr_colour" \
+    python -c "import socket,sys
+s=socket.create_connection(('egress-proxy',3128),timeout=8)
+s.sendall(b'CONNECT 169.254.169.254:443 HTTP/1.1\r\nHost: 169.254.169.254:443\r\n\r\n')
+# A denied CONNECT must NOT return 200; a 403/forbidden is the success case.
+sys.exit(1 if b'200' in s.recv(128) else 0)" >/dev/null 2>&1 || return 1
+}
+
 fsync_promote_path() {
   python3 - "$1" <<'PY'
 import os
@@ -2630,6 +2693,46 @@ if [ -n "$embedding_running_before" ] &&
   fi
 fi
 
+# The shared egress-proxy conf is swapped here, mirroring the embedding block:
+# after readiness/smoke/edge-switch and immediately before the durable write, so
+# a normal release (unchanged conf) never enters this block. The conf change is
+# detected by comparing the egress-squid.conf hash in the target and previous
+# colour config bindings.
+egress_swapped=0
+egress_conf_before=""
+egress_conf_target=""
+if egress_conf_before="$(egress_conf_sha_from_binding "$previous_config_binding")" &&
+   egress_conf_target="$(egress_conf_sha_from_binding "$colour_config_binding")" &&
+   [ "$egress_conf_before" != "$egress_conf_target" ]; then
+  # A forward promotion must present a root-written authorization naming exactly
+  # from->to conf hashes; an emergency rollback recreates the target colour's
+  # own previously promoted conf with no fresh authorization.
+  if [ "$rollback_mode" = 0 ]; then
+    if ! python3 "$script_dir/maintenance.py" shared-dependency-gate \
+      --candidate-environment "$colour_env" --manifest "$colour_manifest" \
+      | grep -Fq '"shared_dependencies": "egress-config-swap-authorized"'; then
+      echo 'Egress conf differs but no matching swap authorization exists; traffic restored.' >&2
+      restore_previous_runtime || exit 74
+      exit 73
+    fi
+  fi
+  if ! egress_conf_parses "$colour_env" "$colour_config_root"; then
+    echo 'Candidate egress conf failed squid -k parse; traffic restored.' >&2
+    restore_previous_runtime || exit 74
+    exit 73
+  fi
+  if recreate_egress_from_env "$colour_env" "$colour_config_root" "$colour"; then
+    egress_swapped=1
+  else
+    echo 'New egress conf failed its parse/CONNECT probes; recreating the previous conf.' >&2
+    if ! recreate_egress_from_env "$previous_env" "$previous_config_root" "$previous_colour"; then
+      echo 'CRITICAL: failed to recreate the previous egress conf after a failed swap.' >&2
+    fi
+    restore_previous_runtime || exit 74
+    exit 73
+  fi
+fi
+
 commit_promoted_state() {
   trap '' HUP INT QUIT TERM PIPE || return 1
   promoted_commit_failed=0
@@ -2691,6 +2794,12 @@ if ! commit_promoted_state; then
       echo 'CRITICAL: failed to revert the embedding digest after a failed state commit.' >&2
     fi
   fi
+  if [ "${egress_swapped:-0}" -eq 1 ]; then
+    echo 'Reverting the egress conf to the previous colour after a failed state commit.' >&2
+    if ! recreate_egress_from_env "$previous_env" "$previous_config_root" "$previous_colour"; then
+      echo 'CRITICAL: failed to revert the egress conf after a failed state commit.' >&2
+    fi
+  fi
   restore_previous_runtime || exit 74
   exit 73
 fi
@@ -2700,6 +2809,14 @@ fi
 if [ "${embedding_swapped:-0}" -eq 1 ] && [ "$rollback_mode" = 0 ]; then
   if ! python3 "$script_dir/maintenance.py" embedding-swap-clear --lock-held; then
     echo 'Promotion is durable; the embedding-swap authorization requires manual clearing.' >&2
+  fi
+fi
+
+# Same rule for the egress-config swap: consume its authorization only after the
+# durable commit so a forward swap cannot replay. Rollback carries no file.
+if [ "${egress_swapped:-0}" -eq 1 ] && [ "$rollback_mode" = 0 ]; then
+  if ! python3 "$script_dir/maintenance.py" egress-config-swap-clear --lock-held; then
+    echo 'Promotion is durable; the egress-config-swap authorization requires manual clearing.' >&2
   fi
 fi
 

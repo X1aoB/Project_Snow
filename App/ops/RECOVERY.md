@@ -149,6 +149,47 @@ python3 /usr/local/libexec/project-snow/maintenance.py embedding-swap-clear
 
 回滚语义：回滚到某个 marker 记录了不同 embedding digest 的 colour 时，promote 的 rollback 模式会把共享 embedding 容器重建到**该 colour 签名 manifest 里记录的**那个 digest（同样的健康等待与失败回退），无需新授权（该 digest 此前已被晋级、已在签名清单中），重建前同样先 `docker image inspect` 确认镜像在本机。`restore_colour` 允许锚点与运行 compose.env **仅** `EMBEDDING_IMAGE` 不同（随后的 rollback/promote 完成容器切换，使 marker/manifest/current/compose.env 一致）；其余任何共享 key 不同仍拒绝。旧镜像由锚点保护不被 GC，替换前应确认仍在本机。
 
+## 共享 egress 配置（egress-squid.conf）的安全替换
+
+共享 `egress-proxy` 由 blue/green 共用，bind-mount 主机部署树里的 `infra/egress-squid.conf`（`compose.prod.yml` 中 `./infra/egress-squid.conf:/etc/squid/squid.conf:ro`，compose 项目 `project-snow-public`，镜像 `EGRESS_PROXY_IMAGE`）。该文件在 `maintenance.py` 的 `SHARED_CONFIG_PATHS`、`release_state.py` 与 `deploy.sh` 的 `base_configuration_paths` 中，属共享配置，普通 stage 对其内容哈希变更一律硬拒绝。放行第三方中转站（relay）需要用 variant B 的 squid 配置（先拒私网/回环/链路本地/CGNAT/ULA/metadata 目标，再放行公网 CONNECT 443），这是一次共享配置变更，须走本节的受控 egress-config swap，完全镜像 embedding swap。
+
+替换要素是一份 root 写入、按候选配置 sha256 命名、记录 from→to 内容哈希与 `squid -k parse` 通过状态的授权文件 `/etc/project-snow/egress-swap/<候选conf的sha256>.env`（目录 root 0700，文件 root 0600，无符号链接）：
+
+```
+schema=project-snow-egress-swap-1
+from_sha256=<当前运行 colour 配置绑定里 egress-squid.conf 的 sha256>
+to_sha256=<候选 colour manifest 里 egress-squid.conf 的 sha256>
+approved_at=<ISO>
+parse_ok=true
+```
+
+`shared_dependency_gate` 只有在**唯一**变更项是 `infra/egress-squid.conf`（按 `configuration_sha256` 比较）、且存在 from=当前、to=候选 的匹配授权时，才返回 `shared_dependencies: egress-config-swap-authorized`；其余任何共享 image/config 变更仍硬性拒绝。
+
+完整流程（★ 为所有者审批点）：
+
+1. 合并包含新 `infra/egress-squid.conf` 的 PR，main 的 manifest 随之携带新 conf 哈希。
+2. ★ 所有者对两个 colour 执行 `backup --pin` 与 `anchor`（新 conf 哈希随配置绑定自动被锚定，`restore-anchor` 按绑定恢复该哈希，无需新恢复逻辑）。
+3. ★ 所有者先对候选 conf 跑 `squid -k parse` 确认通过，再据此写授权：
+
+   ```sh
+   python3 /usr/local/libexec/project-snow/maintenance.py egress-config-swap-authorize --manifest <候选manifest> --parse-ok
+   ```
+
+   该命令从 live 配置绑定读 from、从候选 manifest 读 to，二者必须不同且均为合法 sha256。
+4. `project-snow-release stage <inactive> <sha>`：gate 因授权自洽通过。
+5. candidate 验收照常：prepare → ★ approve。
+6. `project-snow-release promote <inactive> <sha>`：在 API 就绪/smoke 与边缘切换全部通过后、持久写之前，若目标 colour 的 egress conf 哈希与当前运行的不同，promote 先校验匹配授权，再对候选 conf 做 `squid -k parse`，随后 `compose up -d --no-deps --force-recreate egress-proxy`，并从 API 容器 CONNECT 探测三个官方厂商主机（必须 200）与一个私网目标 169.254.169.254（必须被拒）。任一失败则重建回上一个 colour 的 conf 并恢复旧运行态、非零退出且不提交切换。成功提交后删除授权文件（`egress-config-swap-clear`），授权无法重放。egress conf 未变的普通发布完全不进入该分支。
+
+清除未消费的授权：
+
+```sh
+python3 /usr/local/libexec/project-snow/maintenance.py egress-config-swap-clear
+```
+
+回滚语义：回滚到某个 colour 时，promote 的 rollback 模式按该 colour 签名配置绑定里记录的 conf 重建 `egress-proxy`，无需新授权。因为「加放行项」对现有主机是纯超集，blue/green 两个 colour 各自看自己的 conf 都能正常工作，切换与回退都干净；但授权+哈希绑定+锚点步骤仍是强制的——`verify_candidate`/`verify_promoted` 断言 active marker、manifest、compose.env 与配置绑定一致，`configuration_sha256` 内容寻址，改了 conf 却不更新记录哈希会使校验失败。
+
+**PUBLIC_ENABLED_PROVIDERS 两 colour 必须一致**：`deploy.sh` 规范化器的允许列表正则已拓宽为 `openai|deepseek|dashscope|zhipu|moonshot|anthropic|xai|gemini|relay`。但 `verify_candidate.py` 断言两 colour public env 仅 `PUBLIC_APP_VERSION` 不同，`verify_promoted.py` pin 精确 `public_environment_sha256`，所以厂商放行变更必须对两 colour **逐字相同**地应用，并重新 pin `verify_promoted.PUBLIC_ENVIRONMENT`，否则下次 promote 会在 colour-diff 校验上失败。
+
 ## 备份范围、基线与恢复演练
 
 daily backup 使用当前 PostgreSQL digest 对应容器生成一致 custom dump，以 `pg_restore --list` 检查并记录 SHA-256；restic 加密保存 dump、全部 releases/anchors/runtime、部署 repo、不可变 data/media、`/etc/project-snow` 和已安装 helpers/runner/sudoers。发布锁固定配置与 release 引用；immutable 包直接由 restic 读取，不先复制到根盘。

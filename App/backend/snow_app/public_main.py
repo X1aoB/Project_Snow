@@ -55,7 +55,9 @@ from .public_providers import (
     ProviderRequestError,
     discover_models,
     provider_spec,
+    relay_provider_spec,
 )
+from .relay_url import RelayUrlError, normalise_relay_base_url
 from .public_security import (
     BYOK_RETENTION_HOURS,
     BYOK_RETENTION_NOTICE_VERSION,
@@ -736,6 +738,22 @@ def create_app(
             revoked_before=revoked_before,
         )
 
+    def relay_aware_spec(spec, claims):
+        """Return the spec a route must use for the opened credential.
+
+        For a relay credential the real base URL is the one sealed into the
+        claim (never the request body); official providers keep their fixed
+        spec. Every model-calling route runs its opened claims through this so
+        discovery, chat, scene, arrival, summary and proactive all route to the
+        sealed relay host identically.
+        """
+        if spec.provider_id == "relay":
+            sealed = str((claims or {}).get("relay_base") or "")
+            if not sealed:
+                raise PublicSecurityError("Relay credential is missing its sealed base URL")
+            return relay_provider_spec(sealed)
+        return spec
+
     async def claim_owned_request(request_id: str, subject: str, request_hash: str):
         result = await async_store.call("claim_request", request_id, subject, request_hash)
         if result[0] == "claimed":
@@ -1052,6 +1070,9 @@ def create_app(
                         "display_name": spec.display_name,
                         "documentation_url": spec.documentation_url,
                         "privacy_url": spec.privacy_url,
+                        "console_url": spec.console_url,
+                        "kind": spec.kind,
+                        "caveat": spec.caveat,
                     }
                 )
         return {
@@ -1245,6 +1266,13 @@ def create_app(
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
         if spec.provider_id == SUBSCRIPTION_PROVIDER:
             raise _error("subscription_pairing_required", 422)
+        relay_base: str | None = None
+        relay_host = ""
+        if spec.provider_id == "relay":
+            try:
+                relay_base, relay_host = normalise_relay_base_url(payload.base_url)
+            except RelayUrlError as exc:
+                raise _error("relay_url_invalid", 422) from exc
         if payload.retention != "tab":
             if not public_settings.byok_retention_enabled:
                 raise _error("credential_retention_unavailable", 422)
@@ -1276,15 +1304,20 @@ def create_app(
             anonymous_id=request.state.anonymous_id,
             provider=spec.provider_id,
             api_key=payload.api_key,
+            relay_base=relay_base,
             **credential_kwargs,
         )
-        return {
+        result = {
             "provider": spec.provider_id,
             "credential": credential,
             "expires_at": expires_at.isoformat(),
             "stored": False,
             "retention": payload.retention,
         }
+        if spec.provider_id == "relay":
+            # Host only — never the sealed path, query or the key.
+            result["relay_host"] = relay_host
+        return result
 
     @app.post("/public/v1/byok/revoke")
     async def byok_revoke(request: Request) -> dict[str, Any]:
@@ -1297,6 +1330,7 @@ def create_app(
     async def models(request: Request, payload: ModelDiscoveryRequest) -> dict[str, Any]:
         spec = provider_spec(payload.provider, public_settings.enabled_providers)
         claims = await open_request_credential(request, payload.credential, spec.provider_id)
+        spec = relay_aware_spec(spec, claims)
         await async_store.call("consume_limits", request.state.subject_hash, [("model_discovery_hour", "hour", 20)])
         try:
             discovered = await discover_models(
@@ -1362,6 +1396,7 @@ def create_app(
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported", 422)
         claims = await open_request_credential(request, payload.credential, spec.provider_id)
+        spec = relay_aware_spec(spec, claims)
         cache_id = "presence-arrival:" + str(payload.arrival_id)
         request_body = _model_request_body(payload)
         subject = request.state.subject_hash
@@ -1507,6 +1542,7 @@ def create_app(
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported", 422)
         claims = await open_request_credential(request, payload.credential, spec.provider_id)
+        spec = relay_aware_spec(spec, claims)
         owns_subject = await acquire_subject_generation(subject, cache_id)
         request_claimed = False
         generation_started = False
@@ -1696,6 +1732,8 @@ def create_app(
                 original.caption = str(canonical.get("caption") or "")
         claims = ({"api_key": ""} if recovery else
                   await open_request_credential(request, payload.credential, spec.provider_id))
+        if not recovery:
+            spec = relay_aware_spec(spec, claims)
         request_body = business_body if business_body is not None else _model_request_body(payload)
         request_id = str(payload.request_id)
         request.state.public_request_id = request_id
@@ -2332,6 +2370,7 @@ def create_app(
         if spec.provider_id != SUBSCRIPTION_PROVIDER and payload.reasoning_effort is not None:
             raise _error("reasoning_effort_not_supported", 422)
         claims = await open_request_credential(request, payload.credential, spec.provider_id)
+        spec = relay_aware_spec(spec, claims)
         cache_id = "chat-summary:" + str(payload.request_id)
         request_body = _model_request_body(payload)
         subject = request.state.subject_hash

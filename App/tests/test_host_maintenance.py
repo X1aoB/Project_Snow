@@ -343,3 +343,131 @@ def test_promote_embedding_health_checks_dimension_and_embed_sanity():
     source = (OPS / "promote.sh").read_text()
     assert "/health" in source and "'dimension'" in source and "= 512" in source
     assert "/embed" in source and "len(vector)==512" in source
+
+
+# --- egress-config swap (mirrors the embedding swap) ------------------------
+
+OLD_EGRESS_SHA = "a" * 64
+NEW_EGRESS_SHA = "e" * 64
+
+
+@pytest.fixture
+def egress_swap(release, tmp_path):
+    paths, image = release
+    swap_dir = tmp_path / "egress-swap"
+    swap_dir.mkdir()
+    paths = maintenance.Paths(root=paths.root, secrets=paths.secrets,
+                              docker_storage=paths.docker_storage, egress_swap=swap_dir)
+    environment = {key: image for key in maintenance.SHARED_IMAGE_KEYS}
+    (paths.root / "runtime" / "compose.env").write_text("".join(f"{k}={v}\n" for k, v in environment.items()))
+    hashes = {key: OLD_EGRESS_SHA for key in maintenance.SHARED_CONFIG_PATHS}
+    (paths.root / "releases" / "current-config.json").write_text(json.dumps({"configuration_sha256": hashes}))
+    candidate = paths.root / "runtime" / "candidate.env"
+    candidate.write_text("".join(f"{k}={v}\n" for k, v in environment.items()))
+    candidate_hashes = dict(hashes)
+    candidate_hashes[maintenance.EGRESS_SWAP_PATH] = NEW_EGRESS_SHA
+    manifest = paths.root / "candidate.json"
+    manifest.write_text(json.dumps({"configuration_sha256": candidate_hashes}))
+    return paths, candidate, manifest, swap_dir
+
+
+def write_egress_authorization(swap_dir, *, to=NEW_EGRESS_SHA, from_=OLD_EGRESS_SHA,
+                               schema=maintenance.EGRESS_SWAP_SCHEMA, parse_ok="true"):
+    (swap_dir / f"{to}.env").write_text(
+        f"schema={schema}\nfrom_sha256={from_}\nto_sha256={to}\n"
+        f"approved_at=2026-10-26T00:00:00+00:00\nparse_ok={parse_ok}\n")
+
+
+def test_egress_gate_refuses_without_authorization(egress_swap):
+    paths, candidate, manifest, _swap_dir = egress_swap
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_egress_gate_accepts_with_matching_authorization(egress_swap):
+    paths, candidate, manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        result = maintenance.shared_dependency_gate(paths, candidate, manifest)
+    assert result == {"status": "ok", "shared_dependencies": "egress-config-swap-authorized",
+                      "from": OLD_EGRESS_SHA, "to": NEW_EGRESS_SHA}
+
+
+def test_egress_gate_refuses_mismatched_hashes(egress_swap):
+    paths, candidate, manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir, from_="9" * 64)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="does not match the running"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_egress_gate_refuses_unknown_schema(egress_swap):
+    paths, candidate, manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir, schema="project-snow-egress-swap-9")
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="schema is unknown"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_egress_gate_refuses_when_parse_not_ok(egress_swap):
+    paths, candidate, manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir, parse_ok="false")
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="passing squid parse"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_egress_gate_still_refuses_when_a_second_shared_item_also_changes(egress_swap):
+    paths, candidate, manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir)
+    # A second shared config change alongside the egress conf must stay refused.
+    document = json.loads(manifest.read_text())
+    document["configuration_sha256"]["infra/postgres/postgresql.conf"] = "f" * 64
+    manifest.write_text(json.dumps(document))
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        with pytest.raises(maintenance.MaintenanceError, match="independent backed-up"):
+            maintenance.shared_dependency_gate(paths, candidate, manifest)
+
+
+def test_egress_authorize_writes_pinned_file_and_reads_back(egress_swap):
+    paths, _candidate, manifest, swap_dir = egress_swap
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        result = maintenance.egress_swap_authorize(paths, manifest, parse_ok=True)
+        written = maintenance.egress_swap_authorization(paths, OLD_EGRESS_SHA, NEW_EGRESS_SHA)
+    assert result == {"status": "authorized", "from_sha256": OLD_EGRESS_SHA, "to_sha256": NEW_EGRESS_SHA}
+    assert written is not None and written["to_sha256"] == NEW_EGRESS_SHA
+
+
+def test_egress_authorize_refuses_without_parse_ok(egress_swap):
+    paths, _candidate, manifest, _swap_dir = egress_swap
+    with pytest.raises(maintenance.MaintenanceError, match="squid -k parse"):
+        maintenance.egress_swap_authorize(paths, manifest, parse_ok=False)
+
+
+def test_egress_clear_removes_only_well_formed(egress_swap):
+    paths, _candidate, _manifest, swap_dir = egress_swap
+    write_egress_authorization(swap_dir)
+    with patch.object(maintenance, "require_regular"), patch.object(maintenance, "_require_egress_private_directory"):
+        result = maintenance.egress_swap_clear(paths)
+    assert result["status"] == "cleared"
+    assert result["removed"] == [NEW_EGRESS_SHA + ".env"]
+
+
+def test_promote_recreates_egress_only_under_authorization_and_reverts():
+    source = (OPS / "promote.sh").read_text()
+    assert '"shared_dependencies": "egress-config-swap-authorized"' in source
+    assert 'egress_conf_parses "$colour_env" "$colour_config_root"' in source
+    assert '--force-recreate egress-proxy' in source
+    assert 'recreate_egress_from_env "$previous_env" "$previous_config_root" "$previous_colour"' in source
+    # Authorization consumed only after a committed forward swap.
+    assert source.index("egress_swapped=1") < source.index("egress-config-swap-clear")
+    # CONNECT probes: official hosts allowed, a private target denied.
+    assert "api.anthropic.com api.x.ai generativelanguage.googleapis.com" in source
+    assert "169.254.169.254:443" in source
+
+
+def test_promote_egress_swap_gated_on_conf_hash_difference():
+    source = (OPS / "promote.sh").read_text()
+    guard = source.index('egress_conf_before="$(egress_conf_sha_from_binding "$previous_config_binding")"')
+    assert '[ "$egress_conf_before" != "$egress_conf_target" ]' in source[guard:guard + 400]

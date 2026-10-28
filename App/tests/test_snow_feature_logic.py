@@ -363,6 +363,28 @@ class SnowFeatureLogicTests(TestCase):
             {"messageId": "line-239", "blockIndex": 1, "ranges": [[0, 6], [7, 13]]},
             {"messageId": "line-238", "blockIndex": 1, "ranges": [[0, 6], [7, 13]]}]})
 
+    def test_conversations_by_day_excludes_in_person_groups_newest_first_and_limits(self):
+        result = self.page.evaluate("""async()=>{
+          const day1='2026-10-18T09:00:00+08:00',day2='2026-10-19T09:00:00+08:00';
+          const h=harness({messages:[
+            message('u1',{role:'user',requestId:'r1',createdAt:Date.parse(day1),communicationChannel:'text',contentBlocks:[{type:'message',text:'我喜欢下雪天'}]}),
+            message('a1',{role:'assistant',requestId:'r1',createdAt:Date.parse(day1)+1000,communicationChannel:'text',contentBlocks:[{type:'message',text:'我也喜欢，和你一样'}]}),
+            message('uf',{role:'user',requestId:'rf',createdAt:Date.parse(day1)+2000,communicationChannel:'in_person',contentBlocks:[{type:'speech',text:'面对面不算'}]}),
+            message('af',{role:'assistant',requestId:'rf',createdAt:Date.parse(day1)+3000,communicationChannel:'in_person',contentBlocks:[{type:'speech',text:'面对面回复'}]}),
+            message('u2',{role:'user',requestId:'r2',createdAt:Date.parse(day2),communicationChannel:'text',contentBlocks:[{type:'message',text:'今天在听爵士乐'}]}),
+            message('a2',{role:'assistant',requestId:'r2',createdAt:Date.parse(day2)+1000,communicationChannel:'text',contentBlocks:[{type:'message',text:'听起来不错'}]})]});
+          const logic=h.install();await logic.ready;
+          const all=await logic.conversations.byDay('synthetic-a');
+          const capped=await logic.conversations.byDay('synthetic-a',{limit:1});
+          return {total:all.total,shown:all.shown,
+            days:all.days.map(d=>({dayKey:d.dayKey,items:d.items.map(it=>({you:it.user&&it.user.text,her:it.reply.text,replyId:it.replyId}))})),
+            capped:{total:capped.total,shown:capped.shown,days:capped.days.length}};
+        }""")
+        self.assertEqual(result, {"total": 2, "shown": 2, "days": [
+            {"dayKey": "2026-10-19", "items": [{"you": "今天在听爵士乐", "her": "听起来不错", "replyId": "a2"}]},
+            {"dayKey": "2026-10-18", "items": [{"you": "我喜欢下雪天", "her": "我也喜欢，和你一样", "replyId": "a1"}]}],
+            "capped": {"total": 2, "shown": 1, "days": 1}})
+
     def test_usage_groups_reply_summary_and_arrival_and_deduplicates_replays(self):
         result = self.page.evaluate("""async()=>{
           const extra={kind:'summary',requestId:'summary-1',provider_calls:1,total_tokens:5,model:'synthetic-summary'};

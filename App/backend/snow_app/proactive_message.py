@@ -12,15 +12,18 @@ from fastapi import HTTPException, Request
 
 from .mvp_policy import MVP_CHARACTERS
 from .public_contracts import ProactiveConsentRequest, ProactiveMessageRequest, StatePayload
-from .public_providers import ProviderRequestError, provider_spec, simple_completion
+from .public_providers import ProviderRequestError, provider_spec, relay_provider_spec, simple_completion
 from .public_security import PublicSecurityError, open_byok_credential, verify_state
 from .public_store import PublicStoreUnavailable
 from .public_subscription import PROVIDER as SUBSCRIPTION_PROVIDER, SubscriptionError
 from .session_context import (_sign, _verify, verify_session_context,
                               session_context_transfer_size, CONTEXT_TRANSFER_LIMIT)
 
-NOTICE_VERSION = "proactive-cost-1"
+NOTICE_VERSION = "proactive-cost-2"
 _CONSENT_DOMAIN = b"project-snow-proactive-cost-consent-1\x00"
+# Durations the user may pick for how long one cost confirmation stays valid.
+# Kept in lockstep with BYOK_RETENTION_HOURS so consent never outlives the key.
+DURATION_HOURS = {"tab": 12, "2h": 2, "24h": 24, "3d": 72, "7d": 168}
 
 
 def proactive_config(settings):
@@ -167,6 +170,11 @@ def install_proactive_routes(app, settings, async_store, chat_service, get_dialo
         claims = open_byok_credential(settings, anonymous_id=request.state.anonymous_id,
             token=payload.credential, expected_provider=spec.provider_id,
             revoked_before=await async_store.call("credential_revoked_before", request.state.subject_hash))
+        if spec.provider_id == "relay":
+            sealed = str((claims or {}).get("relay_base") or "")
+            if not sealed:
+                raise PublicSecurityError("Relay credential is missing its sealed base URL")
+            spec = relay_provider_spec(sealed)
         effort = payload.reasoning_effort
         if spec.provider_id == SUBSCRIPTION_PROVIDER:
             effort = broker.preflight(str(claims["api_key"]), payload.model, payload.reasoning_effort)
@@ -186,13 +194,13 @@ def install_proactive_routes(app, settings, async_store, chat_service, get_dialo
             raise _error("proactive_cost_notice_required")
         _spec, claims, effort = await session(payload, request)
         now = int(datetime.now(UTC).timestamp())
-        expires = min(now + 12 * 3600, int(claims["exp"]))
+        expires = min(now + DURATION_HOURS[payload.duration] * 3600, int(claims["exp"]))
         token = _sign(settings, {"schema_version": "public-proactive-consent-1",
             **consent_scope(payload, request.state.subject_hash), "effective_effort": effort,
             "issued_at": now, "expires_at": expires},
             _CONSENT_DOMAIN, 2048)
         return {"consent_token": token, "notice_version": NOTICE_VERSION,
-                "model_session_id": str(payload.model_session_id),
+                "model_session_id": str(payload.model_session_id), "duration": payload.duration,
                 "expires_at": datetime.fromtimestamp(expires, UTC).isoformat()}
 
     def response(payload, value=None, *, code="", replay=False):

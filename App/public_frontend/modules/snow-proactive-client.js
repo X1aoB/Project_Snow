@@ -3,8 +3,9 @@
 // the host so tab retention can use sessionStorage and other retention can use
 // localStorage without coupling this module to either global.
 const clone = value => structuredClone(value);
-const PREFIX = "proactive_request_v1:", NOTICE = "proactive-cost-1";
-const AUTH_KEY = "project-snow-public:proactive-consent:v1", MAX_CONFIRMATION_MS = 12 * 60 * 60 * 1000;
+const PREFIX = "proactive_request_v1:", NOTICE = "proactive-cost-2";
+const AUTH_KEY = "project-snow-public:proactive-consent:v1", MAX_CONFIRMATION_MS = 7 * 24 * 60 * 60 * 1000;
+const DURATION_VALUES = new Set(["tab", "2h", "24h", "3d", "7d"]);
 const RETENTION_VALUES = new Set(["tab", "2h", "24h", "3d", "7d"]);
 const fail = reason => ({ ok: false, reason });
 const publicRecord = record => record ? { key: record.key, requestId: record.envelope.request_id,
@@ -32,7 +33,8 @@ export function createProactiveClient(adapter) {
   const visible = () => adapter.visible?.() !== false;
   const savedEnabled = () => adapter.preferences()?.proactivePreferences?.enabled === true;
   const preferences = () => ({ enabled: savedEnabled() && Boolean(consent), requiresConfirmation: !consent,
-    serverEnabled, noticeVersion: NOTICE, busy: operation !== null });
+    serverEnabled, noticeVersion: NOTICE, busy: operation !== null,
+    duration: consent?.duration ?? null, expiresAt: consent?.expires_at ?? null });
   const emit = () => adapter.emit?.("proactive-changed", preferences());
 
   function retentionPolicy(value) {
@@ -115,8 +117,9 @@ export function createProactiveClient(adapter) {
     if (noticeVersion !== NOTICE || candidate.model_session_id !== session || !Number.isFinite(expiresAt)) return null;
     const boundedExpiry = Math.min(expiresAt, confirmedAt + MAX_CONFIRMATION_MS);
     if (boundedExpiry <= Date.now()) return null;
+    const duration = DURATION_VALUES.has(candidate.duration) ? candidate.duration : "tab";
     return { model_identity: identity, model_session_id: session, confirmed_at: confirmedAt,
-      consent: { consent_token: token, notice_version: NOTICE, model_session_id: session,
+      consent: { consent_token: token, notice_version: NOTICE, model_session_id: session, duration,
         expires_at: new Date(boundedExpiry).toISOString() } };
   }
   async function loadAuth(kind) {
@@ -161,7 +164,7 @@ export function createProactiveClient(adapter) {
   function persistedConsent() {
     if (!consent || typeof consent.consent_token !== "string" || !consent.consent_token) return null;
     return { consent_token: consent.consent_token, notice_version: NOTICE, model_session_id: modelSessionId,
-      expires_at: consent.expires_at };
+      duration: DURATION_VALUES.has(consent.duration) ? consent.duration : "tab", expires_at: consent.expires_at };
   }
   async function saveAuth(expectedGeneration = generation) {
     if (expectedGeneration !== generation || !storage || !modelSessionId || !modelIdentity) return;
@@ -234,10 +237,11 @@ export function createProactiveClient(adapter) {
       if (!current(captured) || !visible()) return fail("inactive");
       if (!serverEnabled) return fail("server_disabled");
       if (!value.ready || !value.credential) return fail("model_required");
+      const duration = DURATION_VALUES.has(options.duration) ? options.duration : "tab";
       const response = await adapter.request("/rendezvous/consent", { method: "POST", body: JSON.stringify({
         provider: value.provider, model: value.model, reasoning_effort: value.reasoning_effort || null,
         credential: value.credential, model_session_id: value.model_session_id,
-        notice_version: NOTICE, accepted_cost_notice: true }) });
+        notice_version: NOTICE, accepted_cost_notice: true, duration }) });
       if (!current(captured)) return fail("inactive");
       const latest = await context(snapshot().selected);
       if (!current(captured) || latest.model_session_id !== value.model_session_id) return fail("model_changed");
@@ -246,6 +250,7 @@ export function createProactiveClient(adapter) {
       await adapter.savePreferences({ proactivePreferences: { enabled: true } });
       if (!current(captured)) return fail("inactive");
       consent = { ...clone(response), confirmed_at: Date.now() };
+      consent.duration = DURATION_VALUES.has(response.duration) ? response.duration : duration;
       const maxExpiry = new Date(consent.confirmed_at + MAX_CONFIRMATION_MS).toISOString();
       if (Date.parse(consent.expires_at) > Date.parse(maxExpiry)) consent.expires_at = maxExpiry;
       armExpiry(consent.expires_at); await saveAuth(); return { ok: true, ...preferences() };

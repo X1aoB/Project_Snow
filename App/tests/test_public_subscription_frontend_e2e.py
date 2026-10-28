@@ -173,6 +173,8 @@ class SubscriptionFrontendE2ETests(TestCase):
             self._open(page)
             page.locator("#model-mode-subscription").click()
             self.assertEqual(page.locator("#subscription-model-detail").inner_text(), "GPT-5.6-Luna · 极高")
+            # 1.1.0：教程正文改为切到订阅时按需加载（modules/model-guide.js）。
+            page.locator("#subscription-tutorial > ol").wait_for(state="attached")
             self.assertIn("GPT-5.6-Luna · 极高", page.locator("#subscription-tutorial").text_content())
             page.close()
             page = browser.new_page()

@@ -1051,7 +1051,7 @@ build_candidate_public_env() {
 
   [ "$public_have_enabled_providers" -eq 1 ] &&
     printf '%s\n' "$public_enabled_providers" |
-      grep -Eq '^(openai|deepseek|dashscope|zhipu|moonshot)(,(openai|deepseek|dashscope|zhipu|moonshot))*$' || {
+      grep -Eq '^(openai|deepseek|dashscope|zhipu|moonshot|anthropic|xai|gemini|relay)(,(openai|deepseek|dashscope|zhipu|moonshot|anthropic|xai|gemini|relay))*$' || {
         echo 'Public environment has no valid enabled-provider allowlist.' >&2
         return 1
       }

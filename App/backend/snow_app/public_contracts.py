@@ -18,6 +18,11 @@ class StrictModel(BaseModel):
 class ByokSessionRequest(StrictModel):
     provider: str = Field(min_length=1, max_length=24)
     api_key: str = Field(min_length=8, max_length=4096)
+    # Required iff provider == "relay" (a user-entered third-party transit
+    # station); must be empty for every official vendor. The server validates
+    # and normalises it (relay_url.normalise_relay_base_url) and seals the
+    # result into the credential — it is never echoed back verbatim.
+    base_url: str = Field(default="", max_length=255)
     turnstile_token: str = Field(default="", max_length=4096)
     accepted_transit_notice: bool
     accepted_cost_notice: bool
@@ -25,6 +30,15 @@ class ByokSessionRequest(StrictModel):
     retention: Literal["tab", "2h", "24h", "3d", "7d"] = "tab"
     retention_notice_version: str = Field(default="", max_length=64)
     accepted_retention_notice: StrictBool = False
+
+    @model_validator(mode="after")
+    def validate_relay_base_url(self) -> "ByokSessionRequest":
+        if self.provider.strip().casefold() == "relay":
+            if not self.base_url.strip():
+                raise ValueError("base_url is required for the relay provider")
+        elif self.base_url.strip():
+            raise ValueError("base_url is only allowed for the relay provider")
+        return self
 
 
 class ModelDiscoveryRequest(StrictModel):
@@ -339,7 +353,7 @@ class SessionMemory(StrictModel):
     """A bounded session observation; its source never becomes canon evidence."""
 
     memory_id: str = Field(min_length=8, max_length=80)
-    kind: Literal["user_statement", "assistant_commitment", "shared_scene_event"]
+    kind: Literal["user_statement", "assistant_commitment", "shared_scene_event", "communicator_topic"]
     value: str = Field(min_length=1, max_length=160)
     source_request_id: UUID
     segment_id: UUID
@@ -444,8 +458,9 @@ class ProactiveConsentRequest(StrictModel):
     reasoning_effort: ReasoningEffort | None = None
     credential: str = Field(min_length=20, max_length=8192)
     model_session_id: UUID
-    notice_version: Literal["proactive-cost-1"]
+    notice_version: Literal["proactive-cost-2"]
     accepted_cost_notice: bool = Field(strict=True)
+    duration: Literal["tab", "2h", "24h", "3d", "7d"] = "tab"
 
 
 class ProactiveMessageRequest(StrictModel):
@@ -459,7 +474,7 @@ class ProactiveMessageRequest(StrictModel):
     model: str = Field(min_length=1, max_length=200)
     reasoning_effort: ReasoningEffort | None = None
     model_session_id: UUID
-    notice_version: Literal["proactive-cost-1"]
+    notice_version: Literal["proactive-cost-2"]
     # Authentication can expire while the exact original business request is
     # recovered. Neither bearer token is part of that immutable body hash.
     credential: str = Field(default="", max_length=8192)

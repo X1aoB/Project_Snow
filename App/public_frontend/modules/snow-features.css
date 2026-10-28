@@ -280,6 +280,87 @@ html[data-ui="snow-adv"] .snow-memory-removed {
   color: var(--ink-600);
   font-size: var(--fs-13);
 }
+/* ---------- 1.1.0：记忆档案两视图（她记得的事 / 通讯器对话） ---------- */
+/* 标签页：roving tabindex + aria-selected。只用会随色调翻转的设计变量，不写死白色。 */
+html[data-ui="snow-adv"] .snow-memory-tabs {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+  padding: 3px;
+  border: 1px solid var(--snow-200);
+  border-radius: 999px;
+  background: var(--snow-50);
+}
+html[data-ui="snow-adv"] .snow-memory-tabs [role="tab"] {
+  min-height: 32px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-600);
+  background: transparent;
+  font: 600 var(--fs-13) / 1 var(--font-ui);
+  cursor: pointer;
+}
+html[data-ui="snow-adv"] .snow-memory-tabs [role="tab"]:hover[aria-selected="false"] { color: var(--ink-900); background: var(--snow-100); }
+html[data-ui="snow-adv"] .snow-memory-tabs [role="tab"][aria-selected="true"] {
+  border-color: color-mix(in srgb, var(--ice-500) 70%, transparent);
+  color: var(--ice-700);
+  background: color-mix(in srgb, var(--ice-500) 18%, var(--snow-0));
+}
+html[data-ui="snow-adv"] .snow-memory-tabs [role="tab"]:focus-visible { outline: 2px solid var(--ice-500); outline-offset: 1px; }
+html[data-ui="snow-adv"] .snow-memory-list[hidden] { display: none; }
+/* 来源徽章：面对面用冰蓝，通讯器用墨色描边，两种都从色调变量取色，深浅/暮色自动翻转。 */
+html[data-ui="snow-adv"] .snow-source {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font: 600 var(--fs-12) / 1.4 var(--font-ui);
+  white-space: nowrap;
+}
+html[data-ui="snow-adv"] .snow-source.is-inperson {
+  border: 1px solid color-mix(in srgb, var(--ice-500) 55%, transparent);
+  color: var(--ice-700);
+  background: color-mix(in srgb, var(--ice-500) 14%, var(--snow-0));
+}
+html[data-ui="snow-adv"] .snow-source.is-text {
+  border: 1px solid var(--snow-200);
+  color: var(--ink-700);
+  background: color-mix(in srgb, var(--ink-600) 8%, var(--snow-0));
+}
+/* 通讯器对话视图：每轮一张卡，可点击跳到回看。 */
+html[data-ui="snow-adv"] .snow-memory-convo { gap: 8px; }
+html[data-ui="snow-adv"] .snow-memory-convo[hidden] { display: none; }
+html[data-ui="snow-adv"] .snow-convo-list { display: grid; align-content: start; gap: 8px; }
+html[data-ui="snow-adv"] .snow-convo-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--snow-200);
+  border-left: 3px solid color-mix(in srgb, var(--char) 60%, var(--snow-200));
+  border-radius: var(--radius-m);
+  background: var(--snow-50);
+  color: var(--ink-900);
+  text-align: left;
+  cursor: pointer;
+}
+html[data-ui="snow-adv"] .snow-convo-item:hover { border-color: color-mix(in srgb, var(--ice-500) 50%, var(--snow-200)); background: var(--snow-100); }
+html[data-ui="snow-adv"] .snow-convo-item:focus-visible { outline: 2px solid var(--ice-500); outline-offset: 1px; }
+html[data-ui="snow-adv"] .snow-convo-item p { display: flex; gap: 8px; margin: 0; font: var(--fs-14) / 1.6 var(--font-story); overflow-wrap: anywhere; }
+html[data-ui="snow-adv"] .snow-convo-you { color: var(--ink-600); }
+html[data-ui="snow-adv"] .snow-convo-her { color: var(--ink-900); }
+html[data-ui="snow-adv"] .snow-convo-tag {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 999px;
+  color: color-mix(in oklab, var(--char) 50%, var(--ink-900));
+  background: color-mix(in srgb, var(--char) 12%, transparent);
+  font: 600 var(--fs-12) / 1.8 var(--font-ui);
+  white-space: nowrap;
+}
+html[data-ui="snow-adv"] .snow-convo-you .snow-convo-tag { color: var(--ink-700); background: color-mix(in srgb, var(--ink-600) 10%, transparent); }
+html[data-ui="snow-adv"] .snow-convo-time { color: var(--ink-600); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+html[data-ui="snow-adv"] .snow-convo-more { margin: 6px 2px 0; }
+
 /* 角色与场景面板里的入口 */
 html[data-ui="snow-adv"] .snow-info-entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 html[data-ui="snow-adv"] .snow-info-entry p { margin: 4px 0 0; }
@@ -529,6 +610,18 @@ html[data-ui="snow-adv"] .snow-cost-notice {
 }
 html[data-ui="snow-adv"] .snow-cost-notice .snow-cost-tag { margin: 0; }
 html[data-ui="snow-adv"] .snow-cost-notice ul { display: grid; gap: 6px; margin: 0; padding-left: 1.2em; color: var(--ink-900); font-size: var(--fs-14); line-height: 1.6; }
+html[data-ui="snow-adv"] .snow-cost-duration-row { display: grid; gap: 6px; margin-top: 12px; color: var(--ink-900); font-size: var(--fs-13); font-weight: 600; }
+html[data-ui="snow-adv"] .snow-cost-duration {
+  padding: 6px 10px;
+  border: 1px solid var(--snow-200);
+  border-radius: var(--radius-m);
+  background: var(--snow-50);
+  color: var(--ink-900);
+  font: 500 var(--fs-14) / 1.4 var(--font-ui);
+}
+html[data-ui="snow-adv"] .snow-cost-duration:disabled { opacity: 0.6; }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-cost-duration { background: color-mix(in srgb, var(--snow-50) 16%, transparent); }
+html[data-ui="snow-adv"] #snow-proactive-change { margin-top: 6px; justify-self: start; }
 
 /* ---------- 手机 ---------- */
 @media (max-width: 860px) {
@@ -560,3 +653,47 @@ html[data-ui="snow-adv"] .snow-cost-notice ul { display: grid; gap: 6px; margin:
 @media (max-width: 560px) {
   html[data-ui="snow-adv"] .in-person-surface[data-snow-pager] { --stage-dialogue-height: clamp(164px, calc(21dvh + 60px), 228px); }
 }
+
+/* 1.1.0 一起去：按区域分组，每个地点一枚图标和一句去做什么；四个区域各一种强调色。 */
+html[data-ui="snow-adv"] .snow-move-head {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 2px 0;
+  color: var(--ink-600);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+}
+html[data-ui="snow-adv"] .snow-move-head:first-child { margin-top: 0; }
+html[data-ui="snow-adv"] .snow-move-head::after { flex: 1; height: 1px; background: var(--snow-200); content: ""; }
+html[data-ui="snow-adv"] .movement-options [role="radio"][data-snow-group] {
+  --move: var(--ice-500);
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: center;
+  border-left: 3px solid color-mix(in srgb, var(--move) 72%, transparent);
+}
+html[data-ui="snow-adv"] .movement-options [data-snow-group="annex"] { --move: #4f9e96; }
+html[data-ui="snow-adv"] .movement-options [data-snow-group="out"] { --move: #c98a46; }
+html[data-ui="snow-adv"] .movement-options [data-snow-group="room"] { --move: #a27cc4; }
+html[data-ui="snow-adv"] .movement-options [role="radio"][data-snow-group] :is(strong, small) { grid-column: 2; }
+html[data-ui="snow-adv"] .snow-move-icon {
+  display: grid;
+  grid-row: 1 / span 2;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  color: var(--move);
+  background: color-mix(in srgb, var(--move) 15%, transparent);
+}
+html[data-ui="snow-adv"] .snow-move-icon svg { width: 20px; height: 20px; }
+html[data-ui="snow-adv"] .movement-options [role="radio"][data-snow-group][aria-checked="true"] {
+  border-color: var(--move);
+  background: color-mix(in srgb, var(--move) 14%, var(--snow-0));
+  box-shadow: inset 0 0 0 1px var(--move);
+}
+html[data-ui="snow-adv"] .movement-options [role="radio"][data-snow-group][aria-checked="true"] .snow-move-icon { color: #fff; background: var(--move); }
+html[data-ui="snow-adv"][data-tone="dark"] .movement-options [role="radio"][data-snow-group][aria-checked="true"] { background: color-mix(in srgb, var(--move) 24%, rgb(var(--tn-surface))); }

@@ -123,11 +123,11 @@ class SnowAdvFeatureHostTests(MapBrowserFixture, TestCase):
             payload = route.request.post_data_json
             consents.append({"model": payload["model"], "session": payload["model_session_id"],
                              "accepted": payload["accepted_cost_notice"]})
-            route.fulfill(json={"consent_token": "synthetic-host-consent", "notice_version": "proactive-cost-1",
-                                "model_session_id": payload["model_session_id"], "expires_at": "2099-01-01T00:00:00Z"})
+            route.fulfill(json={"consent_token": "synthetic-host-consent", "notice_version": "proactive-cost-2",
+                                "model_session_id": payload["model_session_id"], "duration": payload.get("duration", "tab"), "expires_at": "2099-01-01T00:00:00Z"})
 
         page.route(self.base_url + "/public/v2/rendezvous/consent", consent_fixture)
-        page.evaluate("""()=>{window.__featureProbe.state.config.proactive_messages={enabled:true,notice_version:'proactive-cost-1'};
+        page.evaluate("""()=>{window.__featureProbe.state.config.proactive_messages={enabled:true,notice_version:'proactive-cost-2'};
           window.__featureHost.open.settings('models');const select=document.querySelector('#discovered-models');
           select.replaceChildren(new Option('合成模型 A','gpt-e2e'),new Option('合成模型 B','synthetic-model-b'));
           select.value='gpt-e2e';select.hidden=false;}""")

@@ -1716,3 +1716,74 @@ P6a：开关只在 config 解析后才已知，故开机/锁屏层只能此时�
 - 第 705 行，`far.dataset.pushing = "1";` 之前：用数据属性标记正在推进，供证据截图/测试断言读取
 - 第 707 行，`let whiteoutTimer, finishTimer, settle;` 之前：硬性兜底
 - 第 745 行，`const commit = () => { if (key && key !== world.scene) { world.scene = k…` 之前：推进完成后由 onWhiteout 回调切场景
+
+## app.js（1.1.0 移出首屏的中文注释）
+
+1.1.0 为给模型设置改版腾出首屏体积，`App/public_frontend/app.js` 里的中文整行注释移到这里；行号是移出后 `app.js` 中紧跟注释的那行代码。
+
+- 第 8 行，`const SNOW_LAST_SEEN_KEY = "project-snow-public:snow-adv:last-seen";` 之前：雪境 ADV P6a/P7：开关随 /public/v1/config 下发，皮肤只能在 config 解析后才切换。
+- 第 12 行，`const tone = localPreferences.getItem("project-snow-public:tone");` 之前：P8：深色时段的返回用户，首帧品牌底色直接用深色，避免先白后深。
+- 第 131 行，`snowOpening: null,        // { phone, kind: 'boot'|'lock'|'none' } 页面加载时…` 之前：雪境 ADV P6a 开场与通讯器世界层。
+- 第 441 行，`if (snowOpeningActive()) return;` 之前：P6a：开机/锁屏层占屏时不自动弹公告（<dialog> 走顶层会盖在开场层之上）。
+- 第 464 行，`snowRefreshLockNotes();` 之前：P6a：锁屏仍在时，公告就绪后补上「未读公告」通知卡。
+- 第 750 行，`snowProbe: () => ({ opening: state.snowOpening, beenInPerson: state.snow…` 之前：P6a 探针：读取开场/世界层状态，并可强制切换世界场景以单测镜头推进/veil。
+- 第 804 行，`function snowAdvActive() { return document.documentElement.dataset.ui ==…` 之前：雪境 ADV 演出 (P4)：是否处于雪境皮肤。
+- 第 805 行，`function stageMotionTier() {` 之前：P4 立绘/动作档位：auto=完整（位移+缩放+呼吸）、light=仅淡入淡出、off=无动画（含减少动态）。
+- 第 846 行，`const SNOW_ADV_FONT_STYLESHEET = "/snow-adv-fonts.css";` 之前：雪境 ADV skin (P1).
+- 第 901 行，`const SNOW_TONE_KEY = "project-snow-public:tone";` 之前：P8：界面深色状态。
+- 第 922 行，`if (dark && preference === "auto" && time === "dusk") root.dataset.toneT…` 之前：黄昏用暮色（同一套深色规则换偏紫暖色变量）；固定「深色」始终是夜色。
+- 第 929 行，`let snowComposerObserver = null;` 之前：P8：面对面舞台延伸到输入区下方。
+- 第 958 行，`let snowBackdrop = null;` 之前：P6a：通讯器背后的世界——一个 body 级 fixed 的「舞台」容器，仅桌面开关开启时存在， aria-hidden、pointer-events:non…
+- 第 970 行，`function snowBackdropScene() {` 之前：背后世界应显示的场景：首次入室镜头推进播放前恒为 generic 外景（推进从外景推入）；推进播放后（snowPushPlayed）跟随当前室内地点。
+- 第 977 行，`const stage = $("scene-stage");` 之前：P2 舞台世界：仅面对面可见时挂载在 #scene-stage（保持原状，不受通讯器背后世界影响）。
+- 第 988 行，`function syncSnowBackdrop() {` 之前：通讯器背后世界的建/拆与可见性。
+- 第 1011 行，`if (!snowBackdrop.isPushing()) snowBackdrop.setScene(snowBackdropScene()…` 之前：背后世界场景跟随「是否已入室」；推进进行中不要打断（pushInto 自行切场景）。
+- 第 1020 行，`` 之前：P3 面对面主屏全部只在 ui_snow_adv 开启时生效。
+- 第 1038 行，`node.style.setProperty("--actor-anchor-x", "0.5");` 之前：占位：先用 0.5，测出后再更新，避免首帧跳动。
+- 第 1084 行，`const STAGE_QUICK_ACTIONS = Object.freeze([` 之前：快捷菜单（跳过 / 回看 / 隐藏 / 设置）与 ▼ 推进标记：开关开启且处于面对面时建一次。
+- 第 1129 行，`function stageSpeaking() {` 之前：▼ 可见 = 当前回复显示完、空闲（非打字 / 揭示 / 等待）；跳过按钮在无内容揭示时禁用。
+- 第 1154 行，`function syncStageNarrationMount() {` 之前：雪境 ADV（P7）：旁白放进对白框，排在名牌与台词之间，不再作为单独的条压在立绘上。
+- 第 1167 行，`function buildSnowVeil() {` 之前：雪境 ADV (P4 后续)：白雪转场遮罩。
+- 第 1226 行，`function maybePlaySnowVeil(scene, visualKey, label) {` 之前：决定是否在本次 renderScene 播放遮罩，并在遮罩掩护下切换 P2 世界场景（仅视觉延迟，不延迟逻辑）。
+- 第 1233 行，`const commitScene = () => { label(); state.snowShown = visualKey; if (sn…` 之前：遮罩不适用时，P2 舞台世界场景照旧立即切换（舞台世界仅面对面可见时存在）。
+- 第 1251 行，`if (snowMaybePushIntoScene(scene, visualKey, commit)) return;` 之前：P6a：首次由「外面」进入室内，先镜头推进再 P4 veil；推进接管后不再立即切场景。
+- 第 1271 行，`function armSnowVeilSoon() {` 之前：首帧/历史恢复发生在同一帧的同步突发里；用一次 rAF 把布防推到下一帧，排除这段突发。
+- 第 1286 行，`if (kicker) kicker.textContent = "场景";` 之前：标题卡文案：标题=地点名，副标题=角色活动（本层 aria-hidden，不额外播报）。
+- 第 1301 行，`state.snowVeilTimers.push(window.setTimeout(() => { if (sequence === sno…` 之前：掩护下切换世界场景（纯视觉延迟）。
+- 第 1317 行，`const SNOW_BOOT_SEEN_KEY = "project-snow-public:snow-adv:boot-seen";   /…` 之前：P6a 开场与通讯器世界层全部仅在 ui_snow_adv 开启时生效，节点由 JS 在开关开启时建出、关闭态不存在，所以 flag-off 的 DOM 与行为…
+- 第 1331 行，`async function snowRunDeferredOpenings() {` 之前：开场层消隐/解锁后调用：先按既有顺序弹一次性体验须知，再渲染尚未完成的新手引导。
+- 第 1339 行，`const override = document.documentElement.dataset.snowTime;` 之前：复用世界模块的 resolveTime 口径（含 html[data-snow-time] 覆盖，仅测试/截图）。
+- 第 1346 行，`function buildSnowBoot() {` 之前：开机层「终端开机」（桌面）
+- 第 1382 行，`try { localPreferences.setItem(SNOW_BOOT_SEEN_KEY, snowLocalDay()); } ca…` 之前：同一日历日重访直接跳过视觉：记录「上次见过开机」的日期。
+- 第 1385 行，`const finish = () => { boot.remove(); if (onRemoved) onRemoved(); };` 之前：节点真正移除后才允许体验须知/新手引导出现（它们绝不能盖在开机层之上）。
+- 第 1394 行，`window.setTimeout(finish, 220);` 之前：轻量档：只做 200ms 淡出。
+- 第 1396 行，`function maybeStartSnowBoot() {` 之前：开机层只在：桌面开场、开关开启、且今天还没见过时显示；否则不建（不加任何延迟）。
+- 第 1408 行，`function snowLockNotes() {` 之前：锁屏层「终端锁屏」（手机）
+- 第 1409 行，`const notes = [];` 之前：通知卡仅由既有状态构造：当前待赴约定、未读公告。
+- 第 1415 行，`const pending = sceneActionsV2Enabled() ? signedPendingRendezvous().valu…` 之前：当前待赴约定：复用既有签名约定判定；点开走「去见她/赴约」确认流程，绝不自动赴约。
+- 第 1470 行，`snowRenderLockNotes(notes);` 之前：通知卡（公告等异步源就绪后由 snowRefreshLockNotes 重渲染）。
+- 第 1477 行，`if (["Escape", "Esc"].includes(event.key)` 之前：子通知按钮保留原生 Enter/Space 激活，不能被外层解锁处理吞掉。
+- 第 1491 行，`function snowRenderLockNotes(notesEl) {` 之前：渲染锁屏通知卡（可重入，公告等异步源就绪后重渲染）。
+- 第 1523 行，`function snowRefreshLockNotes() {` 之前：公告等异步源就绪时，若锁屏仍在，重渲染其通知卡（新出现的未读公告据此补上卡片）。
+- 第 1539 行，`void snowAfterUnlock(note);` 之前：解锁后再按既有顺序弹出一次性体验须知等（锁屏期间被推迟）。
+- 第 1546 行，`await snowRunDeferredOpenings();` 之前：体验须知与新手引导在解锁后按正常顺序出现（锁屏期间被推迟，且绝不盖在锁屏之上）。
+- 第 1548 行，`if (["rendezvous", "reminder"].includes(note.kind)) { if (note.character…` 之前：通知卡复用既有处理，绝不自动赴约 / 自动发消息。
+- 第 1562 行，`function snowMaybePushIntoScene(scene, visualKey, commitScene) {` 之前：通讯器背后的世界层（桌面） 首次由「外面」进入某室内地点时的镜头推进 → 随后交给 P4 veil（显示目的地）。
+- 第 1566 行，`const canPush = featureEnabled("ui_snow_adv") && !snowOpeningState().pho…` 之前：首次入室 = backdrop 当前仍是 generic 外景、目标是具体室内、尚未推进过、auto 档。
+- 第 1577 行，`if (snowWorld) snowWorld.setMotion(currentMotionLevel());` 之前：仅把舞台的视觉层暂时让开，逻辑/回复照常推进。
+- 第 1582 行，`playSnowVeil({ character_location: destination, character_activity: acti…` 之前：veil 真正盖住外景后才显示目的地，避免先出现室内再播放被遮住的推进。
+- 第 2710 行，`const retentionModule = () => import("/modules/credential-retention.js")…` 之前：凭证保存时长：说明见 docs/snow-adv-ui-notes.md「凭证保存时长」。
+- 第 4247 行，`const rowCharacter = snowAdvActive() ? ˋ data-snow-character="${escapeHt…` 之前：雪境 ADV (P5)：每行带 data-snow-character，让联系人卡片用各自的角色色（--char）。
+- 第 4290 行，`document.addEventListener("close", (event) => {` 之前：close 事件不冒泡，在捕获阶段监听所有 <dialog> 的关闭；只在雪境界面下补显引导。
+- 第 4300 行，`const remembered = state.characters.find(item => item.character_id === p…` 之前：回访时回到上次聊天的角色，否则通讯器停在名单第一位的空会话上。
+- 第 4912 行，`const snowAdv = snowAdvActive();` 之前：雪境 ADV (P4)：换表情不出现透明空档。
+- 第 4941 行，`function playStageEnter(node) {` 之前：雪境 ADV (P4)：立绘入场。
+- 第 5216 行，`if (snowAdvActive() && stageMotionTier() === "light") { node.dataset.sta…` 之前：雪境 ADV (P4)：light 档位只保留淡入淡出，不做任何位移/缩放动作；标记为 suppressed。
+- 第 5861 行，`const emptyBody = snowAdvActive() && currentCharacter()` 之前：雪境 ADV (P5)：空会话用角色色问候卡取代纯灰文字；文案不变。
+- 第 6354 行，`delete $("chat-app").dataset.snowAutoCollapsed;` 之前：还原我们为面对面自动折叠的侧栏，避免把文字界面也折叠（不碰用户手动折叠的情况）。
+- 第 7504 行，`state.snowBeenInPerson = true;` 之前：P6a：用户亲身进入室内，世界背景从此为当前室内地点，不再跳回外景。
+- 第 7540 行，`if (!suppressArrivalDuplicateNotice()) {` 之前：雪境 ADV：舞台旁白「你已来到X。
+- 第 8491 行，`for (const [name, path] of [["config", "/config"], ["characters", "/char…` 之前：配置与角色列表不依赖本地存储：先并行发出（index.html 已预加载），不等 IndexedDB。
+- 第 8500 行，`let snowBoot = false;` 之前：P6a：开关只在 config 解析后才已知，故开机/锁屏层只能此时才出现。
+- 第 8522 行，`syncSnowWorld();` 之前：P6a：桌面开关开启时，通讯器背后挂载世界背景（人在外→generic 外景）。
+- 第 8540 行，`snowClearFirstFlashHold();` 之前：启动失败（含 /public/v1/config 取回失败）也必须立刻解除首帧中性保持，绝不卡白。

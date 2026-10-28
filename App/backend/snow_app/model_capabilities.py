@@ -78,6 +78,32 @@ _register("openai", ("gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-2025-08-07",
 _register("openai", ("gpt-5.1", "gpt-5.1-2025-11-13"),
           {"reasoning_effort": "none"}, token_parameter="max_completion_tokens", stream_include_usage=True)
 
+# Anthropic Claude via the OpenAI-compatible layer. The compat endpoint accepts
+# the standard max_tokens and temperature; extended thinking is an extra_body
+# field that is never returned, so the public off-profile sends no thinking
+# field and reports thinking off. Streaming usage is emitted OpenAI-style.
+_register("anthropic", (
+    "claude-opus-4-1", "claude-opus-4-1-20250805",
+    "claude-sonnet-4-5", "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5", "claude-haiku-4-5-20251001",
+), {}, stream_include_usage=True)
+
+# xAI Grok is fully OpenAI-compatible on /chat/completions: standard max_tokens,
+# temperature echoed/capped, no public thinking field.
+_register("xai", (
+    "grok-4", "grok-4-0709", "grok-4-fast", "grok-4-fast-reasoning",
+    "grok-3", "grok-3-mini",
+), {}, stream_include_usage=True)
+
+# Gemini via the OpenAI-compatible surface. reasoning_effort maps to the
+# thinking level, standard max_tokens and temperature apply.
+_register("gemini", (
+    "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+    "gemini-2.0-flash", "gemini-2.0-flash-lite",
+), {}, stream_include_usage=True)
+_register("gemini", ("gemini-3-pro", "gemini-3-flash"),
+          {"reasoning_effort": "low"}, effective="minimum", stream_include_usage=True)
+
 
 def immersive_model_policy(provider_kind: str, model: str) -> dict[str, Any]:
     """Return a detached policy for an exact official provider/model pair."""

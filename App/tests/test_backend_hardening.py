@@ -37,6 +37,30 @@ from backend.snow_app.public_store import PublicStore, PublicStoreUnavailable
 
 
 class BudgetAndIsolationTests(TestCase):
+    def test_relay_model_response_is_read_with_a_byte_ceiling(self):
+        from backend.snow_app import mvp_service as module
+
+        def handler(request):
+            return httpx.Response(200, content=b"x" * (module._RELAY_MODEL_RESPONSE_CAP + 1), request=request)
+
+        service = MVPService.__new__(MVPService)
+        service._generation_diagnostics = threading.local()
+        service._model_http_client = httpx.Client(transport=httpx.MockTransport(handler))
+        try:
+            with module.untrusted_model_host("https://relay.example.com/v1"):
+                with self.assertRaises(MVPProviderError):
+                    service._post_model("https://relay.example.com/v1/chat/completions", json={})
+                # Another host in the same scope keeps the unbounded official path.
+                self.assertEqual(service._post_model("https://api.openai.com/v1/chat/completions", json={}).status_code, 200)
+            # Outside a relay generation nothing is capped.
+            self.assertEqual(service._post_model("https://relay.example.com/v1/chat/completions", json={}).status_code, 200)
+        finally:
+            service._model_http_client.close()
+
+        lines = module._CappedLineStream(Mock(iter_lines=lambda: iter(["a" * 10] * 10)), 50)
+        with self.assertRaises(module.GenerationStreamError):
+            list(lines.iter_lines())
+
     def test_engine_budget_counts_real_http_attempt_and_blocks_repair(self):
         service = MVPService.__new__(MVPService)
         service._generation_diagnostics = threading.local()

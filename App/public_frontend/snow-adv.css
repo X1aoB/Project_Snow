@@ -887,6 +887,22 @@ html[data-ui="snow-adv"] .form-hint,
 html[data-ui="snow-adv"] .form-error { color: var(--ink-600); }
 html[data-ui="snow-adv"] .form-error { color: var(--warm-600); }
 html[data-ui="snow-adv"] .provider-doc-links a { color: var(--ice-700); }
+/* 1.1.0 模型页：分步标题、厂商卡片（桌面也用卡片）、只列所选厂商的链接、当前模型卡；各页内容离下边框留白。 */
+html[data-ui="snow-adv"] .settings-section { padding-bottom: 24px; }
+html[data-ui="snow-adv"] .provider-form { counter-reset: model-step; }
+html[data-ui="snow-adv"] .model-step { display: grid; gap: 8px; min-width: 0; }
+html[data-ui="snow-adv"] .model-step-label { color: var(--ink-900); font-size: 0.8rem; font-weight: 650; }
+html[data-ui="snow-adv"] .model-step-label::before { color: var(--ice-500); content: counter(model-step) " · "; counter-increment: model-step; }
+html[data-ui="snow-adv"] .provider-select-field { display: none !important; }
+html[data-ui="snow-adv"] .provider-options-mobile { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+html[data-ui="snow-adv"] .provider-doc-links { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 0; }
+html[data-ui="snow-adv"] :is(.provider-doc-links small, .model-relay-note) { flex-basis: 100%; margin: 0; color: var(--ink-600); font-size: 0.74rem; line-height: 1.6; }
+html[data-ui="snow-adv"] .model-connection-modes { grid-template-columns: none; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; }
+html[data-ui="snow-adv"] .model-connection-modes button[aria-pressed="true"] { border-color: var(--ice-600); color: #fff; background: var(--ice-600); }
+html[data-ui="snow-adv"] .model-current { display: grid; gap: 3px; margin-bottom: 14px; padding: 12px 14px; border: 1px solid var(--snow-200); border-left: 3px solid var(--ice-300); border-radius: var(--radius-m); background: var(--snow-50); }
+html[data-ui="snow-adv"] .model-current[data-ready="true"] { border-left-color: #4f9e74; }
+html[data-ui="snow-adv"] .model-current strong { color: var(--ink-900); overflow-wrap: anywhere; }
+html[data-ui="snow-adv"] .model-current span { color: var(--ink-600); font-size: 0.76rem; }
 
 /* 设置分页标签。 */
 html[data-ui="snow-adv"] .settings-tabs button { border-radius: 999px; color: var(--ink-600); }
@@ -1522,8 +1538,20 @@ html[data-ui="snow-adv"][data-tone="dark"] .snow-lock-notes:empty::before { back
 html[data-ui="snow-adv"][data-tone="dark"] .floating-feedback { border-color: rgb(var(--tn-line) / 0.3); color: var(--ink-700); background: rgb(var(--tn-surface) / 0.88); }
 html[data-ui="snow-adv"][data-tone="dark"] :is(.source-links, .provider-doc-links) a { border-color: rgb(var(--tn-line) / 0.26); color: var(--ice-700); background: rgb(var(--tn-raised) / 0.72); }
 /* 设置、须知、公告里写死浅色的小表面（app.css 原值） */
-html[data-ui="snow-adv"][data-tone="dark"] :is(.setting-toggle, .notice-choice, .announcement-tabs, .subscription-tutorial, .subscription-model, .subscription-pairing, .model-verification, .subscription-status) { border-color: rgb(var(--tn-line) / 0.22); background: rgb(var(--tn-surface) / 0.72); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.setting-toggle, .notice-choice, .announcement-tabs, .subscription-tutorial, .subscription-model, .subscription-pairing, .model-verification, .subscription-status, .model-current) { border-color: rgb(var(--tn-line) / 0.22); background: rgb(var(--tn-surface) / 0.72); }
 html[data-ui="snow-adv"][data-tone="dark"] .provider-options-mobile button:not([aria-checked="true"]) { border-color: rgb(var(--tn-line) / 0.22); color: var(--ink-700); background: rgb(var(--tn-surface) / 0.72); }
+html[data-ui="snow-adv"][data-tone="dark"] .model-current[data-ready="true"] { border-left-color: #6fc19a; }
+html[data-ui="snow-adv"][data-tone="dark"] .model-connection-modes button[aria-pressed="true"] { border-color: var(--ice-500); background: rgb(var(--tn-accent)); }
+/* 1.1.0：人机验证、访问统计、表情包、生日项原来写死浅色 */
+html[data-ui="snow-adv"][data-tone="dark"] :is(.feedback-verification, .snow-statistics-notice, .snow-statistics-settings, .snow-statistics-actions button, .sticker-choice, .favorite-sticker, .birthday-row, .movement-preview textarea) { border-color: rgb(var(--tn-line) / 0.22); color: var(--ink-700); background: rgb(var(--tn-surface) / 0.72); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.sticker-sections button:not([aria-selected="true"]), .birthday-monogram:not(.has-image)) { color: var(--ink-700); background: rgb(var(--tn-high) / 0.85); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.sticker-choice:hover, .sticker-choice:focus-visible) { background: rgb(var(--tn-raised)); }
+html[data-ui="snow-adv"][data-tone="dark"] .sticker-sections button:not([aria-selected="true"]):hover { background: rgb(var(--tn-accent)); }
+html[data-ui="snow-adv"][data-tone="dark"] .sticker-skeleton { background-image: linear-gradient(100deg, rgb(var(--tn-surface)) 30%, rgb(var(--tn-raised)) 50%, rgb(var(--tn-surface)) 70%); }
+html[data-ui="snow-adv"][data-tone="dark"] .snow-statistics-notice a { color: var(--ice-700); }
+html[data-ui="snow-adv"][data-tone="dark"] .birthday-row-copy strong { color: var(--ink-900); }
+html[data-ui="snow-adv"][data-tone="dark"] :is(.birthday-highlight, .birthday-today) { border-color: rgb(var(--tn-line) / 0.3); background: linear-gradient(145deg, rgb(var(--tn-raised)), color-mix(in srgb, var(--char-soft, #e4cbbc) 16%, rgb(var(--tn-surface)))); }
+html[data-ui="snow-adv"][data-tone="dark"] .birthday-highlight strong { color: var(--ink-900); }
 html[data-ui="snow-adv"][data-tone="dark"] .announcements-modal .announcements-header { background: linear-gradient(125deg, rgb(var(--tn-raised)), rgb(var(--tn-surface)) 72%); }
 html[data-ui="snow-adv"][data-tone="dark"] .announcement-tabs button[aria-selected="true"] { background: rgb(var(--tn-accent) / 0.55); }
 /* C8 announcement contrast */

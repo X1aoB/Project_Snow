@@ -94,7 +94,7 @@ class SnowAdvFeaturesUITests(TestCase):
             payload["features"] = {**FEATURES, "ui_snow_adv": enabled}
             payload["capabilities"] = {"dialogue_protocol": "public-dialogue-v2", "scene_action_protocol": "public-scene-action-v2", "recovery_only": True}
             if proactive:
-                payload["proactive_messages"] = {"enabled": True, "notice_version": "proactive-cost-1"}
+                payload["proactive_messages"] = {"enabled": True, "notice_version": "proactive-cost-2"}
             if retention:
                 payload["credential_policy"] = {**payload.get("credential_policy", {}), "retention": {
                     "enabled": True, "notice_version": "credential-retention-1", "options": ["2h", "24h", "3d", "7d"], "storage": "localStorage"}}
@@ -271,6 +271,42 @@ class SnowAdvFeaturesUITests(TestCase):
         self.assertEqual(len(record), 1)
         self.send(page, "合成第三句")
         self.assertNotIn(record[0], self.candidates())
+        self.assertEqual(self.errors, [])
+
+    def test_memory_archive_two_views_source_badges_and_communicator_conversation(self):
+        page = self.open(self.page())
+        # Text-channel turns populate both the signed memory list and local history.
+        self.send(page, "我最近在看一部纪录片")
+        self.send(page, "合成日常聊天")
+        self.enter_stage(page)
+        page.locator("#stage-menu > summary").click()
+        page.locator("#stage-open-memory").click()
+        dialog = page.locator("#snow-memory-dialog")
+        dialog.wait_for(state="visible")
+        page.locator(".snow-memory-item").first.wait_for()
+        # 她记得的事 is the default tab; every item shows a source badge.
+        self.assertEqual(page.locator("#snow-memory-tab-remembers").get_attribute("aria-selected"), "true")
+        self.assertEqual(page.locator(".snow-memory-item .snow-source").count(),
+                         page.locator(".snow-memory-item").count())
+        sources = set(page.locator(".snow-memory-item .snow-source").all_inner_texts())
+        self.assertTrue(sources and sources <= {"面对面", "通讯器"})
+        # Switch to 通讯器对话 (ArrowRight) — roving tabindex + aria-selected move together.
+        page.locator("#snow-memory-tab-remembers").focus()
+        page.keyboard.press("ArrowRight")
+        page.wait_for_function("() => document.getElementById('snow-memory-tab-convo').getAttribute('aria-selected') === 'true'")
+        self.assertEqual(page.locator("#snow-memory-tab-remembers").get_attribute("aria-selected"), "false")
+        self.assertEqual(page.locator("#snow-memory-tab-convo").get_attribute("tabindex"), "0")
+        self.assertEqual(page.locator("#snow-memory-tab-remembers").get_attribute("tabindex"), "-1")
+        self.assertTrue(page.locator("#snow-memory-view-remembers").evaluate("node => node.hidden"))
+        # A communicator exchange appears (newest first), showing the user line and her reply.
+        page.locator(".snow-convo-item").first.wait_for()
+        self.assertTrue(page.locator(".snow-convo-item").count() >= 1)
+        self.assertIn("我最近在看一部纪录片",
+                      "".join(page.locator(".snow-convo-item .snow-convo-you").all_inner_texts()))
+        self.assertTrue(page.locator(".snow-convo-item .snow-convo-her").count() >= 1)
+        # Clicking an exchange opens the transcript panel at that message.
+        page.locator(".snow-convo-item").first.click()
+        page.locator("#transcript-panel").wait_for(state="visible")
         self.assertEqual(self.errors, [])
 
     def test_backlog_search_favorites_and_image_card(self):
@@ -777,8 +813,8 @@ class SnowAdvFeaturesUITests(TestCase):
         def grant(route):
             body = route.request.post_data_json
             consent.append(body)
-            route.fulfill(json={"consent_token": "synthetic-consent-only", "notice_version": "proactive-cost-1",
-                                "model_session_id": body["model_session_id"],
+            route.fulfill(json={"consent_token": "synthetic-consent-only", "notice_version": "proactive-cost-2",
+                                "model_session_id": body["model_session_id"], "duration": body.get("duration", "tab"),
                                 "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()})
         context.route("**/public/v1/byok/session", session)
         context.route("**/public/v1/byok/revoke", lambda route: route.fulfill(json={"revoked": True}))
@@ -840,8 +876,8 @@ class SnowAdvFeaturesUITests(TestCase):
         def grant(route):
             body = route.request.post_data_json
             consent.append(body)
-            route.fulfill(json={"consent_token": "synthetic-consent-only", "notice_version": "proactive-cost-1",
-                                "model_session_id": body["model_session_id"],
+            route.fulfill(json={"consent_token": "synthetic-consent-only", "notice_version": "proactive-cost-2",
+                                "model_session_id": body["model_session_id"], "duration": body.get("duration", "tab"),
                                 "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()})
 
         def recover(route):
@@ -888,7 +924,7 @@ class SnowAdvFeaturesUITests(TestCase):
         dialog.locator("button", has_text="我知道会产生费用，开启").click()
         dialog.wait_for(state="hidden")
         page.wait_for_function("() => document.querySelector('#snow-proactive-enabled').checked")
-        self.assertEqual([(row["accepted_cost_notice"], row["notice_version"]) for row in consent], [(True, "proactive-cost-1")])
+        self.assertEqual([(row["accepted_cost_notice"], row["notice_version"], row.get("duration")) for row in consent], [(True, "proactive-cost-2", "tab")])
         self.assertIn("已开启", page.locator("#snow-proactive-note").inner_text())
         toggle.click()
         page.wait_for_function("() => !document.querySelector('#snow-proactive-enabled').checked")
@@ -901,7 +937,7 @@ class SnowAdvFeaturesUITests(TestCase):
           const record = { key: `proactive_request_v1:2026-10-19:${characterId}:rv-1`, status: 'unknown', dispatched: true, createdAt: Date.now(),
             envelope: { request_id: requestId, character_id: characterId, rendezvous_id: 'rv-1', segment_id: 'segment', state_package: '',
               session_context_package: '', provider: 'openai', model: 'synthetic-model', reasoning_effort: null, model_session_id: 'session',
-              notice_version: 'proactive-cost-1' } };
+              notice_version: 'proactive-cost-2' } };
           const tx = db.transaction('app_state', 'readwrite'); tx.objectStore('app_state').put(record);
             tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); }; }; })""")
         page.locator('[data-settings-tab="history"]').click()
@@ -913,6 +949,58 @@ class SnowAdvFeaturesUITests(TestCase):
         page.wait_for_function("() => document.querySelector('#snow-proactive-requests .snow-request-status')?.textContent === '没有送达'")
         self.assertEqual(len(recoveries), 1)
         self.assertEqual(recoveries[0][:2], ("1", ""))
+
+    def test_model_sync_box_opens_cost_dialog_preselected_and_requires_confirm(self):
+        context = self.browser.new_context(viewport={"width": 1280, "height": 820}, reduced_motion="reduce",
+                                           timezone_id="Asia/Hong_Kong", locale="zh-CN")
+        consent = []
+
+        def session(route):
+            body = route.request.post_data_json
+            route.fulfill(json={"provider": body["provider"], "credential": "synthetic-2h-1",
+                                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat(),
+                                "stored": False, **({"retention": body["retention"]} if "retention" in body else {})})
+
+        def grant(route):
+            body = route.request.post_data_json
+            consent.append(body)
+            route.fulfill(json={"consent_token": "synthetic-consent-only", "notice_version": "proactive-cost-2",
+                                "model_session_id": body["model_session_id"], "duration": body.get("duration", "tab"),
+                                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()})
+        context.route("**/public/v1/byok/session", session)
+        context.route("**/public/v1/byok/revoke", lambda route: route.fulfill(json={"revoked": True}))
+        context.route("**/public/v2/rendezvous/consent", grant)
+
+        page = self.open(self.page(context=context, proactive=True, retention=True))
+        page.evaluate("() => document.getElementById('open-settings').click()")
+        page.locator('[data-settings-tab="conversation"]').click()
+        page.locator("#snow-reminders-enabled").check()
+        page.locator('[data-settings-tab="models"]').click()
+        # Pick a retention well inside the credential's 12h life so its option stays enabled.
+        page.locator("#credential-retention").select_option("2h")
+        notice = page.locator(".credential-retention-modal[open]")
+        notice.locator('input[type="checkbox"]').check()
+        notice.locator("[data-retention-confirm]").click()
+        page.wait_for_function("() => document.getElementById('proactive-sync-field') && !document.getElementById('proactive-sync-field').hidden")
+        page.evaluate("() => { document.getElementById('proactive-sync').checked = true; }")
+        page.locator("#api-key").fill("sk-e2e-only-not-real")
+        if not page.locator("#model-id").is_visible():
+            page.locator("#toggle-advanced-model").click()
+        page.locator("#model-id").fill("gpt-e2e")
+        page.locator("#save-model").click()
+        dialog = page.locator("#snow-proactive-dialog")
+        dialog.wait_for(state="visible")
+        # Opened preselected to the chosen duration, but nothing is enabled yet.
+        self.assertEqual(page.locator("#snow-proactive-duration").input_value(), "2h")
+        self.assertEqual(consent, [])
+        self.assertFalse(self.idb_preferences(page).get("proactivePreferences", {}).get("enabled", False))
+        dialog.locator("button", has_text="我知道会产生费用，开启").click()
+        dialog.wait_for(state="hidden")
+        page.wait_for_function("() => document.querySelector('#snow-proactive-enabled').checked")
+        self.assertEqual([row.get("duration") for row in consent], ["2h"])
+        self.assertEqual(self.errors, [])
+        page.close()
+
         self.assertEqual(self.errors, [])
 
     def test_second_batch_surfaces_are_readable_in_every_tone(self):

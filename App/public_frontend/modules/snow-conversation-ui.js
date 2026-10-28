@@ -1,6 +1,7 @@
 // 雪境第二批界面（按需加载）：约定提醒（邀请时设定、约定卡补设、到点提醒卡、锁屏通知样式），以及设置「对话」分类
 // （文字速度、自动翻页停留、已读快进、每轮用量、约定提醒、角色主动来消息与费用确认）。
 // 调度、已读和收费请求都在 host.logic（reminders / reading / proactive）；这里只负责界面。说明见 docs/snow-adv-ui-notes.md。
+import { createSceneIcon } from "/modules/snow-scene-icons.js";
 
 const HK_OFFSET = 8 * 3600000; // 香港时间固定 UTC+8，没有夏令时
 const SPEEDS = [["slow", "慢"], ["normal", "标准"], ["fast", "快"], ["instant", "立即显示"]];
@@ -14,6 +15,31 @@ const ENABLE_ERRORS = Object.freeze({ server_disabled: "服务器暂未开放这
   model_changed: "模型刚刚变了，请重新确认一次。", cost_confirmation_required: "需要先确认费用说明。" });
 const RECOVER_COPY = Object.freeze({ completed: "已找到这条消息，已放进通讯记录。", failed: "这条消息没有送达。",
   not_dispatched: "这条请求没有发出，没有调用模型。", result_unknown: "仍未确认结果，可以稍后再查。", missing: "本机已经没有这条请求的记录。" });
+// 「一起去」：按区域分组；每个地点一个图标和一句去做什么（配置里有 activity_name 时用配置的）。
+const MOVE_GROUPS = [["base", "基地设施"], ["annex", "附属设施"], ["out", "外出"], ["room", "房间"]];
+const MOVE_PLACES = Object.freeze({
+  observation: ["base", "mountain-snow", "看雪原和星空"], archive: ["base", "book-open", "安静地翻翻资料"],
+  base_lounge: ["base", "sofa", "坐下喝杯热茶"], base_restaurant: ["base", "utensils", "一起吃点东西"],
+  training: ["base", "dumbbell", "活动活动身体"], base_beach: ["annex", "waves", "吹吹海风"],
+  base_arcade: ["annex", "gamepad-2", "玩几局游戏"], base_hot_spring: ["annex", "bath", "泡个温泉"],
+  base_healing_center: ["annex", "leaf", "放松一下"], base_bar: ["annex", "glass-water", "小酌一杯"],
+  commercial_street: ["out", "store", "一起逛街"], shopping_mall: ["out", "shopping-bag", "随便逛逛"],
+  park: ["out", "trees", "散散步"], character_room: ["room", "door-open", "去她那里坐坐"], analyst_room: ["room", "bed-double", "来我这里坐坐"],
+});
+export function movementPlace(locationId = "") {
+  return MOVE_PLACES[locationId] || [locationId.startsWith("base_") ? "annex" : "out", "mountain-snow", ""];
+}
+// 主动来消息的确认时长，必须与模型凭证的本机保存时长一致（含仅当前标签页的 12 小时）。
+const DURATION_LABELS = Object.freeze({ tab: "本次（仅当前标签页 · 约 12 小时）", "2h": "2 小时", "24h": "24 小时", "3d": "3 天", "7d": "7 天" });
+const DURATION_HOURS = Object.freeze({ tab: 12, "2h": 2, "24h": 24, "3d": 72, "7d": 168 });
+// 到期提示用上海时间（UTC+8，无夏令时）：形如「10月28日 14:00」。
+export function shanghaiExpiry(time) {
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return "";
+  const p = Object.fromEntries(new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric",
+    day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(date).map(part => [part.type, part.value]));
+  return `${p.month}月${p.day}日 ${p.hour}:${p.minute}`;
+}
 
 function hkParts(time) {
   return Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit",
@@ -118,10 +144,27 @@ export function installConversationUi(host, { icon, el, notify, readOnly, nameOf
   const movementPick = picker({ id: "snow-movement-reminder", withNone: true });
   let intent = null;
   const planned = new Set();
+  function decorateMovement() {
+    const root = $("movement-options");
+    const radios = [...(root?.querySelectorAll("[role=radio][data-movement-id]") || [])];
+    if (!radios.length || radios[0].querySelector(".snow-move-icon")) return;
+    const buckets = new Map(MOVE_GROUPS.map(([key]) => [key, []]));
+    for (const radio of radios) {
+      const [group, iconName, blurb] = movementPlace(radio.dataset.movementId);
+      radio.dataset.snowGroup = group;
+      radio.prepend(el("span", { class: "snow-move-icon", "aria-hidden": "true" }, createSceneIcon(iconName)));
+      if (!radio.querySelector("small") && blurb) radio.append(el("small", { text: blurb }));
+      buckets.get(group).push(radio);
+    }
+    root.replaceChildren(...MOVE_GROUPS.flatMap(([key, label]) => buckets.get(key).length
+      ? [el("p", { class: "snow-move-head", "aria-hidden": "true", text: label }), ...buckets.get(key)] : []));
+    root.querySelectorAll("[role=radio]").forEach((radio, index) => { radio.tabIndex = index ? -1 : 0; });
+  }
   if (movementForm) {
     (movementForm.querySelector(".modal-actions") || null)?.before(movementPick.node);
     new MutationObserver(() => {
       if (!movementDialog.open) return;
+      decorateMovement();
       movementPick.node.hidden = !remindersOn() || snapshot().writerOwned === false;
       movementPick.reset();
     }).observe(movementDialog, { attributes: true, attributeFilter: ["open"] });
@@ -381,6 +424,9 @@ export function installConversationUi(host, { icon, el, notify, readOnly, nameOf
   // ---------- 五、角色主动来消息：开启前确认费用 ----------
   const costDialog = el("dialog", { class: "modal snow-feature-modal snow-cost-modal", id: "snow-proactive-dialog", "aria-labelledby": "snow-proactive-title" });
   const costError = el("p", { class: "snow-remind-error", role: "alert", hidden: true });
+  const durationSelect = el("select", { id: "snow-proactive-duration", class: "snow-cost-duration", "aria-label": "确认有效时长" });
+  const durationHint = el("small", { class: "snow-hint", id: "snow-proactive-duration-hint" });
+  const durationRow = el("label", { class: "snow-cost-duration-row" }, el("span", { text: "有效时长" }), durationSelect, durationHint);
   const costCancel = el("button", { type: "button", class: "secondary-button" }, "暂不开启");
   const costConfirm = el("button", { type: "button", class: "primary-button" }, "我知道会产生费用，开启");
   costDialog.append(
@@ -392,19 +438,59 @@ export function installConversationUi(host, { icon, el, notify, readOnly, nameOf
         el("li", { text: "约定提醒到点时，她会先给你发一条文字消息。" }),
         el("li", { text: "每条消息会调用一次你的模型，产生费用；使用订阅连接时会消耗订阅额度。" }),
         el("li", { text: "每天最多 3 条，每个约定最多 1 条；只在页面开着时发送，不会离线补发。" }),
-        el("li", { text: "确认最长 12 小时有效。更换模型、重新连接或清除模型会话后需要再确认；凭证只保存在当前标签页时，重新打开页面也要再确认。" }))),
+        el("li", { text: "你可以自己选择这次确认的有效时长，范围与模型凭证的本机保存时长一致，且不会超过凭证本身的剩余有效期。更换模型、重新连接或清除模型会话后需要再确认；凭证只保存在当前标签页时，重新打开页面也要再确认。" }))),
+    durationRow,
     costError,
     el("div", { class: "snow-modal-foot" }, el("span", { text: "随时可以在这里关闭。" }), el("div", { class: "modal-actions" }, costCancel, costConfirm)));
   document.body.append(costDialog);
   costDialog.querySelector("[data-snow-close]").addEventListener("click", () => costDialog.close());
   costCancel.addEventListener("click", () => costDialog.close());
   costDialog.addEventListener("close", () => syncSettings());
+
+  // 时长选项与模型会话允许的凭证保存时长一致（含「本次」=当前标签页，约 12 小时）；
+  // 超过凭证剩余有效期的选项禁用并给出原因。返回当前有效选项列表。
+  function durationOptions() {
+    const info = snapshot().proactiveDuration || {};
+    const policy = Array.isArray(info.options) ? info.options : [];
+    const values = ["tab", ...policy.filter(value => value !== "tab" && DURATION_HOURS[value])];
+    const remainingMs = info.credentialExpiresAt ? info.credentialExpiresAt - Date.now() : 0;
+    return values.map(value => {
+      // 「本次」永远可选（12 小时上限会被服务器按凭证夹取）；其余长于凭证剩余有效期的禁用。
+      const tooLong = value !== "tab" && remainingMs > 0 && DURATION_HOURS[value] * 3600000 > remainingMs;
+      return { value, label: DURATION_LABELS[value] || value, disabled: tooLong };
+    });
+  }
+  function populateDuration(preselect) {
+    const info = snapshot().proactiveDuration || {};
+    const options = durationOptions();
+    const enabled = options.filter(option => !option.disabled);
+    const wanted = [preselect, info.current, "tab"].find(value => enabled.some(option => option.value === value)) || enabled[0]?.value || "tab";
+    durationSelect.replaceChildren(...options.map(option => el("option", { value: option.value, ...(option.disabled ? { disabled: "" } : {}) },
+      option.disabled ? `${option.label}（超过凭证剩余有效期）` : option.label)));
+    durationSelect.value = wanted;
+    durationSelect.disabled = enabled.length <= 1;
+    refreshDurationHint();
+  }
+  function refreshDurationHint() {
+    const info = snapshot().proactiveDuration || {};
+    const hours = DURATION_HOURS[durationSelect.value] || 12;
+    const target = Date.now() + hours * 3600000;
+    const capped = info.credentialExpiresAt ? Math.min(target, info.credentialExpiresAt) : target;
+    durationHint.textContent = `确认后有效至 ${shanghaiExpiry(capped)}；到期或更换模型后需要再确认。`;
+  }
+  durationSelect.addEventListener("change", refreshDurationHint);
+  function openCostDialog(preselect) {
+    costError.hidden = true;
+    populateDuration(preselect);
+    costDialog.showModal();
+    costConfirm.focus();
+  }
   costConfirm.addEventListener("click", async () => {
     const client = proactive();
     if (!client || readOnly()) return;
     costConfirm.disabled = true; costError.hidden = true;
     try {
-      const result = await client.enable({ acceptedCostNotice: true });
+      const result = await client.enable({ acceptedCostNotice: true, duration: durationSelect.value });
       if (result?.ok) { costDialog.close(); notify("已开启。约定提醒到点时，她会先给你发消息。"); }
       else { costError.textContent = ENABLE_ERRORS[result?.reason] || "没能开启，请稍后再试。"; costError.hidden = false; }
     } catch { costError.textContent = "没能开启，请检查网络后再试。"; costError.hidden = false; }
@@ -415,30 +501,45 @@ export function installConversationUi(host, { icon, el, notify, readOnly, nameOf
     if (!client || readOnly()) { syncSettings(); return; }
     if (proactiveInput.checked) {
       proactiveInput.checked = false;
-      costError.hidden = true;
-      costDialog.showModal();
-      costConfirm.focus();
+      openCostDialog();
       return;
     }
     await client.disable().catch(() => null);
     notify("已关闭角色主动来消息。");
     syncSettings();
   });
+  // 模型面板勾选「同步主动来消息」保存会话后，按该时长打开费用确认（仍需确认，不自动开启）。
+  on("proactive-sync-request", detail => {
+    if (readOnly() || !remindersOn() || !proactive()?.preferences()?.serverEnabled) return;
+    openCostDialog(detail?.duration);
+  });
+  // 改期：在已开启的设置行上重新打开费用确认，预选当前时长。
+  const proactiveChange = el("button", { type: "button", class: "secondary-button snow-small", id: "snow-proactive-change", hidden: true }, "修改时长");
+  proactiveChange.addEventListener("click", () => {
+    if (readOnly() || !proactive()?.preferences()?.serverEnabled) return;
+    openCostDialog(proactive()?.preferences()?.duration);
+  });
+  proactiveNote.after(proactiveChange);
   function proactiveState() {
     const client = proactive(), state = client?.preferences() || {}, snap = snapshot();
     if (!client) return { disabled: true, checked: false, note: "这项功能暂时不可用。" };
     if (!state.serverEnabled) return { disabled: true, checked: false, note: "服务器暂未开放这项功能。约定提醒照常可用，不调用模型。" };
     if (!remindersOn()) return { disabled: true, checked: false, note: "需要先开启上面的「约定提醒」。" };
-    if (state.enabled) return { disabled: Boolean(state.busy), checked: true, note: "已开启：约定提醒到点时，她会先发一条消息，每条调用一次模型。每天最多 3 条。" };
+    if (state.enabled) {
+      const until = state.expiresAt ? `已开启 · 到 ${shanghaiExpiry(state.expiresAt)} 为止` : "已开启";
+      return { disabled: Boolean(state.busy), checked: true, change: true,
+        note: `${until}：约定提醒到点时，她会先发一条消息，每条调用一次模型。每天最多 3 条。` };
+    }
     if (!snap.modelReady) return { disabled: true, checked: false, note: "需要先在「模型」里连接你的模型。" };
     return { disabled: Boolean(state.busy), checked: false,
-      note: "约定提醒到点时，她会先给你发一条消息。默认关闭；开启前会说明费用，确认最长 12 小时有效。" };
+      note: "约定提醒到点时，她会先给你发一条消息。默认关闭；开启前可以自己选择确认的有效时长。" };
   }
   function syncProactive() {
     const value = proactiveState();
     proactiveInput.checked = value.checked;
     proactiveInput.disabled = value.disabled;
     proactiveNote.textContent = value.note;
+    proactiveChange.hidden = !value.change || Boolean(value.disabled);
   }
   let requestVersion = 0;
   async function renderRequests() {
