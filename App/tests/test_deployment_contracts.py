@@ -503,6 +503,19 @@ class DeploymentContractTests(TestCase):
         commit_block = promote[commit:commit + 900]
         self.assertIn('recreate_embedding_from_env "$previous_env" "$previous_config_root" "$previous_colour"', commit_block)
 
+    def test_promote_egress_probe_failure_also_reverts_a_swapped_embedding(self) -> None:
+        promote = self.read("ops/promote.sh")
+        # The egress probes run after the embedding swap. Their failure branch must
+        # put the previous embedding back before restoring traffic, or the markers
+        # name one digest while another keeps running (1.1.0's first promotion).
+        failure = promote.index("The recreated egress proxy failed its CONNECT policy probes")
+        branch = promote[failure:promote.index("egress_swapped=1", failure)]
+        revert = branch.index('recreate_embedding_from_env "$previous_env" "$previous_config_root" "$previous_colour"')
+        self.assertIn('if [ "${embedding_swapped:-0}" -eq 1 ]; then', branch[:revert])
+        self.assertLess(revert, branch.index("restore_previous_runtime || exit 74"))
+        self.assertIn("exit 73", branch)
+        self.assertLess(promote.index("embedding_swapped=1"), failure)
+
     def test_promote_consumes_authorization_only_after_committed_forward_swap(self) -> None:
         promote = self.read("ops/promote.sh")
         self.assertIn("embedding-swap-clear --lock-held", promote)

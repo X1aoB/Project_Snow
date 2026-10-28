@@ -2749,6 +2749,14 @@ if [ "${egress_conf_changed:-0}" -eq 1 ]; then
   # shellcheck disable=SC2086 # egress_new_hosts is a fixed list of hostnames.
   if ! egress_policy_holds "$colour_env" "$colour_config_root" "$colour" $egress_new_hosts; then
     echo 'The recreated egress proxy failed its CONNECT policy probes; traffic restored.' >&2
+    # The embedding swap above already ran; put the previous digest back too, as
+    # a failed state commit does, so markers and the running container agree.
+    if [ "${embedding_swapped:-0}" -eq 1 ]; then
+      echo 'Reverting the embedding to its previous digest after the failed egress probes.' >&2
+      if ! recreate_embedding_from_env "$previous_env" "$previous_config_root" "$previous_colour"; then
+        echo 'CRITICAL: failed to revert the embedding digest after the failed egress probes.' >&2
+      fi
+    fi
     restore_previous_runtime || exit 74
     exit 73
   fi

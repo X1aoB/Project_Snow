@@ -103,3 +103,13 @@ def test_no_allow_precedes_a_private_deny() -> None:
     assert max(deny_indexes) < min(allow_indexes), (
         "a private-range deny appears after an allow rule"
     )
+
+
+def test_no_rule_names_the_v4_mapped_range() -> None:
+    """Squid keeps every IPv4 address as v4-mapped IPv6 (::ffff:a.b.c.d), so a
+    dst ACL over ::ffff:0:0/96 matches all IPv4 targets. 1.1.0's first promotion
+    stopped on exactly that: public IPv4 CONNECTs answered 403 until the line was
+    removed. The v4 ranges already cover mapped forms of private addresses."""
+    for name, ranges in _acl_ranges().items():
+        mapped = sorted(value for value in ranges if value.lower().startswith("::ffff:"))
+        assert not mapped, f"acl {name} names v4-mapped ranges {mapped}"
