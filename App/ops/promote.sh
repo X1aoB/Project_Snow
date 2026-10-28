@@ -714,7 +714,8 @@ if egress_conf_before="$(egress_conf_sha_from_binding "$previous_config_binding"
   if [ "$rollback_mode" = 0 ]; then
     if ! python3 "$script_dir/maintenance.py" shared-dependency-gate \
       --candidate-environment "$colour_env" --manifest "$colour_manifest" \
-      | grep -Fq '"shared_dependencies": "egress-config-swap-authorized"'; then
+      | grep -Fq -e '"shared_dependencies": "egress-config-swap-authorized"' \
+        -e '"shared_dependencies": "embedding-and-egress-swaps-authorized"'; then
       echo 'Egress conf differs but no matching swap authorization exists; traffic was not changed.' >&2
       exit 73
     fi
@@ -2709,7 +2710,8 @@ if [ -n "$embedding_running_before" ] &&
   if [ "$rollback_mode" = 0 ]; then
     if ! python3 "$script_dir/maintenance.py" shared-dependency-gate \
       --candidate-environment "$colour_env" --manifest "$colour_manifest" \
-      | grep -Fq '"shared_dependencies": "embedding-swap-authorized"'; then
+      | grep -Fq -e '"shared_dependencies": "embedding-swap-authorized"' \
+        -e '"shared_dependencies": "embedding-and-egress-swaps-authorized"'; then
       echo 'Embedding digest differs but no matching swap authorization exists; traffic restored.' >&2
       restore_previous_runtime || exit 74
       exit 73

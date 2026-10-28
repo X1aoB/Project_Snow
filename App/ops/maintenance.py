@@ -383,6 +383,21 @@ def shared_dependency_gate(paths: Paths, candidate_environment: Path, candidate_
         if egress_authorization is not None:
             return {"status": "ok", "shared_dependencies": "egress-config-swap-authorized",
                     "from": egress_authorization["from_sha256"], "to": egress_authorization["to_sha256"]}
+    # Both swaps may land together (a security rebuild of the embedding image in
+    # the same release as an egress conf change). Each still needs its own
+    # matching root authorization, and nothing else may change.
+    if len(changed) == 2 and set(changed) == {"EMBEDDING_IMAGE", EGRESS_SWAP_PATH}:
+        authorization = embedding_swap_authorization(paths, current["EMBEDDING_IMAGE"], candidate.get("EMBEDDING_IMAGE", ""))
+        egress_authorization = egress_swap_authorization(
+            paths,
+            str(previous_hashes.get(EGRESS_SWAP_PATH, "")),
+            str(next_hashes.get(EGRESS_SWAP_PATH, "")),
+        )
+        if authorization is not None and egress_authorization is not None:
+            return {"status": "ok", "shared_dependencies": "embedding-and-egress-swaps-authorized",
+                    "from": authorization["from"], "to": authorization["to"],
+                    "egress_from": egress_authorization["from_sha256"],
+                    "egress_to": egress_authorization["to_sha256"]}
     if changed:
         raise MaintenanceError("Shared dependency changes require an independent backed-up maintenance release: " + ", ".join(changed))
     return {"status": "ok", "shared_dependencies": "unchanged"}
