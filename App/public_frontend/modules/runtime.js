@@ -37,7 +37,7 @@ function createHttpClient(root, fetcher = fetch) {
           failure.retryable = typeof detail?.retryable === "boolean" ? detail.retryable : null;
           const retryAfter = Number(detail?.retry_after_seconds);
           failure.retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(300, Math.floor(retryAfter)) : 0;
-          failure.resetAt = Date.parse(detail?.reset_at) || 0;
+          failure.resetAt = Date.parse(String(detail?.reset_at ?? "")) || 0;
           failure.httpStatus = response.status;
           throw failure;
         }

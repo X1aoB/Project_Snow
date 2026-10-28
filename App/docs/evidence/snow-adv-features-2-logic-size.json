@@ -110,9 +110,9 @@
       },
       {
         "path": "App/public_frontend/modules/runtime.js",
-        "lf_bytes": 25554,
-        "lf_sha256": "4c12d57e6b104891390914276579c594286bc06b39f2fe79c094a01864802804",
-        "gzip_bytes": 7417
+        "lf_bytes": 25568,
+        "lf_sha256": "8417148e36ac447c7c2c7e002f52430fdd345db31efec33cdd19179e84226287",
+        "gzip_bytes": 7424
       },
       {
         "path": "App/public_frontend/modules/snow-icons.js",
@@ -163,11 +163,11 @@
         "gzip_bytes": 95
       }
     ],
-    "gzip_sum_bytes": 189569
+    "gzip_sum_bytes": 189576
   },
-  "increase_bytes": 58415,
+  "increase_bytes": 58422,
   "budget_bytes": 61440,
-  "remaining_bytes": 3025,
+  "remaining_bytes": 3018,
   "app_hook_increase_bytes": 2726,
   "app_hook_budget_bytes": 6013,
   "passed": true,
