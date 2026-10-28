@@ -376,14 +376,16 @@ class SnowFeatureLogicTests(TestCase):
           const logic=h.install();await logic.ready;
           const all=await logic.conversations.byDay('synthetic-a');
           const capped=await logic.conversations.byDay('synthetic-a',{limit:1});
+          // The view reads .days directly: every early exit keeps the same shape.
+          const missing=await logic.conversations.byDay('');
           return {total:all.total,shown:all.shown,
             days:all.days.map(d=>({dayKey:d.dayKey,items:d.items.map(it=>({you:it.user&&it.user.text,her:it.reply.text,replyId:it.replyId}))})),
-            capped:{total:capped.total,shown:capped.shown,days:capped.days.length}};
+            capped:{total:capped.total,shown:capped.shown,days:capped.days.length},missing};
         }""")
         self.assertEqual(result, {"total": 2, "shown": 2, "days": [
             {"dayKey": "2026-10-19", "items": [{"you": "今天在听爵士乐", "her": "听起来不错", "replyId": "a2"}]},
             {"dayKey": "2026-10-18", "items": [{"you": "我喜欢下雪天", "her": "我也喜欢，和你一样", "replyId": "a1"}]}],
-            "capped": {"total": 2, "shown": 1, "days": 1}})
+            "capped": {"total": 2, "shown": 1, "days": 1}, "missing": {"total": 0, "shown": 0, "days": []}})
 
     def test_usage_groups_reply_summary_and_arrival_and_deduplicates_replays(self):
         result = self.page.evaluate("""async()=>{

@@ -21,18 +21,26 @@ from urllib.parse import unquote, urlsplit
 MAX_RELAY_URL_LENGTH = 255
 
 # Hostnames whose right-most label (or whole name) resolves to infrastructure a
-# public relay has no business being: link-local, private LAN discovery and the
-# RFC 8375 home network zone.  Matched case-insensitively against the punycode
+# public relay has no business being: link-local, private LAN discovery, the
+# RFC 8375 home network zone and the RFC 2606/6761 reserved names.  ``invalid``
+# also matters in-process: the provider pool answers
+# ``codex-subscription.invalid`` from the subscription broker, so a relay must
+# never be able to name it.  Matched case-insensitively against the punycode
 # host and every suffix of it.
 _FORBIDDEN_HOST_SUFFIXES = (
     "localhost",
     "local",
+    "localdomain",
     "internal",
     "intranet",
     "lan",
     "home.arpa",
     "in-addr.arpa",
     "ip6.arpa",
+    "invalid",
+    "test",
+    "example",
+    "onion",
 )
 
 # A single DNS label: 1-63 chars, alphanumeric with internal hyphens, no

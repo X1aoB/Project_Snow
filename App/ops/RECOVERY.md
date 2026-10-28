@@ -178,7 +178,7 @@ parse_ok=true
    该命令从 live 配置绑定读 from、从候选 manifest 读 to，二者必须不同且均为合法 sha256。
 4. `project-snow-release stage <inactive> <sha>`：gate 因授权自洽通过。
 5. candidate 验收照常：prepare → ★ approve。
-6. `project-snow-release promote <inactive> <sha>`：在 API 就绪/smoke 与边缘切换全部通过后、持久写之前，若目标 colour 的 egress conf 哈希与当前运行的不同，promote 先校验匹配授权，再对候选 conf 做 `squid -k parse`，随后 `compose up -d --no-deps --force-recreate egress-proxy`，并从 API 容器 CONNECT 探测三个官方厂商主机（必须 200）与一个私网目标 169.254.169.254（必须被拒）。任一失败则重建回上一个 colour 的 conf 并恢复旧运行态、非零退出且不提交切换。成功提交后删除授权文件（`egress-config-swap-clear`），授权无法重放。egress conf 未变的普通发布完全不进入该分支。
+6. `project-snow-release promote <inactive> <sha>`：若目标 colour 配置绑定里的 egress conf 哈希与当前运行 colour 的不同，promote 在任何流量切换之前（目标 API 就绪与直连 smoke 之后）先校验匹配授权，再在一次性容器里对目标 conf 做 `squid -k parse`；任一不通过即以 73 退出，流量与共享 `egress-proxy` 都没有改变。随后的边缘切换按目标快照重建 `egress-proxy`（`routing.py` 用 conf 内容哈希标识该服务，内容变了就重建）。切换后、持久写之前，promote 从目标 API 容器做 CONNECT 探测：`challenges.cloudflare.com` 必须返回 200（等待新代理就绪，最多 15 次）；`169.254.169.254` 必须被 ACL 拒绝（403）；本次新放行的 `api.anthropic.com`、`api.x.ai`、`generativelanguage.googleapis.com` 不得被拒，返回 403 或无应答即失败，上游 5xx 只告警。探测失败则 `restore_previous_runtime`，其中的边缘切换按上一个快照重建回旧 conf，promote 非零退出且不提交切换。成功提交后删除授权文件（`egress-config-swap-clear`），授权无法重放。egress conf 未变的普通发布不进入这两个分支。
 
 清除未消费的授权：
 
@@ -186,9 +186,9 @@ parse_ok=true
 python3 /usr/local/libexec/project-snow/maintenance.py egress-config-swap-clear
 ```
 
-回滚语义：回滚到某个 colour 时，promote 的 rollback 模式按该 colour 签名配置绑定里记录的 conf 重建 `egress-proxy`，无需新授权。因为「加放行项」对现有主机是纯超集，blue/green 两个 colour 各自看自己的 conf 都能正常工作，切换与回退都干净；但授权+哈希绑定+锚点步骤仍是强制的——`verify_candidate`/`verify_promoted` 断言 active marker、manifest、compose.env 与配置绑定一致，`configuration_sha256` 内容寻址，改了 conf 却不更新记录哈希会使校验失败。
+回滚语义：rollback 模式不需要新授权，也不做 parse 前置检查（目标 conf 此前已晋级运行过）。边缘切换按该 colour 签名配置绑定里记录的 conf 重建 `egress-proxy`；切换后只做所有 conf 版本都满足的两项探测（Turnstile 主机 200、metadata 地址 403），不探测新厂商，所以从 1.1.0 回滚到 1.0.2 的白名单 conf 不会被探测挡住。回滚后旧 conf 不放行新厂商与中转站，这些接入方式会在代理处被拒，需要用户换回原有厂商。授权、哈希绑定和锚点步骤仍是强制的：`configuration_sha256` 按内容寻址，改了 conf 却不更新记录的哈希会让发布校验失败。
 
-**PUBLIC_ENABLED_PROVIDERS 两 colour 必须一致**：`deploy.sh` 规范化器的允许列表正则已拓宽为 `openai|deepseek|dashscope|zhipu|moonshot|anthropic|xai|gemini|relay`。但 `verify_candidate.py` 断言两 colour public env 仅 `PUBLIC_APP_VERSION` 不同，`verify_promoted.py` pin 精确 `public_environment_sha256`，所以厂商放行变更必须对两 colour **逐字相同**地应用，并重新 pin `verify_promoted.PUBLIC_ENVIRONMENT`，否则下次 promote 会在 colour-diff 校验上失败。
+**新厂商在主机上的开启**：候选 colour 的 public env 由 `deploy.sh` 从主机源文件 `/etc/project-snow/public.env`（root 0600）规范化生成，`PUBLIC_ENABLED_PROVIDERS` 取自源文件；规范化正则已拓宽为 `openai|deepseek|dashscope|zhipu|moonshot|anthropic|xai|gemini|relay`。要在 1.1.0 候选里开启新厂商与中转站，需要在 stage 之前由 root 把它们加进源文件的列表（★ 所有者审批点）。已在运行的 colour 保留自己部署时生成的 env，不受影响；但 1.0.2 的 `deploy.sh` 只认原来 5 家，源文件改了以后不能再用它重新 stage 1.0.2。两个 colour 的 public env 因此会在 `PUBLIC_APP_VERSION`、`PUBLIC_PRIVACY_POLICY_VERSION`、`PUBLIC_PRIVACY_EFFECTIVE_AT`、`PUBLIC_ENABLED_PROVIDERS` 四个键上不同。发布用的本地验收脚本（`.tmp/release-*/host/verify_candidate.py`，不在仓库里）的 colour 差异放行项需要相应放宽，并核对每个键都等于签名 manifest 与 `deploy.sh` 写入的预期值；其余键仍须逐字一致。
 
 ## 备份范围、基线与恢复演练
 

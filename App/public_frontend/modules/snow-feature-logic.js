@@ -387,11 +387,12 @@ export function createFeatureLogic(adapter) {
       // 通讯器对话（communicationChannel !== "in_person"）按天分组，每轮取用户一句与她的回复的摘要，最新在前。
       async byDay(characterId, { limit = 60, excerpt = 48 } = {}) {
         const token = historyToken();
-        if (!string(characterId)) return [];
+        const empty = { total: 0, shown: 0, days: [] };
+        if (!string(characterId)) return empty;
         const records = copy(list(await adapter.messages(characterId))).filter(item =>
           messageCharacter(item) === characterId
           && (item.communicationChannel || item.communication_channel) !== "in_person");
-        if (!currentHistory(token)) return [];
+        if (!currentHistory(token)) return empty;
         const ordered = records.sort((a, b) => stamp(a.createdAt ?? a.created_at) - stamp(b.createdAt ?? b.created_at)
           || string(a.id).localeCompare(string(b.id)));
         const firstText = message => {

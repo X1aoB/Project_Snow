@@ -22,6 +22,7 @@ import time
 import unicodedata
 from collections import OrderedDict
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from hashlib import sha256
@@ -29,42 +30,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from contextvars import ContextVar
 
 import httpx
-
-# A third-party relay (第三方中转站) is a user-chosen upstream. While a public
-# relay generation runs, its host is recorded here so the model client reads
-# that host's responses with a byte ceiling; every other endpoint is unchanged.
-_UNTRUSTED_MODEL_HOST: ContextVar[str] = ContextVar("untrusted_model_host", default="")
-_RELAY_MODEL_RESPONSE_CAP = 4 * 1024 * 1024
-
-
-@contextmanager
-def untrusted_model_host(base_url: str | None):
-    token = _UNTRUSTED_MODEL_HOST.set((urlparse(base_url).hostname or "") if base_url else "")
-    try:
-        yield
-    finally:
-        _UNTRUSTED_MODEL_HOST.reset(token)
-
-
-class _CappedLineStream:
-    """Expose ``iter_lines`` of a streamed response, refusing more than *cap* bytes."""
-
-    def __init__(self, response: Any, cap: int) -> None:
-        self._response, self._cap = response, cap
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._response, name)
-
-    def iter_lines(self):
-        total = 0
-        for line in self._response.iter_lines():
-            total += len(line) + 1
-            if total > self._cap:
-                raise GenerationStreamError("provider_stream_too_large")
-            yield line
 
 from .chat_store import ConversationStore
 from .config import Settings
@@ -123,6 +90,50 @@ from .public_knowledge import PublicKnowledge
 from .repository import RuntimeRepository
 from .text_rules import _compact, _contains_term
 from .user_fact_store import UserFactStore
+
+# A third-party relay (第三方中转站) is a user-chosen upstream. While a public
+# relay generation runs, its host is recorded here so the model client reads
+# that host's responses with a byte ceiling; every other endpoint is unchanged.
+_UNTRUSTED_MODEL_HOST: ContextVar[str] = ContextVar("untrusted_model_host", default="")
+_RELAY_MODEL_RESPONSE_CAP = 4 * 1024 * 1024
+
+
+@contextmanager
+def untrusted_model_host(base_url: str | None):
+    token = _UNTRUSTED_MODEL_HOST.set((urlparse(base_url).hostname or "") if base_url else "")
+    try:
+        yield
+    finally:
+        _UNTRUSTED_MODEL_HOST.reset(token)
+
+
+class _CappedLineStream:
+    """Expose ``iter_lines`` of a streamed response, refusing more than *cap* bytes.
+
+    The ceiling counts body bytes before httpx assembles lines, so a single
+    endless line cannot be buffered without bound; httpx still splits the lines.
+    """
+
+    def __init__(self, response: Any, cap: int) -> None:
+        self._response, self._cap = response, cap
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._response, name)
+
+    def iter_lines(self):
+        def capped():
+            total = 0
+            for chunk in self._response.iter_bytes():
+                total += len(chunk)
+                if total > self._cap:
+                    raise GenerationStreamError("provider_stream_too_large")
+                yield chunk
+
+        lines = httpx.Response(self._response.status_code, content=capped(),
+                               headers={"content-type": self._response.headers.get("content-type", "")})
+        lines.encoding = self._response.encoding
+        yield from lines.iter_lines()
+
 
 _FEEDBACK_LOCK = threading.RLock()
 _FEEDBACK_RESOLUTION_STATUSES = {

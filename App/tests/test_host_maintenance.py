@@ -454,20 +454,107 @@ def test_egress_clear_removes_only_well_formed(egress_swap):
     assert result["removed"] == [NEW_EGRESS_SHA + ".env"]
 
 
-def test_promote_recreates_egress_only_under_authorization_and_reverts():
-    source = (OPS / "promote.sh").read_text()
-    assert '"shared_dependencies": "egress-config-swap-authorized"' in source
-    assert 'egress_conf_parses "$colour_env" "$colour_config_root"' in source
-    assert '--force-recreate egress-proxy' in source
-    assert 'recreate_egress_from_env "$previous_env" "$previous_config_root" "$previous_colour"' in source
-    # Authorization consumed only after a committed forward swap.
-    assert source.index("egress_swapped=1") < source.index("egress-config-swap-clear")
-    # CONNECT probes: official hosts allowed, a private target denied.
-    assert "api.anthropic.com api.x.ai generativelanguage.googleapis.com" in source
-    assert "169.254.169.254:443" in source
-
-
-def test_promote_egress_swap_gated_on_conf_hash_difference():
+def test_promote_admits_a_changed_egress_conf_before_any_traffic_moves():
     source = (OPS / "promote.sh").read_text()
     guard = source.index('egress_conf_before="$(egress_conf_sha_from_binding "$previous_config_binding")"')
     assert '[ "$egress_conf_before" != "$egress_conf_target" ]' in source[guard:guard + 400]
+    preflight = source[guard:source.index("\nfi\n", guard)]
+    # Authorization and squid -k parse are refused before the edge switch, so a
+    # refused conf never reaches the live proxy and needs no runtime restore.
+    authorization = preflight.index('"shared_dependencies": "egress-config-swap-authorized"')
+    assert authorization < preflight.index('egress_conf_parses "$colour_env" "$colour_config_root"')
+    assert "exit 73" in preflight and "restore_previous_runtime" not in preflight
+    assert source.index(preflight) < source.index('if ! switch_edge "$colour_env" "$colour_config_root" "$colour"')
+    # The edge switch recreates egress-proxy itself; promote never does it twice.
+    assert "recreate_egress_from_env" not in source
+    assert "--force-recreate egress-proxy" not in source
+
+
+def test_promote_verifies_egress_policy_after_the_switch_and_clears_after_commit():
+    source = (OPS / "promote.sh").read_text()
+    edge_switch = source.index('if ! switch_edge "$colour_env" "$colour_config_root" "$colour"')
+    policy = source.index('egress_policy_holds "$colour_env" "$colour_config_root" "$colour" $egress_new_hosts')
+    assert edge_switch < policy < source.index("commit_promoted_state() {")
+    # Only a forward swap probes the newly allowed vendor hosts: a rollback to a
+    # conf that predates them must still pass.
+    forward = source.rindex('if [ "$rollback_mode" = 0 ]; then', 0, policy)
+    assert 'egress_new_hosts="api.anthropic.com api.x.ai generativelanguage.googleapis.com"' in source[forward:policy]
+    # Authorization consumed only after a committed forward swap.
+    assert source.index("egress_swapped=1") < source.index("egress-config-swap-clear")
+
+
+def _promote_functions(*names: str) -> str:
+    source = (OPS / "promote.sh").read_text(encoding="utf-8")
+    chunks = []
+    for name in names:
+        start = source.index(f"\n{name}() {{\n") + 1
+        chunks.append(source[start:source.index("\n}\n", start) + 3])
+    return "\n".join(chunks)
+
+
+def _run_posix(script: str, tmp_path, **environment: str):
+    import os
+    import subprocess
+
+    candidates = ("C:/Program Files/Git/bin/bash.exe", shutil.which("sh"), shutil.which("bash"))
+    shell = next((candidate for candidate in candidates if candidate and Path(candidate).is_file()), None)
+    assert shell, "A POSIX shell is required for promote.sh behaviour tests."
+    path = tmp_path / "harness.sh"
+    path.write_text(script, encoding="utf-8", newline="\n")
+    return subprocess.run([shell, str(path)], capture_output=True, text=True, check=False,
+                          env={**os.environ, **environment})
+
+
+EGRESS_POLICY_HARNESS = r'''set -u
+sleep() { :; }
+egress_connect_status() {
+  printf '%s\n' "$4" >> "$PROBE_LOG"
+  case "$4" in
+    challenges.cloudflare.com) printf '%s\n' "$TURNSTILE_STATUS" ;;
+    169.254.169.254) printf '%s\n' "$METADATA_STATUS" ;;
+    *) printf '%s\n' "$VENDOR_STATUS" ;;
+  esac
+}
+'''
+
+
+@pytest.mark.parametrize(("turnstile", "metadata", "vendor", "hosts", "expected"), [
+    ("200", "403", "200", "api.anthropic.com api.x.ai", 0),
+    # A rollback to the 1.0.2 conf, which refuses the new vendors, names none.
+    ("200", "403", "403", "", 0),
+    ("200", "403", "403", "api.anthropic.com", 1),
+    ("200", "403", "000", "api.x.ai", 1),
+    ("200", "403", "503", "generativelanguage.googleapis.com", 0),
+    ("200", "200", "200", "", 1),
+    ("503", "403", "200", "", 1),
+])
+def test_egress_policy_probe_outcomes(tmp_path, turnstile, metadata, vendor, hosts, expected):
+    log = tmp_path / "probes.log"
+    script = (EGRESS_POLICY_HARNESS + _promote_functions("egress_policy_holds")
+              + f"\negress_policy_holds env root green {hosts}\n")
+    result = _run_posix(script, tmp_path, PROBE_LOG=str(log), TURNSTILE_STATUS=turnstile,
+                        METADATA_STATUS=metadata, VENDOR_STATUS=vendor)
+    assert result.returncode == expected, result.stderr
+    probed = log.read_text().split()
+    if turnstile != "200":
+        # Waits for the recreated proxy, then gives up without other probes.
+        assert probed == ["challenges.cloudflare.com"] * 15
+    if expected == 0:
+        assert probed == ["challenges.cloudflare.com", "169.254.169.254", *hosts.split()]
+    if vendor == "503" and hosts:
+        assert "its upstream answered 503" in result.stderr
+
+
+@pytest.mark.parametrize(("reply", "status", "expected"), [
+    ("200", "0", "200"),
+    ("403", "0", "403"),
+    ("HTTP/1.1 200", "0", "000"),
+    ("", "1", "000"),
+])
+def test_egress_connect_status_normalises_the_probe_reply(tmp_path, reply, status, expected):
+    script = ("set -u\ndocker() { printf '%s\\n' \"$DOCKER_REPLY\"; return \"$DOCKER_STATUS\"; }\n"
+              + _promote_functions("egress_connect_status")
+              + "\negress_connect_status env root blue api.x.ai\n")
+    result = _run_posix(script, tmp_path, DOCKER_REPLY=reply, DOCKER_STATUS=status)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == expected

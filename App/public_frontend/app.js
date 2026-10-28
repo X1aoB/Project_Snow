@@ -523,7 +523,7 @@ const errorMessages = {
   generation_queue_timeout: "等待生成超时，请稍后重试。",
   upstream_invalid_response: "模型没有返回可用正文，本次不会写入角色回复，请重试。",
   role_guard_rejected: "本次生成未通过角色校验，请重试。",
-  rate_limit_exceeded: "当前额度已用完，位置切换已保留，但没有生成到场对白。",
+  rate_limit_exceeded: "已达到本站每位访客的使用频率上限，这不是你的模型额度，Key 和余额都不受影响。",
   credential_invalid: "模型会话已失效，请重新输入 API Key。",
   request_in_progress: "同一请求仍在处理中，请稍后重试。",
   request_id_conflict: "请求编号冲突，请重新操作。",
@@ -691,11 +691,17 @@ function chatError(code = "request_failed", detail = {}, status = 0) {
   error.retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0
     ? Math.min(300, Math.floor(retryAfter))
     : 0;
+  error.resetAt = Date.parse(payload.reset_at) || 0;
   error.httpStatus = Number(status) || 0;
   return error;
 }
 function displayError(error) {
   const code = error instanceof Error ? error.message : plain(error);
+  // The site's own per-visitor frequency cap: say when it lifts, never "your quota".
+  if (code === "rate_limit_exceeded" && error?.resetAt > Date.now()) {
+    const resume = new Date(error.resetAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    return `${errorMessages.rate_limit_exceeded}约 ${resume} 后恢复。`;
+  }
   if (["Failed to fetch", "NetworkError when attempting to fetch resource.", "Load failed"].includes(code)) return errorMessages.network_unavailable;
   if (code === "credential_invalid" && state.provider === SUBSCRIPTION_PROVIDER) return errorMessages.subscription_not_connected;
   const stage = normalizedErrorStage(error instanceof Error ? error.errorStage : "");
@@ -3147,6 +3153,7 @@ function chooseModelMode(mode) {
     if (subscriptionEnabled()) select.value = SUBSCRIPTION_PROVIDER;
   } else select.value = mode === "relay" ? RELAY_PROVIDER : state.apiProviderChoice || (providerMode(state.provider) === "api" ? state.provider : "") || apiProviders()[0]?.provider_id || "";
   syncProviderControls(select.value);
+  refreshCredentialStatus();
   showError("setup-error", "");
   renderSubscriptionSettings();
   if (mode === "subscription") startSubscriptionPolling();

@@ -132,28 +132,91 @@ class PublicProviderTests(TestCase):
         self.assertEqual(headers["x-api-key"], "sk-ant")
         self.assertEqual(headers["anthropic-version"], "2023-06-01")
 
-    def test_relay_response_byte_cap(self) -> None:
+    def relay_transport(self, handler):
+        """Patch the module's AsyncClient so real httpx streaming runs over *handler*."""
+        real_client = httpx.AsyncClient
+
+        def factory(**kwargs):
+            return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+        return patch("backend.snow_app.public_providers.httpx.AsyncClient", side_effect=factory)
+
+    def test_relay_response_byte_cap_stops_reading_early(self) -> None:
         from backend.snow_app.public_providers import (
             RELAY_RESPONSE_BYTE_CAP,
             relay_provider_spec,
             simple_completion,
         )
 
-        oversized = b'{"choices":[{"message":{"content":"' + b"x" * (RELAY_RESPONSE_BYTE_CAP + 10) + b'"}}]}'
+        sent = []
 
-        class Client:
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *_args):
-                return None
-
-            async def post(self, url, **_kwargs):
-                return httpx.Response(200, content=oversized, request=httpx.Request("POST", url))
+        async def oversized():
+            # Far more than the cap; a buffering client would read all of it.
+            for _ in range(4 * RELAY_RESPONSE_BYTE_CAP // 65536):
+                sent.append(65536)
+                yield b"x" * 65536
 
         spec = relay_provider_spec("https://relay.example.com/v1")
-        with patch("backend.snow_app.public_providers.httpx.AsyncClient", return_value=Client()):
+        with self.relay_transport(lambda request: httpx.Response(200, content=oversized())):
             with self.assertRaises(ProviderRequestError) as caught:
                 asyncio.run(simple_completion(spec, "sk-relay", "model-x",
                                               system_prompt="s", user_prompt="u"))
         self.assertEqual(caught.exception.code, "provider_response_too_large")
+        self.assertLessEqual(sum(sent), RELAY_RESPONSE_BYTE_CAP + 2 * 65536)
+
+    def test_relay_completion_and_discovery_under_the_cap_still_parse(self) -> None:
+        from backend.snow_app.public_providers import relay_provider_spec, simple_completion
+
+        seen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append((request.method, str(request.url), request.headers.get("Authorization")))
+            if request.url.path.endswith("/models"):
+                return httpx.Response(200, json={"data": [{"id": "relay-b"}, {"id": "relay-a"}]})
+            return httpx.Response(200, json={"choices": [{"message": {"content": " 你好 "}}],
+                                             "usage": {"total_tokens": 3}})
+
+        spec = relay_provider_spec("https://relay.example.com/v1")
+        with self.relay_transport(handler):
+            models = asyncio.run(discover_models(spec, "sk-relay"))
+            content, usage = asyncio.run(simple_completion(spec, "sk-relay", "relay-a",
+                                                           system_prompt="s", user_prompt="u"))
+        self.assertEqual(models, ["relay-a", "relay-b"])
+        self.assertEqual((content, usage), ("你好", {"total_tokens": 3}))
+        self.assertEqual(seen, [
+            ("GET", "https://relay.example.com/v1/models", "Bearer sk-relay"),
+            ("POST", "https://relay.example.com/v1/chat/completions", "Bearer sk-relay"),
+        ])
+
+    def test_relay_discovery_is_capped_and_redirects_are_not_followed(self) -> None:
+        from backend.snow_app.public_providers import RELAY_RESPONSE_BYTE_CAP, relay_provider_spec
+
+        spec = relay_provider_spec("https://relay.example.com/v1")
+        huge = b"[" + b" " * (RELAY_RESPONSE_BYTE_CAP + 1) + b"]"
+        with self.relay_transport(lambda request: httpx.Response(200, content=huge)):
+            with self.assertRaises(ProviderRequestError) as caught:
+                asyncio.run(discover_models(spec, "sk-relay"))
+        self.assertEqual(caught.exception.code, "provider_response_too_large")
+        redirect = httpx.Response(302, headers={"Location": "http://127.0.0.1/private"})
+        with self.relay_transport(lambda request: redirect):
+            with self.assertRaises(ProviderRequestError) as caught:
+                asyncio.run(discover_models(spec, "sk-relay"))
+        self.assertEqual(caught.exception.code, "provider_redirect_rejected")
+
+    def test_gemini_discovery_returns_bare_model_ids(self) -> None:
+        listing = {"data": [{"id": "models/gemini-2.5-flash"}, {"id": "models/gemini-2.5-pro"},
+                            {"id": "gemini-2.0-flash"}]}
+        with self.relay_transport(lambda request: httpx.Response(200, json=listing)):
+            models = asyncio.run(discover_models(PROVIDERS["gemini"], "gm-key"))
+        self.assertEqual(models, ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"])
+
+    def test_pool_never_streams_to_the_subscription_broker(self) -> None:
+        from backend.snow_app.public_subscription import SubscriptionError
+
+        async def exercise() -> None:
+            pool = ProviderHTTPPool(subscription_broker=object())
+            async with pool.stream("POST", "https://codex-subscription.invalid/v1/chat/completions"):
+                raise AssertionError("the broker host must not be streamed")
+
+        with self.assertRaises(SubscriptionError):
+            asyncio.run(exercise())

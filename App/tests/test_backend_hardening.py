@@ -57,9 +57,23 @@ class BudgetAndIsolationTests(TestCase):
         finally:
             service._model_http_client.close()
 
-        lines = module._CappedLineStream(Mock(iter_lines=lambda: iter(["a" * 10] * 10)), 50)
+        sent = []
+
+        def endless_line():
+            # No newline ever: line assembly alone would buffer all of it.
+            for _ in range(10_000):
+                sent.append(4096)
+                yield b"a" * 4096
+
+        stream = httpx.Response(200, headers={"content-type": "text/event-stream"}, content=endless_line())
         with self.assertRaises(module.GenerationStreamError):
-            list(lines.iter_lines())
+            list(module._CappedLineStream(stream, 64 * 1024).iter_lines())
+        self.assertLessEqual(sum(sent), 64 * 1024 + 4096)
+        # Under the ceiling the lines are exactly httpx's, including a CRLF split across chunks.
+        split = httpx.Response(200, headers={"content-type": "text/event-stream; charset=utf-8"},
+                               content=iter([b"event: done\r", "\n\r\ndata: 雪\n\n".encode()]))
+        self.assertEqual(list(module._CappedLineStream(split, 1024).iter_lines()),
+                         ["event: done", "", "data: 雪", ""])
 
     def test_engine_budget_counts_real_http_attempt_and_blocks_repair(self):
         service = MVPService.__new__(MVPService)
@@ -315,3 +329,27 @@ class RetrievalDeadlineTests(TestCase):
         finally:
             release.set()
             repository._executor.shutdown(wait=True)
+
+
+class RateLimitResponseTests(TestCase):
+    def test_site_frequency_cap_says_when_it_lifts(self):
+        import json
+        from datetime import UTC, datetime, timedelta
+
+        from starlette.requests import Request
+
+        from backend.snow_app.public_main import _rate_limit_response
+        from backend.snow_app.public_store import RateLimitExceeded
+
+        request = Request({"type": "http", "method": "POST", "path": "/public/v2/chat/stream",
+                           "headers": [], "query_string": b""})
+        reset_at = (datetime.now(UTC) + timedelta(minutes=30)).replace(microsecond=0)
+        response = _rate_limit_response(request, RateLimitExceeded("chat_hour", 120, reset_at))
+        detail = json.loads(response.body)["detail"]
+        self.assertEqual((response.status_code, detail["code"], detail["scope"], detail["limit"]),
+                         (429, "rate_limit_exceeded", "chat_hour", 120))
+        self.assertEqual(detail["reset_at"], reset_at.isoformat())
+        self.assertTrue(1790 <= int(response.headers["Retry-After"]) <= 1801)
+        self.assertEqual(detail["retry_after_seconds"], min(300, int(response.headers["Retry-After"])))
+        legacy = _rate_limit_response(request, RateLimitExceeded("chat_hour", 120))
+        self.assertEqual(legacy.headers["Retry-After"], "60")

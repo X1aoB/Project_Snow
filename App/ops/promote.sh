@@ -151,7 +151,7 @@ egress_conf_sha_from_binding() {
 }
 
 # squid -k parse the conf the egress-proxy would load, inside a throwaway
-# container built from the same proxy image, before recreating the live one.
+# container built from the same proxy image, before any traffic moves.
 egress_conf_parses() {
   egr_env="$1"
   egr_config_root="$2"
@@ -164,43 +164,57 @@ egress_conf_parses() {
     -k parse -f /etc/squid/squid.conf >/dev/null 2>&1
 }
 
-# Force-recreate the shared egress-proxy from the named env, then CONNECT-probe
-# the three official 1.1.0 vendor hosts (must succeed) and a known private
-# target (must be DENIED). Returns non-zero on any failure; the caller reverts.
-recreate_egress_from_env() {
+# Print the status code the shared egress proxy answers for CONNECT host:443,
+# asked from the colour's API container (the proxy's only client network).
+# Prints 000 when the proxy cannot be reached or its reply is not HTTP.
+egress_connect_status() {
   egr_env="$1"
   egr_config_root="$2"
   egr_colour="$3"
-  docker compose --env-file "$egr_env" -f "$egr_config_root/compose.prod.yml" \
-    --profile "$egr_colour" up -d --no-deps --force-recreate egress-proxy || return 1
-  # Give squid a moment to listen.
+  egr_host="$4"
+  egr_reply="$(docker compose --env-file "$egr_env" -f "$egr_config_root/compose.prod.yml" \
+    --profile "$egr_colour" exec -T "public-api-$egr_colour" \
+    python -c "import socket
+try:
+    s=socket.create_connection(('egress-proxy',3128),timeout=8)
+    s.sendall(b'CONNECT $egr_host:443 HTTP/1.1\r\nHost: $egr_host:443\r\n\r\n')
+    status=s.recv(256).split(b'\r\n',1)[0].split()
+    print(status[1].decode() if len(status)>1 and status[0].startswith(b'HTTP/') and status[1].isdigit() else '000')
+except Exception:
+    print('000')" 2>/dev/null)" || egr_reply=000
+  printf '%s\n' "$egr_reply" | grep -Eq '^[0-9]{3}$' || egr_reply=000
+  printf '%s\n' "$egr_reply"
+}
+
+# The edge switch recreates egress-proxy from the target snapshot whenever the
+# conf content differs (routing.py keys the proxy on it). Confirm the running
+# proxy enforces a sane policy: the Turnstile host that every conf version
+# allows must CONNECT, the metadata address must be refused by the ACL (403),
+# and each extra host named by the caller must not be refused by the ACL. An
+# upstream outage on an extra host (5xx) is reported but does not fail.
+egress_policy_holds() {
+  egr_policy_env="$1"
+  egr_policy_root="$2"
+  egr_policy_colour="$3"
+  shift 3
   egr_attempt=0
-  while [ "$egr_attempt" -lt 15 ]; do
-    if docker compose --env-file "$egr_env" -f "$egr_config_root/compose.prod.yml" \
-      --profile "$egr_colour" exec -T egress-proxy squid -k check >/dev/null 2>&1; then
-      break
-    fi
+  until [ "$(egress_connect_status "$egr_policy_env" "$egr_policy_root" "$egr_policy_colour" \
+    challenges.cloudflare.com)" = 200 ]; do
     egr_attempt=$((egr_attempt + 1))
+    [ "$egr_attempt" -lt 15 ] || return 1
     sleep 1
   done
-  # Reachability: each official vendor host must CONNECT; a private target must
-  # be refused by the deny-first ACLs. Probes run from the API container, which
-  # is the only member of the egress-client network.
-  for egr_host in api.anthropic.com api.x.ai generativelanguage.googleapis.com; do
-    docker compose --env-file "$egr_env" -f "$egr_config_root/compose.prod.yml" \
-      --profile "$egr_colour" exec -T "public-api-$egr_colour" \
-      python -c "import socket,sys
-s=socket.create_connection(('egress-proxy',3128),timeout=8)
-s.sendall(b'CONNECT ${egr_host}:443 HTTP/1.1\r\nHost: ${egr_host}:443\r\n\r\n')
-sys.exit(0 if b'200' in s.recv(128) else 1)" >/dev/null 2>&1 || return 1
+  [ "$(egress_connect_status "$egr_policy_env" "$egr_policy_root" "$egr_policy_colour" \
+    169.254.169.254)" = 403 ] || return 1
+  for egr_policy_host in "$@"; do
+    egr_policy_status="$(egress_connect_status "$egr_policy_env" "$egr_policy_root" \
+      "$egr_policy_colour" "$egr_policy_host")"
+    case "$egr_policy_status" in
+      200) ;;
+      403|000) return 1 ;;
+      *) echo "Egress proxy allowed $egr_policy_host but its upstream answered $egr_policy_status." >&2 ;;
+    esac
   done
-  docker compose --env-file "$egr_env" -f "$egr_config_root/compose.prod.yml" \
-    --profile "$egr_colour" exec -T "public-api-$egr_colour" \
-    python -c "import socket,sys
-s=socket.create_connection(('egress-proxy',3128),timeout=8)
-s.sendall(b'CONNECT 169.254.169.254:443 HTTP/1.1\r\nHost: 169.254.169.254:443\r\n\r\n')
-# A denied CONNECT must NOT return 200; a 403/forbidden is the success case.
-sys.exit(1 if b'200' in s.recv(128) else 0)" >/dev/null 2>&1 || return 1
 }
 
 fsync_promote_path() {
@@ -685,6 +699,31 @@ if ! is_immutable_image "$previous_app_image" || ! is_immutable_image "$previous
 fi
 validate_config_binding "$previous_config_binding" "$previous_colour" "$previous_marker_sha" || exit 69
 previous_config_root="$(jq -r '.root' "$previous_config_binding")"
+
+# A changed shared egress conf is admitted before any traffic moves. A forward
+# promotion needs the root-written swap authorization naming exactly the
+# running -> target conf hashes and a clean squid -k parse of the target conf.
+# The edge switch then recreates egress-proxy from the target snapshot, and
+# restore_previous_runtime's edge switch recreates the previous conf. An
+# emergency rollback reuses the target colour's own previously promoted conf.
+egress_conf_changed=0
+if egress_conf_before="$(egress_conf_sha_from_binding "$previous_config_binding")" &&
+   egress_conf_target="$(egress_conf_sha_from_binding "$colour_config_binding")" &&
+   [ "$egress_conf_before" != "$egress_conf_target" ]; then
+  egress_conf_changed=1
+  if [ "$rollback_mode" = 0 ]; then
+    if ! python3 "$script_dir/maintenance.py" shared-dependency-gate \
+      --candidate-environment "$colour_env" --manifest "$colour_manifest" \
+      | grep -Fq '"shared_dependencies": "egress-config-swap-authorized"'; then
+      echo 'Egress conf differs but no matching swap authorization exists; traffic was not changed.' >&2
+      exit 73
+    fi
+    if ! egress_conf_parses "$colour_env" "$colour_config_root"; then
+      echo 'Target egress conf failed squid -k parse; traffic was not changed.' >&2
+      exit 73
+    fi
+  fi
+fi
 
 previous_compose() {
   docker compose --env-file "$previous_env" -f "$previous_config_root/compose.prod.yml" \
@@ -2693,44 +2732,25 @@ if [ -n "$embedding_running_before" ] &&
   fi
 fi
 
-# The shared egress-proxy conf is swapped here, mirroring the embedding block:
-# after readiness/smoke/edge-switch and immediately before the durable write, so
-# a normal release (unchanged conf) never enters this block. The conf change is
-# detected by comparing the egress-squid.conf hash in the target and previous
-# colour config bindings.
+# The edge switch above recreated egress-proxy from the target snapshot when its
+# conf changed (admitted before any traffic moved). Before the durable write,
+# confirm the running proxy enforces the expected policy. A forward swap also
+# checks the vendor hosts this release newly allows; a rollback only checks
+# what every conf version allows. On failure, restore_previous_runtime's edge
+# switch recreates egress-proxy from the previous snapshot.
 egress_swapped=0
-egress_conf_before=""
-egress_conf_target=""
-if egress_conf_before="$(egress_conf_sha_from_binding "$previous_config_binding")" &&
-   egress_conf_target="$(egress_conf_sha_from_binding "$colour_config_binding")" &&
-   [ "$egress_conf_before" != "$egress_conf_target" ]; then
-  # A forward promotion must present a root-written authorization naming exactly
-  # from->to conf hashes; an emergency rollback recreates the target colour's
-  # own previously promoted conf with no fresh authorization.
+if [ "${egress_conf_changed:-0}" -eq 1 ]; then
+  egress_new_hosts=""
   if [ "$rollback_mode" = 0 ]; then
-    if ! python3 "$script_dir/maintenance.py" shared-dependency-gate \
-      --candidate-environment "$colour_env" --manifest "$colour_manifest" \
-      | grep -Fq '"shared_dependencies": "egress-config-swap-authorized"'; then
-      echo 'Egress conf differs but no matching swap authorization exists; traffic restored.' >&2
-      restore_previous_runtime || exit 74
-      exit 73
-    fi
+    egress_new_hosts="api.anthropic.com api.x.ai generativelanguage.googleapis.com"
   fi
-  if ! egress_conf_parses "$colour_env" "$colour_config_root"; then
-    echo 'Candidate egress conf failed squid -k parse; traffic restored.' >&2
+  # shellcheck disable=SC2086 # egress_new_hosts is a fixed list of hostnames.
+  if ! egress_policy_holds "$colour_env" "$colour_config_root" "$colour" $egress_new_hosts; then
+    echo 'The recreated egress proxy failed its CONNECT policy probes; traffic restored.' >&2
     restore_previous_runtime || exit 74
     exit 73
   fi
-  if recreate_egress_from_env "$colour_env" "$colour_config_root" "$colour"; then
-    egress_swapped=1
-  else
-    echo 'New egress conf failed its parse/CONNECT probes; recreating the previous conf.' >&2
-    if ! recreate_egress_from_env "$previous_env" "$previous_config_root" "$previous_colour"; then
-      echo 'CRITICAL: failed to recreate the previous egress conf after a failed swap.' >&2
-    fi
-    restore_previous_runtime || exit 74
-    exit 73
-  fi
+  egress_swapped=1
 fi
 
 commit_promoted_state() {
@@ -2794,12 +2814,8 @@ if ! commit_promoted_state; then
       echo 'CRITICAL: failed to revert the embedding digest after a failed state commit.' >&2
     fi
   fi
-  if [ "${egress_swapped:-0}" -eq 1 ]; then
-    echo 'Reverting the egress conf to the previous colour after a failed state commit.' >&2
-    if ! recreate_egress_from_env "$previous_env" "$previous_config_root" "$previous_colour"; then
-      echo 'CRITICAL: failed to revert the egress conf after a failed state commit.' >&2
-    fi
-  fi
+  # A swapped egress conf needs no separate revert: the edge switch inside
+  # restore_previous_runtime recreates egress-proxy from the previous snapshot.
   restore_previous_runtime || exit 74
   exit 73
 fi

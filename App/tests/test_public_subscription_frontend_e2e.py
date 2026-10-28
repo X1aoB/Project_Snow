@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import TestCase, skipUnless
+from urllib.parse import urlsplit
 
 from tests import test_public_frontend_e2e as frontend
 
@@ -106,6 +107,95 @@ class SubscriptionFrontendE2ETests(TestCase):
     def _reply(route, text="合成模型选择回复"):
         result = {"communication_channel": "text", "content_blocks": [{"type": "message", "text": text}], "usage": {"provider_calls": 1}}
         route.fulfill(status=200, content_type="text/event-stream", body="event: done\ndata: " + json.dumps(result, ensure_ascii=False) + "\n\n")
+
+    def test_relay_mode_sends_the_address_with_the_key_and_shows_only_the_host(self):
+        with frontend.sync_playwright() as playwright:
+            browser = frontend._launch_browser(playwright)
+            plain = browser.new_page(reduced_motion="reduce")
+            self._open(plain)
+            # Without a relay in /config the server has not opened it: no mode button.
+            self.assertTrue(plain.locator("#model-mode-relay").is_hidden())
+            plain.close()
+
+            page = browser.new_page(reduced_motion="reduce")
+            sessions = []
+
+            def config(route):
+                payload = route.fetch().json()
+                payload["providers"].append({"provider_id": "relay", "display_name": "第三方中转站", "kind": "relay",
+                                             "caveat": "第三方中转站由你自行选择与信任。"})
+                route.fulfill(json=payload)
+
+            def session(route):
+                body = route.request.post_data_json
+                sessions.append(body)
+                host = urlsplit(body.get("base_url") or "").hostname or ""
+                route.fulfill(json={"provider": body["provider"], "credential": f"relay-credential-{len(sessions)}",
+                                    "expires_at": (datetime.now(UTC) + timedelta(hours=12)).isoformat(),
+                                    "stored": False, "retention": "tab", "relay_host": host})
+
+            page.route("**/public/v1/config", config)
+            page.route("**/public/v1/byok/session", session)
+            self._open(page)
+            # An official-API credential first: its "no need to re-enter the key"
+            # hint must not carry over to the relay, which needs the key again.
+            page.locator("#api-key").fill("sk-official-e2e-only")
+            page.locator("#toggle-advanced-model").click()
+            page.locator("#model-id").fill("gpt-e2e")
+            self._save_model(page)
+            page.locator("#open-settings").click()
+            page.locator("#credential-status").wait_for(state="visible")
+            page.locator("#model-mode-relay").click()
+            page.locator("#relay-base-field").wait_for(state="visible")
+            self.assertTrue(page.locator("#provider-step").is_hidden())
+            self.assertTrue(page.locator("#credential-status").is_hidden())
+            page.locator("#relay-base-url").fill("https://relay.example.com/v1")
+            page.locator("#api-key").fill("sk-relay-e2e-only")
+            if page.locator("#advanced-model-panel").is_hidden():
+                page.locator("#toggle-advanced-model").click()
+            page.locator("#model-id").fill("relay-model")
+            self._save_model(page)
+            self.assertEqual([(item["provider"], item.get("base_url")) for item in sessions],
+                             [("openai", None), ("relay", "https://relay.example.com/v1")])
+            page.locator("#open-settings").click()
+            self.assertEqual(page.locator("#model-current-title").inner_text(), "中转站 relay.example.com · relay-model")
+            self.assertEqual(page.locator("#relay-base-url").input_value(), "https://relay.example.com/v1")
+            self._screenshot(page, "relay-desktop")
+            # A different address is a different upstream: it needs the key again
+            # and a freshly sealed credential, never a silent reuse.
+            page.locator("#relay-base-url").fill("https://other-relay.example.net/openai/v1")
+            page.locator("#api-key").fill("sk-relay-e2e-only")
+            self._save_model(page)
+            self.assertEqual(sessions[-1]["base_url"], "https://other-relay.example.net/openai/v1")
+            self.assertEqual(len(sessions), 3)
+            stored = json.loads(page.evaluate("sessionStorage.getItem('project-snow-public:byok')"))
+            self.assertEqual((stored["provider"], stored["relayHost"], stored["credential"]),
+                             ("relay", "other-relay.example.net", "relay-credential-3"))
+            self.assertNotIn("sk-relay-e2e-only", json.dumps(stored))
+            browser.close()
+
+    def test_site_frequency_cap_is_not_reported_as_the_users_model_quota(self):
+        with frontend.sync_playwright() as playwright:
+            browser = frontend._launch_browser(playwright)
+            page = browser.new_page(reduced_motion="reduce")
+            reset_at = (datetime.now(UTC) + timedelta(minutes=30)).replace(second=0, microsecond=0)
+            page.route("**/public/v1/chat/stream", lambda route: route.fulfill(status=429, headers={"Retry-After": "1800"}, json={
+                "detail": {"code": "rate_limit_exceeded", "scope": "chat_hour", "limit": 120,
+                           "retry_after_seconds": 300, "reset_at": reset_at.isoformat()}}))
+            self._open(page)
+            page.locator("#api-key").fill("sk-e2e-only-not-real")
+            page.locator("#toggle-advanced-model").click()
+            page.locator("#model-id").fill("gpt-e2e")
+            self._save_model(page)
+            self._send_chat(page, "频率上限测试")
+            notice = page.get_by_text("这不是你的模型额度", exact=False).first
+            notice.wait_for()
+            text = notice.inner_text()
+            resume = page.evaluate("iso => new Date(iso).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'})",
+                                   reset_at.isoformat())
+            self.assertIn(f"约 {resume} 后恢复", text)
+            self.assertNotIn("额度已用完", page.locator("body").inner_text())
+            browser.close()
 
     def test_catalogue_selection_sends_sol_medium_and_restores_after_reload(self):
         with frontend.sync_playwright() as playwright:

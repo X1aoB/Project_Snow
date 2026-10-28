@@ -299,6 +299,23 @@ def _error_response(
         headers=headers,
     )
 
+
+def _rate_limit_response(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """A site frequency cap (not the user's model quota), retryable when its window ends."""
+    retry_after = 60
+    extra: dict[str, Any] = {"scope": exc.scope, "limit": exc.limit}
+    if exc.reset_at is not None:
+        retry_after = max(1, int((exc.reset_at - datetime.now(exc.reset_at.tzinfo)).total_seconds()) + 1)
+        extra["reset_at"] = exc.reset_at.isoformat()
+    return _error_response(
+        request,
+        "rate_limit_exceeded",
+        429,
+        headers={"Retry-After": str(retry_after)},
+        retry_after_seconds=retry_after,
+        extra=extra,
+    )
+
 def _anonymous_cookie_name(settings: PublicSettings) -> str:
     return DEVELOPMENT_ANONYMOUS_COOKIE if settings.allow_insecure_dev else ANONYMOUS_COOKIE
 
@@ -935,7 +952,7 @@ def create_app(
             elif path.startswith("/public/v1/byok/"):
                 ip_limits = [("byok_ip_hour", "hour", 30), ("byok_ip_day", "day", 100)]
             else:
-                ip_limits = [("write_ip_hour", "hour", 240), ("write_ip_day", "day", 1000)]
+                ip_limits = [("write_ip_hour", "hour", 600), ("write_ip_day", "day", 3000)]
             try:
                 await async_store.call("consume_limits", ip_subject, ip_limits)
             except PublicStoreUnavailable:
@@ -947,14 +964,7 @@ def create_app(
                     retry_after_seconds=PUBLIC_DATABASE_RETRY_AFTER_SECONDS,
                 )
             except RateLimitExceeded as exc:
-                return _error_response(
-                    request,
-                    "rate_limit_exceeded",
-                    429,
-                    headers={"Retry-After": "60"},
-                    retry_after_seconds=60,
-                    extra={"scope": exc.scope, "limit": exc.limit},
-                )
+                return _rate_limit_response(request, exc)
         response = await call_next(request)
         if path.startswith(("/public/v1/subscription/", "/public/v1/byok/")):
             response.headers["Cache-Control"] = "no-store"
@@ -1104,8 +1114,8 @@ def create_app(
             "limits": {
                 "input_characters": 2000,
                 "output_characters": 1200,
-                "chat_hour": 50,
-                "chat_day": 200,
+                "chat_hour": 120,
+                "chat_day": 600,
                 "feedback_hour": 10,
                 "feedback_day": 30,
                 "history_rounds_per_request": 12,
@@ -1432,7 +1442,7 @@ def create_app(
                 try:
                     await async_store.call("consume_limits",
                         request.state.subject_hash,
-                        [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
+                        [("chat_hour", "hour", 120), ("chat_day", "day", 600)],
                     )
                 except RateLimitExceeded:
                     result = chat_service.failed_presence_arrival(
@@ -1567,7 +1577,7 @@ def create_app(
                     str(claims["api_key"]), payload.model, payload.reasoning_effort)
             try:
                 await async_store.call("consume_limits", subject,
-                    [("chat_hour", "hour", 50), ("chat_day", "day", 200)])
+                    [("chat_hour", "hour", 120), ("chat_day", "day", 600)])
             except RateLimitExceeded:
                 result = PublicChatService.failed_presence_arrival(prepared, "rate_limit_exceeded", model_called=False)
             else:
@@ -1786,7 +1796,7 @@ def create_app(
                     )
                 await async_store.call("consume_limits",
                     request.state.subject_hash,
-                    [("chat_hour", "hour", 50), ("chat_day", "day", 200)],
+                    [("chat_hour", "hour", 120), ("chat_day", "day", 600)],
                 )
             except Exception:
                 await release_owned_request(request_id)
@@ -2401,9 +2411,9 @@ def create_app(
                     str(claims["api_key"]), payload.model, payload.reasoning_effort,
                 )
             # Summaries are extra model calls and therefore consume the same
-            # daily 200-call budget as chat, but deliberately do not touch the
-            # hourly 50-round bucket.
-            await async_store.call("consume_limits", subject, [("chat_day", "day", 200)])
+            # daily 600-call budget as chat, but deliberately do not touch the
+            # hourly 120-round bucket.
+            await async_store.call("consume_limits", subject, [("chat_day", "day", 600)])
             generation = asyncio.create_task(chat_service.summarize(payload, spec, str(claims["api_key"])))
             if summary_control is not None:
                 summary_control["task"] = generation
@@ -2687,14 +2697,7 @@ def create_app(
 
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_error(request: Request, exc: RateLimitExceeded):
-        return _error_response(
-            request,
-            "rate_limit_exceeded",
-            429,
-            headers={"Retry-After": "60"},
-            retry_after_seconds=60,
-            extra={"scope": exc.scope, "limit": exc.limit},
-        )
+        return _rate_limit_response(request, exc)
 
     @app.exception_handler(GenerationBusy)
     async def generation_busy(request: Request, exc: GenerationBusy):

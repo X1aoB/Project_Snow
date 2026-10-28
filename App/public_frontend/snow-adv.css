@@ -899,6 +899,11 @@ html[data-ui="snow-adv"] .provider-doc-links { display: flex; flex-wrap: wrap; a
 html[data-ui="snow-adv"] :is(.provider-doc-links small, .model-relay-note) { flex-basis: 100%; margin: 0; color: var(--ink-600); font-size: 0.74rem; line-height: 1.6; }
 html[data-ui="snow-adv"] .model-connection-modes { grid-template-columns: none; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; }
 html[data-ui="snow-adv"] .model-connection-modes button[aria-pressed="true"] { border-color: var(--ice-600); color: #fff; background: var(--ice-600); }
+/* 手机上三个接入方式一行放不下「第三方中转站」：改两列，中转站开着时 Codex 订阅独占第二行。 */
+@media (max-width: 560px) {
+  html[data-ui="snow-adv"] .model-connection-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-flow: row; }
+  html[data-ui="snow-adv"] #model-mode-relay:not([hidden]) ~ #model-mode-subscription { grid-column: 1 / -1; }
+}
 html[data-ui="snow-adv"] .model-current { display: grid; gap: 3px; margin-bottom: 14px; padding: 12px 14px; border: 1px solid var(--snow-200); border-left: 3px solid var(--ice-300); border-radius: var(--radius-m); background: var(--snow-50); }
 html[data-ui="snow-adv"] .model-current[data-ready="true"] { border-left-color: #4f9e74; }
 html[data-ui="snow-adv"] .model-current strong { color: var(--ink-900); overflow-wrap: anywhere; }

@@ -55,6 +55,12 @@ def test_accepts_and_normalises(raw, expected_base, expected_host):
         "https://svc.internal/v1",             # .internal
         "https://box.lan/v1",                  # .lan
         "https://x.home.arpa/v1",              # home.arpa
+        "https://codex-subscription.invalid/v1",  # in-process subscription broker
+        "https://relay.invalid/v1",            # RFC 2606 reserved names
+        "https://relay.test/v1",
+        "https://relay.example/v1",
+        "https://relayexample.onion/v1",
+        "https://box.localdomain/v1",
         "https://singlelabel",                 # not FQDN
         # IP literals, various forms
         "https://127.0.0.1/v1",

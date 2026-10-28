@@ -1,18 +1,22 @@
-"""Fixed official BYOK provider adapters. Custom base URLs are never accepted."""
+"""Fixed official BYOK provider adapters plus the sealed third-party relay.
+
+A custom base URL is only ever the relay's base, opened from its credential.
+"""
 
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 
-# A relay station is an attacker-choosable upstream, so a completion response
-# from it is bounded before we parse it (official vendors are trusted hosts and
-# keep the unbounded path). 2 MiB comfortably holds any legitimate single-turn
-# chat completion JSON.
+# A relay station is an attacker-choosable upstream, so its response body is
+# read in chunks and refused past this ceiling instead of being buffered whole
+# (official vendors are trusted hosts and keep the plain path). 2 MiB
+# comfortably holds a model list or any legitimate single-turn completion JSON.
 RELAY_RESPONSE_BYTE_CAP = 2 * 1024 * 1024
 
 
@@ -73,6 +77,17 @@ class ProviderHTTPPool:
             return httpx.Response(200, json=payload, request=httpx.Request("POST", url))
         client = await self._for_current_loop()
         return await client.post(url, **kwargs)
+
+    @asynccontextmanager
+    async def stream(self, method: str, url: str, **kwargs: Any):
+        # Only relay requests stream, and a relay can never be the in-process
+        # subscription broker.
+        if str(url).startswith("https://codex-subscription.invalid"):
+            from .public_subscription import SubscriptionError
+            raise SubscriptionError("subscription_disabled", 404)
+        client = await self._for_current_loop()
+        async with client.stream(method, url, **kwargs) as response:
+            yield response
 
     async def close(self) -> None:
         async with self._lock:
@@ -241,6 +256,40 @@ class ProviderRequestError(RuntimeError):
         self.status_code = status_code
 
 
+async def _bounded_relay_request(
+    client: ProviderHTTPPool | None,
+    method: str,
+    url: str,
+    *,
+    timeout: float,
+    **kwargs: Any,
+) -> httpx.Response:
+    """Send one relay request and return its response with a bounded body.
+
+    The body is streamed and refused past ``RELAY_RESPONSE_BYTE_CAP`` decoded
+    bytes, so a hostile station cannot make the API buffer an unbounded (or
+    decompression-bomb) payload. Status and JSON handling stay with the caller.
+    """
+
+    async def bounded(response: httpx.Response) -> httpx.Response:
+        body = bytearray()
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > RELAY_RESPONSE_BYTE_CAP:
+                raise ProviderRequestError("provider_response_too_large")
+        headers = [(key, value) for key, value in response.headers.items()
+                   if key.lower() not in {"content-encoding", "content-length", "transfer-encoding"}]
+        return httpx.Response(response.status_code, headers=headers, content=bytes(body),
+                              request=response.request)
+
+    if client is not None:
+        async with client.stream(method, url, timeout=timeout, **kwargs) as response:
+            return await bounded(response)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as request_client:
+        async with request_client.stream(method, url, **kwargs) as response:
+            return await bounded(response)
+
+
 def provider_spec(provider_id: str, enabled: tuple[str, ...]) -> ProviderSpec:
     provider_id = str(provider_id or "").casefold()
     if provider_id not in enabled or provider_id not in PROVIDERS:
@@ -258,7 +307,12 @@ async def discover_models(
     if spec.provider_id == "codex_subscription" and client is None:
         raise ProviderRequestError("subscription_not_connected", 409)
     try:
-        if client is not None:
+        if spec.kind == "relay":
+            response = await _bounded_relay_request(
+                client, "GET", _official_url(spec, "models"),
+                headers=_auth_headers(spec, api_key), timeout=timeout,
+            )
+        elif client is not None:
             response = await client.get(
                 _official_url(spec, "models"),
                 headers=_auth_headers(spec, api_key),
@@ -287,13 +341,16 @@ async def discover_models(
     records = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(records, list):
         return []
-    return sorted(
-        {
-            str(record.get("id"))
-            for record in records
-            if isinstance(record, dict) and str(record.get("id") or "").strip()
-        }
-    )[:500]
+    identifiers = {
+        str(record.get("id"))
+        for record in records
+        if isinstance(record, dict) and str(record.get("id") or "").strip()
+    }
+    if spec.provider_id == "gemini":
+        # Gemini's OpenAI-compatible list returns native "models/<id>" names;
+        # chat accepts the bare id, which is also what the reviewed profiles use.
+        identifiers = {identifier.removeprefix("models/") for identifier in identifiers}
+    return sorted(identifiers)[:500]
 
 
 async def simple_completion(
@@ -322,7 +379,12 @@ async def simple_completion(
     if spec.provider_id == "codex_subscription" and reasoning_effort is not None:
         body["reasoning_effort"] = reasoning_effort
     try:
-        if client is not None:
+        if spec.kind == "relay":
+            response = await _bounded_relay_request(
+                client, "POST", _official_url(spec, "chat/completions"),
+                headers=_auth_headers(spec, api_key, json_body=True), json=body, timeout=timeout,
+            )
+        elif client is not None:
             response = await client.post(
                 _official_url(spec, "chat/completions"),
                 headers=_auth_headers(spec, api_key, json_body=True),
@@ -348,12 +410,6 @@ async def simple_completion(
         raise ProviderRequestError("provider_rate_limited", 429)
     if response.status_code >= 400:
         raise ProviderRequestError("provider_request_failed")
-    # A relay is an attacker-choosable host: cap the response body we will
-    # parse so a hostile station cannot exhaust memory with a giant payload.
-    if spec.kind == "relay":
-        raw = response.content
-        if len(raw) > RELAY_RESPONSE_BYTE_CAP:
-            raise ProviderRequestError("provider_response_too_large")
     try:
         payload = response.json()
         content = payload["choices"][0]["message"]["content"]
