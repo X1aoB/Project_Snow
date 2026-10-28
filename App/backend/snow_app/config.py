@@ -189,7 +189,7 @@ class PublicSettings:
     turnstile_hostname: str = "snow.xiaob.dev"
     turnstile_max_age_seconds: int = 300
     privacy_policy_version: str = "1.1.0"
-    privacy_effective_at: str = "2026-10-28"
+    privacy_effective_at: str = "2026-10-29"
     attribution_url: str = "/public/v1/attributions"
     max_provider_calls_per_action: int = 2
     byok_lifetime_hours: int = 12
@@ -299,7 +299,7 @@ class PublicSettings:
             turnstile_max_age_seconds=max(60, min(600, turnstile_max_age_seconds)),
             privacy_policy_version=os.getenv("PUBLIC_PRIVACY_POLICY_VERSION", "1.1.0").strip(),
             privacy_effective_at=os.getenv(
-                "PUBLIC_PRIVACY_EFFECTIVE_AT", "2026-10-28"
+                "PUBLIC_PRIVACY_EFFECTIVE_AT", "2026-10-29"
             ).strip(),
             attribution_url=os.getenv(
                 "PUBLIC_ATTRIBUTION_URL", "/public/v1/attributions"
