@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from fnmatch import fnmatch
 from pathlib import Path
 
-CATEGORIES = ("ui", "api", "data", "embedding", "deploy")
+CATEGORIES = ("ui", "api", "data", "embedding", "deploy", "egress")
 
 FRONTEND_RELEASE_PATTERNS = (
     "App/config/public_frontend_release.json",
@@ -111,6 +111,14 @@ DEPLOY_PATTERNS = (
     "App/tests/test_shared_design.py",
 )
 
+# The real-squid ACL check runs the compose egress-proxy service on the conf;
+# the static conf test runs beside it.
+EGRESS_PATTERNS = (
+    "App/infra/egress-squid.conf",
+    "App/compose.prod.yml",
+    "App/tests/test_egress_squid_*.py",
+)
+
 APP_IMAGE_PATTERNS = (
     "App/backend/snow_app/**",
     "App/config/public_knowledge/**",
@@ -151,6 +159,7 @@ def classify(paths: Iterable[str], *, force_full: bool = False) -> dict[str, boo
         result["data"] |= _matches(path, DATA_PATTERNS)
         result["embedding"] |= _matches(path, EMBEDDING_PATTERNS)
         result["deploy"] |= _matches(path, DEPLOY_PATTERNS)
+        result["egress"] |= _matches(path, EGRESS_PATTERNS)
         result["app_image"] |= _matches(path, APP_IMAGE_PATTERNS)
         if _matches(path, FRONTEND_RELEASE_PATTERNS):
             # Selecting a UI changes the actual shipped application even when
@@ -165,6 +174,7 @@ def classify(paths: Iterable[str], *, force_full: bool = False) -> dict[str, boo
                 DATA_PATTERNS,
                 EMBEDDING_PATTERNS,
                 DEPLOY_PATTERNS,
+                EGRESS_PATTERNS,
                 FRONTEND_RELEASE_PATTERNS,
             )
         )

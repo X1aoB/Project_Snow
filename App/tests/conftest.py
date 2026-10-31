@@ -27,6 +27,7 @@ TIMING_SENSITIVE = frozenset({
     "test_public_frontend_e2e.py::PublicFrontendE2ETests::test_v092_frontend_contracts_are_non_blocking_and_opt_out_feedback",
     "test_public_frontend_e2e.py::PublicFrontendE2ETests::test_presentation_queue_segments_text_but_uses_one_face_to_face_surface",
     "test_public_frontend_e2e.py::PublicFrontendE2ETests::test_long_face_to_face_reply_is_bounded_and_never_splits_graphemes",
+    "test_public_frontend_reliability.py::PublicFrontendReliabilityTests::test_build_update_saves_draft_before_reload",
     "test_stage_presentation_timing.py::StagePresentationTimingTests::test_same_character_expression_crossfades_quickly_and_respects_reduced_motion",
     "test_public_frontend_latency_motion.py::PublicFrontendLatencyMotionTests::test_committed_body_precedes_completion_and_retains_nodes_and_private_free_metrics",
     "test_public_frontend_latency_motion.py::PublicFrontendLatencyMotionTests::test_warm_mobile_transition_has_one_interactive_surface_and_no_long_task",
