@@ -3295,6 +3295,22 @@ require_runner_controller_binding
             release.index("Generate immutable release manifest"),
         )
 
+    def test_egress_conf_changes_run_the_real_squid_check(self) -> None:
+        import yaml
+
+        jobs = yaml.safe_load((self.app_root.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"]
+        self.assertEqual(jobs["changes"]["outputs"]["egress"], "${{ steps.classify.outputs.egress }}")
+        job = jobs["egress-proxy"]
+        self.assertIn("needs.changes.outputs.egress == 'true'", job["if"])
+        # Text parsing alone passed the 1.1.0 conf that denied every public IPv4 target.
+        self.assertRegex(job["env"]["SNOW_TEST_SQUID_IMAGE"], r"^ubuntu/squid(:[\w.-]+)?@sha256:[0-9a-f]{64}$")
+        self.assertIn('docker pull "$SNOW_TEST_SQUID_IMAGE"', [step.get("run") for step in job["steps"]])
+        check = next(step for step in job["steps"] if "tests/test_egress_squid_acl.py" in step.get("run", ""))
+        self.assertEqual(check["env"]["SNOW_SQUID_INTEGRATION"], "1")
+        self.assertIn("tests/test_egress_squid_conf.py", check["run"])
+        self.assertIn("egress-proxy", jobs["gate"]["needs"])
+        self.assertIn("egress-proxy", jobs["release"]["needs"])
+
     def test_nightly_health_and_candidate_image_security_are_distinct(self) -> None:
         workflows = self.app_root.parent / ".github" / "workflows"
         workflow = (workflows / "ci.yml").read_text(encoding="utf-8")

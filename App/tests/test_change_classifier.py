@@ -115,6 +115,21 @@ class ChangeClassifierTests(TestCase):
                 self.assertTrue(result["deploy"])
                 self.assertFalse(result["app_image"])
 
+    def test_egress_proxy_inputs_run_the_real_squid_check(self) -> None:
+        for path in (
+            "App/infra/egress-squid.conf",
+            "App/compose.prod.yml",
+            "App/tests/test_egress_squid_conf.py",
+            "App/tests/test_egress_squid_acl.py",
+        ):
+            with self.subTest(path=path):
+                result = classify([path])
+                self.assertTrue(result["egress"])
+                self.assertFalse(result["full"])
+                self.assertFalse(result["app_image"])
+        self.assertTrue(classify(["App/infra/egress-squid.conf"])["deploy"])
+        self.assertFalse(classify(["App/ops/deploy.sh"])["egress"])
+
     def test_release_artifact_digest_index_is_a_deployment_change(self) -> None:
         result = classify(["App/config/public_release_artifacts.json"])
         self.assertTrue(result["deploy"])
@@ -153,4 +168,5 @@ class ChangeClassifierTests(TestCase):
         self.assertTrue(result["full"])
         self.assertTrue(result["api"])
         self.assertTrue(result["data"])
+        self.assertTrue(result["egress"])
         self.assertFalse(result["embedding"])

@@ -30,6 +30,7 @@ jobs:
       data: ${{ steps.classify.outputs.data }}
       embedding: ${{ steps.classify.outputs.embedding }}
       deploy: ${{ steps.classify.outputs.deploy }}
+      egress: ${{ steps.classify.outputs.egress }}
       app_image: ${{ steps.classify.outputs.app_image }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       full: ${{ steps.classify.outputs.full }}
@@ -295,6 +296,33 @@ jobs:
           find App/ops App/infra -name '*.sh' -print0 | xargs -0 -n1 bash -n
           python -m py_compile App/scripts/bootstrap_release_host.py App/scripts/cloudflare_origin_firewall.py App/scripts/install_origin_tls.py App/scripts/install_release_archive.py App/scripts/release_manifest.py
           PYTHONPATH=App python -m pytest App/tests/test_deployment_contracts.py App/tests/test_subscription_deployment.py App/tests/test_dialogue_deployment.py App/tests/test_snow_adv_deployment.py App/tests/test_change_classifier.py App/tests/test_install_origin_tls.py App/tests/test_origin_firewall.py App/tests/test_release_manifest.py App/tests/test_frontend_release_contracts.py App/tests/test_candidate_acceptance.py -q
+
+  egress-proxy:
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.egress == 'true' || needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: App
+    env:
+      # EGRESS_PROXY_IMAGE from the production host's images.env, as recorded
+      # for the running egress-proxy by the 1.1.0 release. Move both together.
+      SNOW_TEST_SQUID_IMAGE: ubuntu/squid:latest@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - run: pip install --require-hashes -r requirements-test.txt
+      - name: Pull the production squid image by digest
+        run: docker pull "$SNOW_TEST_SQUID_IMAGE"
+      - name: Egress ACLs through a real squid with no network
+        env:
+          SNOW_SQUID_INTEGRATION: "1"
+        # CONNECTs never leave the container: 403 is an ACL denial, 503 an allowed target squid cannot reach.
+        run: python -m pytest tests/test_egress_squid_conf.py tests/test_egress_squid_acl.py -v -rP
 
   app-image:
     if: >-
@@ -617,7 +645,7 @@ jobs:
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [changes, security, contracts, full-validation, postgres-contracts, frontend-contracts, desktop-smoke]
+    needs: [changes, security, contracts, full-validation, postgres-contracts, egress-proxy, frontend-contracts, desktop-smoke]
     permissions:
       contents: read
       packages: write
@@ -671,6 +699,7 @@ jobs:
       - api
       - data
       - deploy
+      - egress-proxy
       - app-image
       - embedding-image
       - production-health
