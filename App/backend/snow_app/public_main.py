@@ -9,9 +9,11 @@ import mimetypes
 import os
 import secrets
 import time
+from collections import OrderedDict
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -108,6 +110,10 @@ DEVELOPMENT_ANONYMOUS_COOKIE = "snow_anon_dev"
 MAX_BODY_BYTES = 64 * 1024
 REQUEST_BODY_TIMEOUT_SECONDS = 10
 PUBLIC_DATABASE_RETRY_AFTER_SECONDS = 2
+# Per-client cap on edge-relayed health probes, far above any uptime monitor.
+HEALTH_PROBE_LIMIT = 60
+HEALTH_PROBE_WINDOW_SECONDS = 60
+HEALTH_PROBE_MAX_CLIENTS = 4096
 LOGGER = configure_public_logger()
 
 _ERROR_STAGES = frozenset(
@@ -330,12 +336,51 @@ def _allowed_hosts(settings: PublicSettings) -> frozenset[str]:
     return frozenset(host for host in hosts if host)
 
 
+def _edge_client_ip(request: Request) -> str:
+    """The visitor address Cloudflare reported, or "" when the request bypassed the edge."""
+    if not request.app.state.public_settings.trust_proxy_headers:
+        return ""
+    return str(request.headers.get("CF-Connecting-IP") or "").strip()[:64]
+
+
 def _client_ip(request: Request) -> str:
-    settings = request.app.state.public_settings
-    cloudflare_ip = str(request.headers.get("CF-Connecting-IP") or "").strip()
-    if settings.trust_proxy_headers and cloudflare_ip:
-        return cloudflare_ip[:64]
-    return str(request.client.host if request.client else "unknown")[:64]
+    return _edge_client_ip(request) or str(request.client.host if request.client else "unknown")[:64]
+
+
+class HealthProbeLimiter:
+    """Per-client fixed-window cap on health probes relayed by the edge.
+
+    State stays in process memory, so a probe flood never reaches PostgreSQL.
+    Clients are keyed by a per-process keyed digest rather than the raw
+    address, and the least recently seen client is forgotten once full.
+    """
+
+    def __init__(
+        self,
+        limit: int = HEALTH_PROBE_LIMIT,
+        window_seconds: float = HEALTH_PROBE_WINDOW_SECONDS,
+        max_clients: int = HEALTH_PROBE_MAX_CLIENTS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self.max_clients = max_clients
+        self._clock = clock
+        self._key = secrets.token_bytes(32)
+        self._windows: OrderedDict[bytes, tuple[float, int]] = OrderedDict()
+
+    def retry_after(self, client_ip: str) -> float | None:
+        """Count one probe; past the cap, return the seconds left in the client's window."""
+        client = hashlib.blake2b(client_ip.encode(), key=self._key, digest_size=16).digest()
+        now = self._clock()
+        started, count = self._windows.pop(client, (now, 0))
+        if now - started >= self.window_seconds:
+            started, count = now, 0
+        # Re-inserting keeps the table ordered from least to most recently seen.
+        self._windows[client] = (started, count + 1)
+        if len(self._windows) > self.max_clients:
+            self._windows.popitem(last=False)
+        return None if count < self.limit else started + self.window_seconds - now
 
 
 def _error(
@@ -882,6 +927,7 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type", "Accept", "X-Snow-Stream-Version", "X-Snow-Recovery-Only"],
     )
+    health_probes = HealthProbeLimiter()
 
     @app.middleware("http")
     async def public_boundary(request: Request, call_next):
@@ -891,6 +937,15 @@ def create_app(
         request_host = str(request.url.hostname or "").casefold().rstrip(".")
         if request_host not in _allowed_hosts(public_settings):
             return _error_response(request, "host_rejected", 400)
+        if path.startswith("/public/v1/health/"):
+            # Only edge-relayed probes count. Container, release-script and
+            # monitor-internal probes reach the API without an edge client.
+            edge_ip = _edge_client_ip(request)
+            wait = health_probes.retry_after(edge_ip) if edge_ip else None
+            if wait is not None:
+                return _rate_limit_response(request, RateLimitExceeded(
+                    "health_ip_minute", health_probes.limit, datetime.now(UTC) + timedelta(seconds=wait),
+                ))
         cookie_name = _anonymous_cookie_name(public_settings)
         anonymous_id = str(request.cookies.get(cookie_name) or "").strip()
         new_cookie = not is_valid_anonymous_id(anonymous_id)
@@ -2600,7 +2655,9 @@ def create_app(
         return {"feedback_code": public_code, "retention_days": 30, "suppressed": False}
 
     @app.get("/public/v1/health/live")
-    def live() -> dict[str, Any]:
+    async def live() -> dict[str, Any]:
+        # Answer on the event loop: a probe flood must not queue for the
+        # worker threads that static files and sync routes share.
         return {"status": "ok", "version": public_settings.app_version}
 
     @app.get("/public/v1/health/ready")
