@@ -37,6 +37,7 @@ class ChangeClassifierTests(TestCase):
         for path in (
             "App/pipelines/build_graph.py",
             "App/config/public_knowledge/character_relationships.v1.json",
+            "App/config/public_knowledge/character_identity.v1.json",
         ):
             self.assertTrue(classify([path])["data"])
 

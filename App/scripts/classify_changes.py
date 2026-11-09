@@ -66,6 +66,7 @@ DATA_PATTERNS = (
     "App/pipelines/**",
     "App/config/public_knowledge/data_release.json",
     "App/config/public_knowledge/character_relationships.v1.json",
+    "App/config/public_knowledge/character_identity.v1.json",
     "App/scripts/build_data_release.py",
     "App/scripts/export_publishable_graph.py",
     "App/scripts/validate_architecture.py",

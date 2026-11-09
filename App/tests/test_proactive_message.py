@@ -137,6 +137,14 @@ class ProactiveMessageTests(IsolatedAsyncioTestCase):
         self.assertEqual(call.kwargs["max_tokens"], 400)
         self.assertIn("系统提醒事件", call.kwargs["user_prompt"])
 
+    async def test_prompt_carries_her_own_facts_and_the_date(self):
+        service = self.app.state.proactive_message_service
+        pending = service.prepare(self.payload, self.scene.subject)
+        await service.generate(self.payload, pending, Mock(), "synthetic", on_publication=Mock())
+        prompt = self.provider.call_args.kwargs["system_prompt"]
+        self.assertIn("生日：", prompt)
+        self.assertRegex(prompt, r"\d{4}年\d{1,2}月\d{1,2}日星期")
+
     async def test_prompt_shares_main_dialogue_addresses_for_every_formal_character(self):
         expected = self.legacy.mvp.public_knowledge.preferred_addresses()
         self.assertEqual(expected["ca0144ccd81b"], "亲爱的")
