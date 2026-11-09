@@ -950,15 +950,22 @@ class SnowAdvFeaturesUITests(TestCase):
         self.assertEqual(len(recoveries), 1)
         self.assertEqual(recoveries[0][:2], ("1", ""))
 
-    def test_model_sync_box_opens_cost_dialog_preselected_and_requires_confirm(self):
+    def test_model_sync_box_keeps_the_saved_duration_selectable_and_requires_confirm(self):
+        # The server issues exactly the chosen tier and its countdown starts at
+        # once, so what remains is always a little shorter than that tier.
+        for retention, hours, blocked in (("7d", 168, ()), ("3d", 72, ("7d",)), ("2h", 2, ("24h", "3d", "7d"))):
+            with self.subTest(retention=retention):
+                self.assert_sync_box_preselects(retention, hours, blocked)
+
+    def assert_sync_box_preselects(self, retention, hours, blocked):
         context = self.browser.new_context(viewport={"width": 1280, "height": 820}, reduced_motion="reduce",
                                            timezone_id="Asia/Hong_Kong", locale="zh-CN")
         consent = []
 
         def session(route):
             body = route.request.post_data_json
-            route.fulfill(json={"provider": body["provider"], "credential": "synthetic-2h-1",
-                                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat(),
+            route.fulfill(json={"provider": body["provider"], "credential": f"synthetic-{retention}-1",
+                                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat(),
                                 "stored": False, **({"retention": body["retention"]} if "retention" in body else {})})
 
         def grant(route):
@@ -976,8 +983,7 @@ class SnowAdvFeaturesUITests(TestCase):
         page.locator('[data-settings-tab="conversation"]').click()
         page.locator("#snow-reminders-enabled").check()
         page.locator('[data-settings-tab="models"]').click()
-        # Pick a retention well inside the credential's 12h life so its option stays enabled.
-        page.locator("#credential-retention").select_option("2h")
+        page.locator("#credential-retention").select_option(retention)
         notice = page.locator(".credential-retention-modal[open]")
         notice.locator('input[type="checkbox"]').check()
         notice.locator("[data-retention-confirm]").click()
@@ -991,13 +997,21 @@ class SnowAdvFeaturesUITests(TestCase):
         dialog = page.locator("#snow-proactive-dialog")
         dialog.wait_for(state="visible")
         # Opened preselected to the chosen duration, but nothing is enabled yet.
-        self.assertEqual(page.locator("#snow-proactive-duration").input_value(), "2h")
+        duration = page.locator("#snow-proactive-duration")
+        self.assertEqual(duration.input_value(), retention)
+        saved = duration.locator(f'option[value="{retention}"]')
+        self.assertFalse(saved.evaluate("option => option.disabled"))
+        self.assertIn("到凭证到期为止", saved.text_content())
+        for value in blocked:
+            option = duration.locator(f'option[value="{value}"]')
+            self.assertTrue(option.evaluate("option => option.disabled"))
+            self.assertIn("超过凭证保存时长", option.text_content())
         self.assertEqual(consent, [])
         self.assertFalse(self.idb_preferences(page).get("proactivePreferences", {}).get("enabled", False))
         dialog.locator("button", has_text="我知道会产生费用，开启").click()
         dialog.wait_for(state="hidden")
         page.wait_for_function("() => document.querySelector('#snow-proactive-enabled').checked")
-        self.assertEqual([row.get("duration") for row in consent], ["2h"])
+        self.assertEqual([row.get("duration") for row in consent], [retention])
         self.assertEqual(self.errors, [])
         page.close()
 
