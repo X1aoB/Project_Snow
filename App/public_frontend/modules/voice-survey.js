@@ -1,7 +1,7 @@
-// 角色语音调研问卷。只在用户点「去填写」时才加载；题目和文案全部来自 /voice-survey.json，
+// 功能调研问卷（角色语音、模型托管与多端同步）。只在用户点「去填写」时才加载；题目和文案全部来自 /voice-survey.json，
 // 改字不用动代码。这里不碰 IndexedDB，答案只提交给服务器，是否已答由 app.js 记在 localStorage。
 const STYLE_URL = "/modules/voice-survey.css";
-const FIELD_DEFAULTS = Object.freeze({ use_scenes: [], priorities: [], characters: [], adult: "", comment: "" });
+const FIELD_DEFAULTS = Object.freeze({ use_scenes: [], priorities: [], characters: [], hosted_models: [], app_platforms: [], adult: "", comment: "" });
 
 function el(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
@@ -76,7 +76,10 @@ export async function openVoiceSurvey({ api, characters, onSaved, notify }) {
       el("button", { type: "button", class: "icon-button", "aria-label": copy.close, "data-voice-survey-later": "" }, "×")),
     el("div", { class: "voice-survey-intro" }, ...copy.intro.map((line) => el("p", {}, line)), el("p", { class: "voice-survey-privacy" }, copy.privacy)),
     ...(status?.answered ? [el("p", { class: "voice-survey-note" }, copy.resubmitNote)] : []),
-    ...copy.questions.map((question) => questionField(question, characters)),
+    ...copy.questions.flatMap((question) => [
+      ...(question.section ? [el("h3", { class: "voice-survey-section" }, question.section)] : []),
+      questionField(question, characters),
+    ]),
     error,
     el("div", { class: "modal-actions" }, later, submit));
   dialog.append(form);

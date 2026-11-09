@@ -458,7 +458,6 @@ class VoiceSurveySubmit(StrictModel):
     survey_version: Literal["voice-survey-1"]
     use_voice: Literal["often", "sometimes", "never"]
     use_scenes: list[Literal["direct", "group", "party"]] = Field(default_factory=list, max_length=3)
-    voice_type: Literal["ai_clone", "ai_designed", "system_tts", "none"]
     pass_through_acceptance: int = Field(strict=True, ge=1, le=5)
     payment_method: Literal["site_topup", "own_key", "free_only"]
     monthly_budget: Literal["0", "1_5", "6_20", "21_50", "over_50"]
@@ -466,10 +465,18 @@ class VoiceSurveySubmit(StrictModel):
         default_factory=list, max_length=5
     )
     characters: list[str] = Field(default_factory=list, max_length=22)
+    hosted_interest: Literal["paid", "free_only", "own_key"]
+    hosted_models: list[Literal["vendors", "thinking", "auto"]] = Field(default_factory=list, max_length=3)
+    hosted_budget: Literal["0", "1_10", "11_30", "31_60", "over_60"]
+    history_hosting: Literal["accept", "with_controls", "encrypted_only", "local_only"]
+    sync_importance: int = Field(strict=True, ge=1, le=5)
+    app_platforms: list[Literal["android", "ios", "windows", "mac", "web_only"]] = Field(
+        default_factory=list, max_length=5
+    )
     adult: Literal["", "yes", "no", "skip"] = ""
     comment: str = Field(default="", max_length=200)
 
-    @field_validator("use_scenes", "priorities", "characters")
+    @field_validator("use_scenes", "priorities", "characters", "hosted_models", "app_platforms")
     @classmethod
     def choices_are_distinct(cls, value: list[str]) -> list[str]:
         if len(set(value)) != len(value):

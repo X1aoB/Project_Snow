@@ -379,14 +379,14 @@ function renderAnnouncementBadges(view = announcementView()) {
   $("announcement-birthday-badge").hidden = !view.today.length;
   $("announcement-birthday-badge").textContent = String(view.today.length);
 }
-// 角色语音调研：开关开启且用户没答过、没选「不再提示」时，才在公告里放入口；不弹窗、不打断聊天。
+// 功能调研：开关开启且用户没答过、没选「不再提示」时，才在公告里放入口；不弹窗、不打断聊天。
 function voiceSurveyInvited() {
   return state.config?.voice_survey?.enabled === true
     && !["answered", "dismissed"].includes(localPreferences.getItem(VOICE_SURVEY_STATE_KEY));
 }
 function voiceSurveyCard() {
   if (!voiceSurveyInvited()) return "";
-  return '<article class="announcement-update" aria-label="角色语音调研"><h3>角色语音调研</h3><p>想听听你对角色语音和 1 比 1 付费的看法，大约 1 分钟。</p><div style="display:flex;flex-wrap:wrap;gap:8px"><button class="primary-button" type="button" data-voice-survey="open">去填写</button><button class="secondary-button" type="button" data-voice-survey="dismiss">不再提示</button></div></article>';
+  return '<article class="announcement-update" aria-label="功能调研"><h3>功能调研</h3><p>想听听你对角色语音、模型托管和多端同步的看法，大约 2 分钟。</p><div style="display:flex;flex-wrap:wrap;gap:8px"><button class="primary-button" type="button" data-voice-survey="open">去填写</button><button class="secondary-button" type="button" data-voice-survey="dismiss">不再提示</button></div></article>';
 }
 async function startVoiceSurvey() {
   if ($("announcements-dialog").open) $("announcements-dialog").close();

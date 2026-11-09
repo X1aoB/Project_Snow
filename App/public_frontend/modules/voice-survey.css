@@ -1,4 +1,5 @@
-/* 角色语音调研表单。只在打开问卷时加载；app.css 是冻结基线，新样式不放进去。 */
+/* 功能调研表单。只在打开问卷时加载；app.css 是冻结基线，新样式不放进去。 */
+.voice-survey-section { margin: 6px 18px 12px; padding-top: 12px; border-top: 1px solid var(--snow-line-soft); color: #294a5e; font-size: .95rem; }
 .voice-survey-intro { margin: 14px 18px; color: #536f80; font-size: .83rem; line-height: 1.7; }
 .voice-survey-intro p { margin: 0 0 8px; }
 .voice-survey-privacy { color: #657c89; }
@@ -16,6 +17,6 @@
 .voice-survey-error { margin: 0 18px 10px; color: #a13b3b; font-size: .82rem; }
 
 html[data-ui="snow-adv"] :is(.voice-survey-intro, .voice-survey-privacy, .voice-survey-hint, .voice-survey-scale-ends) { color: var(--ink-600); }
-html[data-ui="snow-adv"] .voice-survey-question legend { color: var(--ink-900); }
+html[data-ui="snow-adv"] :is(.voice-survey-question legend, .voice-survey-section) { color: var(--ink-900); }
 html[data-ui="snow-adv"] .modal label.voice-survey-option { color: var(--ink-700); }
 html[data-ui="snow-adv"][data-tone="dark"] .modal label.voice-survey-option { border-color: rgb(var(--tn-line) / 0.22); background: rgb(var(--tn-surface) / 0.72); }

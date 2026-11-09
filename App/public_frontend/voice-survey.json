@@ -2,17 +2,18 @@
   "schema_version": 1,
   "survey_version": "voice-survey-1",
   "kicker": "小吉终端 · 调研",
-  "title": "角色语音调研",
+  "title": "功能调研",
   "intro": [
-    "我们在评估要不要给角色加上语音，想先听听你的想法，大约需要 1 分钟。",
-    "「1 比 1 付费」的意思是：按语音厂商的实际单价收费，费用全部用于你自己的语音请求，网站不赚差价。举个例子：按 qwen-audio-3.1-tts-plus 每万计费字符 1.4 元、一个汉字算 2 个字符计算，一句 50 字的台词大约 1.4 分钱。",
-    "支付手续费怎么承担、请求失败时怎么处理，目前都还没有定。",
-    "这只是一次调研，不代表这个功能一定会上线；贴近原角色的声线需要取得授权，不一定能做到。"
+    "我们在评估两个方向，想先听听你的想法，大约需要 2 分钟。",
+    "一是角色语音。「1 比 1 付费」的意思是：按语音厂商的实际单价收费，费用全部用于你自己的语音请求，网站不赚差价。举个例子：按 qwen-audio-3.1-tts-plus 每万计费字符 1.4 元、一个汉字算 2 个字符计算，一句 50 字的台词大约 1.4 分钱。支付手续费怎么承担、请求失败时怎么处理，目前都还没有定。",
+    "二是模型托管和多端同步：不用自己申请 API，由小吉终端直接提供不同厂商的模型，并可以选择思考深度；聊天记录由小吉终端托管在服务器上，手机和电脑都能同步，也为以后做手机 App 和桌面应用打基础。这需要注册账号并付费，具体方案和价格都还没有定。",
+    "这只是一次调研，不代表这些功能一定会上线；贴近原角色的声线需要取得授权，不一定能做到。"
   ],
   "privacy": "只保存你的答案，保存 180 天后自动删除，不记录 IP 地址和浏览器信息。",
   "questions": [
     {
       "id": "use_voice",
+      "section": "角色语音",
       "type": "single",
       "required": true,
       "label": "如果有角色语音，你会用吗？",
@@ -33,18 +34,6 @@
       ]
     },
     {
-      "id": "voice_type",
-      "type": "single",
-      "required": true,
-      "label": "你更想要哪种声音？",
-      "options": [
-        { "value": "ai_clone", "label": "贴近原角色的 AI 复刻声线" },
-        { "value": "ai_designed", "label": "AI 设计的新声线" },
-        { "value": "system_tts", "label": "系统自带的朗读" },
-        { "value": "none", "label": "不需要语音" }
-      ]
-    },
-    {
       "id": "pass_through_acceptance",
       "type": "scale",
       "required": true,
@@ -58,7 +47,7 @@
       "id": "payment_method",
       "type": "single",
       "required": true,
-      "label": "你更愿意用哪种方式？",
+      "label": "语音费用，你更愿意用哪种方式？",
       "options": [
         { "value": "site_topup", "label": "在网站充值（按 1 比 1 扣费）" },
         { "value": "own_key", "label": "自己到厂商开账号，填自己的密钥" },
@@ -81,7 +70,7 @@
     {
       "id": "priorities",
       "type": "multi",
-      "label": "你最在意什么？（可多选）",
+      "label": "关于语音，你最在意什么？（可多选）",
       "options": [
         { "value": "price", "label": "价格" },
         { "value": "likeness", "label": "像不像" },
@@ -96,7 +85,77 @@
       "label": "你最想先听到谁的声音？（可多选）"
     },
     {
+      "id": "hosted_interest",
+      "section": "模型托管与多端同步",
+      "type": "single",
+      "required": true,
+      "label": "如果不用自己填 API，由小吉终端直接提供模型，你想用吗？",
+      "options": [
+        { "value": "paid", "label": "想用，愿意付费" },
+        { "value": "free_only", "label": "只有免费才用" },
+        { "value": "own_key", "label": "继续用自己的 API 或订阅" }
+      ]
+    },
+    {
+      "id": "hosted_models",
+      "type": "multi",
+      "label": "如果由小吉终端提供模型，你希望能自己选什么？（可多选）",
+      "options": [
+        { "value": "vendors", "label": "不同厂商的模型" },
+        { "value": "thinking", "label": "思考深度（更快或更细致）" },
+        { "value": "auto", "label": "不用选，默认配好就行" }
+      ]
+    },
+    {
+      "id": "hosted_budget",
+      "type": "single",
+      "required": true,
+      "label": "这样的托管服务，每个月你愿意花多少钱？",
+      "options": [
+        { "value": "0", "label": "0 元" },
+        { "value": "1_10", "label": "1～10 元" },
+        { "value": "11_30", "label": "11～30 元" },
+        { "value": "31_60", "label": "31～60 元" },
+        { "value": "over_60", "label": "60 元以上" }
+      ]
+    },
+    {
+      "id": "history_hosting",
+      "type": "single",
+      "required": true,
+      "label": "多端同步需要把聊天记录保存在小吉终端的服务器上，运营者在技术上可以接触到这些内容。你能接受吗？",
+      "options": [
+        { "value": "accept", "label": "可以接受" },
+        { "value": "with_controls", "label": "能随时导出和彻底删除才接受" },
+        { "value": "encrypted_only", "label": "加密到运营者也看不到才接受" },
+        { "value": "local_only", "label": "不接受，只想保存在自己的设备上" }
+      ]
+    },
+    {
+      "id": "sync_importance",
+      "type": "scale",
+      "required": true,
+      "label": "手机和电脑之间同步聊天记录，对你有多重要？",
+      "min": 1,
+      "max": 5,
+      "minLabel": "完全不重要",
+      "maxLabel": "非常重要"
+    },
+    {
+      "id": "app_platforms",
+      "type": "multi",
+      "label": "如果做成安装版，你最想要哪些？（可多选）",
+      "options": [
+        { "value": "android", "label": "安卓 App" },
+        { "value": "ios", "label": "iPhone App" },
+        { "value": "windows", "label": "Windows 应用" },
+        { "value": "mac", "label": "Mac 应用" },
+        { "value": "web_only", "label": "网页就够了" }
+      ]
+    },
+    {
       "id": "adult",
+      "section": "最后",
       "type": "single",
       "label": "你已满 18 岁了吗？（可不答）",
       "hint": "只用来判断未成年人付费问题有多大。",

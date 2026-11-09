@@ -1195,7 +1195,7 @@ class PublicFrontendE2ETests(TestCase):
             page.locator('[data-voice-survey="open"]').click()
             dialog = page.locator(".voice-survey-modal[open]")
             dialog.wait_for()
-            for phrase in ("网站不赚差价", "1.4 分钱", "还没有定", "不代表这个功能一定会上线", "180 天"):
+            for phrase in ("网站不赚差价", "1.4 分钱", "还没有定", "不用自己申请 API", "不代表这些功能一定会上线", "运营者在技术上可以接触", "180 天"):
                 self.assertIn(phrase, dialog.inner_text())
 
             dialog.locator('button[type="submit"]').click()
@@ -1203,18 +1203,22 @@ class PublicFrontendE2ETests(TestCase):
             self.assertEqual(page.evaluate("document.activeElement.name"), "use_voice")
             self.assertEqual(PublicFrontendHandler.voice_survey_payloads, [])
 
-            for name, value in (("use_voice", "often"), ("voice_type", "ai_designed"), ("pass_through_acceptance", "4"),
-                                ("payment_method", "own_key"), ("monthly_budget", "6_20"), ("use_scenes", "group"),
-                                ("priorities", "latency"), ("characters", "9f5804761c56")):
+            for name, value in (("use_voice", "often"), ("pass_through_acceptance", "4"), ("payment_method", "own_key"),
+                                ("monthly_budget", "6_20"), ("use_scenes", "group"), ("priorities", "latency"),
+                                ("characters", "9f5804761c56"), ("hosted_interest", "paid"), ("hosted_models", "thinking"),
+                                ("hosted_budget", "11_30"), ("history_hosting", "with_controls"), ("sync_importance", "5"),
+                                ("app_platforms", "windows")):
                 dialog.locator(f'input[name="{name}"][value="{value}"]').check()
             dialog.locator('textarea[name="comment"]').fill("  希望可以调语速  ")
             self.assertGreaterEqual(dialog.locator(".voice-survey-option").first.bounding_box()["height"], 44)
             dialog.locator('button[type="submit"]').click()
             page.locator(".voice-survey-modal").wait_for(state="detached")
             self.assertEqual(PublicFrontendHandler.voice_survey_payloads, [{
-                "survey_version": "voice-survey-1", "use_voice": "often", "use_scenes": ["group"], "voice_type": "ai_designed",
+                "survey_version": "voice-survey-1", "use_voice": "often", "use_scenes": ["group"],
                 "pass_through_acceptance": 4, "payment_method": "own_key", "monthly_budget": "6_20", "priorities": ["latency"],
-                "characters": ["9f5804761c56"], "adult": "", "comment": "希望可以调语速",
+                "characters": ["9f5804761c56"], "hosted_interest": "paid", "hosted_models": ["thinking"], "hosted_budget": "11_30",
+                "history_hosting": "with_controls", "sync_importance": 5, "app_platforms": ["windows"],
+                "adult": "", "comment": "希望可以调语速",
             }])
             page.locator("#open-announcements").click()
             page.locator("#announcements-dialog[open]").wait_for()

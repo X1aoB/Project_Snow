@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from backend.snow_app.config import Settings
 from backend.snow_app.mvp_policy import MVP_CHARACTERS
+from backend.snow_app.public_contracts import VoiceSurveySubmit
 from backend.snow_app.public_main import create_app
 from backend.snow_app.public_store import PublicStore
 from backend.snow_app.voice_survey_store import VOICE_SURVEY_RETENTION_DAYS
@@ -21,9 +22,11 @@ from tests.test_public_api import _settings
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 ANSWERS = {
-    "survey_version": "voice-survey-1", "use_voice": "often", "use_scenes": ["group"], "voice_type": "ai_designed",
+    "survey_version": "voice-survey-1", "use_voice": "often", "use_scenes": ["group"],
     "pass_through_acceptance": 4, "payment_method": "own_key", "monthly_budget": "6_20", "priorities": ["latency"],
-    "characters": [MVP_CHARACTERS[0].character_id], "adult": "", "comment": "",
+    "characters": [MVP_CHARACTERS[0].character_id], "hosted_interest": "paid", "hosted_models": ["vendors", "thinking"],
+    "hosted_budget": "11_30", "history_hosting": "with_controls", "sync_importance": 5, "app_platforms": ["android"],
+    "adult": "", "comment": "",
 }
 
 
@@ -134,13 +137,15 @@ class VoiceSurveyApiTests(TestCase):
         copy = json.loads((APP_ROOT / "public_frontend/voice-survey.json").read_text(encoding="utf-8"))
         self.assertEqual(copy["survey_version"], "voice-survey-1")
         self.assertEqual(copy["privacy"].count(str(VOICE_SURVEY_RETENTION_DAYS)), 1)
-        _store, client = self.build()
+        fields = VoiceSurveySubmit.model_fields
+        self.assertEqual({question["id"] for question in copy["questions"]}, set(fields) - {"survey_version"})
         for question in copy["questions"]:
+            with self.subTest(required=question["id"]):
+                self.assertEqual(bool(question.get("required")), fields[question["id"]].is_required())
             for option in question.get("options", []):
                 value = [option["value"]] if question["type"] == "multi" else option["value"]
                 with self.subTest(question=question["id"], option=option["value"]):
-                    self.assertEqual(client.post("/public/v1/voice-survey", json={**ANSWERS, question["id"]: value}).status_code, 200)
-                client.cookies.clear()
+                    VoiceSurveySubmit(**{**ANSWERS, question["id"]: value})
 
 
 class VoiceSurveyReportTests(TestCase):
