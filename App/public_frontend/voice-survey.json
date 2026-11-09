@@ -4,9 +4,9 @@
   "kicker": "小吉终端 · 调研",
   "title": "功能调研",
   "intro": [
-    "我们在评估两个方向，想先听听你的想法，大约需要 2 分钟。",
+    "我们在评估两个方向，想先听听你的想法，大约需要 3 分钟。",
     "一是角色语音。「1 比 1 付费」的意思是：按语音厂商的实际单价收费，费用全部用于你自己的语音请求，网站不赚差价。举个例子：按 qwen-audio-3.1-tts-plus 每万计费字符 1.4 元、一个汉字算 2 个字符计算，一句 50 字的台词大约 1.4 分钱。支付手续费怎么承担、请求失败时怎么处理，目前都还没有定。",
-    "二是模型托管和多端同步：不用自己申请 API，由小吉终端直接提供不同厂商的模型，并可以选择思考深度；聊天记录由小吉终端托管在服务器上，手机和电脑都能同步，也为以后做手机 App 和桌面应用打基础。这需要注册账号并付费，具体方案和价格都还没有定。",
+    "二是模型托管和多端同步：不用自己申请 API，由小吉终端直接提供不同厂商的模型，并可以选择思考深度；聊天记录由小吉终端托管在服务器上，手机和电脑都能同步，也为以后做手机 App 和桌面应用打基础。这项功能基于账号注册，费用同样是 1 比 1：按官方 API 的实际价格收费，网站不赚差价。支付手续费怎么承担、用什么方式注册，目前都还没有定。",
     "这只是一次调研，不代表这些功能一定会上线；贴近原角色的声线需要取得授权，不一定能做到。"
   ],
   "privacy": "只保存你的答案，保存 180 天后自动删除，不记录 IP 地址和浏览器信息。",
@@ -86,14 +86,49 @@
     },
     {
       "id": "hosted_interest",
-      "section": "模型托管与多端同步",
+      "section": "模型托管、账号与多端同步",
       "type": "single",
       "required": true,
       "label": "如果不用自己填 API，由小吉终端直接提供模型，你想用吗？",
       "options": [
-        { "value": "paid", "label": "想用，愿意付费" },
+        { "value": "paid", "label": "想用，愿意按官方 API 价格 1 比 1 付费" },
         { "value": "free_only", "label": "只有免费才用" },
         { "value": "own_key", "label": "继续用自己的 API 或订阅" }
+      ]
+    },
+    {
+      "id": "account_willingness",
+      "type": "single",
+      "required": true,
+      "label": "这项功能基于账号注册。你愿意注册吗？",
+      "options": [
+        { "value": "yes", "label": "愿意注册" },
+        { "value": "depends", "label": "看注册方式和隐私条款" },
+        { "value": "no", "label": "不愿意注册" }
+      ]
+    },
+    {
+      "id": "account_methods",
+      "type": "multi",
+      "label": "你能接受哪些注册方式？（可多选）",
+      "options": [
+        { "value": "email", "label": "邮箱" },
+        { "value": "phone", "label": "手机号" },
+        { "value": "qq", "label": "QQ" },
+        { "value": "wechat", "label": "微信" },
+        { "value": "username", "label": "只用用户名和密码" }
+      ]
+    },
+    {
+      "id": "account_concerns",
+      "type": "multi",
+      "label": "注册账号，你最担心什么？（可多选）",
+      "options": [
+        { "value": "privacy", "label": "个人信息泄露" },
+        { "value": "lockout", "label": "账号丢失或被封后，记录拿不回来" },
+        { "value": "real_name", "label": "要绑定手机或实名" },
+        { "value": "password", "label": "又要多记一个密码" },
+        { "value": "none", "label": "没什么顾虑" }
       ]
     },
     {
@@ -110,7 +145,7 @@
       "id": "hosted_budget",
       "type": "single",
       "required": true,
-      "label": "这样的托管服务，每个月你愿意花多少钱？",
+      "label": "按官方 API 价格 1 比 1 计费，这项服务每个月你愿意花多少钱？",
       "options": [
         { "value": "0", "label": "0 元" },
         { "value": "1_10", "label": "1～10 元" },

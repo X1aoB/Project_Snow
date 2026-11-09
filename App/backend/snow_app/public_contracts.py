@@ -466,6 +466,13 @@ class VoiceSurveySubmit(StrictModel):
     )
     characters: list[str] = Field(default_factory=list, max_length=22)
     hosted_interest: Literal["paid", "free_only", "own_key"]
+    account_willingness: Literal["yes", "depends", "no"]
+    account_methods: list[Literal["email", "phone", "qq", "wechat", "username"]] = Field(
+        default_factory=list, max_length=5
+    )
+    account_concerns: list[Literal["privacy", "lockout", "real_name", "password", "none"]] = Field(
+        default_factory=list, max_length=5
+    )
     hosted_models: list[Literal["vendors", "thinking", "auto"]] = Field(default_factory=list, max_length=3)
     hosted_budget: Literal["0", "1_10", "11_30", "31_60", "over_60"]
     history_hosting: Literal["accept", "with_controls", "encrypted_only", "local_only"]
@@ -476,7 +483,7 @@ class VoiceSurveySubmit(StrictModel):
     adult: Literal["", "yes", "no", "skip"] = ""
     comment: str = Field(default="", max_length=200)
 
-    @field_validator("use_scenes", "priorities", "characters", "hosted_models", "app_platforms")
+    @field_validator("use_scenes", "priorities", "characters", "account_methods", "account_concerns", "hosted_models", "app_platforms")
     @classmethod
     def choices_are_distinct(cls, value: list[str]) -> list[str]:
         if len(set(value)) != len(value):

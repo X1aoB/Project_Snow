@@ -24,7 +24,8 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 ANSWERS = {
     "survey_version": "voice-survey-1", "use_voice": "often", "use_scenes": ["group"],
     "pass_through_acceptance": 4, "payment_method": "own_key", "monthly_budget": "6_20", "priorities": ["latency"],
-    "characters": [MVP_CHARACTERS[0].character_id], "hosted_interest": "paid", "hosted_models": ["vendors", "thinking"],
+    "characters": [MVP_CHARACTERS[0].character_id], "hosted_interest": "paid", "account_willingness": "depends", "account_methods": ["email"],
+    "account_concerns": ["privacy"], "hosted_models": ["vendors", "thinking"],
     "hosted_budget": "11_30", "history_hosting": "with_controls", "sync_importance": 5, "app_platforms": ["android"],
     "adult": "", "comment": "",
 }

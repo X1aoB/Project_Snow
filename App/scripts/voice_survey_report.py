@@ -13,8 +13,8 @@ from collections.abc import Iterable, Mapping
 from sqlalchemy import create_engine, text
 
 SINGLE = ("use_voice", "pass_through_acceptance", "payment_method", "monthly_budget", "hosted_interest",
-          "hosted_budget", "history_hosting", "sync_importance", "adult")
-MULTI = ("use_scenes", "priorities", "characters", "hosted_models", "app_platforms")
+          "account_willingness", "hosted_budget", "history_hosting", "sync_importance", "adult")
+MULTI = ("use_scenes", "priorities", "characters", "account_methods", "account_concerns", "hosted_models", "app_platforms")
 
 
 def summarize(rows: Iterable[Mapping]) -> dict:

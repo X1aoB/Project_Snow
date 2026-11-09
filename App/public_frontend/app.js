@@ -386,7 +386,7 @@ function voiceSurveyInvited() {
 }
 function voiceSurveyCard() {
   if (!voiceSurveyInvited()) return "";
-  return '<article class="announcement-update" aria-label="功能调研"><h3>功能调研</h3><p>想听听你对角色语音、模型托管和多端同步的看法，大约 2 分钟。</p><div style="display:flex;flex-wrap:wrap;gap:8px"><button class="primary-button" type="button" data-voice-survey="open">去填写</button><button class="secondary-button" type="button" data-voice-survey="dismiss">不再提示</button></div></article>';
+  return '<article class="announcement-update" aria-label="功能调研"><h3>功能调研</h3><p>想听听你对角色语音、账号注册、模型托管和多端同步的看法，大约 3 分钟。</p><div style="display:flex;flex-wrap:wrap;gap:8px"><button class="primary-button" type="button" data-voice-survey="open">去填写</button><button class="secondary-button" type="button" data-voice-survey="dismiss">不再提示</button></div></article>';
 }
 async function startVoiceSurvey() {
   if ($("announcements-dialog").open) $("announcements-dialog").close();

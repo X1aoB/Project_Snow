@@ -1,7 +1,7 @@
 // 功能调研问卷（角色语音、模型托管与多端同步）。只在用户点「去填写」时才加载；题目和文案全部来自 /voice-survey.json，
 // 改字不用动代码。这里不碰 IndexedDB，答案只提交给服务器，是否已答由 app.js 记在 localStorage。
 const STYLE_URL = "/modules/voice-survey.css";
-const FIELD_DEFAULTS = Object.freeze({ use_scenes: [], priorities: [], characters: [], hosted_models: [], app_platforms: [], adult: "", comment: "" });
+const FIELD_DEFAULTS = Object.freeze({ use_scenes: [], priorities: [], characters: [], account_methods: [], account_concerns: [], hosted_models: [], app_platforms: [], adult: "", comment: "" });
 
 function el(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
