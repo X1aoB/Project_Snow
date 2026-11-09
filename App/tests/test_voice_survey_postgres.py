@@ -1,7 +1,10 @@
 """Real PostgreSQL contract for the additive survey table, including old/new/old."""
 from __future__ import annotations
 
+import importlib
 import os
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
@@ -10,7 +13,7 @@ from sqlalchemy import inspect, text
 
 from backend.snow_app.public_store import PublicStore
 from backend.snow_app.voice_survey_store import VOICE_SURVEY_RETENTION_DAYS
-from tests.test_postgres_integration import database, migrate, old_store_module  # noqa: F401
+from tests.test_postgres_integration import APP, database, migrate  # noqa: F401
 
 pytestmark = pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="TEST_POSTGRES_URL required")
 
@@ -39,9 +42,26 @@ def test_retention_cleanup_uses_the_real_column(database):
     assert count(database) == 1
 
 
-def test_real_old_binary_works_before_and_after_the_expansion(database):
+def old_release_store(root, reference):
+    """Import a released store from git; since 1.1.0 it needs its sibling module."""
+    package = root / "old_snow_release"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    for name in ("public_store.py", "proactive_store.py"):
+        source = subprocess.run(["git", "show", f"{reference}:App/backend/snow_app/{name}"], cwd=APP.parent,
+                                check=True, capture_output=True, text=True, encoding="utf-8").stdout
+        (package / name).write_text(source, encoding="utf-8")
+    sys.path.insert(0, str(root))
+    importlib.invalidate_caches()
+    try:
+        return importlib.import_module("old_snow_release.public_store")
+    finally:
+        sys.path.remove(str(root))
+
+
+def test_real_old_binary_works_before_and_after_the_expansion(database, tmp_path):
     # 1.1.0 is the release this one replaces and the one a rollback returns to.
-    old = old_store_module(os.getenv("TEST_VOICE_SURVEY_OLD_APP_REF") or "bddd613a6b0844f1712f0402ab06ed3346489f64")
+    old = old_release_store(tmp_path, os.getenv("TEST_VOICE_SURVEY_OLD_APP_REF") or "bddd613a6b0844f1712f0402ab06ed3346489f64")
     migrate(database, "20261020_0010")
     old_store = old.PublicStore("", engine=database)
     old_store.claim_request("old-before", "synthetic-subject", "old-hash")
