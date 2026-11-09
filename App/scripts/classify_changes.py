@@ -78,8 +78,13 @@ DATA_PATTERNS = (
 )
 
 EMBEDDING_PATTERNS = (
+    "App/.dockerignore",
     "App/infra/embedding.Dockerfile",
     "App/infra/embedding_service.py",
+    "App/scripts/prepare_embedding_context.py",
+    "App/tests/test_prepare_embedding_context.py",
+    ".github/workflows/ci.yml",
+    ".github/workflows/publish-images.yml",
 )
 
 DEPLOY_PATTERNS = (
