@@ -92,9 +92,9 @@
       },
       {
         "path": "App/public_frontend/app.js",
-        "lf_bytes": 456093,
-        "lf_sha256": "cd458ec1ec2da0a21727ea1372b10fffef2cebc56c8948a2aa133e12226ea1d6",
-        "gzip_bytes": 112370
+        "lf_bytes": 459735,
+        "lf_sha256": "5fb5479ccb4248d26302ec7e14ceb671aaaae31d72cdbd36480a0b8e62bec571",
+        "gzip_bytes": 113697
       },
       {
         "path": "App/public_frontend/dialogue-context.js",
@@ -104,9 +104,9 @@
       },
       {
         "path": "App/public_frontend/index.html",
-        "lf_bytes": 39266,
-        "lf_sha256": "025635567c0bbdc15edefa345aa8b9b96ad64fd13eab6ffa809a936a68dd2a6e",
-        "gzip_bytes": 10264
+        "lf_bytes": 39308,
+        "lf_sha256": "297a3e2b0611baadba843eb196c7791c95c0d5850994998207779fe70952a08b",
+        "gzip_bytes": 10277
       },
       {
         "path": "App/public_frontend/modules/runtime.js",
@@ -163,16 +163,16 @@
         "gzip_bytes": 95
       }
     ],
-    "gzip_sum_bytes": 189576
+    "gzip_sum_bytes": 190916
   },
-  "increase_bytes": 58422,
+  "increase_bytes": 59762,
   "budget_bytes": 61440,
-  "remaining_bytes": 3018,
-  "app_hook_increase_bytes": 2726,
+  "remaining_bytes": 1678,
+  "app_hook_increase_bytes": 4053,
   "app_hook_budget_bytes": 6013,
   "passed": true,
   "second_batch_parent_ref": "95005fe2efade3e9c3b916e8c47c73fced5b19e0",
   "first_batch_increase_bytes": 57474,
   "second_batch_hook_budget_bytes": 3966,
-  "second_batch_hook_increase_bytes": 679
+  "second_batch_hook_increase_bytes": 2006
 }

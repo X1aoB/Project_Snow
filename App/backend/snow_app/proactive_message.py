@@ -12,6 +12,7 @@ from fastapi import HTTPException, Request
 
 from .mvp_policy import MVP_CHARACTERS
 from .public_contracts import ProactiveConsentRequest, ProactiveMessageRequest, StatePayload
+from .public_knowledge import CharacterIdentityCatalog
 from .public_providers import ProviderRequestError, provider_spec, relay_provider_spec, simple_completion
 from .public_security import PublicSecurityError, open_byok_credential, verify_state
 from .public_store import PublicStoreUnavailable
@@ -21,6 +22,7 @@ from .session_context import (_sign, _verify, verify_session_context,
 
 NOTICE_VERSION = "proactive-cost-2"
 _CONSENT_DOMAIN = b"project-snow-proactive-cost-consent-1\x00"
+_CHARACTER_IDENTITY = CharacterIdentityCatalog()
 # Durations the user may pick for how long one cost confirmation stays valid.
 # Kept in lockstep with BYOK_RETENTION_HOURS so consent never outlives the key.
 DURATION_HOURS = {"tab": 12, "2h": 2, "24h": 24, "3d": 72, "7d": 168}
@@ -133,6 +135,8 @@ class ProactiveMessageService:
         character = next(item for item in MVP_CHARACTERS if item.character_id == payload.character_id)
         profile = await asyncio.to_thread(self._tone_reference, payload.character_id)
         on_publication()
+        today = _CHARACTER_IDENTITY.today(payload.character_id, datetime.now(ZoneInfo("Asia/Hong_Kong")))
+        occasion = "，也是你的生日" if today["own_birthday_today"] else ""
         content, raw_usage = await simple_completion(spec, api_key, payload.model,
             system_prompt=(f"你是《尘白禁区》的{character.display_name}。对方的身份是分析员，此处仅作第三人称身份说明。"
                 "只输出你通过通讯器主动发送的一条简短中文消息。称呼他时用你平时的称呼。语气参考已给出"
@@ -140,7 +144,10 @@ class ProactiveMessageService:
                 "也可以省略称呼，不另取昵称。"
                 "这是提醒，不是用户说过的话。不要代写他的台词，不要行动描写，不移动任何人，不创建新约定、"
                 "共同经历或原作事实。不声称他已到场。不输出JSON、标签或角色名前缀。"
-                "只温和提醒已经成立的当天约定，不催促、不施压。以下已审阅资料仅供语气参考：" + profile),
+                "只温和提醒已经成立的当天约定，不催促、不施压。"
+                f"你的基本情况（{_CHARACTER_IDENTITY.facts_text(payload.character_id)}）和今天的日期"
+                f"（{today['date']}{today['weekday']}{occasion}）只用来避免说错，不必提起。"
+                "以下已审阅资料仅供语气参考：" + profile),
             user_prompt=f"系统提醒事件：你今天已在{pending.location_name}等待约定。请发一条自然、简短的提醒。",
             max_tokens=400, timeout=120, client=self.http, reasoning_effort=payload.reasoning_effort)
         blocks, _answer, _truncated, safety = self.chat._public_generation_content(

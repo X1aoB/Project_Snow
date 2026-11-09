@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "survey_version": "voice-survey-1",
+  "kicker": "小吉终端 · 调研",
+  "title": "功能调研",
+  "intro": [
+    "我们在评估两个方向，想先听听你的想法，大约需要 3 分钟。",
+    "一是角色语音。「1 比 1 付费」的意思是：按语音厂商的实际单价收费，费用全部用于你自己的语音请求，网站不赚差价。举个例子：按 qwen-audio-3.1-tts-plus 每万计费字符 1.4 元、一个汉字算 2 个字符计算，一句 50 字的台词大约 1.4 分钱。支付手续费怎么承担、请求失败时怎么处理，目前都还没有定。",
+    "二是模型托管和多端同步：不用自己申请 API，由小吉终端直接提供不同厂商的模型，并可以选择思考深度；聊天记录由小吉终端托管在服务器上，手机和电脑都能同步，也为以后做手机 App 和桌面应用打基础。这项功能基于账号注册，费用同样是 1 比 1：按官方 API 的实际价格收费，网站不赚差价。支付手续费怎么承担、用什么方式注册，目前都还没有定。",
+    "这只是一次调研，不代表这些功能一定会上线；贴近原角色的声线需要取得授权，不一定能做到。"
+  ],
+  "privacy": "只保存你的答案，保存 180 天后自动删除，不记录 IP 地址和浏览器信息。",
+  "questions": [
+    {
+      "id": "use_voice",
+      "section": "角色语音",
+      "type": "single",
+      "required": true,
+      "label": "如果有角色语音，你会用吗？",
+      "options": [
+        { "value": "often", "label": "会经常用" },
+        { "value": "sometimes", "label": "偶尔用" },
+        { "value": "never", "label": "不会用" }
+      ]
+    },
+    {
+      "id": "use_scenes",
+      "type": "multi",
+      "label": "你最想在哪些场合听到语音？（可多选）",
+      "options": [
+        { "value": "direct", "label": "单独聊天" },
+        { "value": "group", "label": "群聊" },
+        { "value": "party", "label": "多人聚会" }
+      ]
+    },
+    {
+      "id": "pass_through_acceptance",
+      "type": "scale",
+      "required": true,
+      "label": "你能接受「1 比 1 付费」吗？",
+      "min": 1,
+      "max": 5,
+      "minLabel": "完全不能接受",
+      "maxLabel": "完全可以接受"
+    },
+    {
+      "id": "payment_method",
+      "type": "single",
+      "required": true,
+      "label": "语音费用，你更愿意用哪种方式？",
+      "options": [
+        { "value": "site_topup", "label": "在网站充值（按 1 比 1 扣费）" },
+        { "value": "own_key", "label": "自己到厂商开账号，填自己的密钥" },
+        { "value": "free_only", "label": "只用免费的方式" }
+      ]
+    },
+    {
+      "id": "monthly_budget",
+      "type": "single",
+      "required": true,
+      "label": "每个月你愿意在语音上花多少钱？",
+      "options": [
+        { "value": "0", "label": "0 元" },
+        { "value": "1_5", "label": "1～5 元" },
+        { "value": "6_20", "label": "6～20 元" },
+        { "value": "21_50", "label": "21～50 元" },
+        { "value": "over_50", "label": "50 元以上" }
+      ]
+    },
+    {
+      "id": "priorities",
+      "type": "multi",
+      "label": "关于语音，你最在意什么？（可多选）",
+      "options": [
+        { "value": "price", "label": "价格" },
+        { "value": "likeness", "label": "像不像" },
+        { "value": "latency", "label": "延迟" },
+        { "value": "privacy", "label": "隐私" },
+        { "value": "transparency", "label": "费用透明" }
+      ]
+    },
+    {
+      "id": "characters",
+      "type": "characters",
+      "label": "你最想先听到谁的声音？（可多选）"
+    },
+    {
+      "id": "hosted_interest",
+      "section": "模型托管、账号与多端同步",
+      "type": "single",
+      "required": true,
+      "label": "如果不用自己填 API，由小吉终端直接提供模型，你想用吗？",
+      "options": [
+        { "value": "paid", "label": "想用，愿意按官方 API 价格 1 比 1 付费" },
+        { "value": "free_only", "label": "只有免费才用" },
+        { "value": "own_key", "label": "继续用自己的 API 或订阅" }
+      ]
+    },
+    {
+      "id": "account_willingness",
+      "type": "single",
+      "required": true,
+      "label": "这项功能基于账号注册。你愿意注册吗？",
+      "options": [
+        { "value": "yes", "label": "愿意注册" },
+        { "value": "depends", "label": "看注册方式和隐私条款" },
+        { "value": "no", "label": "不愿意注册" }
+      ]
+    },
+    {
+      "id": "account_methods",
+      "type": "multi",
+      "label": "你能接受哪些注册方式？（可多选）",
+      "options": [
+        { "value": "email", "label": "邮箱" },
+        { "value": "phone", "label": "手机号" },
+        { "value": "qq", "label": "QQ" },
+        { "value": "wechat", "label": "微信" },
+        { "value": "username", "label": "只用用户名和密码" }
+      ]
+    },
+    {
+      "id": "account_concerns",
+      "type": "multi",
+      "label": "注册账号，你最担心什么？（可多选）",
+      "options": [
+        { "value": "privacy", "label": "个人信息泄露" },
+        { "value": "lockout", "label": "账号丢失或被封后，记录拿不回来" },
+        { "value": "real_name", "label": "要绑定手机或实名" },
+        { "value": "password", "label": "又要多记一个密码" },
+        { "value": "none", "label": "没什么顾虑" }
+      ]
+    },
+    {
+      "id": "hosted_models",
+      "type": "multi",
+      "label": "如果由小吉终端提供模型，你希望能自己选什么？（可多选）",
+      "options": [
+        { "value": "vendors", "label": "不同厂商的模型" },
+        { "value": "thinking", "label": "思考深度（更快或更细致）" },
+        { "value": "auto", "label": "不用选，默认配好就行" }
+      ]
+    },
+    {
+      "id": "hosted_budget",
+      "type": "single",
+      "required": true,
+      "label": "按官方 API 价格 1 比 1 计费，这项服务每个月你愿意花多少钱？",
+      "options": [
+        { "value": "0", "label": "0 元" },
+        { "value": "1_10", "label": "1～10 元" },
+        { "value": "11_30", "label": "11～30 元" },
+        { "value": "31_60", "label": "31～60 元" },
+        { "value": "over_60", "label": "60 元以上" }
+      ]
+    },
+    {
+      "id": "history_hosting",
+      "type": "single",
+      "required": true,
+      "label": "多端同步需要把聊天记录保存在小吉终端的服务器上，运营者在技术上可以接触到这些内容。你能接受吗？",
+      "options": [
+        { "value": "accept", "label": "可以接受" },
+        { "value": "with_controls", "label": "能随时导出和彻底删除才接受" },
+        { "value": "encrypted_only", "label": "加密到运营者也看不到才接受" },
+        { "value": "local_only", "label": "不接受，只想保存在自己的设备上" }
+      ]
+    },
+    {
+      "id": "sync_importance",
+      "type": "scale",
+      "required": true,
+      "label": "手机和电脑之间同步聊天记录，对你有多重要？",
+      "min": 1,
+      "max": 5,
+      "minLabel": "完全不重要",
+      "maxLabel": "非常重要"
+    },
+    {
+      "id": "app_platforms",
+      "type": "multi",
+      "label": "如果做成安装版，你最想要哪些？（可多选）",
+      "options": [
+        { "value": "android", "label": "安卓 App" },
+        { "value": "ios", "label": "iPhone App" },
+        { "value": "windows", "label": "Windows 应用" },
+        { "value": "mac", "label": "Mac 应用" },
+        { "value": "web_only", "label": "网页就够了" }
+      ]
+    },
+    {
+      "id": "adult",
+      "section": "最后",
+      "type": "single",
+      "label": "你已满 18 岁了吗？（可不答）",
+      "hint": "只用来判断未成年人付费问题有多大。",
+      "options": [
+        { "value": "yes", "label": "已满 18 岁" },
+        { "value": "no", "label": "未满 18 岁" },
+        { "value": "skip", "label": "不想回答" }
+      ]
+    },
+    {
+      "id": "comment",
+      "type": "text",
+      "label": "还有什么建议？（可不填）",
+      "hint": "最多 200 字，请不要写联系方式。",
+      "maxLength": 200
+    }
+  ],
+  "resubmitNote": "你之前填过这份问卷，再次提交会更新原来的答案。",
+  "requiredError": "还有必答题没选，已帮你定位到第一题。",
+  "failedError": "没能提交，请检查网络后再试。",
+  "submit": "提交",
+  "later": "稍后再填",
+  "close": "关闭问卷",
+  "saved": "已收到，谢谢你的回答！"
+}

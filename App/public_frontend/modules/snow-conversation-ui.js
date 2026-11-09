@@ -447,17 +447,20 @@ export function installConversationUi(host, { icon, el, notify, readOnly, nameOf
   costCancel.addEventListener("click", () => costDialog.close());
   costDialog.addEventListener("close", () => syncSettings());
 
-  // 时长选项与模型会话允许的凭证保存时长一致（含「本次」=当前标签页，约 12 小时）；
-  // 超过凭证剩余有效期的选项禁用并给出原因。返回当前有效选项列表。
+  // 时长选项与模型会话允许的凭证保存时长一致（含「本次」=当前标签页，约 12 小时）。
+  // 凭证一签发就开始倒计时，刚保存 7 天时剩余时间就已短于 7 天，所以不能拿剩余时间判断：
+  // 只禁用比凭证自身保存档位更长的选项；长于剩余时间的选项由服务器夹取到凭证到期，这里如实标注。
   function durationOptions() {
     const info = snapshot().proactiveDuration || {};
     const policy = Array.isArray(info.options) ? info.options : [];
     const values = ["tab", ...policy.filter(value => value !== "tab" && DURATION_HOURS[value])];
     const remainingMs = info.credentialExpiresAt ? info.credentialExpiresAt - Date.now() : 0;
+    const savedHours = DURATION_HOURS[info.current] || DURATION_HOURS.tab;
     return values.map(value => {
-      // 「本次」永远可选（12 小时上限会被服务器按凭证夹取）；其余长于凭证剩余有效期的禁用。
-      const tooLong = value !== "tab" && remainingMs > 0 && DURATION_HOURS[value] * 3600000 > remainingMs;
-      return { value, label: DURATION_LABELS[value] || value, disabled: tooLong };
+      const hours = DURATION_HOURS[value];
+      const tooLong = value !== "tab" && hours > savedHours;
+      const untilExpiry = value !== "tab" && !tooLong && remainingMs > 0 && hours * 3600000 > remainingMs;
+      return { value, label: DURATION_LABELS[value] || value, disabled: tooLong, untilExpiry };
     });
   }
   function populateDuration(preselect) {
@@ -466,7 +469,7 @@ export function installConversationUi(host, { icon, el, notify, readOnly, nameOf
     const enabled = options.filter(option => !option.disabled);
     const wanted = [preselect, info.current, "tab"].find(value => enabled.some(option => option.value === value)) || enabled[0]?.value || "tab";
     durationSelect.replaceChildren(...options.map(option => el("option", { value: option.value, ...(option.disabled ? { disabled: "" } : {}) },
-      option.disabled ? `${option.label}（超过凭证剩余有效期）` : option.label)));
+      option.disabled ? `${option.label}（超过凭证保存时长）` : option.untilExpiry ? `${option.label}（到凭证到期为止）` : option.label)));
     durationSelect.value = wanted;
     durationSelect.disabled = enabled.length <= 1;
     refreshDurationHint();

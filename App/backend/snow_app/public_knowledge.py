@@ -8,6 +8,7 @@ portable public-data exports.  User conversations cannot mutate this data.
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,10 +17,83 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PUBLIC_KNOWLEDGE_PATH = (
     PACKAGE_ROOT / "config" / "public_knowledge" / "character_relationships.v1.json"
 )
+DEFAULT_CHARACTER_IDENTITY_PATH = (
+    PACKAGE_ROOT / "config" / "public_knowledge" / "character_identity.v1.json"
+)
+_WEEKDAYS = "一二三四五六日"
 
 
 class PublicKnowledgeError(ValueError):
     pass
+
+
+class CharacterIdentityCatalog:
+    """Facts a character always knows about herself.
+
+    Story knowledge reaches a turn through retrieval, so what a character
+    "knows" depends on whether a matching chunk ranked highly.  These facts
+    must not: they are present on every turn for every selectable character.
+    Built by ``pipelines/build_character_identity.py``; chat cannot change them.
+    """
+
+    def __init__(self, path: Path | None = None):
+        self.path = Path(path or DEFAULT_CHARACTER_IDENTITY_PATH).resolve()
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise PublicKnowledgeError(f"角色事实卡无法读取：{self.path}") from exc
+        if payload.get("schema_version") != 1:
+            raise PublicKnowledgeError("角色事实卡 schema_version 不受支持。")
+        self.version = str(payload.get("knowledge_version") or "").strip()
+        if not self.version:
+            raise PublicKnowledgeError("角色事实卡缺少 knowledge_version。")
+        self._cards: dict[str, dict[str, Any]] = {}
+        for item in payload.get("characters") or []:
+            character_id = str(item.get("character_id") or "").strip()
+            if not character_id or character_id in self._cards:
+                raise PublicKnowledgeError("角色事实卡包含空 ID 或重复角色。")
+            if not str(item.get("display_name") or "").strip():
+                raise PublicKnowledgeError("角色事实卡缺少角色显示名。")
+            birthday = item.get("birthday") or {}
+            try:
+                date(2024, int(birthday["month"]), int(birthday["day"]))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise PublicKnowledgeError("角色事实卡的生日无效。") from exc
+            self._cards[character_id] = dict(item)
+
+    def card(self, character_id: str) -> dict[str, Any] | None:
+        item = self._cards.get(str(character_id or "").strip())
+        return dict(item) if item else None
+
+    def facts_text(self, character_id: str) -> str:
+        """One line of plain facts, or "" for an unknown character."""
+        card = self._cards.get(str(character_id or "").strip())
+        if not card:
+            return ""
+        birthday = card["birthday"]
+        facts = [f"生日：{birthday['month']}月{birthday['day']}日"]
+        if card.get("full_name") and card["full_name"] != card["display_name"]:
+            facts.insert(0, f"全名：{card['full_name']}")
+        if card.get("height"):
+            facts.append(f"身高：{card['height']}")
+        if card.get("armors"):
+            facts.append(f"装甲：{'、'.join(card['armors'])}")
+        return "；".join(facts)
+
+    def today(self, character_id: str, now: datetime) -> dict[str, Any]:
+        """The real date for one turn; birthdays use Beijing time like the notices."""
+        own_id = str(character_id or "").strip()
+        celebrating = [
+            (key, card["display_name"]) for key, card in self._cards.items()
+            if (int(card["birthday"]["month"]), int(card["birthday"]["day"])) == (now.month, now.day)
+        ]
+        return {
+            "date": f"{now.year}年{now.month}月{now.day}日",
+            "weekday": f"星期{_WEEKDAYS[now.weekday()]}",
+            "timezone": "北京时间",
+            "own_birthday_today": any(key == own_id for key, _name in celebrating),
+            "birthdays_today": [name for key, name in celebrating if key != own_id],
+        }
 
 
 class PublicKnowledge:

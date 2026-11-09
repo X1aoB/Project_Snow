@@ -216,6 +216,8 @@ jobs:
           tests/test_dialogue_v2_acceptance.py
           tests/test_presence_arrival_v2.py
           tests/test_proactive_message.py
+          tests/test_voice_survey.py
+          tests/test_character_identity.py
           tests/test_paid_probe_budget.py
           tests/test_dialogue_turn.py
           tests/test_dialogue_domains.py
@@ -641,7 +643,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install --require-hashes -r requirements-public.txt -r requirements-test.txt
-      - run: python -m pytest tests/test_postgres_integration.py tests/test_dialogue_v2_acceptance.py tests/test_presence_arrival_v2_postgres.py tests/test_proactive_message_postgres.py -q
+      - run: python -m pytest tests/test_postgres_integration.py tests/test_dialogue_v2_acceptance.py tests/test_presence_arrival_v2_postgres.py tests/test_proactive_message_postgres.py tests/test_voice_survey_postgres.py -q
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

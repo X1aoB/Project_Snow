@@ -1,0 +1,613 @@
+{
+  "schema_version": 1,
+  "knowledge_version": "snow-identity-2026-11-08.1",
+  "release_status": "active",
+  "policy": {
+    "source": "read_only_wiki_armor_infobox",
+    "scope": "facts_a_character_always_knows_about_herself",
+    "birthday_timezone": "Asia/Shanghai",
+    "user_chat_can_modify": false
+  },
+  "characters": [
+    {
+      "character_id": "78aa7ab99154",
+      "display_name": "伊切尔",
+      "full_name": "伊切尔·古斯塔夫",
+      "birthday": {
+        "month": 11,
+        "day": 29
+      },
+      "armors": [
+        "豹豹"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/伊切尔/豹豹__c2ddc362fd8c.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/伊切尔/豹豹__c2ddc362fd8c.html"
+        ]
+      }
+    },
+    {
+      "character_id": "d5ecfceba959",
+      "display_name": "克罗瑞娜",
+      "full_name": "克罗瑞娜·吉诺拉",
+      "birthday": {
+        "month": 3,
+        "day": 13
+      },
+      "height": "160cm",
+      "armors": [
+        "绯月"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/克罗瑞娜/绯月__5e7aa84042cc.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/克罗瑞娜/绯月__5e7aa84042cc.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/克罗瑞娜/绯月__5e7aa84042cc.html"
+        ]
+      }
+    },
+    {
+      "character_id": "25b23cb64398",
+      "display_name": "凯茜娅",
+      "full_name": "凯茜娅·克莱因",
+      "birthday": {
+        "month": 11,
+        "day": 8
+      },
+      "height": "172cm",
+      "armors": [
+        "朝翼",
+        "狂诗",
+        "蓝闪"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/凯茜娅/朝翼__ebed400eb8d6.html",
+          "Data/Source/character_armors/凯茜娅/狂诗__6271027ab3e1.html",
+          "Data/Source/character_armors/凯茜娅/蓝闪__5c3d0ef0a5ed.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/凯茜娅/朝翼__ebed400eb8d6.html",
+          "Data/Source/character_armors/凯茜娅/狂诗__6271027ab3e1.html",
+          "Data/Source/character_armors/凯茜娅/蓝闪__5c3d0ef0a5ed.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/凯茜娅/朝翼__ebed400eb8d6.html",
+          "Data/Source/character_armors/凯茜娅/狂诗__6271027ab3e1.html"
+        ]
+      }
+    },
+    {
+      "character_id": "6455a5dcff6a",
+      "display_name": "卜卜",
+      "full_name": "卜卜",
+      "birthday": {
+        "month": 1,
+        "day": 31
+      },
+      "height": "161cm",
+      "armors": [
+        "灵鉴"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/卜卜/灵鉴__d9c3260a3b78.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/卜卜/灵鉴__d9c3260a3b78.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/卜卜/灵鉴__d9c3260a3b78.html"
+        ]
+      }
+    },
+    {
+      "character_id": "41b7444e39cc",
+      "display_name": "奈莉德",
+      "full_name": "奈莉德·莫罗佐娃",
+      "birthday": {
+        "month": 12,
+        "day": 31
+      },
+      "height": "170cm",
+      "armors": [
+        "冥河代理人"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/奈莉德/冥河代理人__754d613d2de8.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/奈莉德/冥河代理人__754d613d2de8.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/奈莉德/冥河代理人__754d613d2de8.html"
+        ]
+      }
+    },
+    {
+      "character_id": "4370a74d6fda",
+      "display_name": "妮塔",
+      "full_name": "妮塔",
+      "birthday": {
+        "month": 5,
+        "day": 5
+      },
+      "armors": [
+        "四手"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/妮塔/四手__129996592d5e.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/妮塔/四手__129996592d5e.html"
+        ]
+      }
+    },
+    {
+      "character_id": "9f5804761c56",
+      "display_name": "安卡希雅",
+      "full_name": "安卡希雅",
+      "birthday": {
+        "month": 12,
+        "day": 20
+      },
+      "height": "155cm",
+      "armors": [
+        "不予显示",
+        "时之重奏",
+        "辉夜"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/安卡希雅/不予显示__eb4f15f809c3.html",
+          "Data/Source/character_armors/安卡希雅/时之重奏__c88c0f23eaa9.html",
+          "Data/Source/character_armors/安卡希雅/辉夜__aaaf6439cc59.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/安卡希雅/不予显示__eb4f15f809c3.html",
+          "Data/Source/character_armors/安卡希雅/时之重奏__c88c0f23eaa9.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/安卡希雅/时之重奏__c88c0f23eaa9.html",
+          "Data/Source/character_armors/安卡希雅/辉夜__aaaf6439cc59.html"
+        ]
+      }
+    },
+    {
+      "character_id": "43f05917bfa1",
+      "display_name": "恩雅",
+      "full_name": "恩雅·墨尔菲",
+      "birthday": {
+        "month": 1,
+        "day": 19
+      },
+      "height": "171.5cm",
+      "armors": [
+        "澜风",
+        "羽蜕"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/恩雅/澜风__6ff08108b139.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/恩雅/澜风__6ff08108b139.html",
+          "Data/Source/character_armors/恩雅/羽蜕__723f363468ea.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/恩雅/澜风__6ff08108b139.html"
+        ]
+      }
+    },
+    {
+      "character_id": "921f9ef0cc4e",
+      "display_name": "晴",
+      "full_name": "鸣濑晴",
+      "birthday": {
+        "month": 8,
+        "day": 20
+      },
+      "height": "168cm",
+      "armors": [
+        "旧日王牌",
+        "藏锋",
+        "霆光"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/晴/旧日王牌__a4c81a6d5ce9.html",
+          "Data/Source/character_armors/晴/藏锋__73bccac0856b.html",
+          "Data/Source/character_armors/晴/霆光__f4e86e3d40fc.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/晴/旧日王牌__a4c81a6d5ce9.html",
+          "Data/Source/character_armors/晴/藏锋__73bccac0856b.html",
+          "Data/Source/character_armors/晴/霆光__f4e86e3d40fc.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/晴/霆光__f4e86e3d40fc.html"
+        ]
+      }
+    },
+    {
+      "character_id": "6862c43d2ac9",
+      "display_name": "猫汐尔",
+      "full_name": "猫汐尔",
+      "birthday": {
+        "month": 10,
+        "day": 10
+      },
+      "height": "165cm",
+      "armors": [
+        "溯影",
+        "猫猫",
+        "莲驱"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/猫汐尔/溯影__d8b7894f7697.html",
+          "Data/Source/character_armors/猫汐尔/猫猫__a01eb80fb2de.html",
+          "Data/Source/character_armors/猫汐尔/莲驱__6f97efbcb8f4.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/猫汐尔/溯影__d8b7894f7697.html",
+          "Data/Source/character_armors/猫汐尔/猫猫__a01eb80fb2de.html",
+          "Data/Source/character_armors/猫汐尔/莲驱__6f97efbcb8f4.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/猫汐尔/莲驱__6f97efbcb8f4.html"
+        ]
+      }
+    },
+    {
+      "character_id": "8d5b5c3912bb",
+      "display_name": "琴诺",
+      "full_name": "琴诺·凯郭尔",
+      "birthday": {
+        "month": 2,
+        "day": 27
+      },
+      "armors": [
+        "双面",
+        "悖谬"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/琴诺/双面__be583a93a0c1.html",
+          "Data/Source/character_armors/琴诺/悖谬__c928a12348f1.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/琴诺/双面__be583a93a0c1.html",
+          "Data/Source/character_armors/琴诺/悖谬__c928a12348f1.html"
+        ]
+      }
+    },
+    {
+      "character_id": "85b205f6f623",
+      "display_name": "瑟瑞斯",
+      "full_name": "瑟瑞斯",
+      "birthday": {
+        "month": 7,
+        "day": 19
+      },
+      "height": "163cm",
+      "armors": [
+        "小金鱼",
+        "悠游",
+        "瞬刻"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/瑟瑞斯/小金鱼__940fed94f92a.html",
+          "Data/Source/character_armors/瑟瑞斯/悠游__02bccb6332ef.html",
+          "Data/Source/character_armors/瑟瑞斯/瞬刻__747528b762c3.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/瑟瑞斯/小金鱼__940fed94f92a.html",
+          "Data/Source/character_armors/瑟瑞斯/悠游__02bccb6332ef.html",
+          "Data/Source/character_armors/瑟瑞斯/瞬刻__747528b762c3.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/瑟瑞斯/悠游__02bccb6332ef.html",
+          "Data/Source/character_armors/瑟瑞斯/瞬刻__747528b762c3.html"
+        ]
+      }
+    },
+    {
+      "character_id": "702f4375675b",
+      "display_name": "米娅",
+      "full_name": "米娅·丝凯依",
+      "birthday": {
+        "month": 8,
+        "day": 15
+      },
+      "height": "165cm",
+      "armors": [
+        "星彩"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/米娅/星彩__2acc4b465fce.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/米娅/星彩__2acc4b465fce.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/米娅/星彩__2acc4b465fce.html"
+        ]
+      }
+    },
+    {
+      "character_id": "cf0569ac6de9",
+      "display_name": "肴",
+      "full_name": "肴",
+      "birthday": {
+        "month": 12,
+        "day": 23
+      },
+      "height": "169cm",
+      "armors": [
+        "冬至",
+        "夜天光"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/肴/冬至__3f92ad03019b.html",
+          "Data/Source/character_armors/肴/夜天光__147f61997c9f.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/肴/冬至__3f92ad03019b.html",
+          "Data/Source/character_armors/肴/夜天光__147f61997c9f.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/肴/夜天光__147f61997c9f.html"
+        ]
+      }
+    },
+    {
+      "character_id": "447ed3c401c9",
+      "display_name": "胧嫣",
+      "full_name": "胧嫣",
+      "birthday": {
+        "month": 2,
+        "day": 1
+      },
+      "height": "170cm",
+      "armors": [
+        "瑞狐"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/胧嫣/瑞狐__9a46c3a875c0.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/胧嫣/瑞狐__9a46c3a875c0.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/胧嫣/瑞狐__9a46c3a875c0.html"
+        ]
+      }
+    },
+    {
+      "character_id": "a2ffc5b44d7f",
+      "display_name": "芙提雅",
+      "full_name": "芙提雅·伊格妮丝",
+      "birthday": {
+        "month": 4,
+        "day": 23
+      },
+      "height": "158cm（自称160cm）",
+      "armors": [
+        "小太阳",
+        "炬芯",
+        "缄默",
+        "驰掣"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/芙提雅/小太阳__0000e71f332b.html",
+          "Data/Source/character_armors/芙提雅/炬芯__2aedf57410f1.html",
+          "Data/Source/character_armors/芙提雅/缄默__a7495fb936b2.html",
+          "Data/Source/character_armors/芙提雅/驰掣__9f35dd0f5897.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/芙提雅/小太阳__0000e71f332b.html",
+          "Data/Source/character_armors/芙提雅/炬芯__2aedf57410f1.html",
+          "Data/Source/character_armors/芙提雅/缄默__a7495fb936b2.html",
+          "Data/Source/character_armors/芙提雅/驰掣__9f35dd0f5897.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/芙提雅/炬芯__2aedf57410f1.html",
+          "Data/Source/character_armors/芙提雅/驰掣__9f35dd0f5897.html"
+        ]
+      }
+    },
+    {
+      "character_id": "1b0a6b35719a",
+      "display_name": "芬妮",
+      "full_name": "芬妮·戈尔登",
+      "birthday": {
+        "month": 7,
+        "day": 30
+      },
+      "height": "166cm",
+      "armors": [
+        "咎冠",
+        "澄意",
+        "辉耀",
+        "黄金狮子"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/芬妮/咎冠__5641679644f2.html",
+          "Data/Source/character_armors/芬妮/澄意__0c05089b6a8b.html",
+          "Data/Source/character_armors/芬妮/辉耀__6ea970516ff2.html",
+          "Data/Source/character_armors/芬妮/黄金狮子__08d1f9a44d8c.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/芬妮/咎冠__5641679644f2.html",
+          "Data/Source/character_armors/芬妮/澄意__0c05089b6a8b.html",
+          "Data/Source/character_armors/芬妮/辉耀__6ea970516ff2.html",
+          "Data/Source/character_armors/芬妮/黄金狮子__08d1f9a44d8c.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/芬妮/咎冠__5641679644f2.html",
+          "Data/Source/character_armors/芬妮/澄意__0c05089b6a8b.html",
+          "Data/Source/character_armors/芬妮/辉耀__6ea970516ff2.html",
+          "Data/Source/character_armors/芬妮/黄金狮子__08d1f9a44d8c.html"
+        ]
+      }
+    },
+    {
+      "character_id": "673ba6851b05",
+      "display_name": "苔丝",
+      "full_name": "苔丝·科特金",
+      "birthday": {
+        "month": 9,
+        "day": 16
+      },
+      "height": "165cm",
+      "armors": [
+        "绮幻",
+        "魔术师"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/苔丝/绮幻__5749f2051438.html",
+          "Data/Source/character_armors/苔丝/魔术师__efe1cd3a1ed2.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/苔丝/绮幻__5749f2051438.html",
+          "Data/Source/character_armors/苔丝/魔术师__efe1cd3a1ed2.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/苔丝/绮幻__5749f2051438.html"
+        ]
+      }
+    },
+    {
+      "character_id": "daab0f4cceb4",
+      "display_name": "茉莉安",
+      "full_name": "茉莉安·安德烈奥蒂",
+      "birthday": {
+        "month": 9,
+        "day": 5
+      },
+      "height": "174cm",
+      "armors": [
+        "幽潮",
+        "绷带小姐",
+        "雨燕",
+        "霄鹰"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/茉莉安/幽潮__07a0f9cc9f4e.html",
+          "Data/Source/character_armors/茉莉安/绷带小姐__a80cdc36dc1a.html",
+          "Data/Source/character_armors/茉莉安/雨燕__e5e092e18f13.html",
+          "Data/Source/character_armors/茉莉安/霄鹰__7d7fa74f89ef.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/茉莉安/幽潮__07a0f9cc9f4e.html",
+          "Data/Source/character_armors/茉莉安/绷带小姐__a80cdc36dc1a.html",
+          "Data/Source/character_armors/茉莉安/雨燕__e5e092e18f13.html",
+          "Data/Source/character_armors/茉莉安/霄鹰__7d7fa74f89ef.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/茉莉安/幽潮__07a0f9cc9f4e.html",
+          "Data/Source/character_armors/茉莉安/霄鹰__7d7fa74f89ef.html"
+        ]
+      }
+    },
+    {
+      "character_id": "5157b8972632",
+      "display_name": "薇蒂雅",
+      "full_name": "薇蒂雅·香农",
+      "birthday": {
+        "month": 6,
+        "day": 14
+      },
+      "height": "162cm",
+      "armors": [
+        "天鹅座",
+        "龙舌兰"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/薇蒂雅/天鹅座__f6ada2b68c26.html",
+          "Data/Source/character_armors/薇蒂雅/龙舌兰__a75848c6731b.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/薇蒂雅/天鹅座__f6ada2b68c26.html",
+          "Data/Source/character_armors/薇蒂雅/龙舌兰__a75848c6731b.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/薇蒂雅/天鹅座__f6ada2b68c26.html"
+        ]
+      }
+    },
+    {
+      "character_id": "98322bd505f4",
+      "display_name": "辰星",
+      "full_name": "姬辰星",
+      "birthday": {
+        "month": 11,
+        "day": 5
+      },
+      "height": "172cm",
+      "armors": [
+        "云篆",
+        "琼弦"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/辰星/云篆__2df41ee1a5e8.html",
+          "Data/Source/character_armors/辰星/琼弦__32cc81126cac.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/辰星/云篆__2df41ee1a5e8.html",
+          "Data/Source/character_armors/辰星/琼弦__32cc81126cac.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/辰星/琼弦__32cc81126cac.html"
+        ]
+      }
+    },
+    {
+      "character_id": "ca0144ccd81b",
+      "display_name": "里芙",
+      "full_name": "里芙·贝斯特拉",
+      "birthday": {
+        "month": 3,
+        "day": 21
+      },
+      "height": "170cm",
+      "armors": [
+        "无限之视",
+        "狂猎"
+      ],
+      "evidence": {
+        "full_name": [
+          "Data/Source/character_armors/里芙/无限之视__1cd8dba62c90.html",
+          "Data/Source/character_armors/里芙/狂猎__1296a9c8bd35.html"
+        ],
+        "birthday": [
+          "Data/Source/character_armors/里芙/无限之视__1cd8dba62c90.html",
+          "Data/Source/character_armors/里芙/狂猎__1296a9c8bd35.html"
+        ],
+        "height": [
+          "Data/Source/character_armors/里芙/狂猎__1296a9c8bd35.html"
+        ]
+      }
+    }
+  ]
+}

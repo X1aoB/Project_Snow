@@ -86,7 +86,7 @@ from .output_validation import (
 from .output_validation import (
     _looks_like_structured_fragment as _looks_like_structured_fragment,
 )
-from .public_knowledge import PublicKnowledge
+from .public_knowledge import CharacterIdentityCatalog, PublicKnowledge
 from .repository import RuntimeRepository
 from .text_rules import _compact, _contains_term
 from .user_fact_store import UserFactStore
@@ -787,6 +787,26 @@ _PUBLIC_KNOWLEDGE = PublicKnowledge()
 _EXPLICIT_RELATIONSHIP_ADDRESSES = _PUBLIC_KNOWLEDGE.preferred_addresses()
 _EXPLICIT_RELATIONSHIP_CHARACTER_IDS = _PUBLIC_KNOWLEDGE.formal_character_ids()
 _FORMAL_RELATIONSHIP_ROSTER = _PUBLIC_KNOWLEDGE.formal_roster()
+
+# What a character knows about herself and about today must not depend on which
+# story chunks ranked highly this turn: ten of the 22 characters have no profile
+# page in the corpus, and no retrieved text can say what today's date is.
+_CHARACTER_IDENTITY = CharacterIdentityCatalog()
+_TODAY_CONTEXT_RULE = """【今天的日期】
+本轮 today_context 是现实中的今天（北京时间），优先于证据里出现的任何“今天”。被问到今天几号、星期几、是什么日子时，第一句就按它回答，不要说不知道，也不要解释日期从哪里来。
+own_birthday_today 为 true 时今天就是你的生日：被问到今天是什么日子，或收到生日祝福时，自然地认下来；不要每轮都提，也不要编造谁给你办过庆祝、送过什么。为 false 时今天不是你的生日，收到生日祝福可以笑着纠正，并说出你真正的生日。
+birthdays_today 是今天过生日的同伴，只在被问到时使用。"""
+# Matched against ``_compact`` text, which has no spaces or punctuation.
+_DATE_OR_OCCASION_PATTERN = re.compile(
+    r"今天(?:是)?(?:什么|啥|哪)(?:日子|天)"
+    r"|(?:今天|现在)(?:是)?(?:几月)?几号"
+    r"|今天(?:是)?(?:星期|周|礼拜)[几啥]"
+    r"|今天的?日期"
+    r"|今天.{0,10}?生日"
+    r"|生日(?:是)?(?:什么时候|哪天|几号|几月)"
+    r"|(?:什么时候|哪天|几月几号|几号)(?:是你的?)?(?:过)?生日"
+    r"|生日快乐"
+)
 
 # \u7434\u8bfa\u7684\u201c\u83ab\u5c14\u7d22\u201dis a second personality, not a selectable
 # character.  It is activated only when the analyst names her (or asks about
@@ -4725,6 +4745,10 @@ class MVPService:
             return "companion_relationship"
         if intents and "logistics" in intents:
             return "logistics_detail"
+        # Before the broad meal/activity/greeting matchers: "早安，今天几号"
+        # still wants the date, and only today_context can answer it.
+        if _DATE_OR_OCCASION_PATTERN.search(normalized):
+            return "date_or_occasion"
         # A meal that the analyst has already brought or proposed is a shared
         # scene premise, not a request for the character's current diet.  The
         # old broad ``吃饭`` matcher routed these turns to the conservative
@@ -4900,6 +4924,7 @@ class MVPService:
             "logistics_detail": "用户问的是该角色当前装甲关联的后勤小队、队员、成员履历、爱好或专长。先直接列出与该角色/装甲明确关联的小队和成员；再补充与问题相关的成员特点。不要把无关小队、获取方式、数值或套装机制混入回答。",
             "past_experience": "用户问的是过去经历或剧情。可以按时间顺序简洁回忆，但只引用与问题直接相关的事件，不要把无关故事堆在一起。",
             "costume_detail": "用户正在问具体时装、皮肤或适配装甲。先直接回答这套时装的简介、细节或与装甲的关联；如果用户点名了一套时装，必须同时参考该时装和它对应装甲的资料，不能只重复名字或改答泛泛的角色背景。",
+            "date_or_occasion": "用户问的是今天的日期、星期、今天是什么日子，或生日的日期，或在祝生日快乐。问日期时第一句直接按 today_context 回答；问自己的生日时按你的基本认知回答；today_context.own_birthday_today 为 true 时大方认下今天是你的生日，收到祝福就自然道谢。问别人的生日而你不确定时，直接说记不太清。只说 today_context 和基本认知里有的事实，不要转答地点、活动或旧剧情，也不要编造庆祝安排或共同经历。",
             "general": "先自然回应用户这句话本身；只有与问题直接相关时才补充一条资料背景。",
         }
         if focus == "food_or_drink":
@@ -5349,6 +5374,7 @@ class MVPService:
 
         focus = str(context.get("question_focus") or "general")
         if focus in {
+            "date_or_occasion",
             "casual_check_in",
             "food_or_drink",
             "shared_meal",
@@ -6373,6 +6399,7 @@ class MVPService:
                     break
             filtered = promoted_social_hits
         if (frame is not None and not canon_clauses) or (frame is None and question_focus in {
+            "date_or_occasion",
             "food_or_drink",
             "shared_meal",
             "current_activity",
@@ -6478,6 +6505,7 @@ class MVPService:
             else "natural_chat"
             if question_focus
             in {
+                "date_or_occasion",
                 "food_or_drink",
                 "shared_meal",
                 "current_activity",
@@ -6683,6 +6711,19 @@ class MVPService:
             candidates.append({"event_type": "ordinary_interaction", "source_clause_ids": list(dict.fromkeys(clauses)),
                                "response_block_indices": list(dict.fromkeys(indices))})
         return candidates
+
+    @staticmethod
+    def _self_knowledge_rule(character: Any) -> str:
+        """Always-on identity facts and the date rule, independent of retrieval."""
+
+        facts = _CHARACTER_IDENTITY.facts_text(str(getattr(character, "character_id", "")))
+        identity = (
+            f"【你对自己的基本认知｜稳定事实】\n{facts}。\n"
+            "这些是你自己的事，不需要证据支持。被问到就直接回答，不要说“不知道”“没有资料”；没被问到时不必主动提起。\n\n"
+            if facts
+            else ""
+        )
+        return identity + _TODAY_CONTEXT_RULE
 
     def _system_prompt(
         self,
@@ -6972,6 +7013,8 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
         )
         prompt = f"""你是 Project Snow 的角色对话模型，当前为“{mode}”模式。你要模拟《尘白禁区》角色“{character.display_name}”，并始终把当前用户视为“分析员”。
 
+{self._self_knowledge_rule(character)}
+
 {mode_rule}
 
 {tool_rule}
@@ -7007,7 +7050,7 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
 12. 先执行用户问题的回答契约，再决定是否补充背景；不得用地点回答食物、用旧剧情回答当前状态、用实验室等固定场景代替“在做什么”。
 13. 证据只能支持事实和谨慎归纳，不能支持虚构的共同记忆、没有原文的引号句子或重复套话。不要把‘你知道的’、‘你总说’、‘我们刚刚一起’当作自然过渡，除非随后证据逐字支持。
     不要在分析员没有询问时，主动解释一个昵称为什么“只有你能这么叫”、为什么专属，或把这种说明写成内心独白；称呼本身可以自然使用，但不能凭空扩展其来历和排他性。
-14. 当 conversation_mode 为 natural_chat 时，检索到的日期故事只作为隐藏的性格参考，不要主动报出故事中的具体时间、地点、共同活动或“今天”的事实；除非用户明确追问剧情，否则不引用故事标题或场景。
+14. 当 conversation_mode 为 natural_chat 时，检索到的日期故事只作为隐藏的性格参考，不要主动报出故事中的具体时间、地点、共同活动或“今天”的事实；除非用户明确追问剧情，否则不引用故事标题或场景。today_context 和你的基本认知不是检索证据，不受这一条限制。
 15. natural_chat 中若证据的 temporal_scope 是 undated_background，不能把台词场景说成“刚才/现在正在发生”；请改用“如果现在要做……我会……”或更概括的角色口吻，避免每次把角色固定在同一个地点（例如实验室）。
 16. mentioned_characters 中的 matched_alias 只用于理解分析员所指的人；surface_policy 为 canonical_response 时，回答必须使用 canonical_name，不得因为分析员用了昵称就自动照抄该昵称。
 17. live_scene 是当前会话临时建立的世界内现状，仅用于回答此刻的位置和活动。它不是历史剧情或永久人格，但在同一个 world_session 中必须保持一致，并且优先于检索到的旧场景。
@@ -7095,6 +7138,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         documents = self.repository.documents_by_id()
         focus = str(context.get("question_focus") or "general")
         if focus in {
+            "date_or_occasion",
             "casual_check_in",
             "food_or_drink",
             "shared_meal",
@@ -7167,6 +7211,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 "character": character.display_name,
                 "character_id": character.character_id,
                 "user_role": "分析员",
+                "today_context": _CHARACTER_IDENTITY.today(character.character_id, self._food_or_drink_clock(context)),
                 "user_message": "" if context.get("arrival_event") else context.get("user_message") or message,
                 **({"arrival_event": context["arrival_event"]} if context.get("arrival_event") else {}),
                 "analyst_content_blocks": context.get("analyst_content_blocks") or [],
