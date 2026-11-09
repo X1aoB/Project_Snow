@@ -3323,6 +3323,38 @@ require_runner_controller_binding
         self.assertIn("egress-proxy", jobs["gate"]["needs"])
         self.assertIn("egress-proxy", jobs["release"]["needs"])
 
+    def test_embedding_reuse_is_bound_to_actual_image_inputs_after_failed_publication(self) -> None:
+        import yaml
+
+        workflows = self.app_root.parent / '.github/workflows'
+        release = yaml.safe_load((workflows / 'publish-images.yml').read_text(encoding='utf-8'))
+        steps = release['jobs']['publish']['steps']
+        identified = {step['id']: step for step in steps if 'id' in step}
+        previous = identified['embedding-previous']
+        self.assertNotIn('if', previous)
+        self.assertIn('docker image inspect', previous['run'])
+        self.assertIn('io.project-snow.embedding-inputs-sha256', previous['run'])
+        plan = identified['embedding-plan']
+        self.assertNotIn('if', plan)
+        self.assertEqual(plan['env']['PREVIOUS_FINGERPRINT'], '${{ steps.embedding-previous.outputs.inputs_sha256 }}')
+        self.assertIn('--previous-fingerprint', plan['run'])
+        self.assertIn('prepare_embedding_context.py', plan['run'])
+        build = identified['embedding-build']
+        compare = next(step for step in steps if step.get('name', '').startswith('Prove the new embedding'))
+        tag = next(step for step in steps if step.get('name', '').startswith('Tag reused embedding'))
+        self.assertEqual(build['if'], "steps.embedding-plan.outputs.rebuild == 'true'")
+        self.assertEqual(compare['if'], build['if'])
+        self.assertEqual(tag['if'], "steps.embedding-plan.outputs.rebuild == 'false'")
+        self.assertEqual(compare['env']['PREVIOUS_DIGEST'], '${{ steps.embedding-previous.outputs.digest }}')
+        ci = yaml.safe_load((workflows / 'ci.yml').read_text(encoding='utf-8'))
+        pr_build = next(step for step in ci['jobs']['embedding-image']['steps'] if step.get('id') == 'embedding-build')
+        for image in (build['with'], pr_build['with']):
+            self.assertEqual(image['context'], '${{ steps.embedding-plan.outputs.context }}')
+            self.assertEqual(image['file'], '${{ steps.embedding-plan.outputs.context }}/infra/embedding.Dockerfile')
+            self.assertEqual(image['platforms'], 'linux/amd64')
+            self.assertEqual(image['labels'], 'io.project-snow.embedding-inputs-sha256=${{ steps.embedding-plan.outputs.inputs_sha256 }}')
+            self.assertNotIn('build-args', image, 'All build arguments must be bound by the fingerprinted Dockerfile')
+
     def test_nightly_health_and_candidate_image_security_are_distinct(self) -> None:
         workflows = self.app_root.parent / ".github" / "workflows"
         workflow = (workflows / "ci.yml").read_text(encoding="utf-8")

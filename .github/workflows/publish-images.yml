@@ -74,23 +74,8 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
       - run: python App/scripts/report_trivy_findings.py trivy-application.json
-      - name: Build and push changed embedding image
-        if: inputs.embedding_changed
-        id: embedding-build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: App
-          file: App/infra/embedding.Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.images.outputs.embedding }}:${{ github.sha }}
-          provenance: mode=max
-          sbom: true
-          cache-from: type=gha,scope=embedding
-          cache-to: type=gha,mode=max,scope=embedding
-      - name: Resolve previous embedding digest for fresh verification
-        if: ${{ !inputs.embedding_changed }}
-        id: embedding-reuse
+      - name: Resolve previous embedding digest and its actual build inputs
+        id: embedding-previous
         shell: bash
         env:
           IMAGE: ${{ steps.images.outputs.embedding }}
@@ -110,18 +95,49 @@ jobs:
           test -n "$digest"
           echo "Selected embedding digest from main ancestor $source_sha for fresh scanning."
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          docker pull --platform linux/amd64 "$IMAGE@$digest"
+          fingerprint="$(docker image inspect --format '{{ with .Config.Labels }}{{ index . "io.project-snow.embedding-inputs-sha256" }}{{ end }}' "$IMAGE@$digest")"
+          # Legacy images have no label. They must be rebuilt, even when the
+          # latest commit only changes tests after an earlier failed release.
+          if [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "inputs_sha256=$fingerprint" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Prepare complete embedding context and decide whether reuse is valid
+        id: embedding-plan
+        env:
+          PREVIOUS_FINGERPRINT: ${{ steps.embedding-previous.outputs.inputs_sha256 }}
+          CHANGED: ${{ inputs.embedding_changed }}
+        run: >-
+          python App/scripts/prepare_embedding_context.py --app-root App
+          --previous-fingerprint "$PREVIOUS_FINGERPRINT" --changed "$CHANGED"
+          --github-output "$GITHUB_OUTPUT"
+      - name: Build and push embedding image when actual inputs require it
+        if: steps.embedding-plan.outputs.rebuild == 'true'
+        id: embedding-build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: ${{ steps.embedding-plan.outputs.context }}
+          file: ${{ steps.embedding-plan.outputs.context }}/infra/embedding.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.images.outputs.embedding }}:${{ github.sha }}
+          labels: io.project-snow.embedding-inputs-sha256=${{ steps.embedding-plan.outputs.inputs_sha256 }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=embedding
+          cache-to: type=gha,mode=max,scope=embedding
       - name: Select embedding digest
         id: embedding
         shell: bash
         env:
           BUILT: ${{ steps.embedding-build.outputs.digest }}
-          REUSED: ${{ steps.embedding-reuse.outputs.digest }}
+          REUSED: ${{ steps.embedding-previous.outputs.digest }}
         run: |
           digest="${BUILT:-$REUSED}"
           test -n "$digest"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Tag reused embedding digest for the current main SHA
-        if: ${{ !inputs.embedding_changed }}
+        if: steps.embedding-plan.outputs.rebuild == 'false'
         shell: bash
         env:
           IMAGE: ${{ steps.images.outputs.embedding }}
@@ -141,37 +157,12 @@ jobs:
           ignore-unfixed: true
       - name: Enforce embedding vulnerability gate
         run: python App/scripts/report_trivy_findings.py trivy-embedding.json --exceptions App/config/trivy-exceptions.json
-      - name: Resolve previous embedding digest for new-image vector comparison
-        if: inputs.embedding_changed
-        id: embedding-compare-previous
-        shell: bash
-        env:
-          IMAGE: ${{ steps.images.outputs.embedding }}
-          PREVIOUS_SHA: ${{ inputs.previous_sha }}
-        run: |
-          # Same first-parent ancestry walk as "Resolve previous embedding
-          # digest"; used only to prove the pushed new image matches the last
-          # released one.
-          digest=""
-          source_sha=""
-          for candidate in $(git rev-list --first-parent "$PREVIOUS_SHA"); do
-            if image_info="$(docker buildx imagetools inspect "$IMAGE:$candidate" 2>/dev/null)"; then
-              digest="$(printf '%s\n' "$image_info" | awk '/^Digest:/ {print $2; exit}')"
-              if [ -n "$digest" ]; then
-                source_sha="$candidate"
-                break
-              fi
-            fi
-          done
-          test -n "$digest"
-          echo "Resolved previous embedding digest from main ancestor $source_sha for vector comparison."
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Prove the new embedding image matches the previously released vectors
-        if: inputs.embedding_changed
+        if: steps.embedding-plan.outputs.rebuild == 'true'
         env:
           IMAGE: ${{ steps.images.outputs.embedding }}
           NEW_DIGEST: ${{ steps.embedding.outputs.digest }}
-          PREVIOUS_DIGEST: ${{ steps.embedding-compare-previous.outputs.digest }}
+          PREVIOUS_DIGEST: ${{ steps.embedding-previous.outputs.digest }}
         run: |
           cleanup() {
             docker rm -f snow-embedding-new snow-embedding-old >/dev/null 2>&1 || true
