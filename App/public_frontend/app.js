@@ -8275,8 +8275,12 @@ document.addEventListener("visibilitychange", () => {
 });
 
 const WRITER_LOCK_NAME = "project-snow-public:writer:v1";
-async function tryWriterLease() {
+const WRITER_HANDOFF_TIMEOUT_MS = 15000;
+let writerTakeover = null;
+let writerReleasePending = null;
+async function tryWriterLease(signal) {
   const db = await openDB();
+  if (signal?.aborted) return false;
   if (!db) return true;
   return new Promise((resolve, reject) => {
     const tx = db.transaction("app_state", "readwrite");
@@ -8285,7 +8289,7 @@ async function tryWriterLease() {
     const read = store.get("writer_lease");
     read.onsuccess = () => {
       const lease = read.result;
-      if (!lease || lease.owner === state.writerId || lease.expiresAt <= Date.now()) {
+      if (!signal?.aborted && (!lease || lease.owner === state.writerId || lease.expiresAt <= Date.now())) {
         store.put({ key: "writer_lease", owner: state.writerId, expiresAt: Date.now() + 15000 });
         owned = true;
       }
@@ -8295,9 +8299,26 @@ async function tryWriterLease() {
     tx.onabort = () => reject(tx.error);
   });
 }
-async function acquireWriter() {
+function waitForWriterChange(signal) {
+  return new Promise(resolve => {
+    const finish = () => {
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      if (writerTakeover?.wake === finish) writerTakeover.wake = null;
+      resolve();
+    };
+    const timer = window.setTimeout(finish, 250);
+    if (writerTakeover) writerTakeover.wake = finish;
+    signal.addEventListener("abort", finish, { once: true });
+    if (signal.aborted) finish();
+  });
+}
+async function acquireWriter({ signal, wait = false } = {}) {
+  if (state.writerReady && state.writerOwned) return true;
   // Without a persistent database there is no shared history to coordinate.
-  if (!(await openDB())) {
+  const db = await openDB();
+  if (signal?.aborted) return false;
+  if (!db) {
     state.writerOwned = true;
     state.writerReady = true;
     $("tab-session-banner").hidden = true;
@@ -8306,14 +8327,20 @@ async function acquireWriter() {
   }
   if (navigator.locks?.request) {
     const owned = await new Promise((resolve) => {
-      void navigator.locks.request(WRITER_LOCK_NAME, { ifAvailable: true }, async (lock) => {
+      // A queued, abortable request follows the actual lock release, even when
+      // persistence is slow or the BroadcastChannel notification is delayed.
+      void navigator.locks.request(WRITER_LOCK_NAME, wait ? { signal } : { ifAvailable: true }, async (lock) => {
         if (!lock) { resolve(false); return; }
         await new Promise((release) => { state.writerRelease = release; resolve(true); });
       }).catch(() => resolve(false));
     });
     state.writerOwned = owned;
   } else {
-    state.writerOwned = await tryWriterLease().catch(() => false);
+    do {
+      state.writerOwned = await tryWriterLease(signal).catch(() => false);
+      if (state.writerOwned || !wait || signal.aborted) break;
+      await waitForWriterChange(signal);
+    } while (!signal.aborted);
     if (state.writerOwned && !state.writerRenewTimer) state.writerRenewTimer = window.setInterval(async () => {
       if (!(await tryWriterLease().catch(() => false))) await releaseWriter();
     }, 5000);
@@ -8323,7 +8350,12 @@ async function acquireWriter() {
   updateComposerAvailability();
   return state.writerOwned;
 }
-async function releaseWriter() {
+function releaseWriter() {
+  // Two requesting tabs must not persist/release the same writer concurrently.
+  if (!writerReleasePending) writerReleasePending = persistAndReleaseWriter().finally(() => { writerReleasePending = null; });
+  return writerReleasePending;
+}
+async function persistAndReleaseWriter() {
   cancelBackgroundSummaries();
   for (const request of state.chatRequestByCharacter.values()) request.controller.abort();
   await saveDraftNow();
@@ -8376,30 +8408,40 @@ async function startTabCoordination() {
   if (state.writerChannel) {
     state.writerChannel.onmessage = async ({ data }) => {
       if (!data || data.sender === state.writerId) return;
-      if (data.type === "take-over" && state.writerOwned) await releaseWriter();
-      if (data.type === "released" && $("take-over-session").disabled) {
-        if (await acquireWriter()) await refreshStoredHistory();
-        $("take-over-session").disabled = false;
+      if (data.type === "take-over" && state.writerOwned) {
+        try { await releaseWriter(); }
+        catch { toast("会话保存失败，暂时无法交给另一标签页，请重试。"); }
       }
+      if (data.type === "released") writerTakeover?.wake?.();
       if (data.type === "history-changed" && !state.writerOwned) await refreshStoredHistory();
     };
   }
   await acquireWriter();
 }
 $("take-over-session").onclick = async () => {
+  if (writerTakeover) return;
+  const controller = new AbortController();
+  writerTakeover = { controller, wake: null };
   $("take-over-session").disabled = true;
-  if (await acquireWriter()) {
+  const timeout = window.setTimeout(() => controller.abort(), WRITER_HANDOFF_TIMEOUT_MS);
+  try {
+    if (!await acquireWriter()) {
+      state.writerChannel?.postMessage({ type: "take-over", sender: state.writerId });
+      if (!await acquireWriter({ signal: controller.signal, wait: true })) {
+        toast("等待另一标签页释放会话超时，请关闭该页后重试。");
+        return;
+      }
+    }
+    window.clearTimeout(timeout);
     await refreshStoredHistory();
+  } catch {
+    toast("接管会话失败，请重试；原有草稿仍保存在本机。");
+  } finally {
+    window.clearTimeout(timeout);
+    controller.abort();
+    writerTakeover = null;
     $("take-over-session").disabled = false;
-    return;
   }
-  state.writerChannel?.postMessage({ type: "take-over", sender: state.writerId });
-  window.setTimeout(async () => {
-    if (!$("take-over-session").disabled) return;
-    if (await acquireWriter()) await refreshStoredHistory();
-    else toast("另一标签页尚未释放会话，请关闭该页后重试。");
-    $("take-over-session").disabled = false;
-  }, 1500);
 };
 
 async function deleteCharacterHistory() {

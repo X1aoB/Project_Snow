@@ -1051,6 +1051,20 @@ class SnowAdvFeaturesUITests(TestCase):
         keys = ("dialogue", "art", "row")
         self.assertEqual({key: state[key] for key in keys}, {key: rest[key] for key in keys}, state)
 
+    @staticmethod
+    def wait_stage_layout(page):
+        # Textarea sizing and the composer ResizeObserver run in separate render
+        # phases. A fixed 200 ms can observe the new input height with the old
+        # --snow-composer-h (the CI failure was exactly three 24 px lines).
+        # Wait for propagation, not for the geometry assertions to become true.
+        page.evaluate('document.fonts.ready')
+        page.wait_for_function("""() => {
+          const app = document.getElementById('chat-app'), composer = document.getElementById('composer');
+          const dialogue = document.getElementById('stage-dialogue');
+          return parseFloat(app.style.getPropertyValue('--snow-composer-h')) === Math.round(composer.getBoundingClientRect().height)
+            && parseFloat(app.style.getPropertyValue('--snow-dialogue-h')) === Math.round(dialogue.getBoundingClientRect().height);
+        }""")
+
     def assert_tab_above_dialogue(self, state):
         tab, box = state["tab"], state["dialogue"]
         self.assertIsNotNone(tab, state)
@@ -1067,27 +1081,27 @@ class SnowAdvFeaturesUITests(TestCase):
                 dialogue.DialogueHandler.scenario = "success"
                 page = self.open(self.page(width=width, height=height, tone=tone, locale="zh-CN"))
                 self.enter_stage(page)
-                page.wait_for_timeout(300)
+                self.wait_stage_layout(page)
                 rest = page.evaluate(self.STAGE_BOX)
                 self.assertIsNone(rest["tab"])
                 page.locator("#message-input").fill("好")
-                page.wait_for_timeout(200)
+                self.wait_stage_layout(page)
                 self.assert_stage_still(rest, page.evaluate(self.STAGE_BOX))
                 # A multi-line draft lifts the dialogue box with the composer, but the portrait keeps its size.
                 page.locator("#message-input").fill("好\n再说一句\n还有一句\n最后一句")
-                page.wait_for_timeout(200)
+                self.wait_stage_layout(page)
                 grown = page.evaluate(self.STAGE_BOX)
                 self.assertLess(grown["row"][1], rest["row"][1] - 20, grown)
                 self.assertLessEqual(max(abs(a - b) for a, b in zip(grown["art"], rest["art"])), 6, (grown["art"], rest["art"]))
                 page.locator("#message-input").fill("好")
-                page.wait_for_timeout(200)
+                self.wait_stage_layout(page)
                 self.assert_stage_still(rest, page.evaluate(self.STAGE_BOX))
 
                 held = []
                 page.route("**/public/v2/chat/stream", lambda route: held.append(route))
                 page.locator("#send-message").click()
                 page.locator("#stop-waiting").wait_for(state="visible")
-                page.wait_for_timeout(200)
+                self.wait_stage_layout(page)
                 pending = page.evaluate(self.STAGE_BOX)
                 self.assert_stage_still(rest, pending)
                 self.assert_tab_above_dialogue(pending)
@@ -1104,6 +1118,7 @@ class SnowAdvFeaturesUITests(TestCase):
                 route.fulfill(status=response.status, headers=headers, body=response.text())
                 page.wait_for_function("() => document.querySelector('#request-status')?.textContent === '已完成'")
                 page.wait_for_function("() => document.querySelector('#stage-advance')?.classList.contains('is-ready')")
+                self.wait_stage_layout(page)
                 done = page.evaluate(self.STAGE_BOX)
                 self.assert_stage_still(rest, done)
                 self.assertIsNone(done["tab"], "▼ already marks the line as finished; no lingering 已完成 tag")
@@ -1112,6 +1127,7 @@ class SnowAdvFeaturesUITests(TestCase):
                 page.locator("#message-input").fill("合成日常聊天")
                 page.locator("#send-message").click()
                 page.locator("#composer .request-status-row .request-retry").wait_for(state="visible")
+                self.wait_stage_layout(page)
                 failed = page.evaluate(self.STAGE_BOX)
                 self.assert_stage_still(rest, failed)
                 self.assert_tab_above_dialogue(failed)
