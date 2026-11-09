@@ -1051,19 +1051,95 @@ class SnowAdvFeaturesUITests(TestCase):
         keys = ("dialogue", "art", "row")
         self.assertEqual({key: state[key] for key in keys}, {key: rest[key] for key in keys}, state)
 
-    @staticmethod
-    def wait_stage_layout(page):
+    STAGE_LAYOUT_READY = """() => {
+      const app = document.getElementById('chat-app'), composer = document.getElementById('composer');
+      const dialogue = document.getElementById('stage-dialogue'), toast = document.getElementById('toast');
+      const composerH = Math.round(composer.getBoundingClientRect().height);
+      const dialogueH = Math.round(dialogue.getBoundingClientRect().height);
+      const tabH = Math.round(composer.querySelector('.request-status-row').getBoundingClientRect().height);
+      const toastBottom = composerH + dialogueH + (tabH ? tabH + 8 : 0) + 8;
+      return parseFloat(app.style.getPropertyValue('--snow-composer-h')) === composerH
+        && parseFloat(app.style.getPropertyValue('--snow-dialogue-h')) === dialogueH
+        && parseFloat(toast.style.getPropertyValue('--snow-toast-b')) === toastBottom
+        && document.fonts.status === 'loaded';
+    }"""
+
+    def wait_stage_layout(self, page):
         # Textarea sizing and the composer ResizeObserver run in separate render
         # phases. A fixed 200 ms can observe the new input height with the old
         # --snow-composer-h (the CI failure was exactly three 24 px lines).
+        # A status-only change leaves those two heights unchanged: also wait for
+        # its separate observation to update the toast offset. Otherwise the
+        # toast can overlap the newly visible request tab even after this gate.
         # Wait for propagation, not for the geometry assertions to become true.
         page.evaluate('document.fonts.ready')
-        page.wait_for_function("""() => {
-          const app = document.getElementById('chat-app'), composer = document.getElementById('composer');
-          const dialogue = document.getElementById('stage-dialogue');
-          return parseFloat(app.style.getPropertyValue('--snow-composer-h')) === Math.round(composer.getBoundingClientRect().height)
-            && parseFloat(app.style.getPropertyValue('--snow-dialogue-h')) === Math.round(dialogue.getBoundingClientRect().height);
-        }""")
+        page.wait_for_function(self.STAGE_LAYOUT_READY)
+
+    def test_stage_layout_waits_for_delayed_composer_and_status_observations(self):
+        page = self.page(width=1440, height=900, tone='dusk', locale='zh-CN')
+        # Gate the real observer delivery, independently of machine speed. This
+        # recreates both CI failures without relying on a lucky scheduler delay.
+        page.add_init_script("""(() => {
+          const Original = ResizeObserver;
+          window.ResizeObserver = class extends Original {
+            constructor(callback) {
+              const targets = new Set();
+              super((entries, observer) => {
+                if (window.holdComposerObserver && targets.has('composer')) {
+                  window.flushComposerObserver = () => callback(entries, observer);
+                } else callback(entries, observer);
+              });
+              this.targets = targets;
+            }
+            observe(target, options) { this.targets.add(target.id); return super.observe(target, options); }
+          };
+        })()""")
+        self.open(page)
+        self.enter_stage(page)
+        page.locator('#message-input').fill('好')
+        self.wait_stage_layout(page)
+        rest = page.evaluate(self.STAGE_BOX)
+        page.locator('#message-input').fill('好\n再说一句\n还有一句\n最后一句')
+        self.wait_stage_layout(page)
+        page.evaluate('window.holdComposerObserver = true')
+        page.locator('#message-input').fill('好')
+        page.wait_for_function('Boolean(window.flushComposerObserver)')
+        delayed = page.evaluate(self.STAGE_BOX)
+        self.assertEqual(delayed['row'], rest['row'])
+        self.assertNotEqual(delayed['dialogue'], rest['dialogue'])
+        self.assertFalse(page.evaluate(self.STAGE_LAYOUT_READY))
+        page.evaluate('window.holdComposerObserver = false; window.flushComposerObserver()')
+        self.wait_stage_layout(page)
+        self.assert_stage_still(rest, page.evaluate(self.STAGE_BOX))
+
+        held = []
+        page.route('**/public/v2/chat/stream', lambda route: held.append(route))
+        page.evaluate('window.holdComposerObserver = true; window.flushComposerObserver = null')
+        with page.expect_request('**/public/v2/chat/stream'):
+            page.locator('#send-message').click()
+        page.locator('#stop-waiting').wait_for(state='visible')
+        page.wait_for_function('Boolean(window.flushComposerObserver)')
+        # The first fix checked only these heights, so it returned prematurely.
+        self.assertTrue(page.evaluate("""() => {
+          const app = document.getElementById('chat-app');
+          return parseFloat(app.style.getPropertyValue('--snow-composer-h')) === Math.round(document.getElementById('composer').getBoundingClientRect().height)
+            && parseFloat(app.style.getPropertyValue('--snow-dialogue-h')) === Math.round(document.getElementById('stage-dialogue').getBoundingClientRect().height);
+        }"""))
+        self.assertFalse(page.evaluate(self.STAGE_LAYOUT_READY))
+        page.evaluate("""() => { const toast = document.getElementById('toast');
+          toast.textContent = '合成提示'; toast.hidden = false; }""")
+        delayed = page.evaluate(self.STAGE_BOX)
+        self.assertGreater(delayed['toast'][3], delayed['tab'][1] - 4)
+        page.evaluate('window.holdComposerObserver = false; window.flushComposerObserver()')
+        self.wait_stage_layout(page)
+        settled = page.evaluate(self.STAGE_BOX)
+        self.assert_stage_still(rest, settled)
+        self.assert_tab_above_dialogue(settled)
+        self.assertLessEqual(settled['toast'][3], settled['tab'][1] - 4)
+        self.assertEqual(self.errors, [])
+        for route in held:
+            route.abort()
+        page.close()
 
     def assert_tab_above_dialogue(self, state):
         tab, box = state["tab"], state["dialogue"]
