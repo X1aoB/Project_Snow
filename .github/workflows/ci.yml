@@ -687,7 +687,19 @@ jobs:
           cache: npm
           cache-dependency-path: App/client/package-lock.json
       - run: npm ci
-      - run: node node_modules/electron/install.js
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - name: Install the pinned Electron binary with bounded download retries
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            node node_modules/electron/install.js
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($attempt -eq 3) { exit $LASTEXITCODE }
+            Write-Host "Electron binary download failed (attempt $attempt/3); retrying."
+            Start-Sleep -Seconds (10 * $attempt)
+          }
       - run: npm audit --audit-level=high
       - run: npm run smoke:brand
 

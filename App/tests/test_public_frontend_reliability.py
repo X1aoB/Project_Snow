@@ -341,6 +341,86 @@ class PublicFrontendReliabilityTests(TestCase):
             self.assertTrue(first.locator("#send-message").is_disabled())
             browser.close()
 
+    @staticmethod
+    def hold_writer_persistence(page):
+        # Delay the real IndexedDB completion event, so releaseWriter is still
+        # awaiting durable thread persistence while the other tab requests it.
+        page.evaluate("""() => {
+          const descriptor = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, 'oncomplete');
+          Object.defineProperty(IDBTransaction.prototype, 'oncomplete', {...descriptor, set(handler) {
+            descriptor.set.call(this, event => {
+              if (this.mode === 'readwrite' && this.objectStoreNames.contains('threads') && !window.releasePersistence) {
+                window.releasePersistence = () => handler.call(this, event);
+              } else handler.call(this, event);
+            });
+          }});
+        }""")
+
+    def test_slow_handoff_waits_for_persistence_and_ignores_duplicate_releases(self):
+        for leases in (False, True):
+            with self.subTest(leases=leases), sync_playwright() as playwright:
+                browser = _launch_browser(playwright)
+                context = browser.new_context()
+                if leases:
+                    context.add_init_script("Object.defineProperty(navigator, 'locks', {value: undefined})")
+                first = context.new_page()
+                second = context.new_page()
+                errors = []
+                for page in (first, second):
+                    page.on('pageerror', lambda error: errors.append(str(error)))
+                self.open(first)
+                first.locator('#message-input').fill('缓慢保存也不能丢失的草稿')
+                self.open(second)
+                self.hold_writer_persistence(first)
+                second.locator('#take-over-session').click()
+                first.wait_for_function('Boolean(window.releasePersistence)')
+                # Deliberately cross the old 1.5 s failure boundary with the
+                # write held; this is fault injection, not a readiness wait.
+                second.wait_for_timeout(1700)
+                self.assertTrue(second.locator('#take-over-session').is_disabled())
+                self.assertTrue(second.locator('#tab-session-banner').is_visible())
+                first.evaluate('window.releasePersistence()')
+                second.wait_for_function("document.querySelector('#message-input').value === '缓慢保存也不能丢失的草稿' && document.querySelector('#tab-session-banner').hidden && !document.querySelector('#take-over-session').disabled")
+                first.wait_for_function("!document.querySelector('#tab-session-banner').hidden")
+                # A notification is only a wakeup, never a second acquisition
+                # which can overwrite writerOwned after we already hold a lock.
+                first.evaluate("""() => {
+                  const channel = new BroadcastChannel('project-snow-public:writer:v1');
+                  channel.postMessage({type:'released', sender:'synthetic-duplicate'});
+                  channel.postMessage({type:'released', sender:'synthetic-duplicate'});
+                  channel.close();
+                }""")
+                second.wait_for_timeout(300)
+                self.assertTrue(second.locator('#tab-session-banner').is_hidden())
+                self.assertTrue(first.locator('#send-message').is_disabled())
+                self.assertEqual(errors, [])
+                browser.close()
+
+    def test_handoff_timeout_cancels_pending_lock_and_allows_explicit_retry(self):
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            context = browser.new_context()
+            first, second = context.new_page(), context.new_page()
+            self.open(first)
+            first.locator('#message-input').fill('超时后仍保存的草稿')
+            self.open(second)
+            self.hold_writer_persistence(first)
+            second.clock.install()
+            second.locator('#take-over-session').click()
+            first.wait_for_function('Boolean(window.releasePersistence)')
+            second.wait_for_function("async () => (await navigator.locks.query()).pending.some(lock => lock.name === 'project-snow-public:writer:v1')")
+            second.clock.fast_forward(15001)
+            second.wait_for_function("!document.querySelector('#take-over-session').disabled")
+            self.assertIn('超时', second.locator('#toast').text_content())
+            locks = second.evaluate('navigator.locks.query()')
+            self.assertEqual(locks['pending'], [])
+            first.evaluate('window.releasePersistence()')
+            first.wait_for_function("!document.querySelector('#tab-session-banner').hidden")
+            self.assertTrue(second.locator('#tab-session-banner').is_visible())
+            second.locator('#take-over-session').click()
+            second.wait_for_function("document.querySelector('#tab-session-banner').hidden && document.querySelector('#message-input').value === '超时后仍保存的草稿'")
+            browser.close()
+
     def test_ten_thousand_messages_boot_is_bounded_and_backup_is_portable(self):
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)
