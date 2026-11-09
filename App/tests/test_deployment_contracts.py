@@ -1004,8 +1004,8 @@ grep '^PUBLIC_STATISTICS_ENABLED=' "$output_file"
             "PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2|PUBLIC_UI_SNOW_ADV|\\\n            PUBLIC_PROACTIVE_MESSAGES_ENABLED|PUBLIC_BYOK_RETENTION_ENABLED",
             build_function,
         )
-        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=1.1.0", build_function)
-        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-29", build_function)
+        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=1.2.0", build_function)
+        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-11-09", build_function)
 
         harness = r'''
 set -u
@@ -1062,6 +1062,18 @@ fi
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertNotIn("status=0", result.stdout)
                 self.assertIn("Public interface flags must be true or false.", result.stderr)
+        # The voice survey ships on; a false in public.env withdraws it.
+        survey = harness.replace(r"\(PROACTIVE_MESSAGES_ENABLED\|BYOK_RETENTION_ENABLED\)", "VOICE_SURVEY_V1")
+        for flag, value, expected in (("absent", "", "true"), ("PUBLIC_VOICE_SURVEY_V1", "false", "false"),
+                                      ("PUBLIC_VOICE_SURVEY_V1", "true", "true")):
+            with self.subTest(survey=value), tempfile.TemporaryDirectory() as temporary_root:
+                result = self.run_posix_shell(survey, Path(temporary_root).as_posix(), flag, value)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(f"PUBLIC_VOICE_SURVEY_V1={expected}", result.stdout)
+        with tempfile.TemporaryDirectory() as temporary_root:
+            result = self.run_posix_shell(survey, Path(temporary_root).as_posix(), "PUBLIC_VOICE_SURVEY_V1", "yes")
+        self.assertNotIn("status=0", result.stdout)
+        self.assertIn("Public interface flags must be true or false.", result.stderr)
 
     def test_compose_allows_a_colour_to_pin_verified_media(self) -> None:
         compose = self.read("compose.prod.yml")
@@ -3180,8 +3192,8 @@ require_runner_controller_binding
         self.assertIn("Public environment contains a duplicate key.", script)
         self.assertIn("Public environment contains a disallowed key.", script)
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", script)
-        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=1.1.0", script)
-        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-29", script)
+        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=1.2.0", script)
+        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-11-09", script)
         self.assertIn("PUBLIC_TURNSTILE_HOSTNAME=snow.xiaob.dev", script)
         self.assertIn("PUBLIC_TURNSTILE_MAX_AGE_SECONDS=300", script)
         self.assertIn("PUBLIC_MAX_PROVIDER_CALLS_PER_ACTION=2", script)
@@ -3749,15 +3761,15 @@ seal_configuration_snapshot "$seal_root"
         self.assertIn("python ./scripts/prepare_public_frontend.py --verify --output /app", dockerfile)
         self.assertNotIn("RUN python ./scripts/fingerprint_public_frontend.py", dockerfile)
         self.assertIn("pip install --no-cache-dir --require-hashes", dockerfile)
-        self.assertIn('href="/app.css?v=1.1.0"', public_html)
-        self.assertIn('src="/app.js?v=1.1.0"', public_html)
+        self.assertIn('href="/app.css?v=1.2.0"', public_html)
+        self.assertIn('src="/app.js?v=1.2.0"', public_html)
         self.assertIn('href="/shared/immersive.css?v=0.9.2"', public_html)
         self.assertIn('src="/privacy/privacy.js?v=0.9.2"', privacy_html)
         self.assertIn('experience_notice_version || "0.9.2"', public_javascript)
-        self.assertIn("PUBLIC_APP_VERSION=1.1.0", public_env)
+        self.assertIn("PUBLIC_APP_VERSION=1.2.0", public_env)
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", public_env)
-        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=1.1.0", public_env)
-        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-10-29", public_env)
+        self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=1.2.0", public_env)
+        self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-11-09", public_env)
         self.assertIn("PUBLIC_BYOK_LIFETIME_HOURS=12", public_env)
         self.assertIn("PUBLIC_MEDIA_VERSION=2026.10.18.character.webp92.2", public_env)
         self.assertIn("PUBLIC_STICKER_VERSION=2026.08.19.sticker.1", public_env)

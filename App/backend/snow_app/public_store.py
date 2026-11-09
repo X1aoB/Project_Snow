@@ -16,6 +16,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.pool import StaticPool
 
 from .proactive_store import PROACTIVE_SCHEMA_SQL, ProactiveStoreMixin
+from .voice_survey_store import VOICE_SURVEY_SCHEMA_SQL, VoiceSurveyStoreMixin
 
 
 class PublicStoreUnavailable(RuntimeError):
@@ -205,7 +206,7 @@ PUBLIC_FEEDBACK_TRIAGE_STATUSES = {
 }
 
 
-class PublicStore(ProactiveStoreMixin):
+class PublicStore(ProactiveStoreMixin, VoiceSurveyStoreMixin):
     def __init__(self, database_url: str, *, engine: Engine | None = None):
         self.database_url = database_url
         if engine is not None:
@@ -250,6 +251,7 @@ class PublicStore(ProactiveStoreMixin):
             for statement in (
                 SCHEMA_SQL + OUTBOX_SCHEMA_SQL + LEASE_SCHEMA_SQL
                 + FEEDBACK_TRIAGE_SCHEMA_SQL + REQUEST_BLOCKS_SCHEMA_SQL + PROACTIVE_SCHEMA_SQL
+                + VOICE_SURVEY_SCHEMA_SQL
             ).split(";"):
                 if statement.strip():
                     connection.execute(text(statement))
@@ -1284,6 +1286,7 @@ class PublicStore(ProactiveStoreMixin):
                 ("public_proactive_day", "expires_at"),
                 ("public_rendezvous_authority", "expires_at"),
                 ("public_credential_revocation", "expires_at"),
+                ("public_voice_survey_response", "expires_at"),
             ):
                 result = connection.execute(text(f"DELETE FROM {table} WHERE {column} <= :now"), {"now": now})
                 deleted[table] = max(0, int(result.rowcount or 0))

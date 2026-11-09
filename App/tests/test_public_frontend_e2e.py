@@ -139,6 +139,9 @@ class BrowserLaunchContractTests(TestCase):
 class PublicFrontendHandler(BaseHTTPRequestHandler):
     content_security_policy = ""
     announcement_payload: dict[str, object] | None = None
+    voice_survey_enabled = False
+    voice_survey_answered = False
+    voice_survey_payloads: list[dict[str, object]] = []
     announcement_failures = 0
     announcement_requests = 0
     chat_stream_started: threading.Event | None = None
@@ -195,6 +198,9 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
         if path == "/public/v1/byok/verification":
             self._json({"verification_required": type(self).turnstile_verification_required})
             return
+        if path == "/public/v1/voice-survey":
+            self._json({"survey_version": "voice-survey-1", "answered": type(self).voice_survey_answered})
+            return
         if path == "/announcements.json":
             type(self).announcement_requests += 1
             if type(self).announcement_failures:
@@ -210,6 +216,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
                 {
                     "app_version": "e2e",
                     "data_version": "fixture",
+                    "voice_survey": {"enabled": type(self).voice_survey_enabled, "survey_version": "voice-survey-1"},
                     "turnstile_site_key": type(self).turnstile_site_key,
                     "experience_notice_version": "0.9.2",
                     "analyst_avatar": {
@@ -315,7 +322,7 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
             manifest = self._expression_manifest(character_id)
             self._json(manifest)
             return
-        assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/snow-adv.css": "snow-adv.css", "/snow-adv-fonts.css": "snow-adv-fonts.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js"}
+        assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/snow-adv.css": "snow-adv.css", "/snow-adv-fonts.css": "snow-adv-fonts.css", "/privacy/": "privacy/index.html", "/privacy/index.html": "privacy/index.html", "/privacy/privacy.js": "privacy/privacy.js", "/voice-survey.json": "voice-survey.json"}
         if path.startswith("/assets/fonts/") and path.endswith(".woff2"):
             candidate = (PUBLIC_ROOT / path.lstrip("/")).resolve()
             if candidate.is_relative_to((PUBLIC_ROOT / "assets" / "fonts").resolve()) and candidate.is_file():
@@ -391,6 +398,10 @@ class PublicFrontendHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         payload = json.loads(self.rfile.read(length) or b"{}")
         type(self).request_paths.append(self.path)
+        if self.path == "/public/v1/voice-survey":
+            type(self).voice_survey_payloads.append(payload)
+            self._json({"saved": True, "survey_version": "voice-survey-1", "retention_days": 180})
+            return
         if self.path == "/public/v1/byok/session":
             if type(self).session_verification_failures:
                 type(self).session_verification_failures -= 1
@@ -796,6 +807,9 @@ class PublicFrontendE2ETests(TestCase):
     def setUp(self) -> None:
         PublicFrontendHandler.content_security_policy = ""
         PublicFrontendHandler.announcement_payload = None
+        PublicFrontendHandler.voice_survey_enabled = False
+        PublicFrontendHandler.voice_survey_answered = False
+        PublicFrontendHandler.voice_survey_payloads = []
         PublicFrontendHandler.announcement_failures = 0
         PublicFrontendHandler.announcement_requests = 0
         PublicFrontendHandler.chat_stream_started = None
@@ -1101,6 +1115,171 @@ class PublicFrontendE2ETests(TestCase):
             page.locator("#announcements-dialog[open]").wait_for()
             self.assertIn("公告内容已修订", page.locator("#announcement-updates").inner_text())
             self.assertEqual(errors, [])
+            browser.close()
+
+    def test_birthday_entry_opens_that_character_with_an_unsent_wish(self):
+        feed = _announcement_test_feed()
+        feed["updates"] = []
+        rows = {row["display_name"]: row for row in feed["birthdays"]}
+        rows["茉莉安"].update(character_id="9f5804761c56", display_name="安卡希雅")
+        # A birthday whose character is not in the selector gets no entry.
+        rows["晴"].update(month=9, day=5)
+        PublicFrontendHandler.announcement_payload = feed
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(viewport={"width": 1280, "height": 900}, timezone_id="Asia/Shanghai")
+            errors, posts = [], []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("request", lambda request: request.method == "POST" and posts.append(request.url))
+            self._announcement_page(page)
+            page.locator("#announcements-dialog[open]").wait_for()
+            today = page.locator("#announcement-birthdays-today")
+            self.assertEqual(today.locator("[data-birthday-chat]").count(), 1)
+            entry = today.locator('[data-birthday-chat="9f5804761c56"]')
+            self.assertEqual(entry.get_attribute("aria-label"), "去和安卡希雅聊天，送上生日祝福")
+            self.assertGreaterEqual(entry.bounding_box()["height"], 44)
+            entry.click()
+            page.locator("#announcements-dialog:not([open])").wait_for(state="attached")
+            page.locator("#active-character h1", has_text="安卡希雅").wait_for()
+            composer = page.locator("#message-input")
+            page.wait_for_function("document.querySelector('#message-input').value === '生日快乐，安卡希雅！'")
+            self.assertEqual(page.evaluate("document.activeElement.id"), "message-input")
+            self.assertEqual([url for url in posts if "/chat/" in url], [])
+
+            # What the analyst already wrote is never replaced.
+            composer.fill("我自己写的祝福")
+            page.locator("#open-announcements").click()
+            page.locator("#announcement-tab-birthdays").click()
+            page.locator('#announcement-birthdays-today [data-birthday-chat="9f5804761c56"]').click()
+            page.locator("#announcements-dialog:not([open])").wait_for(state="attached")
+            self.assertEqual(composer.input_value(), "我自己写的祝福")
+
+            # The updates tab carries the same one-click entry beside its banner.
+            feed["updates"] = _announcement_test_feed()["updates"]
+            page.reload(wait_until="networkidle")
+            page.locator("#announcements-dialog[open]").wait_for()
+            page.locator("#announcement-tab-updates").click()
+            chip = page.locator('#announcement-birthday-highlight [data-birthday-chat="9f5804761c56"]')
+            self.assertEqual(chip.inner_text(), "去给安卡希雅送祝福")
+            self.assertEqual(page.locator("#announcement-birthday-highlight [data-birthday-chat]").count(), 1)
+            self.assertEqual(errors, [])
+            browser.close()
+
+    def _survey_page(self, browser, *, width=1280, height=900):
+        page = browser.new_page(viewport={"width": width, "height": height}, timezone_id="Asia/Shanghai")
+        errors, requested = [], []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        page.on("request", lambda request: requested.append(request.url))
+        PublicFrontendHandler.announcement_payload = _announcement_test_feed()
+        self._announcement_page(page)
+        page.locator("#announcements-dialog[open]").wait_for()
+        return page, errors, requested
+
+    def test_voice_survey_stays_silent_while_its_switch_is_off(self):
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page, errors, requested = self._survey_page(browser)
+            self.assertEqual(page.locator("[data-voice-survey]").count(), 0)
+            page.locator("#acknowledge-announcements").click()
+            self.assertEqual([url for url in requested if "voice-survey" in url], [])
+            self.assertEqual(errors, [])
+            browser.close()
+
+    def test_voice_survey_validates_submits_once_and_stops_inviting(self):
+        PublicFrontendHandler.voice_survey_enabled = True
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page, errors, requested = self._survey_page(browser)
+            # The form is fetched only once the visitor asks for it.
+            self.assertEqual([url for url in requested if "voice-survey" in url], [])
+            page.locator('[data-voice-survey="open"]').click()
+            dialog = page.locator(".voice-survey-modal[open]")
+            dialog.wait_for()
+            for phrase in ("网站不赚差价", "1.4 分钱", "还没有定", "不代表这个功能一定会上线", "180 天"):
+                self.assertIn(phrase, dialog.inner_text())
+
+            dialog.locator('button[type="submit"]').click()
+            self.assertIn("必答题", dialog.locator(".voice-survey-error").inner_text())
+            self.assertEqual(page.evaluate("document.activeElement.name"), "use_voice")
+            self.assertEqual(PublicFrontendHandler.voice_survey_payloads, [])
+
+            for name, value in (("use_voice", "often"), ("voice_type", "ai_designed"), ("pass_through_acceptance", "4"),
+                                ("payment_method", "own_key"), ("monthly_budget", "6_20"), ("use_scenes", "group"),
+                                ("priorities", "latency"), ("characters", "9f5804761c56")):
+                dialog.locator(f'input[name="{name}"][value="{value}"]').check()
+            dialog.locator('textarea[name="comment"]').fill("  希望可以调语速  ")
+            self.assertGreaterEqual(dialog.locator(".voice-survey-option").first.bounding_box()["height"], 44)
+            dialog.locator('button[type="submit"]').click()
+            page.locator(".voice-survey-modal").wait_for(state="detached")
+            self.assertEqual(PublicFrontendHandler.voice_survey_payloads, [{
+                "survey_version": "voice-survey-1", "use_voice": "often", "use_scenes": ["group"], "voice_type": "ai_designed",
+                "pass_through_acceptance": 4, "payment_method": "own_key", "monthly_budget": "6_20", "priorities": ["latency"],
+                "characters": ["9f5804761c56"], "adult": "", "comment": "希望可以调语速",
+            }])
+            page.locator("#open-announcements").click()
+            page.locator("#announcements-dialog[open]").wait_for()
+            self.assertEqual(page.locator("[data-voice-survey]").count(), 0)
+            self.assertEqual(errors, [])
+            browser.close()
+
+    def test_voice_survey_can_be_put_off_or_declined(self):
+        PublicFrontendHandler.voice_survey_enabled = True
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page, errors, _requested = self._survey_page(browser)
+            page.locator('[data-voice-survey="open"]').click()
+            page.locator(".voice-survey-modal[open]").wait_for()
+            page.locator(".voice-survey-modal button.secondary-button").click()
+            page.locator(".voice-survey-modal").wait_for(state="detached")
+            self.assertEqual(PublicFrontendHandler.voice_survey_payloads, [])
+            # "Later" keeps the invitation, "don't ask again" removes it for good.
+            page.locator("#open-announcements").click()
+            page.locator('[data-voice-survey="dismiss"]').click()
+            self.assertEqual(page.locator("[data-voice-survey]").count(), 0)
+            page.reload(wait_until="networkidle")
+            page.locator("#open-announcements").click()
+            page.locator("#announcements-dialog[open]").wait_for()
+            self.assertEqual(page.locator("[data-voice-survey]").count(), 0)
+            self.assertEqual(errors, [])
+            browser.close()
+
+    def test_voice_survey_load_failure_never_touches_startup_or_chat(self):
+        PublicFrontendHandler.voice_survey_enabled = True
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page(viewport={"width": 1280, "height": 900}, timezone_id="Asia/Shanghai")
+            errors = []
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.route("**/modules/voice-survey.js", lambda route: route.abort())
+            PublicFrontendHandler.announcement_payload = _announcement_test_feed()
+            self._announcement_page(page)
+            page.locator("#announcements-dialog[open]").wait_for()
+            page.locator('[data-voice-survey="open"]').click()
+            page.locator("#toast", has_text="问卷暂时打不开").wait_for()
+            self.assertEqual(page.locator(".voice-survey-modal").count(), 0)
+            self.assertEqual(page.locator("#connection-status").inner_text(), "服务已连接")
+            self.assertTrue(page.locator("#message-input").is_enabled())
+            self.assertEqual(errors, [])
+            browser.close()
+
+    def test_voice_survey_fits_narrow_screens(self):
+        PublicFrontendHandler.voice_survey_enabled = True
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            for width, height in ((390, 844), (340, 640)):
+                with self.subTest(width=width):
+                    page, errors, _requested = self._survey_page(browser, width=width, height=height)
+                    self._assert_no_horizontal_overflow(page)
+                    page.locator('[data-voice-survey="open"]').click()
+                    dialog = page.locator(".voice-survey-modal[open]")
+                    dialog.wait_for()
+                    box = dialog.bounding_box()
+                    self.assertGreaterEqual(box["x"], 0)
+                    self.assertLessEqual(box["x"] + box["width"], width)
+                    overflow = dialog.evaluate("element => element.scrollWidth - element.clientWidth")
+                    self.assertLessEqual(overflow, 1)
+                    self.assertEqual(errors, [])
+                    page.close()
             browser.close()
 
     def test_announcements_birthday_changes_at_beijing_midnight_and_next_year(self):

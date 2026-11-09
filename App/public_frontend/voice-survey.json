@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "survey_version": "voice-survey-1",
+  "kicker": "小吉终端 · 调研",
+  "title": "角色语音调研",
+  "intro": [
+    "我们在评估要不要给角色加上语音，想先听听你的想法，大约需要 1 分钟。",
+    "「1 比 1 付费」的意思是：按语音厂商的实际单价收费，费用全部用于你自己的语音请求，网站不赚差价。举个例子：按 qwen-audio-3.1-tts-plus 每万计费字符 1.4 元、一个汉字算 2 个字符计算，一句 50 字的台词大约 1.4 分钱。",
+    "支付手续费怎么承担、请求失败时怎么处理，目前都还没有定。",
+    "这只是一次调研，不代表这个功能一定会上线；贴近原角色的声线需要取得授权，不一定能做到。"
+  ],
+  "privacy": "只保存你的答案，保存 180 天后自动删除，不记录 IP 地址和浏览器信息。",
+  "questions": [
+    {
+      "id": "use_voice",
+      "type": "single",
+      "required": true,
+      "label": "如果有角色语音，你会用吗？",
+      "options": [
+        { "value": "often", "label": "会经常用" },
+        { "value": "sometimes", "label": "偶尔用" },
+        { "value": "never", "label": "不会用" }
+      ]
+    },
+    {
+      "id": "use_scenes",
+      "type": "multi",
+      "label": "你最想在哪些场合听到语音？（可多选）",
+      "options": [
+        { "value": "direct", "label": "单独聊天" },
+        { "value": "group", "label": "群聊" },
+        { "value": "party", "label": "多人聚会" }
+      ]
+    },
+    {
+      "id": "voice_type",
+      "type": "single",
+      "required": true,
+      "label": "你更想要哪种声音？",
+      "options": [
+        { "value": "ai_clone", "label": "贴近原角色的 AI 复刻声线" },
+        { "value": "ai_designed", "label": "AI 设计的新声线" },
+        { "value": "system_tts", "label": "系统自带的朗读" },
+        { "value": "none", "label": "不需要语音" }
+      ]
+    },
+    {
+      "id": "pass_through_acceptance",
+      "type": "scale",
+      "required": true,
+      "label": "你能接受「1 比 1 付费」吗？",
+      "min": 1,
+      "max": 5,
+      "minLabel": "完全不能接受",
+      "maxLabel": "完全可以接受"
+    },
+    {
+      "id": "payment_method",
+      "type": "single",
+      "required": true,
+      "label": "你更愿意用哪种方式？",
+      "options": [
+        { "value": "site_topup", "label": "在网站充值（按 1 比 1 扣费）" },
+        { "value": "own_key", "label": "自己到厂商开账号，填自己的密钥" },
+        { "value": "free_only", "label": "只用免费的方式" }
+      ]
+    },
+    {
+      "id": "monthly_budget",
+      "type": "single",
+      "required": true,
+      "label": "每个月你愿意在语音上花多少钱？",
+      "options": [
+        { "value": "0", "label": "0 元" },
+        { "value": "1_5", "label": "1～5 元" },
+        { "value": "6_20", "label": "6～20 元" },
+        { "value": "21_50", "label": "21～50 元" },
+        { "value": "over_50", "label": "50 元以上" }
+      ]
+    },
+    {
+      "id": "priorities",
+      "type": "multi",
+      "label": "你最在意什么？（可多选）",
+      "options": [
+        { "value": "price", "label": "价格" },
+        { "value": "likeness", "label": "像不像" },
+        { "value": "latency", "label": "延迟" },
+        { "value": "privacy", "label": "隐私" },
+        { "value": "transparency", "label": "费用透明" }
+      ]
+    },
+    {
+      "id": "characters",
+      "type": "characters",
+      "label": "你最想先听到谁的声音？（可多选）"
+    },
+    {
+      "id": "adult",
+      "type": "single",
+      "label": "你已满 18 岁了吗？（可不答）",
+      "hint": "只用来判断未成年人付费问题有多大。",
+      "options": [
+        { "value": "yes", "label": "已满 18 岁" },
+        { "value": "no", "label": "未满 18 岁" },
+        { "value": "skip", "label": "不想回答" }
+      ]
+    },
+    {
+      "id": "comment",
+      "type": "text",
+      "label": "还有什么建议？（可不填）",
+      "hint": "最多 200 字，请不要写联系方式。",
+      "maxLength": 200
+    }
+  ],
+  "resubmitNote": "你之前填过这份问卷，再次提交会更新原来的答案。",
+  "requiredError": "还有必答题没选，已帮你定位到第一题。",
+  "failedError": "没能提交，请检查网络后再试。",
+  "submit": "提交",
+  "later": "稍后再填",
+  "close": "关闭问卷",
+  "saved": "已收到，谢谢你的回答！"
+}

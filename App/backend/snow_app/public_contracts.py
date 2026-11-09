@@ -452,6 +452,31 @@ class SceneActionRequest(StrictModel):
     memory_candidates: list[SessionMemoryCandidate] = Field(default_factory=list, max_length=12)
 
 
+class VoiceSurveySubmit(StrictModel):
+    """Every answer is an enumeration except the short optional comment."""
+
+    survey_version: Literal["voice-survey-1"]
+    use_voice: Literal["often", "sometimes", "never"]
+    use_scenes: list[Literal["direct", "group", "party"]] = Field(default_factory=list, max_length=3)
+    voice_type: Literal["ai_clone", "ai_designed", "system_tts", "none"]
+    pass_through_acceptance: int = Field(strict=True, ge=1, le=5)
+    payment_method: Literal["site_topup", "own_key", "free_only"]
+    monthly_budget: Literal["0", "1_5", "6_20", "21_50", "over_50"]
+    priorities: list[Literal["price", "likeness", "latency", "privacy", "transparency"]] = Field(
+        default_factory=list, max_length=5
+    )
+    characters: list[str] = Field(default_factory=list, max_length=22)
+    adult: Literal["", "yes", "no", "skip"] = ""
+    comment: str = Field(default="", max_length=200)
+
+    @field_validator("use_scenes", "priorities", "characters")
+    @classmethod
+    def choices_are_distinct(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("a choice may be selected only once")
+        return value
+
+
 class ProactiveConsentRequest(StrictModel):
     provider: str = Field(min_length=1, max_length=24)
     model: str = Field(min_length=1, max_length=200)

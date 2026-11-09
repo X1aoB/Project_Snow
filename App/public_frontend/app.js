@@ -309,6 +309,7 @@ let dbPromise = null;
 let storageWarningShown = false;
 
 const ANNOUNCEMENT_READ_KEY = "project-snow-public:announcements:read:v1";
+const VOICE_SURVEY_STATE_KEY = "project-snow-public:voice-survey:v1";
 const announcements = {
   feed: null, pending: null, error: false, ready: false, tab: "updates",
   read: new Set(), attempted: new Set(), visibleKeys: new Set(), lastFetch: 0, day: "", renderSignature: "",
@@ -378,13 +379,55 @@ function renderAnnouncementBadges(view = announcementView()) {
   $("announcement-birthday-badge").hidden = !view.today.length;
   $("announcement-birthday-badge").textContent = String(view.today.length);
 }
+// 角色语音调研：开关开启且用户没答过、没选「不再提示」时，才在公告里放入口；不弹窗、不打断聊天。
+function voiceSurveyInvited() {
+  return state.config?.voice_survey?.enabled === true
+    && !["answered", "dismissed"].includes(localPreferences.getItem(VOICE_SURVEY_STATE_KEY));
+}
+function voiceSurveyCard() {
+  if (!voiceSurveyInvited()) return "";
+  return '<article class="announcement-update" aria-label="角色语音调研"><h3>角色语音调研</h3><p>想听听你对角色语音和 1 比 1 付费的看法，大约 1 分钟。</p><div style="display:flex;flex-wrap:wrap;gap:8px"><button class="primary-button" type="button" data-voice-survey="open">去填写</button><button class="secondary-button" type="button" data-voice-survey="dismiss">不再提示</button></div></article>';
+}
+async function startVoiceSurvey() {
+  if ($("announcements-dialog").open) $("announcements-dialog").close();
+  try {
+    const { openVoiceSurvey } = await import("/modules/voice-survey.js");
+    await openVoiceSurvey({ api, characters: state.characters, notify: toast,
+      onSaved: () => localPreferences.setItem(VOICE_SURVEY_STATE_KEY, "answered") });
+  } catch {
+    // 模块或文案加载失败只影响问卷本身。
+    toast("问卷暂时打不开，请稍后再试。");
+  }
+}
+// 只给当前角色表里能选的角色放入口。按钮只负责跳转和填草稿，发送仍由用户自己点，不会调用模型。
+function birthdayWishButton(item, label = "送祝福") {
+  if (!state.characters.some((entry) => entry.character_id === item.character_id)) return "";
+  const name = escapeHtml(item.display_name);
+  return `<button class="secondary-button birthday-wish" type="button" style="justify-self:start" data-birthday-chat="${escapeHtml(item.character_id)}" aria-label="去和${name}聊天，送上生日祝福">${escapeHtml(label)}</button>`;
+}
+async function startBirthdayChat(characterId) {
+  const birthday = announcements.feed?.birthdays.find((item) => item.character_id === characterId);
+  if (!birthday || !characterById(characterId)) return;
+  if ($("announcements-dialog").open) $("announcements-dialog").close();
+  await selectCharacter(characterId);
+  if (state.selected !== characterId) return;
+  if (window.matchMedia("(max-width: 820px)").matches) closeContactsPanel({ restoreFocus: false });
+  const input = $("message-input");
+  // 文字通讯和面对面共用这个输入框；已经写了内容就保留，不覆盖用户的草稿。
+  if (!input.disabled && !input.value.trim()) {
+    input.value = `生日快乐，${birthday.display_name}！`;
+    updateInputCount();
+    scheduleDraftSave();
+  }
+  input.focus();
+}
 function birthdayRow(item, { today = false, calendar = false } = {}) {
   const name = escapeHtml(item.display_name);
   const source = item.source_url ? `<a class="birthday-source" href="${escapeHtml(item.source_url)}" target="_blank" rel="noreferrer" aria-label="查看${name}的生日资料">资料 ↗</a>` : "";
   const countdown = today ? "生日快乐" : item.days === 1 ? "明天" : `还有 ${item.days} 天`;
   const character = state.characters.find((entry) => entry.character_id === item.character_id);
   const mark = characterAvatar(character) ? avatarMarkup(character, { className: "birthday-monogram" }).replace("<span ", '<span aria-hidden="true" ') : `<span class="birthday-monogram" aria-hidden="true">${escapeHtml(Array.from(item.display_name)[0])}</span>`;
-  return `<article class="birthday-row${today ? " birthday-today" : ""}" data-birthday-character="${escapeHtml(item.character_id)}">${mark}<div class="birthday-row-copy"><strong>${name}</strong><span>${item.month}月${item.day}日${calendar ? "" : ` · ${countdown}`}</span></div>${source}${calendar ? `<span class="birthday-countdown">${countdown}</span>` : ""}</article>`;
+  return `<article class="birthday-row${today ? " birthday-today" : ""}" data-birthday-character="${escapeHtml(item.character_id)}">${mark}<div class="birthday-row-copy"><strong>${name}</strong><span>${item.month}月${item.day}日${calendar ? "" : ` · ${countdown}`}</span>${today && !calendar ? birthdayWishButton(item) : ""}</div>${source}${calendar ? `<span class="birthday-countdown">${countdown}</span>` : ""}</article>`;
 }
 function announcementRenderSignature(view = announcementView()) {
   return JSON.stringify([announcements.feed, view.day, view.updateKey, announcements.error, state.characters.length]);
@@ -409,8 +452,9 @@ function renderAnnouncements() {
   });
   $("announcement-panel-updates").hidden = !announcements.feed || announcements.tab !== "updates";
   $("announcement-panel-birthdays").hidden = !announcements.feed || announcements.tab !== "birthdays";
-  $("announcement-birthday-highlight").innerHTML = view.today.length ? `<button class="birthday-highlight" type="button"><span class="birthday-highlight-mark" aria-hidden="true">✧</span><span><strong>今天是${view.today.map((item) => escapeHtml(item.display_name)).join("、")}的生日</strong><small>留一份生日祝福</small></span><span aria-hidden="true">↗</span></button>` : "";
-  $("announcement-birthday-highlight").querySelector("button")?.addEventListener("click", () => selectAnnouncementTab("birthdays", true));
+  $("announcement-birthday-highlight").innerHTML = view.today.length ? `<button class="birthday-highlight" type="button"><span class="birthday-highlight-mark" aria-hidden="true">✧</span><span><strong>今天是${view.today.map((item) => escapeHtml(item.display_name)).join("、")}的生日</strong><small>留一份生日祝福</small></span><span aria-hidden="true">↗</span></button><div class="birthday-wish-row" style="display:flex;flex-wrap:wrap;gap:8px;margin:-6px 0 16px">${view.today.map((item) => birthdayWishButton(item, `去给${item.display_name}送祝福`)).join("")}</div>` : "";
+  $("announcement-birthday-highlight").querySelector(".birthday-highlight")?.addEventListener("click", () => selectAnnouncementTab("birthdays", true));
+  $("announcement-voice-survey").innerHTML = voiceSurveyCard();
   $("announcement-updates").innerHTML = view.updates.length ? view.updates.map((update, index) => `<article class="announcement-update${index === 0 ? " is-latest" : ""}"><div class="announcement-update-meta"><span>${index === 0 ? "最新更新" : "过往更新"}</span><time datetime="${escapeHtml(update.published_at)}">${announcementDateLabel(announcementDay(Date.parse(update.published_at)))}</time></div><h3>${escapeHtml(update.title)}</h3><p>${escapeHtml(update.summary)}</p><ul>${update.items.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul></article>`).join("") : '<p class="announcement-empty">暂时没有站点更新。新的公告会出现在这里。</p>';
   $("announcement-birthdays-today").innerHTML = view.today.length ? `<div class="birthday-section-heading"><span>今天的寿星</span><strong>${announcementDateLabel(view.day)}</strong></div>${view.today.map((item) => birthdayRow(item, { today: true })).join("")}` : '<div class="birthday-quiet"><span aria-hidden="true">✧</span><p>今天没有角色生日</p><small>下一个特别的日子，也值得期待。</small></div>';
   $("announcement-birthdays-upcoming").innerHTML = view.birthdays.filter((item) => item.days > 0).slice(0, 3).map((item) => birthdayRow(item)).join("") || '<p class="announcement-empty">暂无即将到来的生日。</p>';
@@ -8064,6 +8108,17 @@ document.querySelectorAll("[data-announcement-tab]").forEach((button) => {
 });
 $("announcements-dialog").addEventListener("cancel", acknowledgeAnnouncements);
 $("announcements-dialog").addEventListener("close", acknowledgeAnnouncements);
+// 公告列表整段重绘，入口用事件委托绑在对话框上。
+$("announcements-dialog").addEventListener("click", (event) => {
+  const entry = event.target.closest?.("[data-birthday-chat]");
+  if (entry) void startBirthdayChat(entry.dataset.birthdayChat);
+  const survey = event.target.closest?.("[data-voice-survey]")?.dataset.voiceSurvey;
+  if (survey === "open") void startVoiceSurvey();
+  if (survey === "dismiss") {
+    localPreferences.setItem(VOICE_SURVEY_STATE_KEY, "dismissed");
+    renderAnnouncements();
+  }
+});
 document.querySelectorAll("dialog").forEach((dialog) => dialog.addEventListener("close", () => window.setTimeout(maybeShowAnnouncements, 0)));
 window.addEventListener("focus", announcementTick);
 document.addEventListener("visibilitychange", announcementTick);

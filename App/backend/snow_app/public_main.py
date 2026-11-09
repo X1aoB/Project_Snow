@@ -33,6 +33,7 @@ from .model_capabilities import immersive_model_policy, public_model_profiles
 from .public_logging import configure_public_logger
 from .public_statistics import install_statistics_config
 from .proactive_message import authority_change, install_proactive_routes, proactive_config
+from .voice_survey import install_voice_survey_routes, voice_survey_config
 from .mvp_service import MVPProviderError, _normalize_expression_state, _normalize_stage_motion
 from .public_contracts import (
     ByokSessionRequest,
@@ -949,6 +950,8 @@ def create_app(
                              ("subscription_setup_ip_day", "day", 300)]
             elif path == "/public/v1/feedback":
                 ip_limits = [("feedback_ip_hour", "hour", 20), ("feedback_ip_day", "day", 50)]
+            elif path == "/public/v1/voice-survey":
+                ip_limits = [("voice_survey_ip_hour", "hour", 30), ("voice_survey_ip_day", "day", 100)]
             elif path.startswith("/public/v1/byok/"):
                 ip_limits = [("byok_ip_hour", "hour", 30), ("byok_ip_day", "day", 100)]
             else:
@@ -966,7 +969,7 @@ def create_app(
             except RateLimitExceeded as exc:
                 return _rate_limit_response(request, exc)
         response = await call_next(request)
-        if path.startswith(("/public/v1/subscription/", "/public/v1/byok/")):
+        if path.startswith(("/public/v1/subscription/", "/public/v1/byok/", "/public/v1/voice-survey")):
             response.headers["Cache-Control"] = "no-store"
         if new_cookie and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
             response.set_cookie(
@@ -1110,6 +1113,7 @@ def create_app(
             "subscription": {"enabled": subscription_broker.enabled, "model": SUBSCRIPTION_MODEL,
                              "effort": SUBSCRIPTION_EFFORT, "protocol_version": SUBSCRIPTION_PROTOCOL_VERSION},
             "proactive_messages": proactive_config(public_settings),
+            "voice_survey": voice_survey_config(public_settings),
             "turnstile_site_key": public_settings.turnstile_site_key,
             "limits": {
                 "input_characters": 2000,
@@ -1506,6 +1510,7 @@ def create_app(
             raise _error("invalid_request", 422, retryable=False)
         return value == "1"
 
+    install_voice_survey_routes(app, public_settings, async_store)
     install_proactive_routes(app, public_settings, async_store, chat_service, get_dialogue_v2_service,
         provider_http, subscription_broker, acquire_subject_generation, release_subject_generation,
         active_request_leases)

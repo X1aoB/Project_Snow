@@ -24,10 +24,10 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/shared/brand/xiaoji-icon-32.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="/shared/brand/xiaoji-icon-192.png" />
     <link rel="stylesheet" href="/shared/immersive.css?v=0.9.2" />
-    <link rel="stylesheet" href="/app.css?v=1.1.0" />
-    <link rel="stylesheet" href="/snow-adv.css?v=1.1.0" />
+    <link rel="stylesheet" href="/app.css?v=1.2.0" />
+    <link rel="stylesheet" href="/snow-adv.css?v=1.2.0" />
     <link rel="stylesheet" href="/statistics/notice.css" />
-    <link rel="modulepreload" href="/app.js?v=1.1.0" />
+    <link rel="modulepreload" href="/app.js?v=1.2.0" />
     <link rel="modulepreload" href="/modules/runtime.js" />
     <link rel="modulepreload" href="/dialogue-context.js" />
     <link rel="modulepreload" href="/modules/snow-icons.js" />
@@ -185,7 +185,7 @@
         <button id="announcement-tab-birthdays" type="button" role="tab" aria-selected="false" aria-controls="announcement-panel-birthdays" tabindex="-1" data-announcement-tab="birthdays">生日提醒<span id="announcement-birthday-badge" class="announcement-tab-badge" hidden></span></button>
       </div>
       <div id="announcement-status" class="announcement-status" role="status" aria-live="polite" hidden><p id="announcement-status-text"></p><button id="retry-announcements" class="secondary-button" type="button" hidden>重新加载</button></div>
-      <section id="announcement-panel-updates" class="announcement-panel" role="tabpanel" aria-labelledby="announcement-tab-updates" tabindex="0"><div id="announcement-birthday-highlight"></div><div id="announcement-updates"></div></section>
+      <section id="announcement-panel-updates" class="announcement-panel" role="tabpanel" aria-labelledby="announcement-tab-updates" tabindex="0"><div id="announcement-voice-survey"></div><div id="announcement-birthday-highlight"></div><div id="announcement-updates"></div></section>
       <section id="announcement-panel-birthdays" class="announcement-panel" role="tabpanel" aria-labelledby="announcement-tab-birthdays" tabindex="0" hidden><div id="announcement-birthdays-today"></div><h3 class="announcement-section-title">接下来的生日</h3><div id="announcement-birthdays-upcoming"></div><details class="birthday-calendar"><summary id="birthday-calendar-label">查看全部角色生日</summary><div id="announcement-birthday-calendar"></div></details><p class="birthday-attribution">生日日期整理自尘白禁区 Wiki，角色条目可查看原始资料。</p></section>
       <footer class="announcements-footer"><span>随时点右上角「!」回看</span><button id="acknowledge-announcements" class="primary-button" type="button" data-close-dialog="announcements-dialog">知道了</button></footer>
     </dialog>
@@ -313,7 +313,7 @@
 
     <dialog id="history-import-dialog" class="modal" aria-labelledby="history-import-title"><header><h2 id="history-import-title">合并本地备份</h2><button class="icon-button" type="button" data-close-dialog="history-import-dialog" aria-label="取消导入">×</button></header><p id="history-import-preview"></p><p>现有消息和草稿优先保留。模型凭证与世界状态不会导入；未完成的请求需由你明确重试。</p><p id="history-import-error" role="alert"></p><div class="settings-actions"><button id="confirm-history-import" class="primary-button" type="button">确认合并</button></div></dialog>
     <div id="toast" class="toast" role="status" hidden></div>
-    <script type="module" src="/app.js?v=1.1.0"></script>
+    <script type="module" src="/app.js?v=1.2.0"></script>
     <script type="module" src="/statistics/start.mjs"></script>
   </body>
 </html>
