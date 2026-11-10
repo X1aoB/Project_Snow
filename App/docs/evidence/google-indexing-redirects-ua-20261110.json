@@ -1,0 +1,101 @@
+[
+  {
+    "url": "http://xiaob.dev/",
+    "googlebot_user_agent": false,
+    "status": 301,
+    "headers": {
+      "content-type": "text/html; charset=UTF-8",
+      "location": "https://xiaob.dev/"
+    }
+  },
+  {
+    "url": "http://snow.xiaob.dev/",
+    "googlebot_user_agent": false,
+    "status": 301,
+    "headers": {
+      "content-type": "text/html; charset=UTF-8",
+      "location": "https://snow.xiaob.dev/"
+    }
+  },
+  {
+    "url": "https://www.xiaob.dev/",
+    "googlebot_user_agent": false,
+    "status": 301,
+    "headers": {
+      "content-type": "text/html; charset=UTF-8",
+      "location": "https://xiaob.dev/"
+    }
+  },
+  {
+    "url": "https://snow.xiaob.dev/privacy",
+    "googlebot_user_agent": false,
+    "status": 307,
+    "headers": {
+      "location": "http://snow.xiaob.dev/privacy/"
+    }
+  },
+  {
+    "url": "https://xiaob.dev/projects/project-snow",
+    "googlebot_user_agent": false,
+    "status": 308,
+    "headers": {
+      "location": "/projects/project-snow/"
+    }
+  },
+  {
+    "url": "https://snow.xiaob.dev/",
+    "googlebot_user_agent": true,
+    "status": 200,
+    "headers": {
+      "content-type": "text/html; charset=utf-8"
+    }
+  },
+  {
+    "url": "https://snow.xiaob.dev/privacy/",
+    "googlebot_user_agent": true,
+    "status": 200,
+    "headers": {
+      "content-type": "text/html; charset=utf-8"
+    }
+  },
+  {
+    "url": "https://snow.xiaob.dev/public/v1/config",
+    "googlebot_user_agent": true,
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    }
+  },
+  {
+    "url": "https://snow.xiaob.dev/public/v1/characters",
+    "googlebot_user_agent": true,
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    }
+  },
+  {
+    "url": "https://snow.xiaob.dev/public/v1/attributions",
+    "googlebot_user_agent": true,
+    "status": 200,
+    "headers": {
+      "content-type": "application/json"
+    }
+  },
+  {
+    "url": "https://xiaob.dev/",
+    "googlebot_user_agent": true,
+    "status": 200,
+    "headers": {
+      "content-type": "text/html; charset=utf-8"
+    }
+  },
+  {
+    "url": "https://xiaob.dev/search/",
+    "googlebot_user_agent": true,
+    "status": 200,
+    "headers": {
+      "content-type": "text/html; charset=utf-8"
+    }
+  }
+]

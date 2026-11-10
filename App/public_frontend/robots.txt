@@ -1,6 +1,12 @@
 User-agent: *
 Allow: /
+# Public read-only resources required to render the home and privacy pages.
+# Keep exact matches: no credential, conversation or state routes are opened.
+Allow: /public/v1/config$
+Allow: /public/v1/characters$
+Allow: /public/v1/attributions$
 Disallow: /public/v1/
+Disallow: /public/v2/
 Disallow: /api/
 Disallow: /workspace/
 

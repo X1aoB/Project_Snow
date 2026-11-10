@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 from uuid import uuid4
+from xml.etree import ElementTree
 
 from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
@@ -266,6 +267,74 @@ class PublicAPITests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "image/webp")
+
+    def test_search_discovery_serves_only_canonical_public_documents(self) -> None:
+        sitemap = self.client.get("/sitemap.xml")
+        self.assertEqual(sitemap.status_code, 200)
+        locations = [node.text for node in ElementTree.fromstring(sitemap.content).iter(
+            "{http://www.sitemaps.org/schemas/sitemap/0.9}loc"
+        )]
+        self.assertEqual(locations, ["https://snow.xiaob.dev/", "https://snow.xiaob.dev/privacy/"])
+        for location in locations:
+            with self.subTest(location=location):
+                response = self.client.get(location)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("text/html", response.headers["content-type"])
+                self.assertIn(f'<link rel="canonical" href="{location}"', response.text)
+                self.assertIn('<meta name="robots" content="index, follow"', response.text)
+                self.assertNotIn("noindex", response.headers.get("x-robots-tag", "").lower())
+                self.assertNotIn("set-cookie", response.headers)
+        # Neither a stale page nor a private/unknown path becomes a soft 404.
+        for path in ("/missing-public-page", "/workspace/", "/api/v1/mvp/bootstrap"):
+            self.assertEqual(self.client.get(path).status_code, 404, path)
+
+    def test_privacy_canonical_redirect_stays_relative_behind_https_edge(self) -> None:
+        # Caddy terminates HTTPS before the HTTP ASGI hop. Do not rely on global
+        # trust of forwarding headers to generate a public canonical redirect.
+        for method in ("GET", "HEAD"):
+            for query in ("", "?source=search&lang=zh-CN"):
+                with self.subTest(method=method, query=query):
+                    response = self.client.request(
+                        method, "http://snow.xiaob.dev/privacy" + query,
+                        headers={"X-Forwarded-Proto": "https"}, follow_redirects=False,
+                    )
+                    self.assertEqual(response.status_code, 308)
+                    self.assertEqual(response.headers["location"], "/privacy/" + query)
+                    self.assertNotIn("set-cookie", response.headers)
+        self.assertEqual(self.client.get("/privacy/").status_code, 200)
+
+    def test_public_render_json_is_fetchable_without_user_state_and_not_indexable(self) -> None:
+        paths = ("/public/v1/config", "/public/v1/characters", "/public/v1/attributions")
+        with patch.object(self.store, "consume_limits", side_effect=AssertionError("read mutated limits")):
+            with patch.object(self.app.state.chat_service, "chat", side_effect=AssertionError("read called model")):
+                for path in paths:
+                    with self.subTest(path=path):
+                        response = self.client.get(path, headers={"User-Agent": "Googlebot"})
+                        self.assertEqual(response.status_code, 200)
+                        self.assertIn("application/json", response.headers["content-type"])
+                        self.assertEqual(response.headers["x-robots-tag"], "noindex")
+                        self.assertNotIn("set-cookie", response.headers)
+
+    def test_robots_exceptions_are_limited_to_public_render_resources(self) -> None:
+        response = self.client.get("/robots.txt")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/plain", response.headers["content-type"])
+        directives: dict[str, list[str]] = {}
+        for line in response.text.splitlines():
+            line = line.partition("#")[0].strip()
+            if line:
+                name, value = line.split(":", 1)
+                directives.setdefault(name.lower(), []).append(value.strip())
+        # Google's longest-match rule selects each exact Allow before the API
+        # prefix Disallow; '$' prevents opening similarly named/private children.
+        self.assertEqual(directives["user-agent"], ["*"])
+        self.assertEqual(set(directives["allow"]), {
+            "/", "/public/v1/config$", "/public/v1/characters$", "/public/v1/attributions$",
+        })
+        self.assertEqual(set(directives["disallow"]), {
+            "/public/v1/", "/public/v2/", "/api/", "/workspace/",
+        })
+        self.assertEqual(directives["sitemap"], ["https://snow.xiaob.dev/sitemap.xml"])
 
     def test_joint_move_requires_named_current_request_and_immediate_acceptance(self) -> None:
         service: PublicChatService = self.app.state.chat_service

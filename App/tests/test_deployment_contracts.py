@@ -3798,7 +3798,7 @@ seal_configuration_snapshot "$seal_root"
         self.assertIn('href="/shared/immersive.css?v=0.9.2"', public_html)
         self.assertIn('src="/privacy/privacy.js?v=0.9.2"', privacy_html)
         self.assertIn('experience_notice_version || "0.9.2"', public_javascript)
-        self.assertIn("PUBLIC_APP_VERSION=1.2.0", public_env)
+        self.assertIn("PUBLIC_APP_VERSION=1.2.1", public_env)
         self.assertIn("PUBLIC_EXPERIENCE_NOTICE_VERSION=0.9.2", public_env)
         self.assertIn("PUBLIC_PRIVACY_POLICY_VERSION=1.2.0", public_env)
         self.assertIn("PUBLIC_PRIVACY_EFFECTIVE_AT=2026-11-09", public_env)

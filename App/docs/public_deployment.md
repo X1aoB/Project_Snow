@@ -5,7 +5,27 @@
 The public home page uses the title `小吉终端`, a canonical URL and descriptive
 search/social metadata. `/robots.txt` advertises `/sitemap.xml`; the sitemap
 contains only the home page and privacy document. API and workspace paths are
-excluded from crawling. Cloudflare may prepend its managed crawler policy.
+excluded from crawling, with exact exceptions for `/public/v1/config`,
+`/public/v1/characters` and `/public/v1/attributions`. These public read-only JSON
+resources are required by the home/privacy renderers; blocking them prevents
+Google's renderer from loading the page data. Their `X-Robots-Tag: noindex` response header keeps
+the JSON out of search results while allowing rendering. The `$` suffix on each
+Allow rule prevents opening API subpaths; v1/v2 session, credential and state
+routes remain disallowed. Cloudflare may prepend its managed crawler policy.
+`/privacy` has an explicit GET/HEAD 308 redirect with relative
+`Location: /privacy/`, preserving query parameters, so the edge's internal HTTP hop cannot
+create an HTTPS-to-HTTP redirect chain.
+
+After deployment, verify the **live** robots response, sitemap and both sitemap
+documents with a normal browser and Googlebot user agent. Check Search Console's
+affected URL examples before treating a 404 as a defect: unknown/private URLs
+must keep a real 404 and must not be redirected to the home page. Use URL
+Inspection's live rendered page to confirm the three JSON resources are no longer
+blocked, then request validation for the affected public pages. A local regression
+or a successful HTTP check does not prove Google has indexed a page.
+
+References: [Google JavaScript rendering](https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics)
+and [robots.txt rule matching](https://developers.google.com/crawling/docs/robots-txt/robots-txt-spec).
 
 The public `1b19b4ec1e454d5780120c8fa287c623.txt` file proves host ownership for
 IndexNow submissions. Keep it deployed while the key is in use. After a release,

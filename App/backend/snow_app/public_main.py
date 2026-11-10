@@ -20,7 +20,7 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
@@ -110,6 +110,12 @@ MAX_BODY_BYTES = 64 * 1024
 REQUEST_BODY_TIMEOUT_SECONDS = 10
 PUBLIC_DATABASE_RETRY_AFTER_SECONDS = 2
 LOGGER = configure_public_logger()
+
+# robots.txt permits these read-only render dependencies. Crawlers must fetch
+# their JSON for page rendering, but search results should contain the HTML pages.
+PUBLIC_RENDER_RESOURCES = frozenset({
+    "/public/v1/config", "/public/v1/characters", "/public/v1/attributions",
+})
 
 _ERROR_STAGES = frozenset(
     {
@@ -969,6 +975,8 @@ def create_app(
             except RateLimitExceeded as exc:
                 return _rate_limit_response(request, exc)
         response = await call_next(request)
+        if path in PUBLIC_RENDER_RESOURCES:
+            response.headers["X-Robots-Tag"] = "noindex"
         if path.startswith(("/public/v1/subscription/", "/public/v1/byok/", "/public/v1/voice-survey")):
             response.headers["Cache-Control"] = "no-store"
         if new_cookie and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -2760,6 +2768,15 @@ def create_app(
             name="shared_immersive_assets",
         )
     if frontend_path.is_dir():
+        @app.api_route("/privacy", methods=["GET", "HEAD"], include_in_schema=False)
+        def privacy_redirect(request: Request) -> RedirectResponse:
+            # The edge terminates HTTPS. A relative canonical redirect avoids
+            # exposing the internal HTTP scheme from StaticFiles' slash redirect.
+            location = "/privacy/"
+            if request.url.query:
+                location += "?" + request.url.query
+            return RedirectResponse(location, status_code=308)
+
         # Wiki-derived portraits are never copied into this directory or the
         # application image; the versioned media mount above remains separate.
         app.mount("/", StaticFiles(directory=frontend_path, html=True), name="public_frontend")
