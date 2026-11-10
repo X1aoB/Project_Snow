@@ -1,0 +1,925 @@
+{
+  "checked_at": "2026-11-10T03:48:04.281374+00:00",
+  "sitemap_urls": 37,
+  "rows": [
+    {
+      "url": "https://snow.xiaob.dev/",
+      "final_url": "https://snow.xiaob.dev/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store, max-age=0"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\" />",
+        "<link rel=\"canonical\" href=\"https://snow.xiaob.dev/\" />"
+      ],
+      "bytes": 41802
+    },
+    {
+      "url": "https://snow.xiaob.dev/privacy/",
+      "final_url": "https://snow.xiaob.dev/privacy/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store, max-age=0"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\" />",
+        "<link rel=\"canonical\" href=\"https://snow.xiaob.dev/privacy/\" />"
+      ],
+      "bytes": 15945
+    },
+    {
+      "url": "https://xiaob.dev/",
+      "final_url": "https://xiaob.dev/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/\">"
+      ],
+      "bytes": 57465
+    },
+    {
+      "url": "https://xiaob.dev/about/",
+      "final_url": "https://xiaob.dev/about/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/about/\">"
+      ],
+      "bytes": 44979
+    },
+    {
+      "url": "https://xiaob.dev/gallery/",
+      "final_url": "https://xiaob.dev/gallery/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/gallery/\">"
+      ],
+      "bytes": 135089
+    },
+    {
+      "url": "https://xiaob.dev/journal/",
+      "final_url": "https://xiaob.dev/journal/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/\">"
+      ],
+      "bytes": 52901
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-001/",
+      "final_url": "https://xiaob.dev/journal/development-log-001/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-001/\">"
+      ],
+      "bytes": 52364
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-002/",
+      "final_url": "https://xiaob.dev/journal/development-log-002/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-002/\">"
+      ],
+      "bytes": 51664
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-003/",
+      "final_url": "https://xiaob.dev/journal/development-log-003/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-003/\">"
+      ],
+      "bytes": 51693
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-004/",
+      "final_url": "https://xiaob.dev/journal/development-log-004/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-004/\">"
+      ],
+      "bytes": 52391
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-005/",
+      "final_url": "https://xiaob.dev/journal/development-log-005/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-005/\">"
+      ],
+      "bytes": 52410
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-006/",
+      "final_url": "https://xiaob.dev/journal/development-log-006/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-006/\">"
+      ],
+      "bytes": 52484
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-007/",
+      "final_url": "https://xiaob.dev/journal/development-log-007/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-007/\">"
+      ],
+      "bytes": 53604
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-008/",
+      "final_url": "https://xiaob.dev/journal/development-log-008/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-008/\">"
+      ],
+      "bytes": 52799
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-009/",
+      "final_url": "https://xiaob.dev/journal/development-log-009/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-009/\">"
+      ],
+      "bytes": 54541
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-010/",
+      "final_url": "https://xiaob.dev/journal/development-log-010/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-010/\">"
+      ],
+      "bytes": 54985
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-011/",
+      "final_url": "https://xiaob.dev/journal/development-log-011/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-011/\">"
+      ],
+      "bytes": 56084
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-012/",
+      "final_url": "https://xiaob.dev/journal/development-log-012/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-012/\">"
+      ],
+      "bytes": 55454
+    },
+    {
+      "url": "https://xiaob.dev/journal/development-log-013/",
+      "final_url": "https://xiaob.dev/journal/development-log-013/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/development-log-013/\">"
+      ],
+      "bytes": 55537
+    },
+    {
+      "url": "https://xiaob.dev/journal/project-snow-data-foundation/",
+      "final_url": "https://xiaob.dev/journal/project-snow-data-foundation/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/journal/project-snow-data-foundation/\">"
+      ],
+      "bytes": 57913
+    },
+    {
+      "url": "https://xiaob.dev/now/",
+      "final_url": "https://xiaob.dev/now/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/now/\">"
+      ],
+      "bytes": 39050
+    },
+    {
+      "url": "https://xiaob.dev/now/daily/",
+      "final_url": "https://xiaob.dev/now/daily/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/now/daily/\">"
+      ],
+      "bytes": 40420
+    },
+    {
+      "url": "https://xiaob.dev/now/daily/failed-before-the-start/",
+      "final_url": "https://xiaob.dev/now/daily/failed-before-the-start/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/now/daily/failed-before-the-start/\">"
+      ],
+      "bytes": 38215
+    },
+    {
+      "url": "https://xiaob.dev/now/daily/japan-trip-preparation/",
+      "final_url": "https://xiaob.dev/now/daily/japan-trip-preparation/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/now/daily/japan-trip-preparation/\">"
+      ],
+      "bytes": 38283
+    },
+    {
+      "url": "https://xiaob.dev/now/daily/typhoon-autumn-recruiting/",
+      "final_url": "https://xiaob.dev/now/daily/typhoon-autumn-recruiting/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/now/daily/typhoon-autumn-recruiting/\">"
+      ],
+      "bytes": 37173
+    },
+    {
+      "url": "https://xiaob.dev/now/guides/",
+      "final_url": "https://xiaob.dev/now/guides/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/now/guides/\">"
+      ],
+      "bytes": 35835
+    },
+    {
+      "url": "https://xiaob.dev/now/guides/japan-eleven-day-route-and-tips/",
+      "final_url": "https://xiaob.dev/now/guides/japan-eleven-day-route-and-tips/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/now/guides/japan-eleven-day-route-and-tips/\">"
+      ],
+      "bytes": 43982
+    },
+    {
+      "url": "https://xiaob.dev/now/interviews/",
+      "final_url": "https://xiaob.dev/now/interviews/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/now/interviews/\">"
+      ],
+      "bytes": 35981
+    },
+    {
+      "url": "https://xiaob.dev/now/interviews/xiaohongshu-ai-data-interview/",
+      "final_url": "https://xiaob.dev/now/interviews/xiaohongshu-ai-data-interview/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/now/interviews/xiaohongshu-ai-data-interview/\">"
+      ],
+      "bytes": 42536
+    },
+    {
+      "url": "https://xiaob.dev/now/technical/",
+      "final_url": "https://xiaob.dev/now/technical/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/now/technical/\">"
+      ],
+      "bytes": 36173
+    },
+    {
+      "url": "https://xiaob.dev/privacy/",
+      "final_url": "https://xiaob.dev/privacy/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/privacy/\">"
+      ],
+      "bytes": 50418
+    },
+    {
+      "url": "https://xiaob.dev/projects/project-snow/",
+      "final_url": "https://xiaob.dev/projects/project-snow/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/projects/project-snow/\">"
+      ],
+      "bytes": 134500
+    },
+    {
+      "url": "https://xiaob.dev/tools/",
+      "final_url": "https://xiaob.dev/tools/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/tools/\">"
+      ],
+      "bytes": 40417
+    },
+    {
+      "url": "https://xiaob.dev/tools/json/",
+      "final_url": "https://xiaob.dev/tools/json/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/tools/json/\">"
+      ],
+      "bytes": 41208
+    },
+    {
+      "url": "https://xiaob.dev/tools/model-iq/",
+      "final_url": "https://xiaob.dev/tools/model-iq/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/tools/model-iq/\">"
+      ],
+      "bytes": 43453
+    },
+    {
+      "url": "https://xiaob.dev/tools/skills/",
+      "final_url": "https://xiaob.dev/tools/skills/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/tools/skills/\">"
+      ],
+      "bytes": 61327
+    },
+    {
+      "url": "https://xiaob.dev/updates/",
+      "final_url": "https://xiaob.dev/updates/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/updates/\">"
+      ],
+      "bytes": 61766
+    },
+    {
+      "url": "https://xiaob.dev/search/",
+      "final_url": "https://xiaob.dev/search/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"noindex, nofollow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/search/\">"
+      ],
+      "bytes": 105911
+    },
+    {
+      "url": "https://xiaob.dev/statistics/",
+      "final_url": "https://xiaob.dev/statistics/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store, max-age=0"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"noindex, nofollow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/statistics/\">"
+      ],
+      "bytes": 39393
+    },
+    {
+      "url": "https://xiaob.dev/status/",
+      "final_url": "https://xiaob.dev/status/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/status/\">"
+      ],
+      "bytes": 39593
+    },
+    {
+      "url": "https://xiaob.dev/404",
+      "final_url": "https://xiaob.dev/404",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"noindex, nofollow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/404/\">"
+      ],
+      "bytes": 34175
+    },
+    {
+      "url": "https://xiaob.dev/404.html",
+      "final_url": "https://xiaob.dev/404",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"noindex, nofollow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/404/\">"
+      ],
+      "bytes": 34175
+    },
+    {
+      "url": "https://xiaob.dev/__indexing_diagnostic_missing_20261110__",
+      "final_url": "https://xiaob.dev/__indexing_diagnostic_missing_20261110__",
+      "status": 404,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"noindex, nofollow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/404/\">"
+      ],
+      "bytes": 34175
+    },
+    {
+      "url": "https://snow.xiaob.dev/__indexing_diagnostic_missing_20261110__",
+      "final_url": "https://snow.xiaob.dev/__indexing_diagnostic_missing_20261110__",
+      "status": 404,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "metas": [],
+      "bytes": 22
+    },
+    {
+      "url": "https://snow.xiaob.dev/workspace/",
+      "final_url": "https://snow.xiaob.dev/workspace/",
+      "status": 404,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "metas": [],
+      "bytes": 22
+    },
+    {
+      "url": "https://snow.xiaob.dev/privacy",
+      "final_url": "https://snow.xiaob.dev/privacy/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store, max-age=0"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\" />",
+        "<link rel=\"canonical\" href=\"https://snow.xiaob.dev/privacy/\" />"
+      ],
+      "bytes": 15945
+    },
+    {
+      "url": "https://snow.xiaob.dev/privacy/index.html",
+      "final_url": "https://snow.xiaob.dev/privacy/index.html",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store, max-age=0"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\" />",
+        "<link rel=\"canonical\" href=\"https://snow.xiaob.dev/privacy/\" />"
+      ],
+      "bytes": 15945
+    },
+    {
+      "url": "https://snow.xiaob.dev/index.html",
+      "final_url": "https://snow.xiaob.dev/index.html",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store, max-age=0"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\" />",
+        "<link rel=\"canonical\" href=\"https://snow.xiaob.dev/\" />"
+      ],
+      "bytes": 41802
+    },
+    {
+      "url": "https://xiaob.dev/index.html",
+      "final_url": "https://xiaob.dev/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/\">"
+      ],
+      "bytes": 57465
+    },
+    {
+      "url": "https://www.xiaob.dev/",
+      "final_url": "https://xiaob.dev/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/\">"
+      ],
+      "bytes": 57465
+    },
+    {
+      "url": "http://www.xiaob.dev/",
+      "final_url": "https://xiaob.dev/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/\">"
+      ],
+      "bytes": 57465
+    },
+    {
+      "url": "https://xiaob.dev/projects/project-snow",
+      "final_url": "https://xiaob.dev/projects/project-snow/",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"index, follow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/projects/project-snow/\">"
+      ],
+      "bytes": 134500
+    },
+    {
+      "url": "https://snow.xiaob.dev/public/v1/config",
+      "final_url": "https://snow.xiaob.dev/public/v1/config",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "no-store, max-age=0"
+      },
+      "metas": [],
+      "bytes": 10534
+    },
+    {
+      "url": "https://snow.xiaob.dev/public/v1/characters",
+      "final_url": "https://snow.xiaob.dev/public/v1/characters",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=300, stale-while-revalidate=60"
+      },
+      "metas": [],
+      "bytes": 21416
+    },
+    {
+      "url": "https://snow.xiaob.dev/public/v1/attributions",
+      "final_url": "https://snow.xiaob.dev/public/v1/attributions",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=300, stale-while-revalidate=60"
+      },
+      "metas": [],
+      "bytes": 513304
+    },
+    {
+      "url": "https://snow.xiaob.dev/assets/avatars/longyan-neutral-provenance.json",
+      "final_url": "https://snow.xiaob.dev/assets/avatars/longyan-neutral-provenance.json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "metas": [],
+      "bytes": 2283
+    },
+    {
+      "url": "https://snow.xiaob.dev/assets/expressions/mia/manifest.json",
+      "final_url": "https://snow.xiaob.dev/assets/expressions/mia/manifest.json",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "metas": [],
+      "bytes": 16677
+    },
+    {
+      "url": "https://snow.xiaob.dev/public/v1/attributions/data",
+      "final_url": "https://snow.xiaob.dev/public/v1/attributions/data",
+      "status": 200,
+      "headers": {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=300, stale-while-revalidate=60"
+      },
+      "metas": [],
+      "bytes": 1963187
+    },
+    {
+      "url": "https://xiaob.dev/404/",
+      "final_url": "https://xiaob.dev/404",
+      "status": 200,
+      "headers": {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [
+        "<meta name=\"robots\" content=\"noindex, nofollow\">",
+        "<link rel=\"canonical\" href=\"https://xiaob.dev/404/\">"
+      ],
+      "bytes": 34175
+    },
+    {
+      "url": "https://xiaob.dev/downloads/skills/benchmark-data-curation.zip",
+      "final_url": "https://xiaob.dev/downloads/skills/benchmark-data-curation.zip",
+      "status": 200,
+      "headers": {
+        "content-type": "application/zip",
+        "cache-control": "public, max-age=14400, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 761
+    },
+    {
+      "url": "https://xiaob.dev/downloads/skills/data-contract-quality-gate.zip",
+      "final_url": "https://xiaob.dev/downloads/skills/data-contract-quality-gate.zip",
+      "status": 200,
+      "headers": {
+        "content-type": "application/zip",
+        "cache-control": "public, max-age=14400, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 754
+    },
+    {
+      "url": "https://xiaob.dev/downloads/skills/observability-lineage-and-evidence.zip",
+      "final_url": "https://xiaob.dev/downloads/skills/observability-lineage-and-evidence.zip",
+      "status": 200,
+      "headers": {
+        "content-type": "application/zip",
+        "cache-control": "public, max-age=14400, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 739
+    },
+    {
+      "url": "https://xiaob.dev/downloads/skills/privacy-safe-analytics-integration.zip",
+      "final_url": "https://xiaob.dev/downloads/skills/privacy-safe-analytics-integration.zip",
+      "status": 200,
+      "headers": {
+        "content-type": "application/zip",
+        "cache-control": "public, max-age=14400, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 814
+    },
+    {
+      "url": "https://xiaob.dev/downloads/skills/product-interface-qa-release.zip",
+      "final_url": "https://xiaob.dev/downloads/skills/product-interface-qa-release.zip",
+      "status": 200,
+      "headers": {
+        "content-type": "application/zip",
+        "cache-control": "public, max-age=14400, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 775
+    },
+    {
+      "url": "https://xiaob.dev/downloads/skills/production-data-pipeline-runbook.zip",
+      "final_url": "https://xiaob.dev/downloads/skills/production-data-pipeline-runbook.zip",
+      "status": 200,
+      "headers": {
+        "content-type": "application/zip",
+        "cache-control": "public, max-age=14400, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 814
+    },
+    {
+      "url": "https://xiaob.dev/downloads/skills/release-acceptance-and-rollback.zip",
+      "final_url": "https://xiaob.dev/downloads/skills/release-acceptance-and-rollback.zip",
+      "status": 200,
+      "headers": {
+        "content-type": "application/zip",
+        "cache-control": "public, max-age=14400, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 739
+    },
+    {
+      "url": "https://xiaob.dev/downloads/skills/resume-and-application-tailoring.zip",
+      "final_url": "https://xiaob.dev/downloads/skills/resume-and-application-tailoring.zip",
+      "status": 200,
+      "headers": {
+        "content-type": "application/zip",
+        "cache-control": "public, max-age=14400, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 808
+    },
+    {
+      "url": "https://xiaob.dev/downloads/skills/static-site-content-release.zip",
+      "final_url": "https://xiaob.dev/downloads/skills/static-site-content-release.zip",
+      "status": 200,
+      "headers": {
+        "content-type": "application/zip",
+        "cache-control": "public, max-age=14400, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 729
+    },
+    {
+      "url": "https://xiaob.dev/downloads/skills/travel-handbook-and-document-production.zip",
+      "final_url": "https://xiaob.dev/downloads/skills/travel-handbook-and-document-production.zip",
+      "status": 200,
+      "headers": {
+        "content-type": "application/zip",
+        "cache-control": "public, max-age=14400, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 791
+    },
+    {
+      "url": "https://xiaob.dev/rss.xml",
+      "final_url": "https://xiaob.dev/rss.xml",
+      "status": 200,
+      "headers": {
+        "content-type": "application/xml",
+        "cache-control": "public, max-age=0, must-revalidate"
+      },
+      "metas": [],
+      "bytes": 12770
+    }
+  ]
+}

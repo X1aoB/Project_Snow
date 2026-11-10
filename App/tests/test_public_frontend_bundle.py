@@ -52,6 +52,7 @@ def fixture_repo(directory: Path) -> Path:
         "config/public_frontend_release.json",
         "compat/public-0.9.6-r1.patch",
         "compat/public-0.9.6-r1.manifest.json",
+        "public_frontend/robots.txt",
     ]
     for name in names:
         target = repo / "App" / name
@@ -119,6 +120,13 @@ class PublicFrontendBundleTests(TestCase):
             {path.name for path in self.current.iterdir()},
             {"public_frontend", "frontend", IDENTITY_FILE, MANIFEST_FILE},
         )
+
+    def test_current_bundle_preserves_crawler_render_exceptions(self):
+        self.assertEqual(
+            (self.current / "public_frontend/robots.txt").read_text(encoding="utf-8"),
+            (APP_ROOT / "public_frontend/robots.txt").read_text(encoding="utf-8"),
+        )
+        self.assertTrue((self.current / "public_frontend/sitemap.xml").is_file())
 
     def test_build_is_deterministic_and_ignores_uncommitted_static_and_selector(self):
         source = self.repo / "App/public_frontend"
