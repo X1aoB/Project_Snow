@@ -20,13 +20,19 @@ _NON_ASSERTION = re.compile(
     r"希望|愿望|想象|梦想|想(?:要)?(?:和|跟|与|成为|当)|愿意|盼望|期待|打算|准备|"
     r"吗|么|是否|是不是|能不能|会不会|还未|尚无"
 )
-_CONDITIONAL_SCOPE = re.compile(r"如果|假如|假设|要是|倘若|万一|等到|有朝一日|总有一天|希望|想象|梦想|^(?:以后|将来|未来)")
-_FORMAL = re.compile(r"恒约|妻子|老婆|夫妻|婚礼|结过?婚|成婚|成亲|丈夫|老公")
+_CONDITIONAL_SCOPE = re.compile(r"如果|假如|假设|要是|倘若|万一|等到|等(?:我们|咱们|咱俩|我和你|你和我)|有朝一日|总有一天|希望|想象|梦想|^(?:以后|将来|未来)")
+_REPORTED_OR_DENIED_ASSERTION = re.compile(
+    r"^\s*(?:(?:你|分析员)(?:还|一直|仍然|也|曾经|之前|竟然|居然){0,2}(?:以为|觉得|认为)|"
+    r"我(?:可|也|并|根本){0,2}没(?:有)?(?:说过?|讲过?|声称过?|承认过?))"
+)
+_FORMAL = re.compile(r"恒约|妻子|老婆|夫妻|婚礼|结过?婚|成婚|成亲|丈夫|老公|嫁给|嫁了|已婚")
 _COMPLETED = r"(?:(?:已经|早已|早就|已然|一同|一起|正式|都|也|早|已|了|过|是|有|立下|缔结|定下|结下|签订|结成|有了|一直是|本来就是|现在是|的){0,5})"
 _SELF_BOND = re.compile(
     r"(?:我们|咱们|我(?:和|跟|与)(?:你|分析员)|(?:你|分析员)(?:和|跟|与)我)" + _COMPLETED
     + r"(?:恒约|结过?婚|成婚|成亲|夫妻|夫妇|婚礼)|"
     r"我(?:已经|早已|早就|已|都|也)?(?:结过?婚|成婚|成亲)|"
+    r"我(?:已经|早已|早就|已)(?:嫁给|嫁了)(?:你|分析员)|我(?:嫁给|嫁了)(?:你|分析员)了|"
+    r"我(?:已经|早已|早就|已|现在|也|就){0,3}是已婚|"
     r"我(?:已经|早已|早就|现在|当然|本来|可|也|就|仍然|一直){0,3}(?:是|成为|当上|做了)(?:你|分析员)的?(?:妻子|老婆|丈夫|老公)|"
     r"(?:你的|分析员的)(?:妻子|老婆|丈夫|老公)(?:就是|正是|是)我|"
     r"(?:你|分析员)(?:已经|早已|早就|现在|当然|本来|可|也|就|仍然|一直){0,3}(?:是|成为|当上|做了)我的?(?:妻子|老婆|丈夫|老公)|"
@@ -63,6 +69,8 @@ def affirmative_clauses(text: str, *, keep_quotes: bool = False) -> list[str]:
 
     A condition carries across its comma clauses; a local negation does not.
     Adversatives begin a new scope. Rhetorical "不是吗" is not a negation.
+    Reporting the listener's belief or denying a previous utterance does not
+    assert its content; the speaker's own affirmative belief remains a claim.
     """
     value = str(text or "")
     if not keep_quotes:
@@ -74,7 +82,8 @@ def affirmative_clauses(text: str, *, keep_quotes: bool = False) -> list[str]:
             conditional = False
             for clause in re.split(r"[，,]", segment):
                 conditional = conditional or bool(_CONDITIONAL_SCOPE.search(clause))
-                if conditional or clause.rstrip().endswith(("?", "？")) or _NON_ASSERTION.search(clause):
+                if (conditional or clause.rstrip().endswith(("?", "？")) or _NON_ASSERTION.search(clause)
+                        or _REPORTED_OR_DENIED_ASSERTION.search(clause)):
                     continue
                 if clause.strip():
                     result.append(clause.strip())

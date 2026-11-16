@@ -76,7 +76,8 @@ class RelationshipFactTests(TestCase):
                            "不是开玩笑，但我们已经结婚了。", "我们已经结婚了，以后每天都一起吃饭。",
                            "我不是在开玩笑，我们早已缔结恒约。", "我们已经恒约了，不是吗？",
                            "自从我们恒约以后，我一直很开心。", "我们已经成亲了。",
-                           "你是我的丈夫。", "我们早就结过婚了。"):
+                           "你是我的丈夫。", "我们早就结过婚了。", "我已经嫁给你了。",
+                           "我已经是已婚人士了。"):
                 with self.subTest(character=character.display_name, answer=answer):
                     context = {"character": character, "question_focus": "general", "hits": []}
                     violations = MVPService._answer_guardrail_violations("陪我聊聊", answer, context, "immersive")
@@ -90,6 +91,8 @@ class RelationshipFactTests(TestCase):
                        "我是芬妮的朋友，她已经和分析员恒约。",
                        "我帮你筹备婚礼。", "我参加过你的婚礼。", "我听说过恒约。",
                        "你可以叫我老婆呀。", "老婆这个称呼我还不习惯。", "我们谈论恒约。",
+                       "等我们结婚后，我每天都陪着你。", "等我们恒约后，我就天天陪你。",
+                       "我想嫁给你。", "假如我已经是已婚人士了，会是什么样呢？",
                        "你问的是“我们已经结婚了”这句话吗？"):
             with self.subTest(answer=answer):
                 self.assertNotIn("unsupported_formal_relationship",
@@ -101,6 +104,22 @@ class RelationshipFactTests(TestCase):
                 continue
             self.assertNotIn("unsupported_formal_relationship", MVPService._answer_guardrail_violations(
                 "陪我聊聊", "我们已经立下恒约了。", {"character": character, "hits": []}, "immersive"))
+
+    def test_belief_attribution_and_denied_reports_preserve_the_claim_owner(self):
+        context = {"character": MIA, "hits": []}
+        for answer in ("你以为我是你的妻子，但我们还没恒约哦。", "你觉得我们已经结婚了。",
+                       "你一直认为我是你的妻子。", "我可没说我是你的妻子。", "我没说过我们已经结婚了。"):
+            with self.subTest(answer=answer):
+                self.assertNotIn("unsupported_formal_relationship",
+                    MVPService._answer_guardrail_violations("我们还没恒约哦", answer, context, "immersive"))
+                self.assertEqual(MVPService._relationship_background([source(answer)], MIA.character_id)["evidence"], [])
+                self.assertIsNone(MVPService._user_relationship_premise(answer))
+        for answer in ("我认为我们已经恒约了。", "我觉得我们已经结婚了。",
+                       "你以为我只是战友，但我们已经恒约了。",
+                       "我可没说我们只是战友，我们已经结婚了。"):
+            with self.subTest(affirmative=answer):
+                self.assertIn("unsupported_formal_relationship",
+                    MVPService._answer_guardrail_violations("陪我聊聊", answer, context, "immersive"))
 
     def test_roster_rejects_every_unapproved_character_not_only_enya(self):
         answer = MVPService._relationship_roster_fallback()

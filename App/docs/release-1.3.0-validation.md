@@ -20,7 +20,7 @@
 
 通用规则允许符合人物形象、可拒绝的小提议；校验继续阻止擅自安排会面、移动和共同执行计划。不是强制每轮提问，也不把所有角色变成相同的外向性格。
 
-`tests/test_dialogue_persona.py` 的九项合成测试覆盖装甲说话人、另一角色的通用别名、旁白/时装隔离、来源预算、构建器、缓存失效与隔离、提示接入和提议边界。只读资料审计中，米娅可识别的自身台词从 64 条变为 332 条；22/22 角色均有明确自身台词参考。自动化测试验证资料选择、提示和保护边界，不代表真人已评价模型的人物表现。
+`tests/test_dialogue_persona.py` 的十项合成测试覆盖装甲说话人、另一角色的通用别名、旁白/时装隔离、来源预算、构建器的跨角色语音隔离、缓存失效与隔离、提示接入和提议边界。只读资料审计中，米娅可识别的自身台词从 64 条变为 332 条；22/22 角色均有明确自身台词参考。自动化测试验证资料选择、提示和保护边界，不代表真人已评价模型的人物表现。
 
 ## 角色事实与检索
 
@@ -32,12 +32,14 @@
 
 检索保留过滤后的候选池直到角色和意图重排结束，再执行返回数量限制；重排入口再次检查角色/时装准入。回归直接调用真实 retrieve 及生成/修复链路，不只验证辅助函数。
 
-`tests/test_factual_grounding.py` 最初在旧实现上得到 83 个失败、5 个通过和 8 个通过子场景，确认新增回归能够发现旧缺陷。最终两类新增测试合计 28 项、188 个子场景通过。所有回归使用合成/临时数据；原始 Data、审核决定、用户聊天和线上运行数据不作测试输入或写入目标。
+`tests/test_factual_grounding.py` 最初在旧实现上得到 83 个失败、5 个通过和 8 个通过子场景，确认新增回归能够发现旧缺陷。最终两类新增测试合计 30 项、229 个子场景通过，涵盖未来条件、反向婚姻谓词和纠错中的主张归属。所有回归使用合成/临时数据；原始 Data、审核决定、用户聊天和线上运行数据不作测试输入或写入目标。
 
 ## 发布验证
 
 版本字段统一为 1.3.0。公共 v1、public-state-2、IndexedDB v4 和请求快照保持兼容；本次不新增数据库迁移。
 
-最终定向回归：`test_factual_grounding.py`、`test_dialogue_persona.py`、`test_application_layer.py`、`test_generation_latency_v2.py`（排除私有运行数据测试）合计 **219 passed、684 subtests passed**。两个新增文件已加入 CI 的公共 API 回归列表。真实资料的独立只读投影检查确认 22 位角色的选中台词都归属于自己，米娅的正式关系规则为尚未确立恒约。
+最终定向回归：`test_factual_grounding.py`、`test_dialogue_persona.py`、`test_application_layer.py`、`test_generation_latency_v2.py`、`test_review_state_preservation.py`、`test_mvp_22_product.py`（排除私有运行数据测试）合计 **230 passed、725 subtests passed**。两个新增文件已加入 CI 的公共 API 回归列表。真实资料的独立只读投影检查确认 22 位角色的选中台词都归属于自己，米娅的正式关系规则为尚未确立恒约。
+
+本地完整可移植套件得到 **1913 passed、489 skipped、2249 subtests passed、1 failed**。唯一失败为 Windows 默认 GBK 解码已有 UTF-8 `ops/deploy.sh`；以 `python -X utf8` 重跑 `test_stage_never_reconciles_shared_services` 后 **1 passed**。未放宽断言、未更改部署脚本。上述最终定向回归包含完整套件之后的审阅修正；完整日志及 JUnit 保存在忽略的 `runtime/release-validation/1.3.0/`。精确发布提交还须通过 Linux CI 全量检查。
 
 状态：已完成实现与定向验证，尚未发布。完整回归、精确提交的 CI、公告预检、候选身份、浏览器检查和回退锚点通过后，才进入既有候选验收及晋级流程。未进行真实付费模型人格评测，不能将自动测试写成人工质量批准。

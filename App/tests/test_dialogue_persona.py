@@ -90,6 +90,24 @@ class CharacterExpressionTests(unittest.TestCase):
         self.assertEqual(profile["analyst_interaction"][0]["document_id"], "story")
         self.assertEqual(profile["review_status"], "evidence_ready")
 
+    def test_profile_rebuild_excludes_foreign_voice_but_preserves_attributed_related_story(self):
+        docs = [
+            document("foreign-voice", "voice_excerpt=问候：本小姐今天决定带你去看一个惊喜，我喜欢这样的陪伴。",
+                     source="character_voice", character_id="fenny", character_name="芬妮", related_character_ids=["mia"]),
+            document("own-voice", "voice_excerpt=问候：分析员，我有一个合成的小提议。", source="character_voice"),
+            document("related-story", speech("米娅", "分析员，我想把这个小主意说给你听。"),
+                     source="character_story", character_id="fenny", character_name="芬妮", related_character_ids=["mia"]),
+        ]
+        before = copy.deepcopy(docs)
+        profile = _build_profile("mia", "米娅", docs)
+        self.assertEqual(profile["dialogue_line_count"], 2)
+        self.assertNotIn("本小姐", {item["term"] for item in profile["self_reference_terms"]})
+        self.assertNotIn("foreign-voice", profile["evidence_document_ids"])
+        self.assertIn("related-story", profile["evidence_document_ids"])
+        self.assertEqual(profile["source_counts"], {"character_voice": 1, "character_story": 1})
+        self.assertEqual(profile["review_status"], "evidence_ready")
+        self.assertEqual(docs, before)
+
     def service(self, docs, character):
         service = MVPService.__new__(MVPService)
         service._expression_prompt_cache = OrderedDict()
