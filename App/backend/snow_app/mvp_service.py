@@ -35,6 +35,7 @@ import httpx
 
 from .chat_store import ConversationStore
 from .config import Settings
+from .factual_grounding import affirmative_clauses, relationship_body, relationship_evidence, unsupported_formal_claims
 from .generation_stream import (
     GenerationPublicationError,
     GenerationStreamError,
@@ -52,6 +53,7 @@ from .dialogue_core import (
     active_generation_budget,
 )
 from .dialogue_turn import TurnFrame, coerce_turn_frame
+from .dialogue_persona import EXPRESSION_RULE, character_speaker_names, expression_reference
 from .dialogue_output import (
     _communication_block_violations,
     _normalize_content_blocks,
@@ -600,9 +602,10 @@ _NATURAL_DIALOGUE_GUIDANCE = (
     "\u5982\u679c\u5173\u7cfb\u80cc\u666f\u8bc1\u636e\u660e\u786e\uff0c\u5bf9\u201c\u6211\u4eec\u662f\u4ec0\u4e48\u5173\u7cfb\u201d\u5e94\u76f4\u63a5\u8bf4\u51fa\u5173\u7cfb\u3001\u4e0e\u5206\u6790\u5458\u7684\u60c5\u611f\u548c\u5171\u540c\u7ecf\u5386\uff1b\u7528\u6237\u79f0\u547c\u201c\u59bb\u5b50\u201d\u65f6\uff0c\u82e5\u80cc\u666f\u4e3a\u6052\u7ea6\u4f34\u4fa3\u5173\u7cfb\uff0c\u5e94\u81ea\u7136\u627f\u63a5\uff0c\u4e0d\u8981\u7ea0\u6b63\u4e3a\u201c\u53ea\u662f\u642d\u6863\u201d\u3002"
     "\u6bcf\u8f6e\u56de\u7b54\u5e94\u4f18\u5148\u53c2\u8003\u5f53\u524d\u4f1a\u8bdd\u80cc\u666f\u3001\u5df2\u53d1\u751f\u7684\u6545\u4e8b\u548c\u5f53\u8f6e\u8bc1\u636e\uff1b\u4e0d\u8981\u6bcf\u8f6e\u628a\u89d2\u8272\u91cd\u7f6e\u6210\u521d\u6b21\u89c1\u9762\u3002"
     "\u56de\u7b54\u901a\u5e38\u63a7\u5236\u5728 1\u20134 \u53e5\uff0c\u5148\u76f4\u63a5\u63a5\u4f4f\u5206\u6790\u5458\u7684\u95ee\u9898\uff0c\u518d\u7528\u4e00\u4e24\u53e5\u8865\u5145\u539f\u56e0\u6216\u56de\u5fc6\u3002\u4e0d\u8981\u628a\u6587\u6863\u6807\u9898\u3001\u68c0\u7d22\u6392\u540d\u3001\u8bc1\u636e\u4e0d\u8db3\u7b49\u5de5\u7a0b\u4fe1\u606f\u5f53\u6210\u56de\u7b54\u7684\u5f00\u573a\u767d\u3002"
-    "\u666e\u901a\u804a\u5929\u5728\u7b54\u5b8c\u540e\u53ef\u4ee5\u81ea\u7136\u6536\u675f\uff1b\u9664\u975e\u5206\u6790\u5458\u660e\u786e\u8be2\u95ee\u8ba1\u5212\u3001\u9080\u7ea6\u3001\u4e0b\u4e00\u6b65\u6216\u4f1a\u9762\u5b89\u6392\uff0c\u4e0d\u8981\u64c5\u81ea\u8865\u4e0a\u2018\u53bb\u67d0\u5904\u78b0\u9762\u2019\u3001\u2018\u518d\u4e00\u8d77\u60f3\u60f3\u2019\u6216\u5171\u540c\u6267\u884c\u8ba1\u5212\u7684\u7ed3\u5c3e\u3002"
+    "普通聊天可以自然收束，也可以按人物形象提出贴合话题、允许分析员拒绝的小提议；未经分析员同意，不得宣布已经约好见面、已经移动或共同执行计划，也不要把空泛的‘再一起想想’当成每轮固定结尾。"
     "对邀约、分享、轻松玩笑和关心，不要只给一条冷淡的确认：在不新增剧情事实的前提下，可以写出自己的即时情绪、犹豫、期待、玩笑或一个贴合话题的追问。"
     "这些低风险的情绪与互动延展不是虚构共同经历；它们应当让角色继续同分析员说话，而不是把每次普通聊天压缩成审查后的结论。"
+    "不要把谨慎处理事实误解为凡事被动附和；也不要固定在每轮末尾反问分析员。"
 )
 
 
@@ -1097,6 +1100,9 @@ _UNPROMPTED_MEETUP_PATTERN = re.compile(
 )
 _UNPROMPTED_SHARED_PLAN_PATTERN = re.compile(
     r"(?:再|然后|之后)?(?:一起)(?:想想|商量|安排|准备|计划)"
+)
+_OPTIONAL_CONVERSATIONAL_IDEA_PATTERN = re.compile(
+    r"(?:要不要|愿不愿意|如果你愿意|不如)[^。！？!?\r\n]{0,24}一起(?:想想|商量)"
 )
 # A model must not manufacture a prior agreement that the current conversation
 # never established.  This is separate from an unsolicited logistics plan:
@@ -1820,6 +1826,7 @@ class MVPService:
         self._dialogue_profiles_mtime: int | None = None
         self._profile_prompt_cache: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
         self._profile_prompt_cache_lock = threading.RLock()
+        self._expression_prompt_cache: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
         self._style_index_cache: dict[str, list[dict[str, Any]]] | None = None
         self._story_character_names_cache: dict[str, str] | None = None
         # Older lakehouse manifests did not persist the recommendation/armor
@@ -2334,6 +2341,38 @@ class MVPService:
             else:
                 self._profile_prompt_cache.move_to_end(key)
             return copy.deepcopy(cached)
+
+    def _character_expression_reference(
+        self, character: Any, documents: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Project only indexed, directly owned source documents, once per revision.
+
+        A fingerprint fences changed metadata/text even without a new file
+        mtime. No user content or session state enters this bounded cache.
+        """
+        if not hasattr(self, "_expression_prompt_cache"):
+            return {}
+        documents = documents if documents is not None else self.repository.documents_by_id()
+        character_id = str(character.character_id)
+        view = self._views().get(character_id) or {}
+        ids = sorted({str(document_id)
+                      for layer, values in (view.get("direct_document_ids_by_layer") or {}).items()
+                      if layer != "costume_specific" for document_id in values})
+        selected = [documents[document_id] for document_id in ids if document_id in documents]
+        fingerprint = sha256(json.dumps(
+            [{key: document.get(key) for key in ("document_id", "page_id", "source_type", "metadata", "text")}
+             for document in selected], ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        key = (character_id, str(character.display_name), fingerprint)
+        with self._profile_prompt_cache_lock:
+            if key not in self._expression_prompt_cache:
+                self._expression_prompt_cache[key] = expression_reference(
+                    character_id, str(character.display_name), selected,
+                )
+                while len(self._expression_prompt_cache) > self._PROFILE_PROMPT_CACHE_LIMIT:
+                    self._expression_prompt_cache.popitem(last=False)
+            self._expression_prompt_cache.move_to_end(key)
+            return copy.deepcopy(self._expression_prompt_cache[key])
 
     @staticmethod
     def _dialogue_profile_prompt_context(profile: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -5271,8 +5310,8 @@ class MVPService:
         anchor_terms = _RELATIONSHIP_POSITIVE_TERMS + ("\u4eb2\u7231\u7684", "\u7231\u4f60")
         # “伴侣” alone is deliberately not an explicit marriage signal.  It
         # can describe a pet, a story character, or a non-romantic partner.
-        # Terms below are strong enough to establish the relationship label in
-        # the runtime narrative card.
+        # These terms can rank affirmative body evidence; only the reviewed
+        # public-knowledge release establishes a formal relationship.
         strong_terms = {"\u6052\u7ea6", "\u59bb\u5b50", "\u4e08\u592b", "\u592b\u59bb", "\u5a5a\u793c", "\u7ed3\u5a5a", "\u4e00\u5468\u5e74"}
         source_bonus = {
             "special_mail": 12.0,
@@ -5285,12 +5324,30 @@ class MVPService:
             "main_story": 4.0,
         }
         scored: list[tuple[float, dict[str, Any], list[str]]] = []
+        other_names = tuple(
+            name for character in MVP_CHARACTERS if character.character_id != character_id
+            for name in (character.display_name, character.source_name, *character.aliases)
+            if len(name) >= 2
+        )
+        selected_character = next((item for item in MVP_CHARACTERS if item.character_id == character_id), None)
+        speaker_names = character_speaker_names(character_id,
+            selected_character.display_name if selected_character else "", documents)
+        if selected_character:
+            speaker_names.update((selected_character.source_name, *selected_character.aliases))
         for document in documents:
             if not MVPService._is_direct_document(document, character_id):
                 continue
-            text = str(document.get("text") or "")
-            normalized = _compact(" ".join((str(document.get("title") or ""), text)))
-            matches = [term for term in anchor_terms if _compact(term) in normalized]
+            owner = str((document.get("metadata") or {}).get("character_id") or "")
+            if owner and owner != character_id:
+                # A related-character link is not authorship of a first-person
+                # relationship statement on somebody else's page.
+                continue
+            if not owner and MVPService._document_character_ids(document) != {character_id}:
+                continue
+            if source_layer(document.get("source_type"), bool((document.get("metadata") or {}).get("requires_costume_context"))) == "costume_specific":
+                continue
+            text = relationship_body(document, speaker_names)
+            matches, excerpt = relationship_evidence(text, anchor_terms, other_names=other_names)
             if not matches:
                 continue
             score = (
@@ -5299,7 +5356,7 @@ class MVPService:
                 + source_bonus.get(str(document.get("source_type") or ""), 0.0)
                 + float((document.get("metadata") or {}).get("source_priority", 0.0)) * 4.0
             )
-            scored.append((score, document, matches))
+            scored.append((score, {**document, "_relationship_excerpt": excerpt}, matches))
         scored.sort(key=lambda item: (item[0], str(item[1].get("document_id") or "")), reverse=True)
 
         evidence: list[dict[str, Any]] = []
@@ -5309,10 +5366,7 @@ class MVPService:
             if title_key and title_key in seen_titles:
                 continue
             seen_titles.add(title_key)
-            text = str(document.get("text") or "")
-            positions = [text.find(term) for term in matches if text.find(term) >= 0]
-            start = max(0, min(positions) - 160) if positions else 0
-            excerpt = text[start : start + 520]
+            excerpt = str(document.get("_relationship_excerpt") or "")
             evidence.append(
                 {
                     "document_id": document.get("document_id"),
@@ -5326,20 +5380,14 @@ class MVPService:
             if len(evidence) >= 5:
                 break
 
-        # A strong word in a character page is not by itself enough to call
-        # somebody the analyst's spouse: pages can quote another character or
-        # describe a hypothetical/future covenant.  The audited policy is the
-        # final scope boundary; source evidence is still required.
-        strong_evidence = any(
-            any(term in item.get("matched_terms", []) for term in strong_terms)
-            for item in evidence
-        )
-        explicit = character_id in _EXPLICIT_RELATIONSHIP_CHARACTER_IDS and strong_evidence
+        # The reviewed release, not keyword search, establishes formal facts.
+        # A sparse retrieval result cannot erase an already reviewed marriage.
+        explicit = character_id in _EXPLICIT_RELATIONSHIP_CHARACTER_IDS
         if explicit:
             label = "\u6052\u7ea6\u4f34\u4fa3\uff0f\u592b\u59bb\u5f0f\u5173\u7cfb"
             summary = "\u6545\u4e8b\u8bc1\u636e\u5df2\u7ecf\u5efa\u7acb\u4e86\u5206\u6790\u5458\u4e0e\u8be5\u89d2\u8272\u7684\u6052\u7ea6\u3001\u4f34\u4fa3\u4e0e\u5bb6\u5ead\u5f0f\u5173\u7cfb\u3002"
         elif evidence:
-            label = "\u660e\u786e\u7684\u4eb2\u5bc6\u4f34\u4fa3\u5173\u7cfb"
+            label = "亲近与情感互动（非正式关系证明）"
             summary = "\u8bc1\u636e\u663e\u793a\u8be5\u89d2\u8272\u4e0e\u5206\u6790\u5458\u6709\u6301\u7eed\u7684\u4eb2\u5bc6\u4e92\u52a8\u548c\u60c5\u611f\u627f\u8bfa\u3002"
         else:
             label = None
@@ -5359,7 +5407,8 @@ class MVPService:
                 if character_id in _EXPLICIT_RELATIONSHIP_CHARACTER_IDS
                 else "source_bounded"
             ),
-            "policy": "\u8fd9\u662f\u53d9\u4e8b\u80cc\u666f\u5361\uff0c\u4e0d\u7b49\u540c\u4e8e\u5df2\u5ba1\u6279\u7684\u56fe\u8c31\u8fb9\u3002",
+            "knowledge_version": _PUBLIC_KNOWLEDGE.version,
+            "policy": "正式关系仅由已审核公共事实确立；正文摘录提供情感背景，不批准图谱边。",
         }
 
     @staticmethod
@@ -5428,7 +5477,8 @@ class MVPService:
                 "我们是恒约",
             )
             explicit = any(
-                any(_compact(term) in _compact(str(premise)) for term in premise_terms)
+                any(_compact(term) in _compact(clause)
+                    for clause in affirmative_clauses(str(premise)) for term in premise_terms)
                 for premise in premises
             )
         if not explicit:
@@ -5456,7 +5506,7 @@ class MVPService:
 
     @staticmethod
     def _user_relationship_premise(message: str) -> str | None:
-        normalized = _compact(message)
+        normalized = _compact(" ".join(affirmative_clauses(message)))
         phrases = (
             "\u4f60\u662f\u6211\u7684\u8001\u5a46",
             "\u4f60\u662f\u6211\u8001\u5a46",
@@ -5886,7 +5936,7 @@ class MVPService:
         for hit in hits:
             document_id = str(hit.get("citation", {}).get("document_id") or "")
             document = documents.get(document_id)
-            if document:
+            if document and self._allowed_document(document, view, style_context, character_id):
                 if str(document.get("source_type") or "") == "logistics_lore":
                     # Hybrid search returns the original manifest metadata;
                     # replace only that metadata field with the ephemeral
@@ -6312,7 +6362,9 @@ class MVPService:
                 )
                 if len(filtered) >= limit:
                     break
-        filtered = filtered[: max(1, min(limit, 12))]
+        # Apply the response budget after reranking. Cutting to ``limit`` here
+        # discarded relevant lower-ranked global evidence before intent and
+        # character-aware ranking could even examine it.
         filtered, query_intents = self._rerank_hits(
             filtered,
             character.character_id,
@@ -7001,6 +7053,7 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
             if str(getattr(character, "character_id", "")) == "1b0a6b35719a"
             else ""
         )
+        character_voice_rule += "\n【人物形象与对话主动性】\n" + EXPRESSION_RULE + "\n"
         if str(getattr(character, "character_id", "")) == "6455a5dcff6a":
             character_voice_rule += """
 【卜卜的标志性表达频率】
@@ -7067,6 +7120,8 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
 
 {_CASUAL_SCENARIO_GUIDANCE}
 
+{_PUBLIC_KNOWLEDGE.relationship_fact_rule(str(getattr(character, 'character_id', '')))}
+
 {relationship_rule}
 
 {relationship_address_rule}
@@ -7100,6 +7155,8 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         sources = [str(item.get("phrase") or "") for item in profile.get("catchphrases") or [] if isinstance(item, dict)]
         for key in ("emotion_patterns", "analyst_interaction"):
             sources.extend(str(item.get("quote") or "") for item in profile.get(key) or [] if isinstance(item, dict))
+        sources.extend(str(item.get("quote") or "")
+                       for item in (context.get("character_expression_reference") or {}).get("voice_evidence", []))
         sources.extend(str(hit.get("text") or "")[:3200] for hit in (context.get("hits") or [])[:12])
         return _longest_copied_run(answer, sources)
 
@@ -7203,6 +7260,15 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         ]
         relationship_background = context.get("relationship_background_for_prompt") or {}
         dialogue_profile = self._cached_dialogue_profile_prompt_context(character.character_id, context.get("dialogue_profile"))
+        character_expression = context.get("character_expression_reference")
+        if character_expression is None:
+            character_expression = self._character_expression_reference(character, documents)
+        if dialogue_profile is not None and character_expression.get("voice_evidence"):
+            # Old data packages may contain narration labelled as interaction.
+            # Prefer the freshly attributed examples without modifying the
+            # immutable profile or its provenance/audit material.
+            dialogue_profile["emotion_patterns"] = []
+            dialogue_profile["analyst_interaction"] = []
         relationship_answer_contract = self._relationship_answer_contract(
             relationship_background, str(context.get("question_focus") or "")
         )
@@ -7241,6 +7307,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 "relationship_answer_contract": relationship_answer_contract,
                 "conversation_context": context.get("session_context") or {},
                 "dialogue_style_profile": dialogue_profile,
+                "character_expression_reference": character_expression,
                 "evidence": evidence,
                 "provisional_relation_evidence": provisional,
                 "verified_graph_context": context.get("graph_context") or {},
@@ -8500,9 +8567,14 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             return False
         if any(_contains_term(message, term) for term in _LOGISTICS_REQUEST_TERMS):
             return False
+        optional_ideas = list(_OPTIONAL_CONVERSATIONAL_IDEA_PATTERN.finditer(answer))
+        unrequested_plans = any(
+            not any(idea.start() <= plan.start() and idea.end() >= plan.end() for idea in optional_ideas)
+            for plan in _UNPROMPTED_SHARED_PLAN_PATTERN.finditer(answer)
+        )
         return bool(
             _UNPROMPTED_MEETUP_PATTERN.search(answer)
-            or _UNPROMPTED_SHARED_PLAN_PATTERN.search(answer)
+            or unrequested_plans
         )
 
     @staticmethod
@@ -9254,6 +9326,14 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 violations.append("immersive_meta_answer_used_direct_quote")
         selected_character_id = str(getattr(context.get("character"), "character_id", ""))
         violations.extend(cls._relationship_roster_violations(message, answer))
+        selected_character = next((item for item in MVP_CHARACTERS if item.character_id == selected_character_id), None)
+        if selected_character and selected_character_id not in _EXPLICIT_RELATIONSHIP_CHARACTER_IDS:
+            if unsupported_formal_claims(
+                answer,
+                speaker_names=(selected_character.display_name, selected_character.source_name, *selected_character.aliases),
+                other_names=tuple(item.display_name for item in MVP_CHARACTERS if item.character_id != selected_character_id),
+            ):
+                violations.append("unsupported_formal_relationship")
         for mention in context.get("mentioned_characters") or []:
             alias = str(mention.get("matched_alias") or "")
             if (
@@ -9497,6 +9577,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 "text_channel_",
                 "immersive_meta_",
                 "relationship_roster_",
+                "unsupported_formal_relationship",
                 "unsupported_analyst_premise:",
                 "unsupported_session_premise:",
                 "unsupported_casual_state_claim:",
@@ -9534,6 +9615,8 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                     "重新生成完整 JSON 回答。严格执行 original_request 中的 response_contract 和 dialogue_boundary；"
                     "不得解释或复述实现层概念。若 violation 包含 unsupported_quote，改为不带引号的谨慎转述，"
                     "不得编造新的台词、事实或共同经历。若包含 address_alias_echo，使用 mentioned_characters 中的 canonical_name；"
+                    "若包含 unsupported_formal_relationship，删除把尚未确立的恒约或婚姻当作已发生事实的表达；"
+                    "用户指出尚未恒约时自然承认纠正，保留有依据的亲近、主动表达与当前话题，不得变成冷淡拒绝。"
                     "若包含 companion_hostility，把关系改写为友好同伴间的玩笑、拌嘴或轻松竞争，不得保留敌意；"
                      "若包含 unsupported_analyst_premise，删除对分析员日常习惯、共同回忆、专属称呼或性格的无依据断言；"
                      "不要用‘你总是’、‘你平时’、‘不像平时’、‘爱睡懒觉’或‘只有你能’补充气氛。"
@@ -9828,12 +9911,36 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         violations: list[str] = []
         if missing:
             violations.append("relationship_roster_missing")
-        # 恩雅 is a common false positive because affectionate story language
-        # contains the same relationship vocabulary.  Treat its appearance in
-        # a supposed complete list as an explicit mismatch, even if all eight
-        # approved names also happen to be present.
-        if _contains_term(normalized, "恩雅"):
-            violations.append("relationship_roster_excluded:恩雅")
+        # Apply the reviewed roster to every registered character, including
+        # names appended after an otherwise complete list of approved names.
+        assertions = affirmative_clauses(answer)
+        all_names = sorted({name for item in MVP_CHARACTERS
+                            for name in (item.display_name, item.source_name, *item.aliases)}, key=len, reverse=True)
+        roster_clauses = []
+        for assertion in assertions:
+            list_shape = assertion
+            for name in all_names:
+                list_shape = list_shape.replace(name, "@")
+            list_shape = re.sub(
+                r"知道|现在|已经|正式|立下|缔结|恒约|结婚|夫妻|夫妇|伴侣|妻子|老婆|名单|角色|少女|"
+                r"分析员|和你|与你|有了|以及|另外|包括|还有|分别|一共|都是|就是|也|已|的|是|有|和|与|及|[\s、，,。.!！：:]",
+                "", list_shape,
+            )
+            if list_shape and set(list_shape) == {"@"}:
+                roster_clauses.append(assertion)
+        for character in MVP_CHARACTERS:
+            if character.character_id in _EXPLICIT_RELATIONSHIP_CHARACTER_IDS:
+                continue
+            names = (character.display_name, character.source_name, *character.aliases)
+            listed = any(_contains_term(clause, name) for clause in roster_clauses for name in names)
+            asserted = any(
+                any(_contains_term(clause, name) for name in names)
+                and unsupported_formal_claims(clause, speaker_names=names,
+                    other_names=tuple(item.display_name for item in MVP_CHARACTERS if item.character_id != character.character_id))
+                for clause in assertions
+            )
+            if listed or asserted:
+                violations.append(f"relationship_roster_excluded:{character.display_name}")
         return violations
 
     @staticmethod
@@ -10323,6 +10430,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         )
         context["user_message"] = message.strip()
         context["analyst_content_blocks"] = normalized_analyst_blocks
+        context["character_expression_reference"] = self._character_expression_reference(character)
         context["public_state_update_catalog"] = list(public_state_update_catalog or [])
         context["attachment_context"] = list(attachment_context or [])
         # Keep only the compact, evidence-backed direct-address memory in all

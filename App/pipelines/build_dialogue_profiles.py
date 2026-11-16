@@ -21,6 +21,8 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from backend.snow_app.dialogue_persona import character_speaker_names
+
 from .common import RUNTIME_ROOT, dialogue_characters, ensure_runtime, load_runtime_jsonl, utc_now, write_json
 from .common import write_jsonl
 
@@ -361,7 +363,8 @@ def _speaker_dialogues(document: dict[str, Any], character_names: set[str]) -> l
 
     # Voice pages use a compact ``trigger: line`` field rather than a role
     # template.  The preamble is still an original source quote.
-    if document.get("source_type") == "character_voice":
+    if (document.get("source_type") == "character_voice"
+            and str((document.get("metadata") or {}).get("character_name") or "") in character_names):
         for line in lines:
             value = _field_value(line, "voice_excerpt")
             if value:
@@ -654,11 +657,17 @@ def _dialogue_style(dialogues: list[tuple[dict[str, Any], str]]) -> dict[str, An
 
 def _build_profile(character_id: str, character_name: str, documents: list[dict[str, Any]]) -> dict[str, Any]:
     direct = _direct_documents(documents, character_id)
-    aliases = {character_name}
-    for document in direct:
-        metadata = document.get("metadata") or {}
-        if metadata.get("character_name"):
-            aliases.add(str(metadata["character_name"]))
+    # Armor-qualified speakers (for example 米娅星彩) are the same character,
+    # but related-character links, costume labels and prefix matches are not.
+    aliases = character_speaker_names(character_id, character_name, direct)
+    # Related stories can contain the selected character's attributed lines;
+    # another character's standalone voice page cannot. Exclude that source
+    # from every profile collection so the narrative fallback cannot re-import
+    # its first-person preferences after the dialogue extractor rejects it.
+    direct = [document for document in direct
+              if document.get("source_type") != "character_voice"
+              or (str((document.get("metadata") or {}).get("character_id") or "") == character_id
+                  and str((document.get("metadata") or {}).get("character_name") or "") in aliases)]
     dialogues_by_doc: dict[str, list[str]] = {}
     dialogue_pairs: list[tuple[dict[str, Any], str]] = []
     for document in direct:
