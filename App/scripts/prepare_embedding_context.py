@@ -17,7 +17,7 @@ from pathlib import Path
 INPUTS = ('.dockerignore', 'infra/embedding.Dockerfile', 'infra/embedding_service.py')
 
 
-def prepare(app_root: Path, previous_fingerprint: str = '', *, changed: bool = False) -> dict:
+def prepare(app_root: Path, previous_fingerprint: str = '', *, force_rebuild: bool = False) -> dict:
     app_root = app_root.resolve(strict=True)
     context = app_root / '.build' / 'embedding-context'
     if context.is_symlink() or context.parent.is_symlink() or not context.resolve().is_relative_to(app_root):
@@ -44,17 +44,18 @@ def prepare(app_root: Path, previous_fingerprint: str = '', *, changed: bool = F
     identity = {'schema': 'project-snow-embedding-inputs-1', 'platform': 'linux/amd64', 'files': inputs}
     fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return {'context': context.as_posix(), 'inputs_sha256': fingerprint,
-            'rebuild': changed or previous_fingerprint.strip() != fingerprint, 'files': inputs}
+            'rebuild': force_rebuild or previous_fingerprint.strip() != fingerprint, 'files': inputs}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--app-root', type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument('--previous-fingerprint', default='')
-    parser.add_argument('--changed', choices=('true', 'false'), default='false')
+    parser.add_argument('--force-rebuild', choices=('true', 'false'), default='false',
+                        help='Explicit security refresh; never a CI risk-tier or changed-path flag')
     parser.add_argument('--github-output', type=Path)
     args = parser.parse_args()
-    report = prepare(args.app_root, args.previous_fingerprint, changed=args.changed == 'true')
+    report = prepare(args.app_root, args.previous_fingerprint, force_rebuild=args.force_rebuild == 'true')
     if args.github_output:
         with args.github_output.open('a', encoding='utf-8', newline='\n') as output:
             output.write('context=' + report['context'] + '\n')

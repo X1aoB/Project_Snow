@@ -3,12 +3,14 @@ name: release-images
 on:
   workflow_call:
     inputs:
-      embedding_changed:
-        required: true
-        type: boolean
-      previous_sha:
+      embedding_baseline_digest:
         required: true
         type: string
+      force_rebuild:
+        description: Explicit shared embedding security refresh, not CI risk selection
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -74,29 +76,18 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
       - run: python App/scripts/report_trivy_findings.py trivy-application.json
-      - name: Resolve previous embedding digest and its actual build inputs
+      - name: Resolve approved embedding baseline and its actual build inputs
         id: embedding-previous
         shell: bash
         env:
-          IMAGE: ${{ steps.images.outputs.embedding }}
-          PREVIOUS_SHA: ${{ inputs.previous_sha }}
+          BASELINE_DIGEST: ${{ inputs.embedding_baseline_digest }}
         run: |
-          digest=""
-          source_sha=""
-          for candidate in $(git rev-list --first-parent "$PREVIOUS_SHA"); do
-            if image_info="$(docker buildx imagetools inspect "$IMAGE:$candidate" 2>/dev/null)"; then
-              digest="$(printf '%s\n' "$image_info" | awk '/^Digest:/ {print $2; exit}')"
-              if [ -n "$digest" ]; then
-                source_sha="$candidate"
-                break
-              fi
-            fi
-          done
-          test -n "$digest"
-          echo "Selected embedding digest from main ancestor $source_sha for fresh scanning."
+          reference="$(python App/scripts/approved_embedding_baseline.py --owner "$GITHUB_REPOSITORY_OWNER" --digest "$BASELINE_DIGEST")"
+          docker pull --platform linux/amd64 "$reference"
+          digest="${reference##*@}"
+          echo "Selected approved shared embedding baseline $digest for fresh scanning."
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          docker pull --platform linux/amd64 "$IMAGE@$digest"
-          fingerprint="$(docker image inspect --format '{{ with .Config.Labels }}{{ index . "io.project-snow.embedding-inputs-sha256" }}{{ end }}' "$IMAGE@$digest")"
+          fingerprint="$(docker image inspect --format '{{ with .Config.Labels }}{{ index . "io.project-snow.embedding-inputs-sha256" }}{{ end }}' "$reference")"
           # Legacy images have no label. They must be rebuilt, even when the
           # latest commit only changes tests after an earlier failed release.
           if [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
@@ -106,10 +97,10 @@ jobs:
         id: embedding-plan
         env:
           PREVIOUS_FINGERPRINT: ${{ steps.embedding-previous.outputs.inputs_sha256 }}
-          CHANGED: ${{ inputs.embedding_changed }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
         run: >-
           python App/scripts/prepare_embedding_context.py --app-root App
-          --previous-fingerprint "$PREVIOUS_FINGERPRINT" --changed "$CHANGED"
+          --previous-fingerprint "$PREVIOUS_FINGERPRINT" --force-rebuild "$FORCE_REBUILD"
           --github-output "$GITHUB_OUTPUT"
       - name: Build and push embedding image when actual inputs require it
         if: steps.embedding-plan.outputs.rebuild == 'true'
@@ -124,6 +115,7 @@ jobs:
           labels: io.project-snow.embedding-inputs-sha256=${{ steps.embedding-plan.outputs.inputs_sha256 }}
           provenance: mode=max
           sbom: true
+          no-cache: ${{ inputs.force_rebuild }}
           cache-from: type=gha,scope=embedding
           cache-to: type=gha,mode=max,scope=embedding
       - name: Select embedding digest
