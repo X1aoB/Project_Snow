@@ -353,3 +353,31 @@ class RateLimitResponseTests(TestCase):
         self.assertEqual(detail["retry_after_seconds"], min(300, int(response.headers["Retry-After"])))
         legacy = _rate_limit_response(request, RateLimitExceeded("chat_hour", 120))
         self.assertEqual(legacy.headers["Retry-After"], "60")
+
+
+class HealthProbeLimiterTests(TestCase):
+    def test_caps_each_client_per_window_and_reopens_after_it(self):
+        from backend.snow_app.public_main import HealthProbeLimiter
+
+        now = [100.0]
+        limiter = HealthProbeLimiter(limit=3, window_seconds=60, clock=lambda: now[0])
+        self.assertEqual([limiter.retry_after("203.0.113.7") for _ in range(3)], [None, None, None])
+        now[0] += 15
+        self.assertEqual(limiter.retry_after("203.0.113.7"), 45)
+        self.assertIsNone(limiter.retry_after("198.51.100.9"))
+        now[0] += 45
+        self.assertIsNone(limiter.retry_after("203.0.113.7"))
+
+    def test_forgets_least_recently_seen_clients_and_keeps_no_raw_address(self):
+        from backend.snow_app.public_main import HealthProbeLimiter
+
+        limiter = HealthProbeLimiter(limit=1, max_clients=2, clock=lambda: 0.0)
+        self.assertIsNone(limiter.retry_after("192.0.2.1"))
+        self.assertIsNone(limiter.retry_after("192.0.2.2"))
+        self.assertIsNotNone(limiter.retry_after("192.0.2.1"))
+        # A new client evicts 192.0.2.2, the least recently seen, not the capped client.
+        self.assertIsNone(limiter.retry_after("192.0.2.3"))
+        self.assertIsNotNone(limiter.retry_after("192.0.2.1"))
+        self.assertIsNone(limiter.retry_after("192.0.2.2"))
+        self.assertEqual(len(limiter._windows), 2)
+        self.assertFalse(any(b"192.0.2" in client for client in limiter._windows))
