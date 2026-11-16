@@ -219,6 +219,8 @@ jobs:
           tests/test_proactive_message.py
           tests/test_voice_survey.py
           tests/test_character_identity.py
+          tests/test_dialogue_persona.py
+          tests/test_factual_grounding.py
           tests/test_paid_probe_budget.py
           tests/test_dialogue_turn.py
           tests/test_dialogue_domains.py

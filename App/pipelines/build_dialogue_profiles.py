@@ -21,6 +21,8 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from backend.snow_app.dialogue_persona import character_speaker_names
+
 from .common import RUNTIME_ROOT, dialogue_characters, ensure_runtime, load_runtime_jsonl, utc_now, write_json
 from .common import write_jsonl
 
@@ -654,11 +656,9 @@ def _dialogue_style(dialogues: list[tuple[dict[str, Any], str]]) -> dict[str, An
 
 def _build_profile(character_id: str, character_name: str, documents: list[dict[str, Any]]) -> dict[str, Any]:
     direct = _direct_documents(documents, character_id)
-    aliases = {character_name}
-    for document in direct:
-        metadata = document.get("metadata") or {}
-        if metadata.get("character_name"):
-            aliases.add(str(metadata["character_name"]))
+    # Armor-qualified speakers (for example 米娅星彩) are the same character,
+    # but related-character links, costume labels and prefix matches are not.
+    aliases = character_speaker_names(character_id, character_name, direct)
     dialogues_by_doc: dict[str, list[str]] = {}
     dialogue_pairs: list[tuple[dict[str, Any], str]] = []
     for document in direct:

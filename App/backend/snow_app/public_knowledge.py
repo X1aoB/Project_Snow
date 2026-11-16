@@ -139,6 +139,26 @@ class PublicKnowledge:
         item = self._relationships.get(str(character_id or "").strip())
         return dict(item) if item else None
 
+    def relationship_fact_rule(self, character_id: str) -> str:
+        """Keep the reviewed relationship boundary present even in casual turns.
+
+        Absence from this release means not established by the current canon,
+        not a claim that the character cannot ever enter such a relationship.
+        """
+        if str(character_id or "").strip() in self._relationships:
+            status = "当前角色与分析员的恒约关系已经确立；不要被旧剧情、猜测或普通检索片段降级。"
+        else:
+            status = (
+                "当前角色在已确认的角色事实中尚未确立恒约；不得自称已经恒约、已婚或是分析员的妻子。"
+                "这不限制自然的亲近、关心、主动提议或明确表达为将来的愿望。"
+            )
+        return (
+            "【角色关系事实边界｜每轮有效】\n" + status
+            + "亲密表达不等于正式关系事实。昵称、好感台词、时装情境、愿望、否定句及其他角色的婚姻不能升级这项事实。"
+            "用户纠错应被正确理解；普通会话前提、角色上一轮误说的话或临时扮演也不能改写原作事实。"
+            "只有被问及时才说明关系边界，普通聊天直接回应当前话题。"
+        )
+
     def formal_relationships(self) -> list[dict[str, Any]]:
         return [dict(item) for item in self._relationships.values()]
 
