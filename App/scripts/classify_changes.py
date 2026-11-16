@@ -83,6 +83,8 @@ EMBEDDING_PATTERNS = (
     "App/infra/embedding_service.py",
     "App/scripts/prepare_embedding_context.py",
     "App/tests/test_prepare_embedding_context.py",
+    "App/scripts/approved_embedding_baseline.py",
+    "App/tests/test_approved_embedding_baseline.py",
     ".github/workflows/ci.yml",
     ".github/workflows/publish-images.yml",
 )

@@ -12,6 +12,8 @@ class ChangeClassifierTests(TestCase):
     def test_embedding_context_and_workflow_changes_validate_the_actual_image(self):
         for path in ('App/.dockerignore', 'App/scripts/prepare_embedding_context.py',
                      'App/tests/test_prepare_embedding_context.py',
+                     'App/scripts/approved_embedding_baseline.py',
+                     'App/tests/test_approved_embedding_baseline.py',
                      '.github/workflows/ci.yml', '.github/workflows/publish-images.yml'):
             with self.subTest(path=path):
                 self.assertTrue(classify([path])['embedding'])

@@ -856,7 +856,7 @@ class SnowAdvPerformanceTests(TestCase):
         return [url for url in self.failed if "snow-adv" in url or "/assets/fonts/" in url
                 or "/modules/snow-world" in url or "/p4art/" in url]
 
-    def _swap_and_sample(self, page):
+    def _swap_and_sample(self, page, *, controlled_progress=True):
         # Swap neutral -> happy and sample both art nodes' opacity across the
         # transition. Returns the minimum opacity seen on the OUTGOING (old) art
         # and whether the incoming rose from < 1 to 1, plus the final node count.
@@ -868,7 +868,7 @@ class SnowAdvPerformanceTests(TestCase):
             && !document.querySelector('.stage-character-art-outgoing');
         }""", timeout=5000)
         return page.evaluate(
-            """async character => {
+            """async ({character, controlledProgress}) => {
           const art = document.getElementById('stage-character-art');
           const previous = art.getAttribute('src');
           const samples = { outgoingMin: 1, incomingMin: 1, incomingMax: 0, bothSemi: false };
@@ -884,7 +884,74 @@ class SnowAdvPerformanceTests(TestCase):
               if (outOpacity < 0.95 && inOpacity < 0.95) samples.bothSemi = true;
             }
           };
-          await window.__projectSnowTest.updateStageCharacterArt(art, character, 'happy');
+          const swapAnimations = [];
+          const animate = Element.prototype.animate;
+          if (controlledProgress) {
+            // Capture the actual two WAAPI effects before they can complete.
+            // A 160 ms fade may finish and remove its outgoing node before a
+            // busy renderer supplies the test's next requestAnimationFrame.
+            Element.prototype.animate = function(frames, options) {
+              const animation = animate.call(this, frames, options);
+              if ((this === art && this.dataset.stageArtTransition === 'incoming')
+                  || this.classList.contains('stage-character-art-outgoing')) {
+                animation.pause();
+                animation.currentTime = 0;
+                swapAnimations.push(animation);
+              }
+              return animation;
+            };
+          }
+          try {
+            await window.__projectSnowTest.updateStageCharacterArt(art, character, 'happy');
+          } finally {
+            if (controlledProgress) Element.prototype.animate = animate;
+          }
+          if (controlledProgress) {
+            const outgoing = document.querySelector('.stage-character-art-outgoing');
+            const samplingDeadline = performance.now() + 5000;
+            const awaitSampling = promise => new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error(
+                'expression swap controlled sampling timed out')),
+                Math.max(0, samplingDeadline - performance.now()));
+              Promise.resolve(promise).then(value => {
+                clearTimeout(timeout);
+                resolve(value);
+              }, error => {
+                clearTimeout(timeout);
+                reject(error);
+              });
+            });
+            samples.sampledProgress = [];
+            try {
+              if (swapAnimations.length !== 2 || !outgoing
+                  || swapAnimations.filter(animation => animation.effect.target === art).length !== 1
+                  || swapAnimations.filter(animation => animation.effect.target === outgoing).length !== 1) {
+                throw new Error('expression swap must create one real WAAPI effect per art node');
+              }
+              await awaitSampling(Promise.all(swapAnimations.map(animation => animation.ready)));
+              for (const progress of [0, 0.25, 0.5, 0.75]) {
+                for (const animation of swapAnimations) {
+                  const timing = animation.effect.getComputedTiming();
+                  if (!Number.isFinite(timing.duration) || timing.duration <= 0) {
+                    throw new Error('expression swap requires a finite positive duration');
+                  }
+                  animation.currentTime = timing.delay + timing.duration * progress;
+                }
+                // Read computed style on connected real elements after a
+                // rendering opportunity, with the actual easing/keyframes.
+                await awaitSampling(new Promise(resolve => requestAnimationFrame(resolve)));
+                if (!outgoing.isConnected || !art.dataset.stageArtTransition) {
+                  throw new Error('expression swap cleaned up before controlled sampling');
+                }
+                sample();
+                samples.sampledProgress.push(progress);
+              }
+            } finally {
+              // Preserve the application's finished promises and real cleanup;
+              // never simulate cancellation or detach the outgoing node here.
+              for (const animation of swapAnimations) animation.play();
+            }
+          }
           // updateStageCharacterArt resolves when the decoded art is committed,
           // before WAAPI finishes. A wall-clock delay can expire before rendering
           // starts on a busy runner, so sample through the actual cleanup instead.
@@ -910,7 +977,7 @@ class SnowAdvPerformanceTests(TestCase):
             '#scene-stage .stage-character-art, #scene-stage .stage-character-art-outgoing').length;
           return samples;
         }""",
-            self.character,
+            {"character": self.character, "controlledProgress": controlled_progress},
         )
 
     def test_expression_swap_under_flag_never_dips_transparent(self):
@@ -920,6 +987,7 @@ class SnowAdvPerformanceTests(TestCase):
         samples = self._swap_and_sample(page)
         self.assertTrue(samples["changed"])
         self.assertEqual(samples["state"], "happy")
+        self.assertEqual(samples["sampledProgress"], [0, 0.25, 0.5, 0.75])
         # Outgoing (old) art stays fully opaque the whole time; the two art nodes
         # are never both semi-transparent, so no mid-swap transparency dip.
         self.assertGreaterEqual(samples["outgoingMin"], 0.95, samples)
@@ -939,8 +1007,39 @@ class SnowAdvPerformanceTests(TestCase):
         samples = self._swap_and_sample(page)
         self.assertTrue(samples["changed"])
         self.assertEqual(samples["state"], "happy")
+        self.assertEqual(samples["sampledProgress"], [0, 0.25, 0.5, 0.75])
         # Legacy behaviour: the outgoing art cross-fades out (drops toward 0).
         self.assertLess(samples["outgoingMin"], 0.5, samples)
+        self.assertTrue(samples["bothSemi"], samples)
+        self.assertEqual(samples["artNodes"], 1, samples)
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self._failed_skin_requests(), [])
+
+    def test_expression_swap_legacy_sampling_survives_frames_slower_than_the_fade(self):
+        page = self._page(1280, 820)
+        self._open(page, False)
+        self._reach_in_person(page)
+        # Delay only the test's rendering callbacks, not the native animations.
+        # The previous natural-time sampler missed every intermediate outgoing
+        # frame when one callback arrived after the 160 ms fade had cleaned up.
+        page.evaluate("""() => {
+          const requestFrame = window.requestAnimationFrame;
+          window.__slowSwapFrames = 0;
+          window.requestAnimationFrame = callback => requestFrame(time => {
+            if (document.querySelector('.stage-character-art-outgoing')) {
+              window.__slowSwapFrames += 1;
+              setTimeout(() => callback(performance.now()), 350);
+            } else callback(time);
+          });
+        }""")
+        samples = self._swap_and_sample(page)
+        self.assertGreaterEqual(page.evaluate("window.__slowSwapFrames"), 4)
+        self.assertEqual(samples["sampledProgress"], [0, 0.25, 0.5, 0.75])
+        self.assertLess(samples["outgoingMin"], 0.5, samples)
+        self.assertTrue(samples["bothSemi"], samples)
+        self.assertTrue(samples["changed"], samples)
+        self.assertEqual(samples["state"], "happy")
+        self.assertEqual(samples["artNodes"], 1, samples)
         self.assertEqual(self.errors, [])
         self.assertEqual(self._failed_skin_requests(), [])
 
@@ -963,7 +1062,10 @@ class SnowAdvPerformanceTests(TestCase):
             return animation;
           };
         }""")
-        samples = self._swap_and_sample(page)
+        # This regression deliberately exercises the natural timeline, not the
+        # controlled-progress opacity measurement used by the two visual cases.
+        samples = self._swap_and_sample(page, controlled_progress=False)
+        self.assertNotIn("sampledProgress", samples)
         self.assertEqual(page.evaluate("window.__delayedSwapAnimations"), 1)
         self.assertEqual(samples["artNodes"], 1, samples)
         self.assertTrue(samples["changed"])

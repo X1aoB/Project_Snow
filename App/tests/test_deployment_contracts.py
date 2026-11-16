@@ -3262,7 +3262,7 @@ require_runner_controller_binding
         # released one before merge: resolve the previous digest and run the
         # stdlib comparison against the freshly built image.
         self.assertIn("docker/login-action@", workflow)
-        self.assertIn("Resolve previously released embedding digest", workflow)
+        self.assertIn("Resolve approved shared embedding baseline", workflow)
         self.assertIn(
             "python App/scripts/compare_embedding_vectors.py compare embed-old.json embed-new.json",
             workflow,
@@ -3292,7 +3292,11 @@ require_runner_controller_binding
         self.assertEqual(len(gates), 1)
         self.assertNotIn("if", gates[0], "The vulnerability gate must apply to built and reused images")
         self.assertIn("fetch-depth: 0", release)
-        self.assertIn('git rev-list --first-parent "$PREVIOUS_SHA"', release)
+        baseline = next(step for step in steps if step.get("id") == "embedding-previous")
+        self.assertEqual(baseline["env"]["BASELINE_DIGEST"], "${{ inputs.embedding_baseline_digest }}")
+        self.assertIn("approved_embedding_baseline.py", baseline["run"])
+        self.assertNotIn("rev-list", baseline["run"], "An unpromoted ancestor must not replace the approved baseline")
+        self.assertNotIn("PREVIOUS_SHA", release)
         self.assertIn("Tag reused embedding digest for the current main SHA", release)
         self.assertIn("release_manifest.py", release)
         # When the embedding image is rebuilt, publish must prove the pushed

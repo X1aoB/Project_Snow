@@ -20,15 +20,25 @@ class EmbeddingContextTests(TestCase):
         recipe = self.root / 'infra/embedding.Dockerfile'
         recipe.write_text(recipe.read_text() + 'ARG SYSTEM_SECURITY_REVISION=new\n')
         # The security commit failed before publication. A later test-only
-        # commit says changed=false, but the registry still has the old image.
+        # commit requests no refresh, but the approved baseline is still old.
         for fingerprint in ('', '<no value>', previous):
             with self.subTest(fingerprint=fingerprint):
-                self.assertTrue(prepare(self.root, fingerprint, changed=False)['rebuild'])
+                self.assertTrue(prepare(self.root, fingerprint, force_rebuild=False)['rebuild'])
 
     def test_identical_context_reuses_but_explicit_security_rebuild_wins(self):
         fingerprint = prepare(self.root)['inputs_sha256']
         self.assertFalse(prepare(self.root, fingerprint)['rebuild'])
-        self.assertTrue(prepare(self.root, fingerprint, changed=True)['rebuild'])
+        self.assertTrue(prepare(self.root, fingerprint, force_rebuild=True)['rebuild'])
+
+    def test_ci_risk_selection_does_not_force_identical_context_rebuild(self):
+        from scripts.classify_changes import classify
+
+        fingerprint = prepare(self.root)['inputs_sha256']
+        for path in ('.github/workflows/ci.yml', '.github/workflows/publish-images.yml',
+                     'App/tests/test_prepare_embedding_context.py'):
+            with self.subTest(path=path):
+                self.assertTrue(classify([path], force_full=True)['embedding'])
+                self.assertFalse(prepare(self.root, fingerprint)['rebuild'])
 
     def test_every_build_input_changes_identity_without_unrelated_application_files(self):
         fingerprint = prepare(self.root)['inputs_sha256']

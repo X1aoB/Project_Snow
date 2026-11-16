@@ -97,6 +97,7 @@ jobs:
           tests/test_migration_secret_config.py
           tests/test_change_classifier.py
           tests/test_prepare_embedding_context.py
+          tests/test_approved_embedding_baseline.py
           tests/test_release_manifest.py
           tests/test_frontend_release_contracts.py
           tests/test_candidate_acceptance.py
@@ -443,50 +444,27 @@ jobs:
           scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-      - name: Resolve previously released embedding digest
+      - name: Resolve approved shared embedding baseline
         id: embedding-previous
         if: ${{ always() && !cancelled() && steps.embedding-build.outcome == 'success' }}
         shell: bash
         env:
-          IMAGE: ghcr.io/x1aob/project_snow-embedding
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASELINE_DIGEST: ${{ vars.PROJECT_SNOW_APPROVED_EMBEDDING_DIGEST }}
         run: |
-          # Resolve the digest of the previously released embedding image by
-          # walking first-parent ancestry exactly like publish-images.yml.
-          # For workflow_dispatch (no pull_request base) start from github.sha's
-          # first parent so a dispatched run compares against the prior release.
-          start="$BASE_SHA"
-          if [ -z "$start" ]; then
-            start="$(git rev-list --first-parent -n 1 --skip 1 "$GITHUB_SHA" 2>/dev/null || true)"
-            [ -n "$start" ] || start="$GITHUB_SHA"
-          fi
-          digest=""
-          source_sha=""
-          for candidate in $(git rev-list --first-parent "$start"); do
-            if image_info="$(docker buildx imagetools inspect "$IMAGE:$candidate" 2>/dev/null)"; then
-              digest="$(printf '%s\n' "$image_info" | awk '/^Digest:/ {print $2; exit}')"
-              if [ -n "$digest" ]; then
-                source_sha="$candidate"
-                break
-              fi
-            fi
-          done
-          test -n "$digest"
-          echo "Resolved previous embedding digest from ancestor $source_sha."
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          reference="$(python App/scripts/approved_embedding_baseline.py --owner "$GITHUB_REPOSITORY_OWNER" --digest "$BASELINE_DIGEST")"
+          docker pull --platform linux/amd64 "$reference"
+          echo "reference=$reference" >> "$GITHUB_OUTPUT"
       - name: Embedding 512-dimension inference and old-vs-new vector equivalence
         if: ${{ always() && !cancelled() && steps.embedding-build.outcome == 'success' && steps.embedding-previous.outcome == 'success' }}
         env:
-          IMAGE: ghcr.io/x1aob/project_snow-embedding
-          PREVIOUS_DIGEST: ${{ steps.embedding-previous.outputs.digest }}
+          PREVIOUS_REFERENCE: ${{ steps.embedding-previous.outputs.reference }}
         run: |
           cleanup() {
             docker rm -f snow-embedding snow-embedding-old >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          docker pull "$IMAGE@$PREVIOUS_DIGEST"
           docker run -d --name snow-embedding -p 18001:8000 project-snow-embedding:ci
-          docker run -d --name snow-embedding-old -p 18002:8000 "$IMAGE@$PREVIOUS_DIGEST"
+          docker run -d --name snow-embedding-old -p 18002:8000 "$PREVIOUS_REFERENCE"
           for port in 18001 18002; do
             ready=false
             for i in $(seq 1 120); do
@@ -661,8 +639,7 @@ jobs:
       packages: write
     uses: ./.github/workflows/publish-images.yml
     with:
-      embedding_changed: ${{ needs.changes.outputs.embedding == 'true' }}
-      previous_sha: ${{ github.event.before }}
+      embedding_baseline_digest: ${{ vars.PROJECT_SNOW_APPROVED_EMBEDDING_DIGEST }}
 
   frontend-contracts:
     runs-on: ubuntu-latest
