@@ -14,7 +14,7 @@
 
 前台操作可取消同主体的后台摘要；浏览器断开也会取消摘要。已开始或结果不确定的摘要保存中断终态，不能换一个变更后的请求体重放同一 UUID。停机拒绝新生成，已接受聊天最多等待 300 秒，之后进行持久化中断与清理；容器停止宽限应至少 330 秒。
 
-`/public/v1/build-info` 提供 revision、build_time、app/data version 与兼容协议版本；未知构建信息返回 null。`/public/v1/health/full` 额外提供聚合 generation_queue 与 draining，不包含主体、凭证或聊天内容。full 由反向代理拒绝公网访问，监控从容器内读取。媒体完整校验发生在启动时，后续健康查询读取缓存。
+`/public/v1/build-info` 提供 revision、build_time、app/data version 与兼容协议版本；未知构建信息返回 null。`/public/v1/health/full` 额外提供聚合 generation_queue 与 draining，不包含主体、凭证或聊天内容。full 由反向代理拒绝公网访问，监控从容器内读取。公网 live 在事件循环内直接返回，不访问数据库、不占用工作线程；经 Cloudflare 转发的健康探测在进程内存中按客户端每分钟限 60 次，超出返回 429（scope `health_ip_minute`），容器、发布脚本和监控内部的直连探测不计数。媒体完整校验发生在启动时，后续健康查询读取缓存。
 
 本地监听默认 loopback，写操作需要可信 Origin 与 GET 引导产生的 HttpOnly、SameSite=Strict cookie。Agent/Connector legacy 默认关闭，只有显式 `LOCAL_LEGACY_ENABLED=true` 才恢复。附件按实际接收字节数限制 100 MiB 和 15 秒读取期限，不信任 Content-Length。
 
