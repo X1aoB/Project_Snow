@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 
 from .config import PublicSettings, Settings
-from .data_loader import versioned_collection_name
+from .data_loader import serving_index_version, versioned_collection_name
 from .data_release import verify_data_release
 from .repository import RuntimeRepository
 
@@ -24,9 +24,7 @@ class PublicRuntimeRepository(RuntimeRepository):
     def __init__(self, settings: Settings, public_settings: PublicSettings):
         super().__init__(settings)
         self.public_settings = public_settings
-        self.qdrant_collection = versioned_collection_name(
-            public_settings.qdrant_collection, public_settings.data_version
-        )
+        self.index_version = public_settings.data_version
         self.data_manifest: dict[str, Any] | None = None
         configured_data_root = str(os.getenv("PUBLIC_DATA_ROOT") or "").strip()
         if configured_data_root:
@@ -37,6 +35,8 @@ class PublicRuntimeRepository(RuntimeRepository):
             ):
                 raise RuntimeError("DATA_ROOT and APP_RUNTIME must match PUBLIC_DATA_ROOT")
             self.data_manifest = verify_data_release(expected_root, public_settings.data_version)
+            self.index_version = serving_index_version(self.data_manifest)
+        self.qdrant_collection = versioned_collection_name(public_settings.qdrant_collection, self.index_version)
         self._health_local = threading.local()
         self._request_context: ContextVar[dict[str, Any] | None] = ContextVar(
             f"project_snow_public_repository_{id(self)}", default=None
@@ -353,7 +353,7 @@ class PublicRuntimeRepository(RuntimeRepository):
                     ),
                     character_node_id=f"character:{character_id}" if character_id else "",
                     terms=terms,
-                    data_version=self.public_settings.data_version,
+                    data_version=self.index_version,
                 )
                 nodes: dict[str, dict[str, Any]] = {}
                 edges: dict[str, dict[str, Any]] = {}
@@ -446,7 +446,7 @@ class PublicRuntimeRepository(RuntimeRepository):
                             "RETURN count(node) AS nodes",
                             timeout=3,
                         ),
-                        data_version=self.public_settings.data_version,
+                        data_version=self.index_version,
                     ).single()
                 health["neo4j"] = "ok" if active and int(active["nodes"]) > 0 else "degraded"
             except Exception:
