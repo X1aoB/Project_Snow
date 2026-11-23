@@ -9,10 +9,10 @@ from backend.snow_app.mvp_service import _FENNY_HARSH_DAILY_MARKERS
 
 from .common import RUNTIME_ROOT, read_jsonl
 from .style_audit import table
-from .style_mining import interval
+from .style_mining import candidate_digest, interval
 
 
-def report(style, out):
+def report(style, out, include_all=False):
     lines = list(read_jsonl(style / "character_lines.jsonl"))
     signatures = list(read_jsonl(style / "signature_terms.jsonl"))
     register = list(read_jsonl(style / "register_terms.jsonl"))
@@ -32,7 +32,14 @@ def report(style, out):
         if pool:
             shortlist.append((max(pool, key=lambda s: s["count"]), "shared_topic", "topic"))
     shortlist.extend((s, "register", "high_stakes") for s in register)
+    if include_all:
+        shortlist = [(s, "signature", s["category"]) for s in signatures]
+        shortlist.extend((s, "register", "high_stakes") for s in register)
+        shortlist.extend((s, "shared_topic", "topic") for s in topics)
     out.mkdir(parents=True, exist_ok=True)
+    # The output may already contain a maintainer's unmerged decisions.
+    if (out / "review.csv").exists():
+        raise FileExistsError("Use a fresh directory to preserve the existing review queue")
     table(
         out / "review.csv",
         [
@@ -47,6 +54,7 @@ def report(style, out):
                 page_id=(s.get("evidence") or [s])[0]["page_id"],
                 document_id=(s.get("evidence") or [s])[0]["document_id"],
                 review_status=s["review_status"],
+                candidate_sha256=candidate_digest(s),
                 decision="",
                 reason="",
             )
@@ -98,6 +106,9 @@ def report(style, out):
         "# 首批风格审阅条目",
         "",
         "review.csv 列出候选词、来源和待填的审阅意见。优先核对分类、说话人、同场证据与适用语境。",
+        "在 decision 中填写 approved 或 rejected，并在 reason 写下依据。留空表示继续待审。"
+        "可修订标志词的 proposed_category。"
+        "使用 style_corpus --decisions review.csv 在独立输出目录生成审阅后的版本。",
         "legacy-comparison.csv 列出既有规则涉及的 15 个表达。分母为训练页面中去重且通过口语筛选的台词。",
         "卜卜的原规则会在最近三轮用过任一标志词后限制再次使用这组词。"
         "数据模式只统计同一个已批准用语，默认含本轮在内观察六轮。表中上限仅供审阅。",
@@ -112,5 +123,6 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--style", type=Path, default=RUNTIME_ROOT / "style/1.4.0")
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--all", action="store_true", help="Export all candidates for review")
     a = p.parse_args()
-    report(a.style, a.out)
+    report(a.style, a.out, a.all)

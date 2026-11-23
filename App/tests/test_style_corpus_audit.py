@@ -244,3 +244,63 @@ def test_public_review_requires_exact_hash_no_exception_and_denylist(tmp_path, m
     cfg["urls"] = []
     cfg["sha256"] = [source[0]["local_sources"][0]["sha256"]]
     assert build("deny_hash")["pages"] == 0
+
+
+def test_review_csv_roundtrip_pending_approval_rejection_and_stale(tmp_path):
+    from copy import deepcopy
+
+    from pipelines.style_review import report
+
+    ref = {"page_id": "synthetic-page", "document_id": "synthetic-doc", "position": 1}
+    cid = canonical_mvp_character("芬妮").character_id
+    signature = dict(
+        character_id=cid,
+        term="合成词",
+        count=9,
+        z=2,
+        category="topic",
+        review_status="pending",
+        evidence=[ref],
+    )
+    register = dict(character_id=cid, term="请立刻", count=4, review_status="pending", evidence=[ref])
+    source = {"signature_terms": [signature], "register_terms": [register], "shared_topics": []}
+    style = tmp_path / "style"
+    for name, records in source.items():
+        jsonl(style / (name + ".jsonl"), records)
+    lines = [
+        dict(
+            character_id=c.character_id,
+            text="合成词",
+            split="train",
+            source_type="affinity_story",
+            spoken=True,
+            high_stakes=False,
+            **ref,
+        )
+        for c in [canonical_mvp_character("卜卜"), canonical_mvp_character("芬妮")]
+    ]
+    jsonl(style / "character_lines.jsonl", lines)
+    output = tmp_path / "queue"
+    report(style, output, include_all=True)
+    path = output / "review.csv"
+    with path.open(encoding="utf-8-sig") as handle:
+        rows = list(corpus.csv.DictReader(handle))
+    assert corpus.apply_review_csv(deepcopy(source), path)["decisions_applied"] == 0
+    rows[0].update(decision="approved", reason="synthetic style evidence", proposed_category="address")
+    rows[1].update(decision="rejected", reason="synthetic counterexample")
+    audit.table(path, rows)
+    result = deepcopy(source)
+    receipt = corpus.apply_review_csv(result, path)
+    assert receipt["decisions_applied"] == 2
+    assert result["signature_terms"][0]["category"] == "address"
+    assert result["signature_terms"][0]["review_csv_sha256"] == receipt["decision_csv_sha256"]
+    assert result["register_terms"][0]["review_status"] == "rejected"
+    with pytest.raises(FileExistsError):
+        report(style, output)
+    stale = deepcopy(source)
+    stale["signature_terms"][0]["z"] += 1
+    with pytest.raises(ValueError, match="stale"):
+        corpus.apply_review_csv(stale, path)
+    audit.table(path, [rows[0], rows[0]])
+    with pytest.raises(ValueError, match="duplicate"):
+        corpus.apply_review_csv(deepcopy(source), path)
