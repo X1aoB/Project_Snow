@@ -9918,12 +9918,12 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                             for name in (item.display_name, item.source_name, *item.aliases)}, key=len, reverse=True)
         roster_clauses = []
         for assertion in assertions:
-            list_shape = assertion
+            list_shape = re.sub(r"[哦呢呀啊哟啦吧]+([。.!！]?)$", r"\1", assertion)
             for name in all_names:
                 list_shape = list_shape.replace(name, "@")
             list_shape = re.sub(
                 r"知道|现在|已经|正式|立下|缔结|恒约|结婚|夫妻|夫妇|伴侣|妻子|老婆|名单|角色|少女|"
-                r"分析员|和你|与你|有了|以及|另外|包括|还有|分别|一共|都是|就是|也|已|的|是|有|和|与|及|[\s、，,。.!！：:]",
+                r"分析员|和你|与你|了|有了|以及|另外|包括|还有|分别|一共|都是|就是|也|已|的|是|有|和|与|及|[\s、，,。.!！：:]",
                 "", list_shape,
             )
             if list_shape and set(list_shape) == {"@"}:

@@ -77,7 +77,11 @@ class RelationshipFactTests(TestCase):
                            "我不是在开玩笑，我们早已缔结恒约。", "我们已经恒约了，不是吗？",
                            "自从我们恒约以后，我一直很开心。", "我们已经成亲了。",
                            "你是我的丈夫。", "我们早就结过婚了。", "我已经嫁给你了。",
-                           "我已经是已婚人士了。"):
+                           "我已经是已婚人士了。", "我们可是已经结婚了呢。", "咱俩已经结婚了。",
+                           "我们现在是夫妇。", "我已经和你立下了恒约。", "我也和你缔结了恒约。",
+                           "我可是你的妻子。", "咱俩可是夫妻呀。", "我的确是你的妻子。",
+                           "我确实是你的妻子。", "我们可是已经是夫妻了。",
+                           f"{character.display_name}可是你的妻子。"):
                 with self.subTest(character=character.display_name, answer=answer):
                     context = {"character": character, "question_focus": "general", "hits": []}
                     violations = MVPService._answer_guardrail_violations("陪我聊聊", answer, context, "immersive")
@@ -86,14 +90,18 @@ class RelationshipFactTests(TestCase):
 
     def test_denial_wishes_affection_and_other_characters_facts_are_allowed(self):
         context = {"character": MIA, "hits": []}
-        for answer in ("我们还没有恒约哦。", "我们还未结婚。", "如果有一天，我们结婚了，我会很高兴。",
+        for answer in ("我们还没有恒约哦。", "我们可是还没结婚呢。", "如果我们可是已经结婚了，会怎样？", "我很开心，可是我们还没恒约。", "我们还未结婚。", "如果有一天，我们结婚了，我会很高兴。",
                        "我想和你结婚。", "我爱你，今天一起喝茶吧。", "芬妮已经和你立下恒约。",
                        "我是芬妮的朋友，她已经和分析员恒约。",
                        "我帮你筹备婚礼。", "我参加过你的婚礼。", "我听说过恒约。",
                        "你可以叫我老婆呀。", "老婆这个称呼我还不习惯。", "我们谈论恒约。",
                        "等我们结婚后，我每天都陪着你。", "等我们恒约后，我就天天陪你。",
                        "我想嫁给你。", "假如我已经是已婚人士了，会是什么样呢？",
-                       "你问的是“我们已经结婚了”这句话吗？"):
+                       "你问的是“我们已经结婚了”这句话吗？",
+                       "如果我们结婚了，我可是你的妻子。", "假如咱俩可是夫妻呢？",
+                       "你以为我可是你的妻子，但我们还没恒约。", "我没说过我可是你的妻子。",
+                       "我确实不是你的妻子。", "我的确还没和你立下恒约。",
+                       "我现在只是队友，可是将来我想成为你的妻子。", "芬妮可是你的妻子。"):
             with self.subTest(answer=answer):
                 self.assertNotIn("unsupported_formal_relationship",
                     MVPService._answer_guardrail_violations("还没恒约呢", answer, context, "immersive"))
@@ -126,9 +134,12 @@ class RelationshipFactTests(TestCase):
         for character in MVP_CHARACTERS:
             if character.character_id in KNOWLEDGE.formal_character_ids():
                 continue
-            with self.subTest(character=character.display_name):
-                self.assertIn(f"relationship_roster_excluded:{character.display_name}",
-                    MVPService._relationship_roster_violations("恒约都有谁？", answer + f"还有{character.display_name}。"))
+            for suffix in (f"还有{character.display_name}。", f"还有{character.display_name}哦。",
+                           f"{character.display_name}也和你缔结了恒约。", f"{character.display_name}已经和分析员立下了恒约。",
+                           f"{character.display_name}可是你的妻子。"):
+                with self.subTest(character=character.display_name, suffix=suffix):
+                    self.assertIn(f"relationship_roster_excluded:{character.display_name}",
+                        MVPService._relationship_roster_violations("恒约都有谁？", answer + suffix))
 
     def test_roster_does_not_treat_unrelated_names_or_denials_as_list_members(self):
         answer = MVPService._relationship_roster_fallback()
@@ -156,12 +167,21 @@ class RelationshipFactTests(TestCase):
 
     def test_false_fact_cannot_publish_as_a_verified_stream_block(self):
         service = object.__new__(MVPService)
+        context = {"character": MIA, "hits": [], "question_focus": "general", "communication_context": {"channel": "text"}}
+        for answer in ("我们已经恒约了。", "我们可是已经结婚了呢。", "咱俩已经结婚了。", "我们现在是夫妇。",
+                       "我可是你的妻子。", "咱俩可是夫妻呀。", "我的确是你的妻子。", "米娅可是你的妻子。"):
+            with self.subTest(answer=answer):
+                observer = GenerationObserver(on_verified_blocks=lambda _blocks: True)
+                with observe_generation(observer):
+                    service._verify_stream_blocks([{"type": "message", "text": answer}],
+                        message="陪我聊聊", context=context, channel="text", character_name=MIA.display_name)
+                self.assertEqual(observer.published_blocks, [])
         observer = GenerationObserver(on_verified_blocks=lambda _blocks: True)
         with observe_generation(observer):
-            service._verify_stream_blocks([{"type": "message", "text": "我们已经恒约了。"}],
-                message="陪我聊聊", context={"character": MIA, "hits": [], "question_focus": "general"},
-                channel="text", character_name=MIA.display_name)
-        self.assertEqual(observer.published_blocks, [])
+            service._verify_stream_blocks([{"type": "message", "text": "我们还没有恒约哦。"}],
+                message="陪我聊聊", context=context, channel="text", character_name=MIA.display_name)
+        self.assertTrue(observer.published_blocks)
+
 
 
 class RetrievalCandidateTests(TestCase):
