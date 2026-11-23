@@ -304,3 +304,11 @@ def test_review_csv_roundtrip_pending_approval_rejection_and_stale(tmp_path):
     audit.table(path, [rows[0], rows[0]])
     with pytest.raises(ValueError, match="duplicate"):
         corpus.apply_review_csv(deepcopy(source), path)
+
+
+def test_parameter_retry_counts_actual_http_resend():
+    # The guard attempted a third call, but never got past its billing budget.
+    assert audit.parameter_retries(["original", "original"], [400, 200]) == 1
+    assert audit.parameter_retries(["original", "rewrite"], [200, 200]) == 0
+    assert audit.parameter_retries(["original"], [400]) == 0
+    assert audit.parameter_retries(["original"], []) == 0

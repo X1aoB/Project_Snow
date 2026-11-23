@@ -158,6 +158,15 @@ def source_fingerprint():
     return digest.hexdigest()
 
 
+def parameter_retries(message_hashes, statuses):
+    # Public requests only resend identical messages after a structured
+    # validation failure. A guard rewrite sends a different prompt.
+    return sum(
+        status == 400 and first == second
+        for first, second, status in zip(message_hashes, message_hashes[1:], statuses)
+    )
+
+
 def run(a):
     spec = PROVIDERS["openai"]
     key = os.environ.get("OPENAI_API_KEY") if a.execute else "synthetic"
@@ -220,10 +229,14 @@ def run(a):
         )
         svc._model_http_client.close()
         estimated = []
+        message_hashes = []
+        statuses = []
 
         def observe(req):
             payload = json.loads(req.content)
-            estimated.append(math.ceil(len(json.dumps(payload["messages"], ensure_ascii=False).encode()) / 3))
+            messages = json.dumps(payload["messages"], ensure_ascii=False).encode()
+            estimated.append(math.ceil(len(messages) / 3))
+            message_hashes.append(sha256(messages).digest())
 
         def synthetic(req):
             content = json.dumps(
@@ -239,7 +252,10 @@ def run(a):
             )
 
         client = httpx.Client(
-            event_hooks={"request": [observe]},
+            event_hooks={
+                "request": [observe],
+                "response": [lambda response: statuses.append(response.status_code)],
+            },
             follow_redirects=False,
             transport=None if a.execute else httpx.MockTransport(synthetic),
         )
@@ -248,6 +264,8 @@ def run(a):
         try:
             for cid, session, turn, message, ref in tasks:
                 estimated.clear()
+                message_hashes.clear()
+                statuses.clear()
                 svc.reset_generation_diagnostics()
                 unit = dict(character_id=cid, session=session, turn=turn)
                 if a.execute:
@@ -300,7 +318,7 @@ def run(a):
                         "style_example_token_delta_estimate", 0
                     ),
                     http_calls=diagnostics["provider_http_calls"] if a.execute else 0,
-                    compat_retries=max(0, diagnostics["provider_http_calls"] - diagnostics["model_calls"]),
+                    compat_retries=parameter_retries(message_hashes, statuses),
                     input_tokens=usage.get("prompt_tokens", 0),
                     output_tokens=usage.get("completion_tokens", 0),
                 )
