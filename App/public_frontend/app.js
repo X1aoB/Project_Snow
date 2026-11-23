@@ -8198,9 +8198,15 @@ $("api-key").oninput = () => {
   if ($("advanced-model-panel").hidden) $("model-id").value = "";
 };
 $("model-id").oninput = () => { $("discovered-models").value = ""; };
-$("discovered-models").onchange = () => {
-  if (state.modelSetupMode !== "subscription" && $("discovered-models").value)
-    $("model-id").value = $("discovered-models").value;
+$("discovered-models").onchange = ({ currentTarget }) => {
+  const model = currentTarget.value;
+  if (!model || state.modelSetupMode === "subscription") return;
+  $("model-id").value = model;
+  if (state.model && model !== state.model && !credentialStale()) {
+    state.model = model;
+    saveCredential();
+    refreshCredentialStatus();
+  }
 };
 $("toggle-advanced-model").onclick = () => {
   const panel = $("advanced-model-panel");
