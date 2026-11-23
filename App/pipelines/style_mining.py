@@ -1,7 +1,9 @@
 """Line-incidence log odds and evidence for human review."""
 
+import json
 import re
 from collections import Counter, defaultdict
+from hashlib import sha256
 from math import log, sqrt
 
 SELF = {"妾身", "本天师", "本人", "本小姐", "本大爷", "小女子", "在下", "人家"}
@@ -9,6 +11,12 @@ ADDRESS = {"达令", "亲爱的", "老师", "长官", "主人", "指挥官", "�
 PARTICLE = re.compile(r"^[哈嘿嘻哼喵呵啦哦嗯呜哇呐哎呦嗷咦呀诶欸嘛]+$")
 CATCH = {"算卦", "卦象", "运势", "本天师", "没问题", "没错", "没关系", "包在我身上"}
 COMMAND = re.compile(r"别|退|滚|闭嘴|警告|撤|不许|马上|立刻|命令|必须|攻击|消灭|站住|住手|放下|掩护|小心")
+
+
+def candidate_digest(row):
+    return sha256(
+        json.dumps(row, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def grams(text):

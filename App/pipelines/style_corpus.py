@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import html
 import json
 import re
@@ -37,7 +38,7 @@ from .common import (
     write_json,
     write_jsonl,
 )
-from .style_mining import mine
+from .style_mining import candidate_digest, mine
 
 STORY = {"affinity_story", "character_story", "main_story", "random_event"}
 BLOCK = re.compile(r"\{\{\s*(剧情格式文本|剧情旁白文本|剧情选项)\s*(?=[|}])")
@@ -304,7 +305,66 @@ def public_sources(review_path, denylist_path):
     )
 
 
-def build(data, root, version="1.4.0", graph=None, public_reviewed=False):
+def apply_review_csv(datasets, path):
+    """Apply only explicit decisions linked to a uniquely identified source candidate."""
+    tables = {"signature": "signature_terms", "register": "register_terms", "shared_topic": "shared_topics"}
+    categories = {"self_reference", "address", "particle", "catchphrase", "topic"}
+    index = {
+        (kind, r["character_id"], r["term"], r.get("other_character_id", "")): r
+        for kind, table in tables.items()
+        for r in datasets[table]
+    }
+    applied = set()
+    digest = sha256(path.read_bytes()).hexdigest()
+    with path.open(encoding="utf-8-sig", newline="") as stream:
+        reader = csv.DictReader(stream)
+        required = {
+            "table",
+            "character_id",
+            "term",
+            "other_character_id",
+            "count",
+            "page_id",
+            "document_id",
+            "proposed_category",
+            "decision",
+            "reason",
+        }
+        if not required.issubset(reader.fieldnames or []):
+            raise ValueError("Expected the review.csv exported by pipelines.style_review")
+        for number, decision in enumerate(reader, 2):
+            status = decision["decision"].strip()
+            if not status:
+                continue
+            key = tuple(decision[k] for k in ("table", "character_id", "term", "other_character_id"))
+            row = index.get(key)
+            if row is None or key in applied or status not in {"approved", "rejected"}:
+                raise ValueError(f"Invalid or duplicate candidate decision at CSV row {number}")
+            ref = (row.get("evidence") or [row])[0]
+            fingerprint = candidate_digest(row)
+            if (
+                not decision["reason"].strip()
+                or decision["count"] != str(row["count"])
+                or ref["page_id"] != decision["page_id"]
+                or ref["document_id"] != decision["document_id"]
+                or (decision.get("candidate_sha256") and fingerprint != decision["candidate_sha256"])
+            ):
+                raise ValueError(f"Missing rationale or stale candidate evidence at CSV row {number}")
+            if key[0] == "signature":
+                if decision["proposed_category"] not in categories:
+                    raise ValueError(f"Invalid signature category at CSV row {number}")
+                row["category"] = decision["proposed_category"]
+            row.update(
+                review_status=status,
+                review_csv_sha256=digest,
+                review_row=number,
+                reviewed_candidate_sha256=fingerprint,
+            )
+            applied.add(key)
+    return {"decision_csv_sha256": digest, "decisions_applied": len(applied)}
+
+
+def build(data, root, version="1.4.0", graph=None, public_reviewed=False, decisions=None):
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]*", version):
         raise ValueError("Invalid corpus version")
     if root.resolve().is_relative_to(data.resolve()):
@@ -391,12 +451,14 @@ def build(data, root, version="1.4.0", graph=None, public_reviewed=False):
             shared_topics=topics,
             situational_cues=cues,
         )
+        decision_receipt = apply_review_csv(datasets, decisions) if decisions else {}
         for name, rows in datasets.items():
             write_jsonl(stage / f"{name}.jsonl", rows)
         build_index(stage / "examples.sqlite3", pairs)
         manifest = dict(
             version=version,
             **public_hashes,
+            **decision_receipt,
             source_sha256=sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest(),
             pages=sum(key.startswith("Data/Source") for key in inputs),
             counts={k: len(v) for k, v in datasets.items()},
@@ -432,10 +494,11 @@ def main():
     p.add_argument(
         "--public-reviewed", action="store_true", help="Restrict output to hash-reviewed public sources"
     )
+    p.add_argument("--decisions", type=Path, help="Maintainer-completed style_review review.csv")
     a = p.parse_args()
     print(
         json.dumps(
-            build(a.data_root, a.runtime / "style", a.version, a.graph, a.public_reviewed),
+            build(a.data_root, a.runtime / "style", a.version, a.graph, a.public_reviewed, a.decisions),
             ensure_ascii=False,
             indent=2,
         )
