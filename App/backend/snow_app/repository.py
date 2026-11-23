@@ -1121,7 +1121,8 @@ class RuntimeRepository:
             return False
         return True
 
-    def _fts_query(self, query: str) -> str:
+    @staticmethod
+    def _fts_query(query: str) -> str:
         # Query the derived `terms` column. It contains CJK bigrams and avoids
         # treating a full natural-language Chinese question as a single token.
         tokens: list[str] = []
