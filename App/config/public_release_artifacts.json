@@ -2,8 +2,8 @@
   "schema_version": "project-snow-release-artifacts-1",
   "artifacts": {
     "data": {
-      "version": "2026.08.19.1",
-      "manifest_sha256": "46046a61d6747a2cb1b5e1d27caa5e2bf6a1e8cc3cc1e5995bc499093a68d90b"
+      "version": "2026.11.23.1",
+      "manifest_sha256": "a081b62590be8dabaa7db0e0e5c0bdfe24c24398799a8b26088299fdd7db58d7"
     },
     "avatar": {
       "version": "2026.10.18.character.webp92.2",
