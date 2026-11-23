@@ -772,11 +772,20 @@ class PublicFrontendLatencyMotionTests(TestCase):
         page.wait_for_timeout(150)
         page.evaluate("""() => {
           window.__motionTrace.actionStart=performance.now();
-          const track=now=>{const t=window.__motionTrace;
+          const t = window.__motionTrace;
+          // Sample the snapshot lifetime at DOM commit. Frame polling adds a
+          // variable extra frame after removal on a busy browser runner.
+          const surface = document.querySelector('#text-surface').parentElement;
+          const lifetime = new MutationObserver(() => {
+            const visible = surface.querySelector('.surface-transition-snapshot');
+            if (visible && !t.start) t.start = performance.now();
+            if (!visible && t.start) { t.end = performance.now(); lifetime.disconnect(); }
+          });
+          lifetime.observe(surface, {childList:true});
+          const track=now=>{
             if(t.last)t.frames.push(now-t.last);t.last=now;
             t.interactiveCounts.push([...document.querySelectorAll('#text-surface,#in-person-surface')].filter(n=>!n.hidden&&!n.inert).length);
-            if(document.querySelector('.surface-transition-snapshot')){if(!t.start)t.start=now;}
-            else if(t.start){t.end=now;return;}requestAnimationFrame(track);
+            if(!t.end)requestAnimationFrame(track);
           };requestAnimationFrame(track);
         }""")
         page.locator(trigger).click()
