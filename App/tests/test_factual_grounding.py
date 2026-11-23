@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from unittest import TestCase
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -128,6 +128,14 @@ class RelationshipFactTests(TestCase):
             with self.subTest(affirmative=answer):
                 self.assertIn("unsupported_formal_relationship",
                     MVPService._answer_guardrail_violations("陪我聊聊", answer, context, "immersive"))
+
+    def test_roster_fallback_tracks_reviewed_data_in_order(self):
+        answer = MVPService._relationship_roster_fallback()
+        self.assertEqual(tuple(answer.split("是", 1)[1].removesuffix("。").split("、")), KNOWLEDGE.formal_roster())
+        with patch("backend.snow_app.mvp_service._FORMAL_RELATIONSHIP_ROSTER", ("甲", "乙")):
+            self.assertTrue(MVPService._relationship_roster_fallback().endswith("是甲、乙。"))
+        with patch("backend.snow_app.mvp_service._FORMAL_RELATIONSHIP_ROSTER", ()):
+            self.assertIn("没有已确认", MVPService._relationship_roster_fallback())
 
     def test_roster_rejects_every_unapproved_character_not_only_enya(self):
         answer = MVPService._relationship_roster_fallback()

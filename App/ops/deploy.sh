@@ -848,6 +848,68 @@ build_candidate_public_env() {
   public_byok_retention_enabled=false
   # Released on the owner's instruction of 2026-11-08; set false in public.env to withdraw it.
   public_voice_survey_v1=true
+  # Freeze experimental dialogue settings into each colour snapshot.
+  public_openai_parameter_adapter=on
+  style_examples=static
+  style_signature_guard=bubu_legacy
+  style_signature_prompt=bubu_legacy
+  style_register_guard=fenny_legacy
+  style_register_prompt=fenny_legacy
+  style_shared_facts=futiya_legacy
+  style_situational_cues=futiya_legacy
+  style_fallback=legacy
+  style_copy=measure
+  style_window=6
+  style_coefficient=1.0
+  style_example_count=4
+  style_keep_repeated_lines=true
+  set_dialogue_experiment() {
+    case "$1" in
+      PUBLIC_OPENAI_PARAMETER_ADAPTER)
+        case "$2" in on|off) ;; *) return 1 ;; esac
+        public_openai_parameter_adapter="$2" ;;
+      PROJECT_SNOW_STYLE_EXAMPLES)
+        case "$2" in static|retrieved) ;; *) return 1 ;; esac
+        style_examples="$2" ;;
+      PROJECT_SNOW_STYLE_SIGNATURE_GUARD)
+        case "$2" in bubu_legacy|data_driven|off) ;; *) return 1 ;; esac
+        style_signature_guard="$2" ;;
+      PROJECT_SNOW_STYLE_SIGNATURE_PROMPT)
+        case "$2" in bubu_legacy|data_driven|off) ;; *) return 1 ;; esac
+        style_signature_prompt="$2" ;;
+      PROJECT_SNOW_STYLE_REGISTER_GUARD)
+        case "$2" in fenny_legacy|data_driven|off) ;; *) return 1 ;; esac
+        style_register_guard="$2" ;;
+      PROJECT_SNOW_STYLE_REGISTER_PROMPT)
+        case "$2" in fenny_legacy|data_driven|off) ;; *) return 1 ;; esac
+        style_register_prompt="$2" ;;
+      PROJECT_SNOW_STYLE_SHARED_FACTS)
+        case "$2" in futiya_legacy|data_driven|off) ;; *) return 1 ;; esac
+        style_shared_facts="$2" ;;
+      PROJECT_SNOW_STYLE_SITUATIONAL_CUES)
+        case "$2" in futiya_legacy|reviewed_table|off) ;; *) return 1 ;; esac
+        style_situational_cues="$2" ;;
+      PROJECT_SNOW_STYLE_FALLBACK)
+        case "$2" in legacy|minimal_repair) ;; *) return 1 ;; esac
+        style_fallback="$2" ;;
+      PROJECT_SNOW_STYLE_COPY)
+        case "$2" in measure|rewrite) ;; *) return 1 ;; esac
+        style_copy="$2" ;;
+      PROJECT_SNOW_STYLE_WINDOW)
+        case "$2" in [1-7]) ;; *) return 1 ;; esac
+        style_window="$2" ;;
+      PROJECT_SNOW_STYLE_COEFFICIENT)
+        LC_ALL=C awk -v n="$2" 'BEGIN {exit !(n ~ /^[0-9]+([.][0-9]+)?$/ && n+0 > 0 && n+0 <= 100)}' || return 1
+        style_coefficient="$2" ;;
+      PROJECT_SNOW_STYLE_EXAMPLE_COUNT)
+        case "$2" in [1-8]) ;; *) return 1 ;; esac
+        style_example_count="$2" ;;
+      PROJECT_SNOW_STYLE_KEEP_REPEATED_LINES)
+        case "$2" in true|false) ;; *) return 1 ;; esac
+        style_keep_repeated_lines="$2" ;;
+      *) return 1 ;;
+    esac
+  }
   carriage_return="$(printf '\r')"
   while IFS= read -r public_line || [ -n "$public_line" ]; do
     case "$public_line" in
@@ -872,7 +934,7 @@ build_candidate_public_env() {
       PUBLIC_CHAT_LATENCY_V2|PUBLIC_VERIFIED_BLOCK_STREAM|PUBLIC_MOTION_V2|\
       PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2|\
       PUBLIC_UI_SNOW_ADV|PUBLIC_PROACTIVE_MESSAGES_ENABLED|PUBLIC_BYOK_RETENTION_ENABLED|\
-      PUBLIC_VOICE_SURVEY_V1|\
+      PUBLIC_VOICE_SURVEY_V1|PUBLIC_OPENAI_PARAMETER_ADAPTER|PROJECT_SNOW_STYLE_*|\
       PUBLIC_APP_VERSION|PUBLIC_DATA_VERSION|PUBLIC_MEDIA_VERSION|PUBLIC_MEDIA_ROOT|\
       PUBLIC_EXPERIENCE_NOTICE_VERSION|PUBLIC_ARRIVAL_PROBABILITY|\
       PUBLIC_STICKER_VERSION|PUBLIC_STICKER_ROOT|TURNSTILE_SITE_KEY|\
@@ -897,6 +959,8 @@ build_candidate_public_env() {
     esac
     public_seen="$public_seen$public_key|"
     case "$public_key" in
+      PUBLIC_OPENAI_PARAMETER_ADAPTER|PROJECT_SNOW_STYLE_*)
+        set_dialogue_experiment "$public_key" "$public_value" || { echo "Invalid dialogue experiment setting." >&2; return 1; } ;;
       PUBLIC_ENABLED_PROVIDERS)
         public_enabled_providers="$public_value"
         public_have_enabled_providers=1
@@ -948,7 +1012,7 @@ build_candidate_public_env() {
   done < "$source_file"
 
   # The root release runner intentionally discards caller environment. A
-  # fixed, exact-SHA operator file enables only these six reviewed features
+  # fixed, exact-SHA operator file selects reviewed settings
   # in the inactive colour; shared public.env and old snapshots are untouched.
   # The resulting per-release env is self-contained, so later changes to this
   # input cannot change a running candidate or its rollback anchor.
@@ -993,15 +1057,23 @@ build_candidate_public_env() {
           esac
           case "$public_override_key" in
             PUBLIC_DIALOGUE_DOMAINS_V2|PUBLIC_SCENE_ACTIONS_V2|PUBLIC_SESSION_MEMORY_V2|PUBLIC_UI_SNOW_ADV|\
-            PUBLIC_PROACTIVE_MESSAGES_ENABLED|PUBLIC_BYOK_RETENTION_ENABLED|PUBLIC_VOICE_SURVEY_V1) ;;
+            PUBLIC_PROACTIVE_MESSAGES_ENABLED|PUBLIC_BYOK_RETENTION_ENABLED|PUBLIC_VOICE_SURVEY_V1|\
+            PUBLIC_OPENAI_PARAMETER_ADAPTER|PROJECT_SNOW_STYLE_*) ;;
             *) echo 'Candidate dialogue flags contain a disallowed key.' >&2; return 1 ;;
           esac
           case "$public_override_seen" in
             *"|$public_override_key|"*) echo 'Candidate dialogue flags contain a duplicate key.' >&2; return 1 ;;
           esac
-          case "$public_override_value" in
-            true|false) ;;
-            *) echo 'Candidate dialogue flags must be true or false.' >&2; return 1 ;;
+          case "$public_override_key" in
+            PUBLIC_OPENAI_PARAMETER_ADAPTER|PROJECT_SNOW_STYLE_*)
+              set_dialogue_experiment "$public_override_key" "$public_override_value" || {
+                echo 'Invalid candidate dialogue experiment setting.' >&2; return 1
+              } ;;
+            *)
+              case "$public_override_value" in
+                true|false) ;;
+                *) echo 'Candidate dialogue flags must be true or false.' >&2; return 1 ;;
+              esac ;;
           esac
           public_override_seen="$public_override_seen$public_override_key|"
           public_override_count=$((public_override_count + 1))
@@ -1100,6 +1172,20 @@ build_candidate_public_env() {
     printf 'PUBLIC_UI_SNOW_ADV=%s\nPUBLIC_PROACTIVE_MESSAGES_ENABLED=%s\nPUBLIC_BYOK_RETENTION_ENABLED=%s\n' \
       "$public_ui_snow_adv" "$public_proactive_messages_enabled" "$public_byok_retention_enabled" || return 1
     printf 'PUBLIC_VOICE_SURVEY_V1=%s\n' "$public_voice_survey_v1" || return 1
+    printf 'PUBLIC_OPENAI_PARAMETER_ADAPTER=%s\n' "$public_openai_parameter_adapter" || return 1
+    printf 'PROJECT_SNOW_STYLE_EXAMPLES=%s\n' "$style_examples" || return 1
+    printf 'PROJECT_SNOW_STYLE_SIGNATURE_GUARD=%s\n' "$style_signature_guard" || return 1
+    printf 'PROJECT_SNOW_STYLE_SIGNATURE_PROMPT=%s\n' "$style_signature_prompt" || return 1
+    printf 'PROJECT_SNOW_STYLE_REGISTER_GUARD=%s\n' "$style_register_guard" || return 1
+    printf 'PROJECT_SNOW_STYLE_REGISTER_PROMPT=%s\n' "$style_register_prompt" || return 1
+    printf 'PROJECT_SNOW_STYLE_SHARED_FACTS=%s\n' "$style_shared_facts" || return 1
+    printf 'PROJECT_SNOW_STYLE_SITUATIONAL_CUES=%s\n' "$style_situational_cues" || return 1
+    printf 'PROJECT_SNOW_STYLE_FALLBACK=%s\n' "$style_fallback" || return 1
+    printf 'PROJECT_SNOW_STYLE_COPY=%s\n' "$style_copy" || return 1
+    printf 'PROJECT_SNOW_STYLE_WINDOW=%s\n' "$style_window" || return 1
+    printf 'PROJECT_SNOW_STYLE_COEFFICIENT=%s\n' "$style_coefficient" || return 1
+    printf 'PROJECT_SNOW_STYLE_EXAMPLE_COUNT=%s\n' "$style_example_count" || return 1
+    printf 'PROJECT_SNOW_STYLE_KEEP_REPEATED_LINES=%s\n' "$style_keep_repeated_lines" || return 1
     printf 'PUBLIC_APP_VERSION=%s\nPUBLIC_DATA_VERSION=%s\n' \
       "$candidate_app_version" "$candidate_data_version" || return 1
     printf 'PUBLIC_MEDIA_VERSION=%s\nPUBLIC_MEDIA_ROOT=%s\n' \

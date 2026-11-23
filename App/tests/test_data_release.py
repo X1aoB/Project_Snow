@@ -3,21 +3,27 @@ from __future__ import annotations
 import json
 import math
 import os
+import shutil
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
+from backend.snow_app import data_loader
+from backend.snow_app.config import Settings
+from backend.snow_app.public_repository import PublicRuntimeRepository
 from backend.snow_app.data_loader import (
     _neo4j_edge,
     _neo4j_node,
     load_neo4j,
     load_qdrant,
     qdrant_point_id,
+    serving_index_version,
     versioned_collection_name,
 )
 from backend.snow_app.data_release import DataReleaseError, verify_data_release
@@ -278,6 +284,95 @@ class FakeQdrantClient:
         self.deleted.append(name)
         del self.collections[name]
         return FakeResponse()
+
+
+@pytest.fixture
+def style_overlay_fixture(tmp_path, monkeypatch):
+    """Same bytes and index identities in the baseline and its overlay."""
+    baseline = _build_fixture(tmp_path, "synthetic-parent")
+    parent = verify_data_release(baseline)
+    digest = sha256((baseline / "manifest.json").read_bytes()).hexdigest()
+    inventory = {"statistics": parent["statistics"], "files": sorted(parent["files"], key=lambda f: f["path"])}
+    fingerprint = sha256(json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    monkeypatch.setattr(data_loader, "_STYLE_PARENT_MANIFEST", digest)
+    monkeypatch.setattr(data_loader, "_STYLE_PARENT_INVENTORY", fingerprint)
+    monkeypatch.setattr(data_loader, "_STYLE_INDEX_SOURCE", "synthetic-parent")
+    overlay = baseline.parent / "synthetic-overlay"
+    shutil.copytree(baseline, overlay)
+    style = overlay / "style" / "1.4.0" / "signature_terms.jsonl"
+    style.parent.mkdir(parents=True)
+    style.write_bytes(b'{"review_status":"pending"}\n')
+    child = {**parent, "data_version": overlay.name, "parent_manifest_sha256": digest,
+             "files": [*parent["files"], {"path": "style/1.4.0/signature_terms.jsonl", "bytes": style.stat().st_size,
+                                         "sha256": sha256(style.read_bytes()).hexdigest()}]}
+    (overlay / "manifest.json").write_text(json.dumps(child), encoding="utf8")
+    monkeypatch.setattr(data_loader, "_STYLE_OVERLAY_VERSION", overlay.name)
+    return baseline, overlay
+
+
+def test_style_overlay_uses_old_verified_indexes_without_shared_mutations(style_overlay_fixture, monkeypatch):
+    baseline, overlay = style_overlay_fixture
+    client = FakeQdrantClient("synthetic_alias")
+    original = load_qdrant(baseline, baseline.name, "", client.alias, "", client=client)
+    for root in (baseline, overlay, baseline):
+        # No point upload, collection creation or destructive fallback.
+        with patch.object(client, "put", side_effect=AssertionError("index write")):
+            result = load_qdrant(root, root.name, "", client.alias, "", client=client)
+        assert result["reused"] and result["collection"] == original["collection"]
+        monkeypatch.setenv("PUBLIC_DATA_ROOT", str(root))
+        repo = PublicRuntimeRepository(Settings(root, root, False, "", []),
+                                       SimpleNamespace(qdrant_collection=client.alias, data_version=root.name))
+        try:
+            assert repo.index_version == baseline.name and repo.qdrant_collection == original["collection"]
+            assert repo.data_manifest["data_version"] == root.name
+        finally:
+            repo.close()
+    assert not client.alias_actions and not client.deleted
+    del client.collections[original["collection"]]
+    with pytest.raises(DataReleaseError, match="restore the parent"), patch.object(client, "put", side_effect=AssertionError):
+        load_qdrant(overlay, overlay.name, "", client.alias, "", client=client)
+
+
+def test_style_overlay_rejects_unverified_parent_or_changed_inventory(style_overlay_fixture):
+    baseline, overlay = style_overlay_fixture
+    manifest = verify_data_release(overlay)
+    assert serving_index_version(manifest) == baseline.name
+    for changed in ({**manifest, "parent_manifest_sha256": "0"*64},
+                    {**manifest, "statistics": {**manifest["statistics"], "vectors": 0}},
+                    {**manifest, "files": manifest["files"][1:]}):
+        with pytest.raises(DataReleaseError, match="differs"):
+            serving_index_version(changed)
+    assert serving_index_version({**manifest, "data_version": "another-release"}) == "another-release"
+
+
+def test_style_overlay_checks_neo4j_contents_without_ddl_or_reload(style_overlay_fixture):
+    baseline, overlay = style_overlay_fixture
+    driver = MagicMock()
+    session = driver.session.return_value.__enter__.return_value
+    nodes = [_neo4j_node(baseline.name, row) for row in data_loader.iter_jsonl(overlay / "graph/nodes.jsonl")]
+    edges = [_neo4j_edge(baseline.name, row) for row in data_loader.iter_jsonl(overlay / "graph/edges.jsonl")]
+    def read(query, **params):
+        assert query.startswith("MATCH ") and not any(s in query for s in (" SET ", "CREATE", "DELETE", "MERGE"))
+        if "SnowDatasetPointer" in query:
+            return SimpleNamespace(single=lambda: {"version": baseline.name})
+        assert params["version"] == baseline.name
+        if "count(node)" in query:
+            return SimpleNamespace(single=lambda: {"count": len(nodes)})
+        if "count(edge)" in query:
+            return SimpleNamespace(single=lambda: {"count": len(edges)})
+        if "properties(node)" in query:
+            return [{"row": row} for row in nodes]
+        assert "from_key: source.dataset_key" in query
+        return [{"row": row} for row in edges]
+    session.run.side_effect = read
+    result = load_neo4j(overlay, overlay.name, "", "", "", driver=driver)
+    assert result["dataset_version"] == baseline.name and result["reused"]
+    nodes[0]["name"] = "changed"
+    with pytest.raises(DataReleaseError, match="differs"):
+        load_neo4j(overlay, overlay.name, "", "", "", driver=driver)
+    nodes.clear()
+    with pytest.raises(DataReleaseError, match="restore the parent"):
+        load_neo4j(overlay, overlay.name, "", "", "", driver=driver)
 
 
 class DataReleaseTests(TestCase):

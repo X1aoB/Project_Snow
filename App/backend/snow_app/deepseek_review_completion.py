@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Literal
 
 import httpx
+
+from .openai_completion import post_completion
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pipelines.review_relation_candidates import _build_review_input
@@ -460,7 +462,7 @@ class DeepSeekReviewCompletionService:
         user_content = json.dumps(payload, ensure_ascii=False)
         if correction:
             user_content += "\n\n上一次输出无效。" + correction + "。请只返回修正后的 JSON。"
-        response = httpx.post(
+        response = post_completion(
             selection.base_url.rstrip("/") + "/chat/completions",
             headers={"Authorization": f"Bearer {credential}", "Content-Type": "application/json"},
             json={

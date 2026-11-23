@@ -21,6 +21,7 @@ from .config import PublicSettings, Settings
 from .dialogue_core import DialogueContext, DialogueEngine, GenerationBudget, GenerationGate, WorldState
 from .dialogue_core import GenerationBusy as GenerationBusy
 from .generation_stream import GenerationPublicationError, GenerationStreamPartialError, current_generation_observer
+from .openai_completion import NON_RETRYABLE
 from .model_capabilities import immersive_model_policy
 from .mvp_policy import MVP_CHARACTERS, scene_visual_key
 from .mvp_service import (
@@ -123,7 +124,7 @@ _PUBLIC_ERROR_STAGES = frozenset({
     "transport",
     "unknown",
 })
-_PUBLIC_NON_RETRYABLE_ERROR_CODES = frozenset({
+_PUBLIC_NON_RETRYABLE_ERROR_CODES = NON_RETRYABLE | frozenset({
     "sticker_unavailable",
     "character_unavailable",
     "generation_interrupted",
@@ -1936,7 +1937,7 @@ class PublicChatService:
                     raise
                 return self.failed_presence_arrival(
                     prepared,
-                    "provider_request_failed",
+                    exc.code,
                     model_called=True,
                     usage={"provider_calls": budget.provider_calls} if typed_arrival else None,
                     diagnostics=self._diagnostics(
@@ -2358,7 +2359,7 @@ class PublicChatService:
                     request,
                     provider,
                     total_started,
-                    code="provider_request_failed",
+                    code=exc.code,
                     error_stage="provider",
                 )
             adjustments = list(result.get("response_adjustments") or [])
@@ -2893,6 +2894,7 @@ class PublicChatService:
                 user_prompt=prompt,
                 max_tokens=1200,
                 client=self.provider_client,
+                max_provider_http_calls=self.public_settings.max_provider_calls_per_action,
                 reasoning_effort=request.reasoning_effort,
             )
 

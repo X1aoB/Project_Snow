@@ -546,6 +546,11 @@ const errorMessages = {
   provider_timeout: "模型厂商响应超时，请稍后重试。",
   provider_rate_limited: "模型厂商触发了频率限制，请稍后重试。",
   provider_request_failed: "模型厂商拒绝了本次请求，请检查模型 ID 和账户权限。",
+  provider_quota_exhausted: "这个 Key 的额度已用完，或所选模型不在 OpenAI 赠送额度范围内。请在 OpenAI 平台查看用量、赠送范围和账单。",
+  provider_model_unavailable: "这个 Key 无权使用所选模型，或模型 ID 不存在。请换一个账号可用的模型。",
+  provider_parameter_rejected: "模型厂商不接受本站为该模型发送的参数。请先换用推荐模型，并在反馈里写上模型 ID。",
+  provider_unavailable: "模型厂商暂时不可用，请稍后重试。",
+  provider_region_unavailable: "OpenAI 不支持本站请求发出地区的 API 访问。请使用在该地区提供服务的模型厂商。",
   subscription_disabled: "本站尚未启用订阅连接。你仍可阅读教程，或使用 API Key。",
   subscription_not_connected: "个人连接器尚未连接或已离线。请打开模型设置，重新配对你自己的 Codex 订阅。",
   subscription_disconnected: "个人连接器已断开，请在模型设置中重新配对。",
@@ -651,6 +656,11 @@ const errorStageByCode = {
   provider_timeout: "provider",
   provider_rate_limited: "provider",
   provider_request_failed: "provider",
+  provider_quota_exhausted: "provider",
+  provider_model_unavailable: "provider",
+  provider_parameter_rejected: "provider",
+  provider_unavailable: "provider",
+  provider_region_unavailable: "provider",
   upstream_invalid_response: "generation_validation",
   role_guard_rejected: "generation_validation",
   public_database_unavailable: "idempotency_store",
@@ -3513,7 +3523,7 @@ async function issueCredential(signal) {
   if (!provider || !state.config?.providers?.some((item) => item.provider_id === provider)) {
     throw new Error("provider_not_enabled");
   }
-  const apiKey = $("api-key").value;
+  const apiKey = $("api-key").value.trim();
   if (!apiKey) throw new Error("请先输入 API Key。");
   const relayBase = provider === RELAY_PROVIDER ? $("relay-base-url").value.trim() : "";
   if (provider === RELAY_PROVIDER && !relayBase) throw new Error("请先填写中转站地址。");
@@ -3557,6 +3567,8 @@ async function issueCredential(signal) {
   signal.throwIfAborted();
   state.credential = payload.credential;
   state.provider = provider;
+  state.model = "";
+  state.reasoningEffort = "";
   state.credentialExpiresAt = Date.parse(payload.expires_at);
   state.credentialRetention = retention && retention !== "tab" && payload.retention === retention ? retention : "tab";
   state.relayBase = relayBase;
@@ -3564,23 +3576,29 @@ async function issueCredential(signal) {
   $("api-key").value = "";
   saveCredential();
   refreshCredentialStatus();
+  updateComposerAvailability();
 }
 function credentialStale() {
-  return !state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now() || retentionChanged()
+  return Boolean($("api-key").value.trim()) || !state.credential || state.provider !== $("provider-select").value || state.credentialExpiresAt <= Date.now() || retentionChanged()
     || (state.provider === RELAY_PROVIDER && $("relay-base-url").value.trim() !== state.relayBase);
 }
+async function loadModelChoices(signal) {
+  if (state.modelSetupMode === "subscription") throw new Error("subscription_model_unavailable");
+  if (!$("provider-select").value) throw new Error("provider_not_enabled");
+  if (credentialStale()) await issueCredential(signal);
+  const select = $("discovered-models");
+  select.replaceChildren();
+  select.hidden = true;
+  const payload = await api("/byok/models", { method: "POST", signal, timeoutMs: 30000, body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
+  signal.throwIfAborted();
+  const reviewed = new Set(state.config?.model_profiles?.[state.provider] || []);
+  select.add(new Option("请选择账号可用的对话模型", ""));
+  for (const model of payload.models) select.add(new Option(reviewed.has(model) ? `${model}（参数已验证）` : model, model));
+  select.hidden = false;
+  if (!payload.models.length) throw new Error("厂商返回的模型列表为空，请手工填写账号可用的对话模型 ID。");
+}
 async function discoverModels() {
-  return runModelSetup("discover-models", async (signal) => {
-    if (state.modelSetupMode === "subscription") throw new Error("subscription_model_unavailable");
-    if (!$("provider-select").value) throw new Error("provider_not_enabled");
-    if (credentialStale()) await issueCredential(signal);
-    const payload = await api("/byok/models", { method: "POST", signal, timeoutMs: 30000, body: JSON.stringify({ provider: state.provider, credential: state.credential, request_id: id() }) });
-    signal.throwIfAborted();
-    saveCredential();
-    const select = $("discovered-models");
-    select.innerHTML = `<option value="">选择已发现模型</option>${payload.models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")}`;
-    select.hidden = false;
-  });
+  return runModelSetup("discover-models", loadModelChoices);
 }
 async function saveModelSession() {
   return runModelSetup("save-model", async (signal) => {
@@ -3605,6 +3623,11 @@ async function saveModelSession() {
       return;
     }
     const model = $("discovered-models").value.trim() || $("model-id").value.trim();
+    if (!model && $("provider-select").value === "openai" && ($("api-key").value.trim() || state.credential)) {
+      if ($("discovered-models").hidden || credentialStale()) await loadModelChoices(signal);
+      toast("请选择账号可用的对话模型，然后保存会话。");
+      return;
+    }
     if (!model) throw new Error("请填写或选择模型 ID。");
     if (!$("provider-select").value) throw new Error("provider_not_enabled");
     if (credentialStale()) await issueCredential(signal);
@@ -7316,7 +7339,7 @@ async function runAutoSummary(thread) {
     if (controller.signal.aborted || epoch !== state.historyEpoch || thread.summaryRequestId !== requestId) return;
     const checkpoint = thread.messages.find(message => message.id === checkpointId);
     if (checkpoint) checkpoint.extraUsage = [...(checkpoint.extraUsage || []).filter(part => (part.requestId || part.request_id) !== requestId),
-      { ...payload.usage, kind: "summary", requestId, provider_calls: 1, model: summaryModel }];
+      { ...payload.usage, kind: "summary", requestId, provider_calls: payload.usage?.provider_calls ?? 1, model: summaryModel }];
     thread.summary = payload.summary || thread.summary;
     thread.pendingTopics = Array.isArray(payload.pending_topics)
       ? payload.pending_topics.map(plain).filter(Boolean).slice(0, 12)
@@ -8168,7 +8191,23 @@ $("credential-retention").onchange = ({ currentTarget: select }) => void retenti
 window.addEventListener("storage", (event) => {
   if (event.key === sessionKey() && !event.newValue && event.storageArea === localStorage && state.credentialRetention !== "tab") clearCredential();
 });
-$("discovered-models").onchange = () => { if (state.modelSetupMode !== "subscription" && $("discovered-models").value) { $("model-id").value = $("discovered-models").value; state.model = $("discovered-models").value; saveCredential(); } };
+$("api-key").oninput = () => {
+  if (!state.credential || !$("api-key").value.trim()) return;
+  $("discovered-models").replaceChildren();
+  $("discovered-models").hidden = true;
+  if ($("advanced-model-panel").hidden) $("model-id").value = "";
+};
+$("model-id").oninput = () => { $("discovered-models").value = ""; };
+$("discovered-models").onchange = ({ currentTarget }) => {
+  const model = currentTarget.value;
+  if (!model || state.modelSetupMode === "subscription") return;
+  $("model-id").value = model;
+  if (state.model && model !== state.model && !credentialStale()) {
+    state.model = model;
+    saveCredential();
+    refreshCredentialStatus();
+  }
+};
 $("toggle-advanced-model").onclick = () => {
   const panel = $("advanced-model-panel");
   const expanded = panel.hidden;

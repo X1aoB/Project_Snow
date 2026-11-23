@@ -221,6 +221,8 @@ jobs:
           tests/test_voice_survey.py
           tests/test_character_identity.py
           tests/test_dialogue_persona.py
+          tests/test_openai_parameter_adapter.py
+          tests/test_reviewed_dialogue_style.py
           tests/test_factual_grounding.py
           tests/test_paid_probe_budget.py
           tests/test_dialogue_turn.py
@@ -255,6 +257,8 @@ jobs:
         run: >-
           python -m pytest
           tests/test_data_release.py
+          tests/test_style_release.py
+          tests/test_style_corpus_audit.py
           tests/test_review_state_preservation.py
           tests/test_data_boundaries.py
           tests/test_mvp_22_product.py -q

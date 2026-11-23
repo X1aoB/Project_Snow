@@ -28,6 +28,10 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
 
+def openai_parameter_adapter_enabled() -> bool:
+    return os.getenv("PUBLIC_OPENAI_PARAMETER_ADAPTER", "on").strip().casefold() == "on"
+
+
 def _secret_value(name: str, default: str = "") -> str:
     """Read a secret from an env value or an explicitly configured file."""
 
@@ -250,7 +254,7 @@ class PublicSettings:
             byok_lifetime_hours = 12
         byok_retention_enabled = os.getenv("PUBLIC_BYOK_RETENTION_ENABLED", "false") == "true"
         return cls(
-            app_version=os.getenv("PUBLIC_APP_VERSION", "1.3.1"),
+            app_version=os.getenv("PUBLIC_APP_VERSION", "1.4.0"),
             data_version=os.getenv("PUBLIC_DATA_VERSION", "local-development"),
             database_url=_public_database_url(),
             public_origin=os.getenv("PUBLIC_ORIGIN", "https://snow.xiaob.dev").rstrip("/"),

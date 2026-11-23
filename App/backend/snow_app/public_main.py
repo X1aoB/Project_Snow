@@ -29,6 +29,7 @@ from .arrival_ticket import ArrivalTicketExpired, verify_arrival_ticket
 from .config import PublicSettings, Settings
 from .frontend_identity import read_frontend_identity
 from .generation_stream import GenerationObserver, observe_generation
+from .openai_completion import NON_RETRYABLE
 from .model_capabilities import immersive_model_policy, public_model_profiles
 from .public_logging import configure_public_logger
 from .public_statistics import install_statistics_config
@@ -160,6 +161,11 @@ _ERROR_STAGE_BY_CODE = {
     "provider_timeout": "provider",
     "provider_rate_limited": "provider",
     "provider_request_failed": "provider",
+    "provider_quota_exhausted": "provider",
+    "provider_model_unavailable": "provider",
+    "provider_parameter_rejected": "provider",
+    "provider_unavailable": "provider",
+    "provider_region_unavailable": "provider",
     "upstream_invalid_response": "generation_validation",
     "role_guard_rejected": "generation_validation",
     "public_database_unavailable": "idempotency_store",
@@ -176,7 +182,7 @@ _ERROR_STAGE_BY_CODE = {
     "invalid_scene_action": "state_validation",
     "character_unavailable": "character_data",
 }
-_NON_RETRYABLE_ERROR_CODES = frozenset(
+_NON_RETRYABLE_ERROR_CODES = NON_RETRYABLE | frozenset(
     {
         "invalid_request",
         "sticker_unavailable",
@@ -2454,7 +2460,10 @@ def create_app(
                 await asyncio.gather(generation, return_exceptions=True)
                 if request_claimed:
                     request_claimed = False
-                    terminal_code = exc.code if isinstance(exc, SubscriptionError) else interrupted_code
+                    terminal_code = interrupted_code
+                    if isinstance(exc, SubscriptionError) or (isinstance(exc, ProviderRequestError)
+                            and exc.failure and 400 <= exc.failure.http_status < 500):
+                        terminal_code = exc.code
                     await complete_owned_request(cache_id, {"terminal_error": terminal_code})
                 if isinstance(exc, asyncio.CancelledError) and not asyncio.current_task().cancelling():
                     raise _error(interrupted_code, 409) from exc
@@ -2732,8 +2741,8 @@ def create_app(
         return _error_response(request, "invalid_request", 422, stage="content_validation")
 
     @app.exception_handler(MVPProviderError)
-    async def mvp_provider_error(request: Request, _exc: MVPProviderError):
-        return _error_response(request, "provider_request_failed", 502, stage="provider")
+    async def mvp_provider_error(request: Request, exc: MVPProviderError):
+        return _error_response(request, exc.code, exc.status_code, stage="provider")
 
     app_root = Path(__file__).resolve().parents[2]
     frontend_path = app_root / "public_frontend"

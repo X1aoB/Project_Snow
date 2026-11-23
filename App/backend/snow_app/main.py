@@ -11,6 +11,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
+
+from .openai_completion import post_completion
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -168,7 +170,7 @@ def _ground_visual_inputs(
         "max_tokens": 2400,
         **provider_registry.thinking_request_fields(selection.provider_kind, "off"),
     }
-    response = httpx.post(
+    response = post_completion(
         selection.base_url.rstrip("/") + "/chat/completions",
         headers={"Authorization": f"Bearer {credential}", "Content-Type": "application/json"},
         json=body,

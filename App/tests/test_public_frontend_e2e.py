@@ -1527,6 +1527,47 @@ class PublicFrontendE2ETests(TestCase):
                 )
                 self.assertFalse(overlaps, f"visible controls overlap: {first} and {second}")
 
+    def test_openai_save_with_only_key_lists_models_and_replaces_rejected_key(self) -> None:
+        with sync_playwright() as playwright:
+            browser = _launch_browser(playwright)
+            page = browser.new_page()
+            issued, listings = [], []
+            def session(route):
+                issued.append(route.request.post_data_json["api_key"])
+                route.fulfill(json={"provider": "openai", "credential": f"fixture-{len(issued)}",
+                                    "expires_at": "2099-01-01T00:00:00Z", "retention": "tab"})
+
+            def models(route):
+                listings.append(route.request.post_data_json["credential"])
+                if listings[-1] == "fixture-1":
+                    route.fulfill(status=401, json={"detail": {"code": "provider_credential_rejected"}})
+                else:
+                    route.fulfill(json={"models": ["gpt-6.2-sol"]})
+
+            page.route("**/public/v1/byok/session", session)
+            page.route("**/public/v1/byok/models", models)
+            page.goto(self.base_url, wait_until="networkidle")
+            page.locator("#accept-experience-notice").click()
+            page.locator("#open-settings").click()
+            page.locator("#api-key").fill("fixture-expired-key")
+            page.locator("#save-model").click()
+            page.locator("#setup-error").get_by_text("API Key 被模型厂商拒绝", exact=False).wait_for()
+            page.locator("#api-key").fill("  fixture-replacement-key  ")
+            page.locator("#save-model").click()
+            choices = page.locator("#discovered-models")
+            choices.wait_for(state="visible")
+            self.assertEqual(choices.input_value(), "")
+            choices.select_option("gpt-6.2-sol")
+            self.assertEqual(page.evaluate("JSON.parse(sessionStorage.getItem('project-snow-public:byok')).model"), "")
+            page.locator("#save-model").click()
+            page.locator("#settings-dialog").wait_for(state="hidden")
+            self.assertEqual(page.evaluate("JSON.parse(sessionStorage.getItem('project-snow-public:byok')).model"), "gpt-6.2-sol")
+            self.assertEqual(issued, ["fixture-expired-key", "fixture-replacement-key"])
+            self.assertEqual(listings, ["fixture-1", "fixture-2"])
+            self.assertNotIn("/public/v1/chat/stream", PublicFrontendHandler.request_paths)
+            self.assertNotIn("/public/v2/chat/stream", PublicFrontendHandler.request_paths)
+            browser.close()
+
     def test_model_discovery_keeps_the_issued_credential(self) -> None:
         with sync_playwright() as playwright:
             browser = _launch_browser(playwright)

@@ -200,3 +200,24 @@ def test_old_new_old_recovery_retains_each_exact_feature_snapshot(state):
         restored = maintenance.read_environment(compose_path)
         assert Path(restored["PUBLIC_ENV_FILE"]).read_bytes() == snapshot.encode()
 
+
+def test_style_modes_are_frozen_and_roundtrip(builder):
+    modes = {
+        "PUBLIC_OPENAI_PARAMETER_ADAPTER": "off",
+        "PROJECT_SNOW_STYLE_EXAMPLES": "retrieved",
+        "PROJECT_SNOW_STYLE_REGISTER_GUARD": "data_driven",
+        "PROJECT_SNOW_STYLE_COEFFICIENT": "2.5",
+    }
+    override = "".join(f"{key}={value}\n" for key, value in modes.items())
+    result, output = build(builder, override=override)
+    assert result.returncode == 0, result.stderr
+    assert modes.items() <= settings(output).items()
+    result, rebuilt = build(builder, source=output)
+    assert result.returncode == 0 and rebuilt == output
+
+
+@pytest.mark.parametrize("setting", ["COPY=typo", "WINDOW=8", "COEFFICIENT=nan", "BOGUS=1"])
+def test_invalid_style_setting_preserves_snapshot(builder, setting):
+    result, output = build(builder, override=f"PROJECT_SNOW_STYLE_{setting}\n", existing="prior\n")
+    assert result.returncode != 0
+    assert output == "prior\n"

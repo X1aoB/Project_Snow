@@ -18,6 +18,8 @@ from uuid import uuid4
 
 import httpx
 
+from .openai_completion import CompletionRequest, completion_stream, post_completion
+
 from .agent_store import AgentStore
 
 try:  # pragma: no cover - platform backend is exercised on Windows
@@ -483,7 +485,7 @@ class ProviderRegistry:
         }
         started = monotonic()
         try:
-            response = httpx.post(base_url + "/chat/completions", headers=headers, json=body, timeout=30, follow_redirects=True)
+            response = post_completion(base_url + "/chat/completions", headers=headers, json=body, timeout=30, follow_redirects=True)
             response.raise_for_status()
             payload = response.json()
             content = str((((payload.get("choices") or [{}])[0].get("message") or {}).get("content") or "")).strip()
@@ -542,7 +544,7 @@ class ProviderRegistry:
                 "max_tokens": 256,
             }
             try:
-                structured_response = httpx.post(base_url + "/chat/completions", headers=headers, json=structured_body, timeout=30, follow_redirects=True)
+                structured_response = post_completion(base_url + "/chat/completions", headers=headers, json=structured_body, required_field="response_format", timeout=30, follow_redirects=True)
                 structured_response.raise_for_status()
                 structured_payload = structured_response.json()
                 structured_content = (((structured_payload.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
@@ -564,7 +566,7 @@ class ProviderRegistry:
                 "max_tokens": 64,
             }
             try:
-                tool_response = httpx.post(base_url + "/chat/completions", headers=headers, json=tool_body, timeout=30, follow_redirects=True)
+                tool_response = post_completion(base_url + "/chat/completions", headers=headers, json=tool_body, timeout=30, follow_redirects=True)
                 tool_response.raise_for_status()
                 tool_payload = tool_response.json()
                 tool_calls = (((tool_payload.get("choices") or [{}])[0].get("message") or {}).get("tool_calls") or [])
@@ -580,7 +582,10 @@ class ProviderRegistry:
             stream_body = {**body, "stream": True, "max_tokens": 16}
             received = False
             try:
-                with httpx.stream("POST", base_url + "/chat/completions", headers=headers, json=stream_body, timeout=30, follow_redirects=True) as stream_response:
+                endpoint = base_url + "/chat/completions"
+                request = CompletionRequest(endpoint, stream_body)
+                with completion_stream(request, lambda body: httpx.stream("POST", endpoint, headers=headers,
+                                       json=body, timeout=30, follow_redirects=True)) as stream_response:
                     stream_response.raise_for_status()
                     for line in stream_response.iter_lines():
                         if str(line).strip().startswith("data:"):

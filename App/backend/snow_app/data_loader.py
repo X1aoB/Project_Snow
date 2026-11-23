@@ -21,6 +21,28 @@ from .config import PublicSettings
 from .data_release import DataReleaseError, iter_jsonl, verify_data_release
 
 
+# The verified 1.4.0 package changes only local style files. Its parent is
+# the production data package recorded in the 1.3.0 release artifact contract.
+# Bind its non-style inventory and statistics independently of claims made by
+# the child manifest. Other data versions retain their separate namespaces.
+_STYLE_OVERLAY_VERSION = "2026.11.23.1"
+_STYLE_INDEX_SOURCE = "2026.08.19.1"
+_STYLE_PARENT_MANIFEST = "46046a61d6747a2cb1b5e1d27caa5e2bf6a1e8cc3cc1e5995bc499093a68d90b"
+_STYLE_PARENT_INVENTORY = "7dca1686c064c138f9b0f8bf812e9fdbc10f9a12094e50b8949f46af9a4289bb"
+
+
+def serving_index_version(manifest: dict[str, Any]) -> str:
+    """Resolve immutable serving indexes only from a verified data package."""
+    if manifest["data_version"] != _STYLE_OVERLAY_VERSION:
+        return manifest["data_version"]
+    files = [item for item in manifest["files"] if not item["path"].startswith("style/1.4.0/")]
+    inventory = {"statistics": manifest["statistics"], "files": sorted(files, key=lambda item: item["path"])}
+    digest = sha256(json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if manifest.get("parent_manifest_sha256") != _STYLE_PARENT_MANIFEST or digest != _STYLE_PARENT_INVENTORY:
+        raise DataReleaseError("style overlay differs from its approved serving index source")
+    return _STYLE_INDEX_SOURCE
+
+
 def versioned_collection_name(alias: str, version: str) -> str:
     slug = re.sub(r"[^a-z0-9_-]+", "-", version.casefold()).strip("-_")[:40] or "release"
     return f"{alias}__{slug}-{sha256(version.encode()).hexdigest()[:8]}"
@@ -96,6 +118,7 @@ def load_qdrant(
     expected_count = int((manifest.get("statistics") or {}).get("vectors") or 0)
     if dimension <= 0 or expected_count <= 0:
         raise DataReleaseError("release manifest has invalid vector statistics")
+    index_version = serving_index_version(manifest)
     owned_client = client is None
     if client is None:
         client = httpx.Client(
@@ -104,7 +127,7 @@ def load_qdrant(
             timeout=30,
             trust_env=False,
         )
-    collection = versioned_collection_name(alias, version)
+    collection = versioned_collection_name(alias, index_version)
     previous_collection: str | None = None
     try:
         _wait_for_http(client, "/healthz")
@@ -136,6 +159,8 @@ def load_qdrant(
             collection_response.raise_for_status()
 
         if not reused:
+            if index_version != version:
+                raise DataReleaseError("approved Qdrant index source is missing; restore the parent data release")
             _raise_for_status(
                 client.put(
                     f"/collections/{collection}",
@@ -304,6 +329,8 @@ def load_neo4j(
     activate: bool = False,
 ) -> dict[str, Any]:
     manifest = verify_data_release(release_root, version)
+    index_version = serving_index_version(manifest)
+    reuse_only = index_version != version
     statistics = manifest.get("statistics") or {}
     expected_nodes = int(statistics.get("graph_nodes") or 0)
     expected_edges = int(statistics.get("graph_edges") or 0)
@@ -315,19 +342,20 @@ def load_neo4j(
     try:
         driver.verify_connectivity()
         with driver.session() as session:
-            session.run(
-                "CREATE CONSTRAINT snow_dataset_pointer_name IF NOT EXISTS "
-                "FOR (pointer:SnowDatasetPointer) REQUIRE pointer.name IS UNIQUE"
-            ).consume()
-            session.run(
-                "CREATE CONSTRAINT snow_entity_dataset_key IF NOT EXISTS "
-                "FOR (node:SnowEntity) REQUIRE node.dataset_key IS UNIQUE"
-            ).consume()
-            session.run(
-                "CREATE INDEX snow_relation_dataset_key IF NOT EXISTS "
-                "FOR ()-[edge:SNOW_RELATION]-() ON (edge.dataset_key)"
-            ).consume()
-            session.run("CALL db.awaitIndex('snow_relation_dataset_key', 60)").consume()
+            if not reuse_only:
+                session.run(
+                    "CREATE CONSTRAINT snow_dataset_pointer_name IF NOT EXISTS "
+                    "FOR (pointer:SnowDatasetPointer) REQUIRE pointer.name IS UNIQUE"
+                ).consume()
+                session.run(
+                    "CREATE CONSTRAINT snow_entity_dataset_key IF NOT EXISTS "
+                    "FOR (node:SnowEntity) REQUIRE node.dataset_key IS UNIQUE"
+                ).consume()
+                session.run(
+                    "CREATE INDEX snow_relation_dataset_key IF NOT EXISTS "
+                    "FOR ()-[edge:SNOW_RELATION]-() ON (edge.dataset_key)"
+                ).consume()
+                session.run("CALL db.awaitIndex('snow_relation_dataset_key', 60)").consume()
             previous_row = session.run(
                 "MATCH (pointer:SnowDatasetPointer {name: 'active'}) RETURN pointer.version AS version"
             ).single()
@@ -336,25 +364,25 @@ def load_neo4j(
             )
             node_row = session.run(
                 "MATCH (node:SnowEntity {dataset_version: $version}) RETURN count(node) AS count",
-                version=version,
+                version=index_version,
             ).single()
             edge_row = session.run(
                 "MATCH ()-[edge:SNOW_RELATION {dataset_version: $version}]->() RETURN count(edge) AS count",
-                version=version,
+                version=index_version,
             ).single()
             node_count = int(node_row["count"]) if node_row else 0
             edge_count = int(edge_row["count"]) if edge_row else 0
             reused = node_count == expected_nodes and edge_count == expected_edges
             if reused:
-                _verify_neo4j_content(session, release_root, version)
+                _verify_neo4j_content(session, release_root, index_version)
                 cleanup_status = (
-                    _activate_neo4j_dataset(session, version, previous_version)
+                    _activate_neo4j_dataset(session, index_version, previous_version)
                     if activate
                     else "not_requested"
                 )
                 return {
-                    "dataset_version": version,
-                    "active_version": version if activate else previous_version,
+                    "dataset_version": index_version,
+                    "active_version": index_version if activate else previous_version,
                     "previous_version": previous_version,
                     "nodes": node_count,
                     "edges": edge_count,
@@ -362,6 +390,8 @@ def load_neo4j(
                     "cleanup_status": cleanup_status,
                     "reused": True,
                 }
+            if reuse_only:
+                raise DataReleaseError("approved Neo4j index source is incomplete; restore the parent data release")
             if node_count or edge_count:
                 raise RuntimeError(
                     "existing Neo4j release does not match its manifest; "
@@ -456,7 +486,8 @@ def main() -> int:
     settings = PublicSettings.from_environment()
     manifest = verify_data_release(args.release_root, settings.data_version)
     if args.verify_only:
-        print(json.dumps({"status": "ok", "data_version": manifest["data_version"]}))
+        print(json.dumps({"status": "ok", "data_version": manifest["data_version"],
+                          "serving_index_version": serving_index_version(manifest)}))
         return 0
     if not settings.qdrant_api_key or not settings.neo4j_password:
         raise SystemExit("Qdrant and Neo4j credentials are required for a production data load")

@@ -5,6 +5,7 @@ import json
 import logging
 import re
 
+from .openai_completion import safe_error_fields
 from .model_capabilities import public_model_profiles
 from .public_delivery import latency_metrics
 
@@ -22,6 +23,17 @@ class PublicLogFilter(logging.Filter):
             if re.fullmatch(r"public_[a-z_]{1,80}", text):
                 return record.levelno >= logging.WARNING
             data = json.loads(text)
+            if data.get("event") == "public_provider_failure":
+                status = data.get("http_status")
+                if data.get("provider") != "openai" or type(status) is not int or not 400 <= status <= 599:
+                    return False
+                model = data.get("model_profile")
+                record.msg = json.dumps({"event": "public_provider_failure", "provider": "openai",
+                    "model_profile": model if model in _MODEL_PROFILES["openai"] else "other",
+                    "http_status": status, **safe_error_fields({"type": data.get("error_type"),
+                    "code": data.get("error_code"), "param": data.get("error_param")})}, separators=(",", ":"))
+                record.args = ()
+                return True
             if data.get("event") != "public_generation_complete":
                 return False
             for key in ("request_id", "character_id"):

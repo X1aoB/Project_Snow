@@ -21,6 +21,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from .config import openai_parameter_adapter_enabled
+
 
 _MODELS: dict[tuple[str, str], dict[str, Any]] = {}
 
@@ -78,6 +80,22 @@ _register("openai", ("gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-2025-08-07",
 _register("openai", ("gpt-5.1", "gpt-5.1-2025-11-13"),
           {"reasoning_effort": "none"}, token_parameter="max_completion_tokens", stream_include_usage=True)
 
+# OpenAI Chat Completions migration guides and model cards reviewed 2026-11-23:
+# https://developers.openai.com/api/docs/guides/latest-model
+# https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra
+# https://developers.openai.com/api/docs/models/gpt-5.5
+# https://developers.openai.com/api/docs/models/gpt-5.6-sol (also Terra and Luna)
+_LEGACY_OPENAI_MODELS = {name for provider, name in _MODELS if provider == "openai"}
+_register("openai", ("gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-astra", "gpt-6.1-sol"),
+          {"reasoning_effort": "low"}, effective="minimum", token_parameter="max_completion_tokens",
+          omit_temperature=True, stream_include_usage=True)
+_register("openai", ("gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"),
+          {"reasoning_effort": "none"}, token_parameter="max_completion_tokens", stream_include_usage=True)
+_register("openai", ("gpt-5.5", "gpt-5.5-2026-04-23", "gpt-5.6", "gpt-5.6-sol",
+                     "gpt-5.6-terra", "gpt-5.6-luna"),
+          {"reasoning_effort": "none"}, token_parameter="max_completion_tokens",
+          omit_temperature=True, stream_include_usage=True)
+
 # Anthropic Claude via the OpenAI-compatible layer. The compat endpoint accepts
 # the standard max_tokens and temperature; extended thinking is an extra_body
 # field that is never returned, so the public off-profile sends no thinking
@@ -110,19 +128,24 @@ def immersive_model_policy(provider_kind: str, model: str) -> dict[str, Any]:
     provider = str(provider_kind or "").strip().casefold()
     name = str(model or "").strip().casefold()
     policy = _MODELS.get((provider, name))
-    if policy is not None:
+    adapted = provider == "openai" and openai_parameter_adapter_enabled()
+    if policy is not None and (provider != "openai" or adapted or name in _LEGACY_OPENAI_MODELS):
         return copy.deepcopy(policy)
     return {
         "requested": "off", "effective": "unverified", "reason": "model_capability_unverified",
-        "provider_kind": provider, "request_fields": {}, "token_parameter": "max_tokens",
-        "omit_temperature": False, "supports_streaming": False,
+        "provider_kind": provider, "request_fields": {},
+        "token_parameter": "max_completion_tokens" if adapted else "max_tokens",
+        "omit_temperature": adapted, "supports_streaming": False,
         "stream_include_usage": False, "capability_verified": False,
     }
 
 
 def public_model_profiles() -> dict[str, list[str]]:
     """Public, reviewed names only; never include discovered or private IDs."""
-    return {
+    profiles = {
         provider: sorted(model for source, model in _MODELS if source == provider)
         for provider in sorted({provider for provider, _model in _MODELS})
     }
+    if not openai_parameter_adapter_enabled():
+        profiles["openai"] = sorted(_LEGACY_OPENAI_MODELS)
+    return profiles
