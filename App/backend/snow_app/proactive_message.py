@@ -149,10 +149,11 @@ class ProactiveMessageService:
                 f"（{today['date']}{today['weekday']}{occasion}）只用来避免说错，不必提起。"
                 "以下已审阅资料仅供语气参考：" + profile),
             user_prompt=f"系统提醒事件：你今天已在{pending.location_name}等待约定。请发一条自然、简短的提醒。",
-            max_tokens=400, timeout=120, client=self.http, reasoning_effort=payload.reasoning_effort)
+            max_tokens=400, timeout=120, client=self.http, reasoning_effort=payload.reasoning_effort,
+            max_provider_http_calls=1)
         blocks, _answer, _truncated, safety = self.chat._public_generation_content(
             {"content_blocks": [{"type": "message", "text": content[:1200]}]}, "text")
-        usage = {"provider_calls": 1, **{key: value for key, value in raw_usage.items()
+        usage = {"provider_calls": raw_usage.get("provider_calls", 1), **{key: value for key, value in raw_usage.items()
             if key in {"prompt_tokens", "completion_tokens", "total_tokens"}
             and isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10000000}}
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
@@ -306,6 +307,14 @@ def install_proactive_routes(app, settings, async_store, chat_service, get_dialo
                 generated = {"status": "unknown" if exc.submitted else "failed", "content_blocks": [],
                     "usage": {"provider_calls": 1 if exc.submitted else 0, "total_tokens": None},
                     "model_called": exc.submitted, "terminal_error": exc.code}
+            except ProviderRequestError as exc:
+                failure = exc.failure
+                certain = failure is not None and 400 <= failure.http_status < 500
+                generated = {"status": "failed" if certain else "unknown", "content_blocks": [],
+                    "usage": {"provider_calls": failure.attempts if failure else int(publication_started),
+                              "total_tokens": None},
+                    "model_called": publication_started,
+                    "terminal_error": exc.code if failure else "proactive_result_unknown"}
             except Exception:
                 # Once publication may have started, neither a provider error
                 # nor a local exception gives permission for another paid try.

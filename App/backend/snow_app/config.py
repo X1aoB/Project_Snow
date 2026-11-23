@@ -28,6 +28,10 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
 
+def openai_parameter_adapter_enabled() -> bool:
+    return os.getenv("PUBLIC_OPENAI_PARAMETER_ADAPTER", "on").strip().casefold() == "on"
+
+
 def _secret_value(name: str, default: str = "") -> str:
     """Read a secret from an env value or an explicitly configured file."""
 

@@ -21,6 +21,8 @@ from typing import Any, Callable
 
 import httpx
 
+from .openai_completion import post_completion
+
 from .agent_store import AgentStore
 from .provider_registry import ProviderRegistry
 
@@ -457,7 +459,7 @@ class AgentRuntime:
                     request_body.update({"tools": self._tool_schemas(), "tool_choice": "required"})
                 else:
                     request_body["response_format"] = {"type": "json_object"}
-                response = httpx.post(
+                response = post_completion(
                     selection.base_url.rstrip("/") + "/chat/completions",
                     headers={"Authorization": f"Bearer {credential}", "Content-Type": "application/json"},
                     json=request_body,
@@ -926,7 +928,7 @@ class AgentRuntime:
             else:
                 data = path.read_bytes()
                 image_blocks.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"}})
-            response = httpx.post(
+            response = post_completion(
                 selection.base_url.rstrip("/") + "/chat/completions",
                 headers={"Authorization": f"Bearer {credential}", "Content-Type": "application/json"},
                 json={"model": selection.model_name, "messages": [{"role": "user", "content": [
@@ -962,7 +964,7 @@ class AgentRuntime:
                 {"text"}, run.get("model_override") or None, {"text"}, profile="assistant_agent"
             )
             credential = self.registry.credential_for_selection(selection)
-            response = httpx.post(
+            response = post_completion(
                 selection.base_url.rstrip("/") + "/chat/completions",
                 headers={"Authorization": f"Bearer {credential}", "Content-Type": "application/json"},
                 json={
