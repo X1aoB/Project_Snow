@@ -25,17 +25,17 @@ _REPORTED_OR_DENIED_ASSERTION = re.compile(
     r"^\s*(?:(?:你|分析员)(?:还|一直|仍然|也|曾经|之前|竟然|居然){0,2}(?:以为|觉得|认为)|"
     r"我(?:可|也|并|根本){0,2}没(?:有)?(?:说过?|讲过?|声称过?|承认过?))"
 )
-_FORMAL = re.compile(r"恒约|妻子|老婆|夫妻|婚礼|结过?婚|成婚|成亲|丈夫|老公|嫁给|嫁了|已婚")
-_COMPLETED = r"(?:(?:已经|早已|早就|已然|一同|一起|正式|都|也|早|已|了|过|是|有|立下|缔结|定下|结下|签订|结成|有了|一直是|本来就是|现在是|的){0,5})"
+_FORMAL = re.compile(r"恒约|妻子|老婆|夫妻|夫妇|婚礼|结过?婚|成婚|成亲|丈夫|老公|嫁给|嫁了|已婚")
+_COMPLETED = r"(?:(?:可是|确实|的确|现在|已经|早已|早就|已然|一同|一起|正式|都|也|早|已|了|过|是|有|立下|缔结|定下|结下|签订|结成|有了|一直是|本来就是|现在是|的){0,5})"
 _SELF_BOND = re.compile(
-    r"(?:我们|咱们|我(?:和|跟|与)(?:你|分析员)|(?:你|分析员)(?:和|跟|与)我)" + _COMPLETED
+    r"(?:我们|咱们|咱俩|我(?:和|跟|与)(?:你|分析员)|(?:你|分析员)(?:和|跟|与)我)" + _COMPLETED
     + r"(?:恒约|结过?婚|成婚|成亲|夫妻|夫妇|婚礼)|"
     r"我(?:已经|早已|早就|已|都|也)?(?:结过?婚|成婚|成亲)|"
     r"我(?:已经|早已|早就|已)(?:嫁给|嫁了)(?:你|分析员)|我(?:嫁给|嫁了)(?:你|分析员)了|"
     r"我(?:已经|早已|早就|已|现在|也|就){0,3}是已婚|"
-    r"我(?:已经|早已|早就|现在|当然|本来|可|也|就|仍然|一直){0,3}(?:是|成为|当上|做了)(?:你|分析员)的?(?:妻子|老婆|丈夫|老公)|"
+    r"我(?:已经|早已|早就|现在|当然|本来|确实|的确|可|也|就|仍然|一直){0,3}(?:是|成为|当上|做了)(?:你|分析员)的?(?:妻子|老婆|丈夫|老公)|"
     r"(?:你的|分析员的)(?:妻子|老婆|丈夫|老公)(?:就是|正是|是)我|"
-    r"(?:你|分析员)(?:已经|早已|早就|现在|当然|本来|可|也|就|仍然|一直){0,3}(?:是|成为|当上|做了)我的?(?:妻子|老婆|丈夫|老公)|"
+    r"(?:你|分析员)(?:已经|早已|早就|现在|当然|本来|确实|的确|可|也|就|仍然|一直){0,3}(?:是|成为|当上|做了)我的?(?:妻子|老婆|丈夫|老公)|"
     r"以(?:你|分析员)的?(?:妻子|老婆|丈夫|老公)(?:身份|名义)|"
     r"(?:自从|既然).{0,12}(?:恒约|结婚)|(?:恒约|结婚)(?:之)?后"
 )
@@ -78,7 +78,10 @@ def affirmative_clauses(text: str, *, keep_quotes: bool = False) -> list[str]:
     result = []
     for sentence in _SENTENCES.findall(value):
         sentence = re.sub(r"[，,]?(?:不是吗|对吧|是吧)[?？]?$", "", sentence)
-        for segment in re.split(r"但是|不过|然而|可是|但(?=[^愿])", sentence):
+        # 可是 after a subject is emphasis, including the copula in
+        # "我可是你的妻子". Split it only at a sentence/comma boundary;
+        # preserving it also retains named subjects for later attribution.
+        for segment in re.split(r"但是|不过|然而|(?:^|[，,]\s*)可是|但(?=[^愿])", sentence):
             conditional = False
             for clause in re.split(r"[，,]", segment):
                 conditional = conditional or bool(_CONDITIONAL_SCOPE.search(clause))
@@ -118,7 +121,7 @@ def unsupported_formal_claims(
                 continue
             mentions_other = any(name and name in clause for name in other_names)
             mentions_self = any(name and name in clause for name in speaker_names)
-            if mentions_other and not mentions_self and not re.search(r"我们|咱们|我(?:已|是|和|与|跟)", clause):
+            if mentions_other and not mentions_self and not re.search(r"我们|咱们|咱俩|我(?:已|是|和|与|跟)", clause):
                 continue
             # Names in third-person action blocks act as the current speaker,
             # but the same relationship predicate is still required.
@@ -127,6 +130,9 @@ def unsupported_formal_claims(
                 for name in sorted(speaker_names, key=len, reverse=True):
                     if name:
                         normalized = normalized.replace(name, "我")
+            # Keep completed markers after the joint subject, including the
+            # common "我已经和你立下了恒约" ordering.
+            normalized = re.sub(r"我((?:已经|早已|早就|正式|也|已){1,3})((?:和|跟|与)(?:你|分析员))", r"我\2\1", normalized)
             if _SELF_BOND.search(normalized):
                 return True
     return False
