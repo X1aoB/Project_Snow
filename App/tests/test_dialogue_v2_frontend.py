@@ -965,22 +965,23 @@ class SnowAdvVeilProductionTests(TestCase):
         self._open()
         self._reach_in_person()
         self.page.locator('#chat-app[data-snow-pushing="1"]').wait_for()
-        self.page.wait_for_timeout(250)
-        push = self.page.evaluate("""() => {
+        push = self.page.wait_for_function("""() => {
           const stage = document.getElementById('scene-stage');
           const backdrop = document.getElementById('snow-backdrop-stage').snowWorld;
+          const transform = getComputedStyle(backdrop.room).transform;
+          if (document.querySelector('#chat-app').dataset.snowPushing !== '1' || new DOMMatrixReadOnly(transform === 'none' ? undefined : transform).isIdentity) return false;
           const target = backdrop.room.querySelector('.push-target').getBoundingClientRect();
           return {
             scene: backdrop.scene, roomHidden: backdrop.room.hidden,
             targetWidth: target.width, targetHeight: target.height,
-            transform: getComputedStyle(backdrop.room).transform,
+            transform,
             stageBackground: getComputedStyle(stage).backgroundColor,
             surfaceBackground: getComputedStyle(document.getElementById('in-person-surface')).backgroundColor,
             stageWorldVisibility: getComputedStyle(stage.querySelector('[data-snow-world]')).visibility,
             activeLoops: window.__projectSnowTest.snowProbe().activeLoops,
             stageRunning: stage.snowWorld.isRunning(), backdropRunning: backdrop.isRunning(),
           };
-        }""")
+        }""", timeout=4000).json_value()
         self.assertEqual(push["scene"], "generic")
         self.assertFalse(push["roomHidden"])
         self.assertGreater(push["targetWidth"], 0)
