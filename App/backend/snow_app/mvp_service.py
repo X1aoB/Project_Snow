@@ -45,6 +45,7 @@ from .generation_stream import (
     validate_generation_blocks,
 )
 from .model_capabilities import immersive_model_policy
+from .openai_completion import CompletionRequest, ProviderFailure, completion_stream, official_chat_endpoint
 from .dialogue_core import (
     GenerationBudget,
     GenerationBudgetExceeded,
@@ -1156,7 +1157,11 @@ class MVPChatDisabled(MVPError):
 
 
 class MVPProviderError(MVPError):
-    pass
+    def __init__(self, message: str, *, code: str = "provider_request_failed", failure: ProviderFailure | None = None):
+        super().__init__(message)
+        self.failure = failure
+        self.code = failure.public_code if failure else code
+        self.status_code = failure.public_status if failure else 504 if code == "provider_timeout" else 502
 
 
 class MVPRequestInProgress(MVPError):
@@ -1906,13 +1911,26 @@ class MVPService:
         diagnostics["provider_http_calls"] = current_calls + 1
         self._generation_diagnostics.value = diagnostics
 
+    def _remaining_provider_call(self, limit: int | None) -> bool:
+        budget = active_generation_budget()
+        if budget is not None:
+            return budget.provider_calls < budget.max_provider_calls
+        return limit is None or self.generation_diagnostics().get("provider_http_calls", 0) < limit
+
     def _stream_model(self, endpoint: str, *, body: dict[str, Any], headers: dict[str, str],
                       timeout: float, max_provider_http_calls: int | None) -> tuple[str, dict[str, Any]]:
-        self._reserve_model_call(max_provider_http_calls)
+        request = CompletionRequest(endpoint, body, relay=bool(_UNTRUSTED_MODEL_HOST.get()))
+
+        def open_stream(payload):
+            self._reserve_model_call(max_provider_http_calls)
+            return self._model_http_client.stream("POST", endpoint, json=payload, headers=headers, timeout=timeout)
+
         started = time.perf_counter()
         observer = current_generation_observer()
         try:
-            with self._model_http_client.stream("POST", endpoint, json=body, headers=headers, timeout=timeout) as response:
+            with completion_stream(request, open_stream, budget_available=lambda: self._remaining_provider_call(max_provider_http_calls)) as response:
+                if request.active and response.is_error:
+                    raise MVPProviderError(f"MVP 对话模型返回 HTTP {response.status_code}。", failure=request.logged_failure(response))
                 response.raise_for_status()
                 self._record_generation_duration("provider_headers_ms", started)
                 if "text/event-stream" not in response.headers.get("content-type", ""):
@@ -1929,7 +1947,8 @@ class MVPService:
             if observer is not None and observer.published_blocks:
                 observer.fail("provider_stream_interrupted")
             if isinstance(exc, (httpx.HTTPError, GenerationStreamError)):
-                raise MVPProviderError("模型流式请求未完成；请保留原请求查询结果。") from exc
+                code = "provider_timeout" if isinstance(exc, httpx.TimeoutException) else "provider_request_failed"
+                raise MVPProviderError("模型流式请求未完成；请保留原请求查询结果。", code=code) from exc
             raise
 
     def close(self) -> None:
@@ -7387,9 +7406,9 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         provider_kind = str((thinking_decision or {}).get("provider_kind") or "").casefold()
         if not provider_kind:
             provider_kind = (
-                "deepseek" if "deepseek" in base_url.casefold() or "deepseek" in model_lower
+                "openai" if official_chat_endpoint(endpoint)
+                else "deepseek" if "deepseek" in base_url.casefold() or "deepseek" in model_lower
                 else "dashscope" if "dashscope" in base_url.casefold()
-                else "openai" if "api.openai.com" in base_url.casefold()
                 else "openai-compatible"
             )
         request_fields = dict((thinking_decision or {}).get("request_fields") or {})
@@ -7441,9 +7460,11 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 endpoint, body=body, headers=headers, timeout=timeout,
                 max_provider_http_calls=max_provider_http_calls,
             )
+        request = CompletionRequest(endpoint, body, relay=bool(_UNTRUSTED_MODEL_HOST.get()))
+        body = request.body
         max_attempts = (
             1
-            if disable_compatibility_retries
+            if disable_compatibility_retries or request.active
             else max(1, min(int(os.getenv("MVP_CHAT_MAX_ATTEMPTS", "2")), 3))
         )
         backoff = max(0.0, min(float(os.getenv("MVP_CHAT_RETRY_BACKOFF_SECONDS", "1.5")), 10.0))
@@ -7459,6 +7480,11 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                     json=body,
                     timeout=timeout,
                 )
+                if request.retry_validation(response, budget_available=self._remaining_provider_call(max_provider_http_calls)):
+                    response = self._post_model(endpoint, max_provider_http_calls=max_provider_http_calls,
+                                                headers=headers, json=request.body, timeout=timeout)
+                if request.active and response.is_error:
+                    raise MVPProviderError(f"MVP 对话模型返回 HTTP {response.status_code}。", failure=request.logged_failure(response))
                 if (
                     not disable_compatibility_retries
                     and response.status_code >= 400
@@ -7516,10 +7542,8 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                     length_retry_done = True
                     body.pop("response_format", None)
                     force_thinking_off()
-                    try:
-                        body["max_tokens"] = min(int(body.get("max_tokens", max_tokens)) * 2, 8192)
-                    except (TypeError, ValueError):
-                        body["max_tokens"] = min(max_tokens * 2, 8192)
+                    token_field = "max_completion_tokens" if "max_completion_tokens" in body else "max_tokens"
+                    body[token_field] = min(int(body[token_field]) * 2, 8192)
                     time.sleep(backoff * attempt)
                     continue
                 if content:
@@ -7541,7 +7565,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 return "", usage_total
             except httpx.TimeoutException as exc:
                 if attempt == max_attempts:
-                    raise MVPProviderError("MVP 对话模型请求超时。") from exc
+                    raise MVPProviderError("MVP 对话模型请求超时。", code="provider_timeout") from exc
                 time.sleep(backoff * attempt)
             except httpx.HTTPStatusError as exc:
                 retryable_statuses = {

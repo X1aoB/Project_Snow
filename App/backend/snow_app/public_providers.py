@@ -12,6 +12,10 @@ from typing import Any
 
 import httpx
 
+from .config import openai_parameter_adapter_enabled
+from .model_capabilities import public_model_profiles
+from .openai_completion import CompletionRequest, ProviderFailure
+
 
 # A relay station is an attacker-choosable upstream, so its response body is
 # read in chunks and refused past this ceiling instead of being buffered whole
@@ -125,6 +129,7 @@ PROVIDERS: dict[str, ProviderSpec] = {
         "https://platform.openai.com/docs",
         "https://openai.com/policies/privacy-policy/",
         console_url="https://platform.openai.com/api-keys",
+        caveat="使用数据共享赠送额度时，请在 OpenAI 平台核对模型范围和用量。超出范围或额度后可能按正常价格计费。",
     ),
     "deepseek": ProviderSpec(
         "deepseek",
@@ -250,7 +255,8 @@ def relay_provider_spec(base_url: str) -> ProviderSpec:
 
 
 class ProviderRequestError(RuntimeError):
-    def __init__(self, code: str, status_code: int = 502):
+    def __init__(self, code: str, status_code: int = 502, *, failure: ProviderFailure | None = None):
+        self.failure = failure
         super().__init__(code)
         self.code = code
         self.status_code = status_code
@@ -330,6 +336,10 @@ async def discover_models(
         raise ProviderRequestError("provider_network_error") from exc
     if 300 <= response.status_code < 400:
         raise ProviderRequestError("provider_redirect_rejected")
+    if spec.provider_id == "openai" and openai_parameter_adapter_enabled() and response.status_code >= 400:
+        failure = CompletionRequest.classify(response, 1, discovery=True)
+        failure.log("other")
+        raise ProviderRequestError(failure.public_code, failure.public_status, failure=failure)
     if response.status_code in {401, 403}:
         raise ProviderRequestError("provider_credential_rejected", 401)
     if response.status_code >= 400:
@@ -342,14 +352,18 @@ async def discover_models(
     if not isinstance(records, list):
         return []
     identifiers = {
-        str(record.get("id"))
+        record["id"].strip()
         for record in records
-        if isinstance(record, dict) and str(record.get("id") or "").strip()
+        if isinstance(record, dict) and isinstance(record.get("id"), str)
+        and 0 < len(record["id"].strip()) <= 200
     }
     if spec.provider_id == "gemini":
         # Gemini's OpenAI-compatible list returns native "models/<id>" names;
         # chat accepts the bare id, which is also what the reviewed profiles use.
         identifiers = {identifier.removeprefix("models/") for identifier in identifiers}
+    if spec.provider_id == "openai" and openai_parameter_adapter_enabled():
+        reviewed = set(public_model_profiles()["openai"])
+        return sorted(identifiers, key=lambda name: (name not in reviewed, name))[:500]
     return sorted(identifiers)[:500]
 
 
@@ -364,6 +378,7 @@ async def simple_completion(
     timeout: float = 120,
     client: ProviderHTTPPool | None = None,
     reasoning_effort: str | None = None,
+    max_provider_http_calls: int = 2,
 ) -> tuple[str, dict[str, Any]]:
     if spec.provider_id == "codex_subscription" and client is None:
         raise ProviderRequestError("subscription_not_connected", 409)
@@ -378,32 +393,39 @@ async def simple_completion(
     }
     if spec.provider_id == "codex_subscription" and reasoning_effort is not None:
         body["reasoning_effort"] = reasoning_effort
-    try:
+    endpoint = _official_url(spec, "chat/completions")
+    request = CompletionRequest(endpoint, body, relay=spec.kind == "relay")
+
+    async def send():
         if spec.kind == "relay":
-            response = await _bounded_relay_request(
-                client, "POST", _official_url(spec, "chat/completions"),
-                headers=_auth_headers(spec, api_key, json_body=True), json=body, timeout=timeout,
+            return await _bounded_relay_request(
+                client, "POST", endpoint,
+                headers=_auth_headers(spec, api_key, json_body=True), json=request.body, timeout=timeout,
             )
-        elif client is not None:
-            response = await client.post(
-                _official_url(spec, "chat/completions"),
+        if client is not None:
+            return await client.post(
+                endpoint,
                 headers=_auth_headers(spec, api_key, json_body=True),
-                json=body,
+                json=request.body,
                 timeout=timeout,
             )
-        else:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as request_client:
-                response = await request_client.post(
-                    _official_url(spec, "chat/completions"),
-                    headers=_auth_headers(spec, api_key, json_body=True),
-                    json=body,
-                )
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as request_client:
+            return await request_client.post(endpoint, headers=_auth_headers(spec, api_key, json_body=True),
+                                             json=request.body)
+
+    try:
+        response = await send()
+        if request.retry_validation(response, budget_available=max_provider_http_calls >= 2):
+            response = await send()
     except httpx.TimeoutException as exc:
         raise ProviderRequestError("provider_timeout", 504) from exc
     except httpx.HTTPError as exc:
         raise ProviderRequestError("provider_network_error") from exc
     if 300 <= response.status_code < 400:
         raise ProviderRequestError("provider_redirect_rejected")
+    if request.active and response.is_error:
+        failure = request.logged_failure(response)
+        raise ProviderRequestError(failure.public_code, failure.public_status, failure=failure)
     if response.status_code in {401, 403}:
         raise ProviderRequestError("provider_credential_rejected", 401)
     if response.status_code == 429:
@@ -417,4 +439,7 @@ async def simple_completion(
         raise ProviderRequestError("provider_invalid_response") from exc
     if not isinstance(content, str) or not content.strip():
         raise ProviderRequestError("provider_empty_response")
-    return content.strip(), dict(payload.get("usage") or {})
+    usage = dict(payload.get("usage") or {})
+    if request.active:
+        usage["provider_calls"] = request.attempts
+    return content.strip(), usage
