@@ -10153,7 +10153,9 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
 
     @staticmethod
     def _relationship_roster_fallback() -> str:
-        return "知道。现在和你立下恒约的，是里芙、芬妮、凯茜娅、苔丝、肴、茉莉安、安卡希雅，还有辰星。"
+        if not _FORMAL_RELATIONSHIP_ROSTER:
+            return "目前的资料里没有已确认的恒约名单。"
+        return "知道。现在和你立下恒约的，是" + "、".join(_FORMAL_RELATIONSHIP_ROSTER) + "。"
 
     @classmethod
     def _repair_explicit_relationship_answer(
