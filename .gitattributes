@@ -1,3 +1,5 @@
 *.sh text eol=lf
 App/ops/project-snow-release text eol=lf
 App/config/origin-edge/*.pem binary
+App/config/public_knowledge/data_license_review.json text eol=lf
+App/config/content_denylist.json text eol=lf
