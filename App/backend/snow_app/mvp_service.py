@@ -34,6 +34,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 from .chat_store import ConversationStore
+from . import dialogue_style
 from .config import Settings
 from .factual_grounding import affirmative_clauses, relationship_body, relationship_evidence, unsupported_formal_claims
 from .generation_stream import (
@@ -1778,6 +1779,7 @@ def _json_content(response: httpx.Response) -> str:
 
 
 class MVPService:
+    style_settings = dialogue_style.LEGACY
     _PROFILE_PROMPT_REVISION = "dialogue-profile-projection-1"
     _PROFILE_PROMPT_CACHE_LIMIT = 64
 
@@ -1795,6 +1797,9 @@ class MVPService:
         self.repository = repository
         self.force_chat_enabled = force_chat_enabled
         self.runtime_root = settings.runtime_root
+        self.style_settings = dialogue_style.StyleSettings.from_environment()
+        self.style_root = Path(os.getenv("PROJECT_SNOW_STYLE_ROOT") or self.runtime_root / "style" / "1.4.0")
+        dialogue_style.validate_style_inputs(self.style_root, self.style_settings)
         self.views_path = self.runtime_root / "mvp" / "character_views.jsonl"
         self.question_path = self.runtime_root / "mvp" / "question_bank.json"
         self.feedback_path = self.runtime_root / "mvp" / "feedback.jsonl"
@@ -2361,6 +2366,21 @@ class MVPService:
                 self._profile_prompt_cache.move_to_end(key)
             return copy.deepcopy(cached)
 
+    def _prepare_style_context(self, character: Any, message: str, context: dict) -> None:
+        config = self.style_settings
+        context["style_settings"] = config
+        for mode, table in ((config.signature_guard, "signature_terms"), (config.register_guard, "register_terms")):
+            if mode == "data_driven":
+                context[table] = dialogue_style.reviewed_rows(self.style_root, table, character.character_id)
+        reference = self._character_expression_reference(character)
+        if config.examples == "retrieved":
+            examples = dialogue_style.retrieved_examples(
+                self.style_root, character.character_id, message, config.example_count, _VOICE_LINE_MAX_CHARS,
+            )
+            context["static_voice_evidence"] = reference.get("voice_evidence", [])
+            reference = {**reference, "voice_evidence": examples}
+        context["character_expression_reference"] = reference
+
     def _character_expression_reference(
         self, character: Any, documents: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -2897,18 +2917,22 @@ class MVPService:
         """
 
         normalized_message = _compact(message)
+        mentioned = self._resolve_story_character_mentions(message, character.character_id)
+        topics = list(_CROSS_CHARACTER_MAIN_STORY_TERMS)
+        if self.style_settings.shared_facts == "data_driven" and mentioned:
+            ids = {other["character_id"] for other in mentioned}
+            topics.extend(row["term"] for row in dialogue_style.reviewed_rows(
+                self.style_root, "shared_topics", character.character_id)
+                if row.get("other_character_id") in ids)
         topic_terms = [
             term
-            for term in _CROSS_CHARACTER_MAIN_STORY_TERMS
+            for term in dict.fromkeys(topics)
             if _compact(term) in normalized_message
         ]
         body_teasing = (
-            character.character_id == "a2ffc5b44d7f"
+            self.style_settings.situational_cues == "futiya_legacy"
+            and character.character_id == "a2ffc5b44d7f"
             and any(_compact(term) in normalized_message for term in _FUTIYA_BODY_TEASING_TERMS)
-        )
-        mentioned = self._resolve_story_character_mentions(
-            message,
-            character.character_id,
         )
         if not topic_terms and not body_teasing:
             return [], {
@@ -2988,7 +3012,8 @@ class MVPService:
                     "title": document.get("title"),
                     "source_type": document.get("source_type"),
                     "matched_characters": matched_targets,
-                    "excerpt": text[start : start + 560],
+                    "excerpt": (dialogue_style.shared_excerpt(text, character.display_name, matched_targets, topic_terms)
+                                if self.style_settings.shared_facts == "data_driven" else "") or text[start : start + 560],
                     "score": round(score, 2),
                 }
             )
@@ -6546,11 +6571,16 @@ class MVPService:
                 seen_cross_ids.add(document_id)
                 combined_hits.append(hit)
             filtered = combined_hits[: max(1, min(limit, 12))]
-        interaction_hint = self._interaction_hint(
-            character,
-            message,
-            cross_character_story_context,
-        )
+        cue_mode = self.style_settings.situational_cues
+        interaction_hint = None
+        if cue_mode == "futiya_legacy":
+            interaction_hint = self._interaction_hint(character, message, cross_character_story_context)
+        elif cue_mode == "reviewed_table":
+            rows = dialogue_style.reviewed_rows(self.style_root, "situational_cues", character.character_id)
+            if rows:
+                interaction_hint = dialogue_style.cue_hint(
+                    rows, message, self.repository.documents_by_id(),
+                )
         dual_persona_context = self._dual_persona_context(
             character.character_id,
             message,
@@ -6911,7 +6941,18 @@ class MVPService:
 说话者与被提及角色共同出现在以下主线情节中，且与本轮主题直接相关。把它当作自己已经经历的事情；不要表现得对此陌生，也不要把它泛化成所有角色的通用知识。
 {cross_evidence_lines}
 """
-            if str(getattr(character, "character_id", "")) == "a2ffc5b44d7f" and any(
+            if self.style_settings.shared_facts == "data_driven":
+                proof = dialogue_style.shared_evidence(cross_character_story_context)
+                if proof:
+                    cross_story_rule = (
+                        f"\n【共同经历】\n依据《{proof.get('title') or '共同经历'}》的这段原文回应，仅承认其中明示的经历。\n"
+                        + proof["excerpt"] + "\n"
+                    )
+                else:
+                    cross_story_rule = ""
+            elif self.style_settings.shared_facts == "off":
+                cross_story_rule = "\n【共同主线参考片段】\n" + cross_evidence_lines
+            elif str(getattr(character, "character_id", "")) == "a2ffc5b44d7f" and any(
                 _compact(term) in {_compact(str(item)) for item in cross_character_story_context.get("topic_terms") or []}
                 for term in ("研发", "战术套装", "装甲", "新装甲")
             ):
@@ -7069,11 +7110,18 @@ expression_state 必须返回 "neutral"；文字通讯不显示或推断立绘�
 """
         character_voice_rule = (
             _FENNY_DAILY_VOICE_GUIDANCE
-            if str(getattr(character, "character_id", "")) == "1b0a6b35719a"
+            if self.style_settings.register_prompt == "fenny_legacy" and str(getattr(character, "character_id", "")) == "1b0a6b35719a"
             else ""
         )
+        if self.style_settings.register_prompt == "data_driven":
+            rows = dialogue_style.reviewed_rows(self.style_root, "register_terms", character.character_id)
+            if rows:
+                character_voice_rule += "\n【场景语气】\n这些表达只适合战斗或危机场合：" + "、".join(row["term"] for row in rows) + "。\n"
         character_voice_rule += "\n【人物形象与对话主动性】\n" + EXPRESSION_RULE + "\n"
-        if str(getattr(character, "character_id", "")) == "6455a5dcff6a":
+        if self.style_settings.signature_prompt == "data_driven":
+            rows = dialogue_style.reviewed_rows(self.style_root, "signature_terms", character.character_id)
+            character_voice_rule += dialogue_style.signature_guidance(rows)
+        elif self.style_settings.signature_prompt == "bubu_legacy" and str(getattr(character, "character_id", "")) == "6455a5dcff6a":
             character_voice_rule += """
 【卜卜的标志性表达频率】
 算卦、卦象、运势和“本天师”是可用的角色特点，不是每轮必加的口癖。只有分析员主动问占卜，或最近三轮尚未使用且它确实能推进当前话题时才提一次；普通问候、连续点餐和闲聊优先表现她的活泼、好奇与亲近，不要反复用算卦作为句尾。
@@ -7170,6 +7218,8 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
 
         if _is_source_line_request(message):
             return 0
+        if "style_copy_sources" in context:
+            return _longest_copied_run(answer, context["style_copy_sources"])
         profile = context.get("dialogue_profile") or {}
         sources = [str(item.get("phrase") or "") for item in profile.get("catchphrases") or [] if isinstance(item, dict)]
         for key in ("emotion_patterns", "analyst_interaction"):
@@ -7280,14 +7330,35 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         relationship_background = context.get("relationship_background_for_prompt") or {}
         dialogue_profile = self._cached_dialogue_profile_prompt_context(character.character_id, context.get("dialogue_profile"))
         character_expression = context.get("character_expression_reference")
-        if character_expression is None:
+        retrieved = self.style_settings.examples == "retrieved"
+        if retrieved and "static_voice_evidence" not in context:
+            self._prepare_style_context(character, message, context)
+            character_expression = context["character_expression_reference"]
+        elif character_expression is None:
             character_expression = self._character_expression_reference(character, documents)
-        if dialogue_profile is not None and character_expression.get("voice_evidence"):
+        if retrieved:
+            old_examples = context.get("static_voice_evidence", [])
+            before = dialogue_style.example_tokens(old_examples, dialogue_profile, static_has_voice=bool(old_examples))
+        if dialogue_profile is not None and (character_expression.get("voice_evidence") or retrieved):
             # Old data packages may contain narration labelled as interaction.
             # Prefer the freshly attributed examples without modifying the
             # immutable profile or its provenance/audit material.
             dialogue_profile["emotion_patterns"] = []
             dialogue_profile["analyst_interaction"] = []
+            if retrieved and not self.style_settings.keep_repeated_lines:
+                dialogue_profile["repeated_lines"] = []
+        if retrieved:
+            actual = character_expression.get("voice_evidence", [])
+            context["style_example_token_delta_estimate"] = dialogue_style.example_tokens(actual, dialogue_profile) - before
+        if retrieved or self.style_settings.copy == "rewrite":
+            profile = dialogue_profile or {}
+            context["style_copy_sources"] = [
+                *(row["quote"] for row in character_expression.get("voice_evidence", []) if row.get("quote")),
+                *(row["phrase"] for row in profile.get("repeated_lines", []) if row.get("phrase")),
+                *(row["quote"] for k in ("emotion_patterns", "analyst_interaction")
+                  for row in profile.get(k, []) if row.get("quote")),
+                *(row["text"] for row in evidence if row.get("text")),
+            ]
         relationship_answer_contract = self._relationship_answer_contract(
             relationship_background, str(context.get("question_focus") or "")
         )
@@ -8279,6 +8350,18 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         """A direct but non-fabricated fallback for routine-time questions."""
 
         message = _compact(str(context.get("user_message") or ""))
+        if context.get("style_settings", dialogue_style.LEGACY).fallback == "minimal_repair":
+            address, subject = dialogue_style.role_terms(context)
+            preferences = (context.get("dialogue_profile") or {}).get("supported_preferences") or []
+            if "训练" in message and "休息" in message:
+                for row in preferences:
+                    if not row.get("evidence_document_ids"):
+                        continue
+                    preference = re.search(r"(?<!不)(?<!不太)(?:偏好|偏爱|喜欢|想要|优先|更愿意)(?:先)?(休息|训练)", row.get("statement") or "")
+                    if preference:
+                        return f"{address}没有紧急安排时，{subject}想先{preference.group(1)}。"
+                return f"{address}有训练安排，{subject}会先去训练。没安排的话就先休息。"
+            return f"{address}{subject}会看看当天的安排，再决定那段时间做什么。"
         if "训练" in message and "休息" in message:
             character_id = str(getattr(context.get("character"), "character_id", ""))
             if character_id == "25b23cb64398":
@@ -8293,6 +8376,10 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             (context.get("relationship_address_memory") or {}).get("preferred_address") or ""
         ).strip()
         prefix = f"{address}，" if address else ""
+        if context.get("style_settings", dialogue_style.LEGACY).fallback == "minimal_repair":
+            prefix, subject = dialogue_style.role_terms(context)
+            meal = next((name for name in ("工作餐", "火锅", "西餐") if name in message), "这顿饭")
+            return f"{prefix}好啊，{subject}和你一起吃{meal}。"
         if "工作餐" in message:
             return f"{prefix}好啊，今天就一起吃你带来的工作餐。至于下次出去吃，我可把这句邀请记下了。"
         if "西餐" in message:
@@ -8309,6 +8396,9 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
             (context.get("relationship_address_memory") or {}).get("preferred_address") or ""
         ).strip()
         prefix = f"{address}……" if address else ""
+        if context.get("style_settings", dialogue_style.LEGACY).fallback == "minimal_repair":
+            prefix, subject = dialogue_style.role_terms(context)
+            return f"{prefix}{subject}也想听你把刚才的话说完。"
         channel = str((context.get("communication_context") or {}).get("channel") or "in_person")
         if channel == "text":
             return f"{prefix}先别急着追问。把你现在真正想说的话告诉我，我会认真听，也会告诉你我的心意。"
@@ -8342,6 +8432,14 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
     ) -> list[str]:
         """Use a signature trait as flavour, not as a compulsory suffix."""
 
+        config = context.get("style_settings", dialogue_style.LEGACY)
+        if config.signature_guard == "off":
+            return []
+        if config.signature_guard == "data_driven":
+            return dialogue_style.signature_violations(
+                message, answer, (context.get("session_context") or {}).get("turns", []),
+                context.get("signature_terms", []), config,
+            )
         character_id = str(getattr(context.get("character"), "character_id", ""))
         if character_id != "6455a5dcff6a":
             return []
@@ -8357,6 +8455,51 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         ):
             return ["character_signature_overuse"]
         return []
+
+    @classmethod
+    def _style_repair(cls, violations: list[str], generated: dict, answer: str, context: dict, channel: str) -> dict | None:
+        """Remove offending clauses, preserving the channel and unaffected actions."""
+        config = context.get("style_settings", dialogue_style.LEGACY)
+        prefixes = ["signature_overuse:", "register_mismatch:"]
+        if config.fallback == "minimal_repair":
+            prefixes += ["fenny_daily_harshness:", "address_alias_echo:"]
+        terms = [v.partition(":")[2] for v in violations if v.startswith(tuple(prefixes))]
+        if "character_signature_overuse" in violations and config.fallback == "minimal_repair":
+            terms += ["算卦", "卦象", "运势", "本天师"]
+        denial = "cross_character_fact_denial" in violations
+        if denial:
+            terms.extend(_CROSS_CHARACTER_FACT_UNCERTAINTY_MARKERS)
+        copy_line = "source_line_copy" in violations
+        if not (terms or copy_line):
+            return None
+        verbal = "message" if channel == "text" else "speech"
+        blocks = generated.get("content_blocks") or [{"type": verbal, "text": answer}]
+        kept = []
+        for block in blocks:
+            value = str(block.get("text") or "")
+            if copy_line:
+                for sentence in re.findall(r"[^。！？!?\n]+[。！？!?]*", value):
+                    if cls._source_line_copy_chars(context.get("user_message", ""), sentence, context):
+                        value = value.replace(sentence, "")
+            if any(term in value for term in terms):
+                value = dialogue_style.minimal_repair(value, terms, min_chars=1)
+            if block.get("type") == "sticker" and channel == "text":
+                kept.append(block)
+            elif value and block.get("type") in ("speech", "message", "action"):
+                kept.append({**block, "text": value})
+        used_ids = []
+        verbal_length = sum(len(re.findall(r"\w", block["text"])) for block in kept if block["type"] == verbal)
+        if verbal_length < 6:
+            proof = dialogue_style.shared_evidence(context.get("cross_character_story_context") or {}) if denial else None
+            if proof:
+                value = f"《{proof['title']}》里的那段经历，我还记得。" if proof.get("title") else "那段共同经历，我还记得。"
+                used_ids = [proof["document_id"]]
+            else:
+                value = dialogue_style.neutral_fallback(context, terms)
+            kept = [{"type": verbal, "text": value}]
+        return {"answer": cls._render_content_blocks(kept), "content_blocks": kept,
+                "confidence": "medium", "used_document_ids": used_ids,
+                "citation_notes": ["已按本轮语境修整回复。"]}
 
     @staticmethod
     def _signature_overuse_fallback(context: dict[str, Any]) -> str:
@@ -8786,7 +8929,14 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         """
 
         cross_context = context.get("cross_character_story_context") or {}
-        if not cross_context.get("active"):
+        mode = context.get("style_settings", dialogue_style.LEGACY).shared_facts
+        if not cross_context.get("active") or mode == "off":
+            return []
+        if mode == "data_driven":
+            if dialogue_style.shared_evidence(cross_context) and any(
+                marker in answer for marker in _CROSS_CHARACTER_FACT_UNCERTAINTY_MARKERS
+            ):
+                return ["cross_character_fact_denial"]
             return []
         character = context.get("character")
         if str(getattr(character, "character_id", "")) != "a2ffc5b44d7f":
@@ -8824,6 +8974,18 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
     ) -> list[str]:
         """Keep Fenny's ordinary companionship playful instead of hostile."""
 
+        config = context.get("style_settings", dialogue_style.LEGACY)
+        if config.register_guard == "off":
+            return []
+        if config.register_guard == "data_driven":
+            scene = context.get("live_scene") or {}
+            situation = message
+            if scene.get("status") == "active":
+                situation += " " + str(scene.get("activity") or "") + " " + str(scene.get("location") or "")
+            if any(term in situation for term in (*_FENNY_HIGH_STAKES_TERMS, "危机", "袭击", "警报")):
+                return []
+            return ["register_mismatch:" + row["term"] for row in context.get("register_terms", [])
+                    if row["term"] in answer]
         character = context.get("character")
         if str(getattr(character, "character_id", "")) != "1b0a6b35719a":
             return []
@@ -9405,6 +9567,9 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         )
         violations.extend(cls._open_invitation_continuity_violations(answer, context))
         violations.extend(cls._signature_overuse_violations(message, answer, context))
+        if (context.get("style_settings", dialogue_style.LEGACY).copy == "rewrite"
+                and cls._source_line_copy_chars(message, answer, context)):
+            violations.append("source_line_copy")
         # Preserve the supplied blocks for the first-block check without
         # mutating the request context that is reused by the controlled retry.
         context_for_style = {**context, "content_blocks": content_blocks}
@@ -9624,7 +9789,25 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         original_user_prompt: str,
         previous_answer: str,
         violations: list[str],
+        config: dialogue_style.StyleSettings = dialogue_style.LEGACY,
     ) -> str:
+        signature_rule = (
+            "若包含 character_signature_overuse，本轮不要再提算卦、卦象、运势或‘本天师’；"
+            "保留卜卜活泼亲近的节奏，直接回应当前食物、邀约或玩笑。"
+            if config.signature_guard == "bubu_legacy" else ""
+        )
+        register_rule = (
+            "若包含 fenny_daily_harshness，保留芬妮自信、亲昵、会开玩笑的语气，删除命令、辱骂或过度强硬的表达；"
+            "普通问候和闲聊中不要把她写成在训斥分析员。"
+            if config.register_guard == "fenny_legacy" else ""
+        )
+        cue_rule = (
+            "若包含 interaction_opening_required:干什么！，首个 speech/message 必须以‘干什么！’自然承接，再回答分析员当下的玩笑；"
+            "不要把它写成固定口癖或无关场景的模板。"
+            if config.situational_cues == "futiya_legacy" else
+            "按 interaction_opening_required 所列的开头自然回应本轮；可选提示不强制用语。"
+            if any(v.startswith("interaction_opening_required:") for v in violations) else ""
+        )
         try:
             original_request: Any = json.loads(original_user_prompt)
         except json.JSONDecodeError:
@@ -9635,6 +9818,10 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                 "original_request": original_request,
                 "previous_answer": previous_answer,
                 "violations": violations,
+                **({"style_repair": "按违规项删去多余用语或高强度表达，保留其余内容。原作照抄应改为自己的说法，共同经历只按原文证据承认。"} if any(
+                    item.startswith(("signature_overuse:", "register_mismatch:", "source_line_copy", "cross_character_fact_denial"))
+                    for item in violations
+                ) else {}),
                 "requirements": (
                     "重新生成完整 JSON 回答。严格执行 original_request 中的 response_contract 和 dialogue_boundary；"
                     "不得解释或复述实现层概念。若 violation 包含 unsupported_quote，改为不带引号的谨慎转述，"
@@ -9662,8 +9849,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                      "不得先说更想赖床又无理由地声称自己大概在训练场。"
                     "若包含 open_invitation_topic_reset，承接 continuity_card 中最近的亲密或玩笑语境，用非露骨、尊重意愿的表达继续；"
                     "不要跳到训练、工作、位置报告，也不要输出安全声明。可以含蓄确认、停在拥抱/靠近/目光等程度，或自然淡出。"
-                    "若包含 character_signature_overuse，本轮不要再提算卦、卦象、运势或‘本天师’；"
-                    "保留卜卜活泼亲近的节奏，直接回应当前食物、邀约或玩笑。"
+                    f"{signature_rule}"
                     "若包含 mechanical_dialogue，删除‘根据资料/无法确定/请提供更多背景’等报告式开头，"
                     "先用角色口吻直接接住分析员的问题；证据不足时只用一句自然、轻量的保留，不要把资料边界当成回答。"
                     "若包含 unprompted_scene_disclosure，不得主动说出当前精确地点、刚结束的活动或分析员位置；"
@@ -9676,12 +9862,10 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
                     "若包含 narrative_action_repetition，保持动作与对白分离，使用角色名第三人称并改换自然的动作或神态；不要机械替换词语，也不要为了制造变化强行添加动作。"
                     "若包含 visit_location_repeated，位置已经在最近对话中说过；只自然确认分析员可以过来并表示等待，"
                     "不要再次报地点、改换地点或补写刚结束的活动。"
-                    "若包含 interaction_opening_required:干什么！，首个 speech/message 必须以‘干什么！’自然承接，再回答分析员当下的玩笑；"
-                    "不要把它写成固定口癖或无关场景的模板。"
+                    f"{cue_rule}"
                       "若包含 communication_block_type、text_channel_physical_action、text_channel_unseen_visual 或 text_channel_unseen_audio，"
                      "严格按照 communication_context 的媒介能力重新组织 content_blocks。"
-                     "若包含 fenny_daily_harshness，保留芬妮自信、亲昵、会开玩笑的语气，删除命令、辱骂或过度强硬的表达；"
-                      "普通问候和闲聊中不要把她写成在训斥分析员。"
+                    f"{register_rule}"
                     "若包含 dual_persona_unresolved，必须明确回应莫尔索/琴诺的双重人格语境；"
                     "只在本轮被点名时让莫尔索接话，不要把她当作可选角色或随机切换。"
                     "若包含 text_rendezvous_semantics，当前是文字通讯中的地点邀请；若角色接受，"
@@ -10454,7 +10638,7 @@ expression_state、stage_motion、performance_id 仍须遵守上文角色和媒�
         )
         context["user_message"] = message.strip()
         context["analyst_content_blocks"] = normalized_analyst_blocks
-        context["character_expression_reference"] = self._character_expression_reference(character)
+        self._prepare_style_context(character, message.strip(), context)
         context["public_state_update_catalog"] = list(public_state_update_catalog or [])
         context["attachment_context"] = list(attachment_context or [])
         # Keep only the compact, evidence-backed direct-address memory in all
@@ -10815,6 +10999,7 @@ interaction_decision、memory_candidates 等元数据必须先于 content_blocks
                             user_prompt,
                             answer_text,
                             guardrail_violations,
+                            self.style_settings,
                         ),
                         **retry_kwargs,
                     )
@@ -10852,6 +11037,9 @@ interaction_decision、memory_candidates 等元数据必须先于 content_blocks
                     answer_text = candidate_answer
             except MVPProviderError:
                 retry_generated = None
+            style_repair = None
+            if retry_generated is None:
+                style_repair = self._style_repair(retry_violations, fallback_generated, fallback_answer, context, active_channel)
             if retry_generated is not None:
                 generated = retry_generated
                 if initial_in_person_block_violations:
@@ -11027,6 +11215,14 @@ interaction_decision、memory_candidates 等元数据必须先于 content_blocks
                     "citation_notes": ["已在非露骨边界内承接当前亲密语境，未跳转到无关活动。"],
                 }
                 open_invitation_guard = True
+            elif style_repair is not None and not any(
+                self._hard_guard_violation(v) and v != "cross_character_fact_denial" for v in retry_violations
+            ):
+                generated = style_repair
+                answer_text = generated["answer"]
+                guardrail_fallback = True
+                signature_frequency_guard = any(v.startswith(("signature_overuse:", "character_signature_overuse")) for v in retry_violations)
+                cross_character_guard = "cross_character_fact_denial" in retry_violations
             elif "character_signature_overuse" in retry_violations:
                 answer_text = self._signature_overuse_fallback(context)
                 generated = {
@@ -11214,10 +11410,22 @@ interaction_decision、memory_candidates 等元数据必须先于 content_blocks
                 item.startswith("interaction_opening_required:")
                 for item in retry_violations
             ):
-                answer_text = self._interaction_hint_fallback(context.get("interaction_hint"))
+                hint = context.get("interaction_hint") or {}
                 generated = fallback_generated
+                if hint.get("kind") == "reviewed_source_cue":
+                    verbal = "message" if active_channel == "text" else "speech"
+                    blocks = generated.get("content_blocks") or [{"type": verbal, "text": fallback_answer}]
+                    first = next((block for block in blocks if block.get("type") == verbal), None)
+                    if first is None:
+                        blocks.append({"type": verbal, "text": hint["required_opening"]})
+                    else:
+                        first["text"] = hint["required_opening"] + str(first.get("text") or "")
+                    generated["content_blocks"] = blocks
+                    answer_text = self._render_content_blocks(blocks)
+                else:
+                    answer_text = self._interaction_hint_fallback(hint)
+                    generated.pop("content_blocks", None)
                 generated["answer"] = answer_text
-                generated.pop("content_blocks", None)
                 interaction_hint_guard = True
             elif any(
                 item.startswith(("communication_block_type:", "text_channel_"))
@@ -11532,10 +11740,18 @@ interaction_decision、memory_candidates 等元数据必须先于 content_blocks
             observer.ensure_prefix(content_blocks)
             if final_guardrail_violations:
                 observer.fail("stream_validation_failed")
-        # Measurement only: how much of the reply was pasted from an original
-        # line.  It never triggers a rewrite (that would cost the user another
-        # model call); it lands in the request diagnostics as a count.
         copy_diagnostics = self.generation_diagnostics()
+        if self.style_settings != dialogue_style.LEGACY:
+            copy_diagnostics["style_example_token_delta_estimate"] = context.get("style_example_token_delta_estimate", 0)
+            copy_diagnostics["style_reviewed_signature_count"] = len(context.get("signature_terms", []))
+            copy_diagnostics["style_reviewed_register_count"] = len(context.get("register_terms", []))
+        for name, variants in (
+            ("signature_overuse", ("signature_overuse", "character_signature_overuse")),
+            ("register_mismatch", ("register_mismatch", "fenny_daily_harshness")),
+            ("cross_character_fact_denial", ("cross_character_fact_denial", "cross_character_fact_mismatch")),
+            ("source_line_copy", ("source_line_copy",)),
+        ):
+            copy_diagnostics[f"style_{name}_count"] = sum(item.partition(":")[0] in variants for item in guardrail_violations)
         copy_diagnostics["source_line_copy_chars"] = self._source_line_copy_chars(message.strip(), answer_text, context)
         self._generation_diagnostics.value = copy_diagnostics
         self._record_generation_duration("validation_total_ms", validation_started)
